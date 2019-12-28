@@ -1,14 +1,14 @@
+use crate::lexer::CustomResult;
 use crate::error::CustomError::LexError;
-use crate::error::CustomError;
 use crate::token::Control::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, NewLine, WhiteSpace, Comma, Dot, QuoteString, QuoteChar, Escape};
-use crate::token::Header::{Function, HeaderEnd, Class, If, ElseIf, Else, Match, For, While, Loop, Test};
+use crate::token::Header::{HeaderEnd, If, ElseIf, Else, Match, For, While, Loop, Test, Enum, Function, Class, Let, Var};
 use crate::token::Comparator::{Equals, NotEquals, LessThan, GreaterThan, LessThanOrEquals, GreaterThanOrEquals};
 use crate::token::Keyword::{Use, Package, Return, Yield, Break, Continue, Implements, Extends, This, Separator, Static, Throw, Catch};
-use crate::token::BinaryOperator::{Assignment, In, Is, As, Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BoolAnd, BoolOr};
+use crate::token::BinaryOperator::{Assignment, In, Is, As, Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BoolAnd, BoolOr, Range};
 use crate::token::UnaryOperator::{IncrementPrefix, IncrementPostfix, DecrementPrefix, DecrementPostfix, BitCompliment, BoolNot};
 use crate::token::Fluff::{CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, Annotation};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Token {
     Control(Control),
     Header(Header),
@@ -17,11 +17,17 @@ pub enum Token {
     BinaryOperator(BinaryOperator),
     UnaryOperator(UnaryOperator),
     Fluff(Fluff),
-    Identifier(String),
+    Variable(Variable),
+    ShortHand(ShortHand),
+    FunctionCall(String),
+    Name(String),
     Type(String),
+    ReturnType(String),
+    Expression(Vec<Token>),
+    Unknown(String)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Control {
     ParenthesisBegin,
     ParenthesisEnd,
@@ -36,19 +42,21 @@ pub enum Control {
     QuoteChar,
     Escape,
     NewLine,
-    WhiteSpace,
+    WhiteSpace(usize),
     Comma,
     // "Control" might not be a suitable category for dot, TODO: pipe (|>) operator.
     Dot,
 }
 
-// "Headers" for blocks.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Header {
     // HeaderEnd == Body start (':' for now)
     HeaderEnd,
     Function,
     Class,
+    Enum,
+    Var,
+    Let,
     If,
     ElseIf,
     Else,
@@ -59,7 +67,7 @@ pub enum Header {
     Test,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Comparator {
     Equals,
     NotEquals,
@@ -69,7 +77,7 @@ pub enum Comparator {
     GreaterThanOrEquals,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Keyword {
     /* GENERAL */
     // == import
@@ -100,7 +108,15 @@ pub enum Keyword {
     Catch,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub enum ShortHand {
+    Integer(i128),
+    Float(f64),
+    String(String),
+    Char(char),
+}
+
+#[derive(Debug, Clone)]
 pub enum BinaryOperator {
     /* GENERAL */
     Assignment,
@@ -110,6 +126,7 @@ pub enum BinaryOperator {
     Is,
     // cast
     As,
+    Range,
 
     /* NUMBERS */
     Addition,
@@ -130,7 +147,7 @@ pub enum BinaryOperator {
     BoolOr,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UnaryOperator {
     /* NUMBERS */
     IncrementPrefix,
@@ -144,7 +161,7 @@ pub enum UnaryOperator {
     BoolNot,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Fluff {
     CommentSingleLine,
     CommentMultiLineBegin,
@@ -158,9 +175,9 @@ pub enum Fluff {
 
 
 impl Token {
-    pub fn lookup(string: &str) -> Result<Token, CustomError> {
+    pub fn lookup(name: String) -> CustomResult<Token> {
         Ok(
-            match string {
+            match name.as_ref() {
                 "(" => Token::Control(ParenthesisBegin),
                 ")" => Token::Control(ParenthesisEnd),
                 "[" => Token::Control(SquareBracketBegin),
@@ -174,8 +191,8 @@ impl Token {
                 "\\" => Token::Control(Escape),
                 "\n" => Token::Control(NewLine),
                 "\r\n" => Token::Control(NewLine),
-                " " => Token::Control(WhiteSpace),
-                "\t" => Token::Control(WhiteSpace),
+                " " => Token::Control(WhiteSpace(1)),
+                "\t" => Token::Control(WhiteSpace(1)),
                 "," => Token::Control(Comma),
                 // "Control" might not be a suitable category for dot, TODO: pipe (|>) operator.
                 "." => Token::Control(Dot),
@@ -183,6 +200,9 @@ impl Token {
                 ":" => Token::Header(HeaderEnd),
                 "function" => Token::Header(Function),
                 "class" => Token::Header(Class),
+                "enum" => Token::Header(Enum),
+                "var" => Token::Header(Var),
+                "let" => Token::Header(Let),
                 "if" => Token::Header(If),
                 "else if" => Token::Header(ElseIf),
                 "else" => Token::Header(Else),
@@ -218,6 +238,7 @@ impl Token {
                 "in" => Token::BinaryOperator(In),
                 "is" => Token::BinaryOperator(Is),
                 "as" => Token::BinaryOperator(As),
+                ".." => Token::BinaryOperator(Range),
                 "+" => Token::BinaryOperator(Addition),
                 "-" => Token::BinaryOperator(Subtraction),
                 "*" => Token::BinaryOperator(Multiplication),
@@ -240,16 +261,42 @@ impl Token {
                 "not" => Token::UnaryOperator(BoolNot),
 
                 "#" => Token::Fluff(CommentSingleLine),
-                "" => Token::Fluff(CommentMultiLineBegin),
-                "" => Token::Fluff(CommentMultiLineEnd),
-                "" => Token::Fluff(Annotation),
-                _ => return Err(LexError("Incorrect string parsed."))
+                "#*" => Token::Fluff(CommentMultiLineBegin),
+                "*#" => Token::Fluff(CommentMultiLineEnd),
+                "@" => Token::Fluff(Annotation),
+                _ => Token::Unknown(name)
             }
         )
     }
 }
+/*
+#[derive(Debug, Clone)]
+pub struct Function {
+    pub name: String,
+    pub arguments: Vec<Variable>,
+    pub return_type:  String,
+}
 
+#[derive(Debug, Clone)]
+pub struct Class {
+    pub name: String,
+    pub implements: Vec<String>,
+    pub extends: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Enum {
+    pub name: String,
+}
+*/
+
+#[derive(Debug, Clone)]
 pub struct Variable {
-    id: String,
-    var_type: String,
+    pub name: String,
+    pub var_type: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Indent {
+    pub size: usize
 }

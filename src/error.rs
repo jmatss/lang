@@ -4,14 +4,14 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum CustomError {
-    LexError(&'static str),
+    LexError(String),
 }
 
 impl Error for CustomError {}
 
 impl Display for CustomError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        match *self {
+        match self {
             CustomError::LexError(x) => write!(f, "{}", x)
         }
     }
