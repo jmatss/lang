@@ -1,6 +1,3 @@
-use std::str::Chars;
-use itertools::{PutBack, put_back};
-
 use crate::lexer::CustomResult;
 use crate::error::CustomError::LexError;
 use crate::pass1::token::{Token, Symbol};
@@ -30,8 +27,20 @@ impl TokenIter {
     }
 
     #[inline]
-    fn next(&mut self) {
+    fn next(&mut self) -> Option<char> {
+        if !self.buf.is_empty() {
+            Some(self.buf.pop_front()?)
+        } else {
+            self.it.next()
+        }
+    }
 
+    #[inline]
+    fn put_back(&mut self, c: char) {
+        if self.buf.len() >= MAX_PUT_BACK {
+            panic!("Max put_back size reached.");
+        }
+        self.buf.push_front(c);
     }
 
     pub fn next_token(&mut self) -> CustomResult<Token> {
@@ -54,7 +63,9 @@ impl TokenIter {
             } else if TokenIter::valid_whitespace(c) {
                 self.get_whitespaces()
             } else if let Some(symbol_token) = Symbol::lookup(c, c_next) {
-                Ok(symbol_token)
+                let (token, n) = symbol_token;
+                self.skip(n);
+                Ok(token)
             } else {
                 Err(LexError(
                     format!("Didn't match a symbol token when c: {:?} and c_next: {:?}", c, c_next)
@@ -88,9 +99,9 @@ impl TokenIter {
 
     fn get_identifier_string(&mut self) -> CustomResult<String> {
         let mut result = String::new();
-        while let Some(c) = self.it.next() {
+        while let Some(c) = self.next() {
             if !TokenIter::valid_identifier(c) {
-                self.it.put_back(c);
+                self.put_back(c);
                 break;
             }
             result.push(c);
@@ -108,7 +119,7 @@ impl TokenIter {
     pub fn get_number(&mut self, radix: u32) -> CustomResult<Token> {
         let mut number = self.get_integer(radix)?;
         if let Some('.') = self.peek() {    // True if float number.
-            self.it.next();                 // Remove dot.
+            self.skip(1);                // Remove dot.
             number = [number, self.get_integer(radix)?].join(".");
         }
 
@@ -117,11 +128,11 @@ impl TokenIter {
 
     fn get_integer(&mut self, radix: u32) -> CustomResult<String> {
         let mut numbers = Vec::new();
-        while let Some(c) = self.it.next() {
+        while let Some(c) = self.next() {
             if TokenIter::valid_number(c, radix) {
                 numbers.push(c);
             } else {
-                self.it.put_back(c);
+                self.put_back(c);
                 break;
             }
         }
@@ -130,13 +141,13 @@ impl TokenIter {
     }
 
     fn get_linebreak(&mut self) -> CustomResult<Token> {
-        let c = self.it.next()
+        let c = self.next()
             .ok_or(LexError("Reached EOF while parsing first char in get_linebreak.".to_string()))?;
 
         if c == '\n' {
             Ok(Token::Symbol(Symbol::LineBreak))
         } else if c == '\r' {
-            let c_next = self.it.next()
+            let c_next = self.next()
                 .ok_or(LexError("Reached EOF after a '\\r' had been parsed.".to_string()))?;
 
             if c_next == '\n' {
@@ -150,14 +161,13 @@ impl TokenIter {
     }
 
     fn get_whitespaces(&mut self) -> CustomResult<Token> {
-        // Count set to 1 since a whitespace have already been traversed to get into this function.
-        let mut count = 1;
+        let mut count = 0;
 
-        while let Some(c) = self.it.next() {
+        while let Some(c) = self.next() {
             if c.is_whitespace() {
                 count += 1;
             } else {
-                self.it.put_back(c);
+                self.put_back(c);
                 break;
             }
         }
@@ -166,9 +176,16 @@ impl TokenIter {
     }
 
     #[inline]
+    pub fn skip(&mut self, n: usize) {
+        for i in 0..n {
+            self.next();
+        }
+    }
+
+    #[inline]
     pub fn peek(&mut self) -> Option<char> {
-        if let Some(c) = self.it.next() {
-            self.it.put_back(c);
+        if let Some(c) = self.next() {
+            self.put_back(c);
             Some(c)
         } else {
             None
@@ -177,13 +194,13 @@ impl TokenIter {
 
     #[inline]
     pub fn peek_two(&mut self) -> Option<(char, Option<char>)> {
-        if let Some(c_first) = self.it.next() {
-            if let Some(c_second) = self.it.next() {
-                self.it.put_back(c_second);
-                self.it.put_back(c_first);
+        if let Some(c_first) = self.next() {
+            if let Some(c_second) = self.next() {
+                self.put_back(c_second);
+                self.put_back(c_first);
                 Some((c_first, Some(c_second)))
             } else {
-                self.it.put_back(c_first);
+                self.put_back(c_first);
                 Some((c_first, None))
             }
         } else {

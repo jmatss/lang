@@ -1,5 +1,3 @@
-use crate::lexer::CustomResult;
-use crate::error::CustomError::LexError;
 use crate::pass1::token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd,
                                   CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd,
                                   Dot, Comma, Equals, DoubleQuote, SingleQuote, Colon, SemiColon, LineBreak,
@@ -9,7 +7,7 @@ use crate::pass1::token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracke
                                   BitCompliment, Increment, Decrement, CommentSingleLine, CommentMultiLineBegin,
                                   CommentMultiLineEnd, Annotation, BoolNot, BoolAnd, BoolOr};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Identifier(String),
     Number(String),
@@ -18,7 +16,7 @@ pub enum Token {
     Unknown(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Symbol {
     ParenthesisBegin,
     ParenthesisEnd,
@@ -91,39 +89,37 @@ impl Symbol {
         )
     }
 
-    pub fn lookup(c: char, c_next: Option<char>) -> Option<Token> {
+    pub fn lookup(c: char, c_next: Option<char>) -> Option<(Token, usize)> {
         // The "..._tuple" variables has the type (char, Token::Symbol).
         // The macro tries to match the char in "m_tuple" to the char in "second_char_option"
         // and returns that "m_tuple"'s Token::Symbol if it matches.
         macro_rules! match_symbol {
             ( $first_char_tuple:expr, $second_char_option:expr, $( $m_tuple:expr ),+ ) => {
-                Token::Symbol(
-                    match $second_char_option {
-                        $( Some(second_char) if second_char == $m_tuple.0 => $m_tuple.1, )+
-                        None | Some(_) => $first_char_tuple.1
-                    }
-                )
+                match $second_char_option {
+                    $( Some(second_char) if second_char == $m_tuple.0 => (Token::Symbol($m_tuple.1), 2), )+
+                    None | Some(_) => (Token::Symbol($first_char_tuple.1), 1)
+                }
             }
         }
 
         Some(
             match c {
-                '(' => Token::Symbol(Symbol::ParenthesisBegin),
-                ')' => Token::Symbol(Symbol::ParenthesisEnd),
-                '[' => Token::Symbol(Symbol::SquareBracketBegin),
-                ']' => Token::Symbol(Symbol::SquareBracketEnd),
-                '{' => Token::Symbol(Symbol::CurlyBracketBegin),
-                '}' => Token::Symbol(Symbol::CurlyBracketEnd),
-                ',' => Token::Symbol(Symbol::Comma),
-                '\"' => Token::Symbol(Symbol::DoubleQuote),
-                '\'' => Token::Symbol(Symbol::SingleQuote),
-                ':' => Token::Symbol(Symbol::Colon),
-                ';' => Token::Symbol(Symbol::SemiColon),
-                '%' => Token::Symbol(Symbol::Modulus),
-                '&' => Token::Symbol(Symbol::BitAnd),
-                '^' => Token::Symbol(Symbol::BitXor),
-                '~' => Token::Symbol(Symbol::BitCompliment),
-                '#' => Token::Symbol(Symbol::Annotation),
+                '(' => (Token::Symbol(Symbol::ParenthesisBegin), 1),
+                ')' => (Token::Symbol(Symbol::ParenthesisEnd), 1),
+                '[' => (Token::Symbol(Symbol::SquareBracketBegin), 1),
+                ']' => (Token::Symbol(Symbol::SquareBracketEnd), 1),
+                '{' => (Token::Symbol(Symbol::CurlyBracketBegin), 1),
+                '}' => (Token::Symbol(Symbol::CurlyBracketEnd), 1),
+                ',' => (Token::Symbol(Symbol::Comma), 1),
+                '\"' => (Token::Symbol(Symbol::DoubleQuote), 1),
+                '\'' => (Token::Symbol(Symbol::SingleQuote), 1),
+                ':' => (Token::Symbol(Symbol::Colon), 1),
+                ';' => (Token::Symbol(Symbol::SemiColon), 1),
+                '%' => (Token::Symbol(Symbol::Modulus), 1),
+                '&' => (Token::Symbol(Symbol::BitAnd), 1),
+                '^' => (Token::Symbol(Symbol::BitXor), 1),
+                '~' => (Token::Symbol(Symbol::BitCompliment), 1),
+                '#' => (Token::Symbol(Symbol::Annotation), 1),
 
                 // The out-commented symbols underneath are "matched" in other ways.
                 //"\n" => Token::Symbol(Symbol::LineBreak),
@@ -131,22 +127,22 @@ impl Symbol {
                 //" " => Token::Symbol(Symbol::WhiteSpace(1)),
                 //"\t" => Token::Symbol(Symbol::WhiteSpace(1)),
 
-                //  |  |>
-                '|' => {
-                    if let Some('>') = c_next {
-                        Token::Symbol(Symbol::Pipe)
-                    } else {
-                        Token::Symbol(Symbol::BitOr)
-                    }
-                }
-
                 //  !=
                 '!' => {
                     if let Some('=') = c_next {
-                        Token::Symbol(Symbol::NotEquals)
+                        (Token::Symbol(Symbol::NotEquals), 2)
                     } else {
                         return None;
                     }
+                }
+
+                //  |  |>
+                '|' => {
+                    match_symbol!(
+                         (c, BitOr),
+                         c_next,
+                         ('>', Pipe)
+                    )
                 }
 
 
