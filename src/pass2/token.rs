@@ -12,6 +12,7 @@ pub enum Token {
 pub enum Statement {
     Return(Option<Expression>),
     Break(Option<Expression>),
+    Yield(Option<Expression>),
     Continue,
 
     // TODO: Maybe something else other that String.
@@ -228,6 +229,7 @@ impl Token {
             match name {
                 "return" => Statement::Return(None),
                 "break" => Statement::Break(None),
+                "yield" => Statement::Yield(None),
                 "continue" => Statement::Continue,
 
                 "use" => Statement::Use(None),
