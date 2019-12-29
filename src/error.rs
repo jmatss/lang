@@ -4,7 +4,8 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum CustomError {
-    LexError(String),
+    Pass1Error(String),
+    Pass2Error(String),
 }
 
 impl Error for CustomError {}
@@ -12,7 +13,8 @@ impl Error for CustomError {}
 impl Display for CustomError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            CustomError::LexError(x) => write!(f, "{}", x)
+            CustomError::Pass1Error(x) => write!(f, "{}", x),
+            CustomError::Pass2Error(x) => write!(f, "{}", x)
         }
     }
 }

@@ -1,13 +1,279 @@
-use crate::lexer::CustomResult;
-use crate::error::CustomError::LexError;
-use crate::token::Control::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, NewLine, WhiteSpace, Comma, Dot, QuoteString, QuoteChar, Escape};
-use crate::token::Header::{HeaderEnd, If, ElseIf, Else, Match, For, While, Loop, Test, Enum, Function, Class, Let, Var};
-use crate::token::Comparator::{Equals, NotEquals, LessThan, GreaterThan, LessThanOrEquals, GreaterThanOrEquals};
-use crate::token::Keyword::{Use, Package, Return, Yield, Break, Continue, Implements, Extends, This, Separator, Static, Throw, Catch};
-use crate::token::BinaryOperator::{Assignment, In, Is, As, Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BoolAnd, BoolOr, Range};
-use crate::token::UnaryOperator::{IncrementPrefix, IncrementPostfix, DecrementPrefix, DecrementPostfix, BitCompliment, BoolNot};
-use crate::token::Fluff::{CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, Annotation};
+#[derive(Debug, Clone)]
+pub enum Token {
+    // TODO: Rust block (statement/expression (?)).
+    // EndBreak == LineBreak/ManualBreak (;).
+    Expression(Expression),
+    Statement(Statement),
 
+    Block(BlockHeader, Vec<Token>),
+}
+
+#[derive(Debug, Clone)]
+pub enum Statement {
+    Return(Option<Expression>),
+    Break(Option<Expression>),
+    Continue,
+
+    // TODO: Maybe something else other that String.
+    Use(Option<String>),
+    Package(Option<String>),
+    // TODO: throw
+    Throw(Option<Expression>),
+
+    // BinaryOperation == Assignment
+    Var(Option<BinaryOperation>),
+    Let(Option<BinaryOperation>),
+}
+
+#[derive(Debug, Clone)]
+pub enum Expression {
+    StringLiteral(Option<String>),
+    CharLiteral(Option<char>),
+    Integer(Option<String>),
+    Float(Option<String>),
+    Variable(Option<Variable>),
+
+    FunctionCall(Option<FunctionCall>),
+
+    BinaryOperation(Option<BinaryOperation>),
+    UnaryOperation(Option<UnaryOperation>),
+}
+
+#[derive(Debug, Clone)]
+pub enum BlockHeader {
+    Function(Option<Function>),
+    Class(Option<Class>),
+    // TODO: change inner of enum to something else.
+    Enum(Option<Vec<Variable>>),
+
+    If(Option<Expression>),
+    ElseIf(Option<Expression>),
+    Else,
+
+    // BinaryOperation == MatchCase
+    Match(Option<Vec<BinaryOperation>>),
+
+    // BinaryOperation == In
+    For(Option<BinaryOperation>),
+    While(Option<Expression>),
+    Loop,
+
+    // Example:
+    //      catch e: EOFException:
+    // or
+    //      catch e as EOFException:
+    Catch(Option<Variable>),
+
+    // TODO: (?)
+    Test(Option<Function>),
+}
+
+#[derive(Debug, Clone)]
+pub enum BinaryOperator {
+    /* GENERAL */
+    Assignment,
+    // Used in for loops etc.
+    In,
+    // instanceOf
+    Is,
+    // cast
+    As,
+    Range,
+
+    // TODO: Make left-hand-side a pattern.
+    /* Example of MatchCase where ("a": ; do_something()) is a MatchCase.
+        match "a":
+            "a":
+                do_something()
+            _:
+                do_nothing()
+        .
+    */
+    MatchCase,
+
+    // Access function/fields ex. list.add(), tuple.0
+    Dot,
+
+    Equals,
+    NotEquals,
+    LessThan,
+    GreaterThan,
+    LessThanOrEquals,
+    GreaterThanOrEquals,
+
+    /* NUMBERS */
+    Addition,
+    Subtraction,
+    Multiplication,
+    Division,
+    Modulus,
+    Power,
+    /* NUMBERS (BIT) */
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShiftLeft,
+    ShiftRight,
+
+    /* BOOL */
+    BoolAnd,
+    BoolOr,
+}
+
+#[derive(Debug, Clone)]
+pub enum UnaryOperator {
+    /* NUMBERS */
+    IncrementPrefix,
+    IncrementPostfix,
+    DecrementPrefix,
+    DecrementPostfix,
+    /* NUMBERS (BIT) */
+    BitCompliment,
+
+    /* BOOL */
+    BoolNot,
+}
+
+#[derive(Debug, Clone)]
+pub struct BinaryOperation {
+    operator: BinaryOperator,
+    left: Box<Expression>,
+    right: Box<Expression>,
+}
+
+impl BinaryOperation {
+    pub fn new(operator: BinaryOperator, left: Box<Expression>, right: Box<Expression>) -> Self {
+        BinaryOperation { operator, left, right }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnaryOperation {
+    operator: UnaryOperator,
+    value: Box<Expression>,
+}
+
+impl UnaryOperation {
+    pub fn new(operator: UnaryOperator, value: Box<Expression>) -> Self {
+        UnaryOperation { operator, value }
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct Class {
+    name: String,
+    implements: Vec<Type>,
+    // TODO: extends: Vec<Type>
+}
+
+impl Class {
+    pub fn new(name: String, implements: Vec<Type>) -> Self {
+        Class { name, implements }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Function {
+    name: String,
+    parameters: Vec<Variable>,
+    return_type: Type,
+}
+
+impl Function {
+    pub fn new(name: String, parameters: Vec<Variable>, return_type: Type) -> Self {
+        Function { name, parameters, return_type }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionCall {
+    name: String,
+    arguments: Vec<Variable>,
+}
+
+impl FunctionCall {
+    pub fn new(name: String, arguments: Vec<Variable>) -> Self {
+        FunctionCall { name, arguments }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Variable {
+    name: String,
+    default: Expression,
+    var_type: Type,
+}
+
+impl Variable {
+    pub fn new(name: String, default: Expression, var_type: Type) -> Self {
+        Variable { name, default, var_type }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Type {
+    t: String,
+}
+
+impl Type {
+    pub fn new(t: String) -> Self {
+        Type { t }
+    }
+}
+
+impl Token {
+    pub fn lookup_identifier(name: &str) -> Option<Statement> {
+        Some(
+            match name {
+                "return" => Statement::Return(None),
+                "break" => Statement::Break(None),
+                "continue" => Statement::Continue,
+
+                "use" => Statement::Use(None),
+                "package" => Statement::Package(None),
+                "throw" => Statement::Throw(None),
+
+                "var" => Statement::Var(None),
+                "let" => Statement::Let(None),
+
+                "function" => BlockHeader::Function(None),
+                "class" => BlockHeader::Class(None),
+                "enum" => BlockHeader::Enum(None),
+
+                "if" => BlockHeader::If(None),
+                "else" => {
+                    // TODO: see if else if here (?)
+                    BlockHeader::Else
+                },
+                "match" => BlockHeader::Match(None),
+
+                "for" => BlockHeader::For(None),
+                "while" => BlockHeader::While(None),
+                "loop" => BlockHeader::Loop,
+
+                "catch" => BlockHeader::Catch(None),
+                // TODO :test
+
+                _ => return None
+            }
+        )
+    }
+
+
+
+/*
+    StringLiteral,
+    CharLiteral,
+    Break, // LineBreak/ManualBreak (;)
+    Expression,
+    Statement,  // return, break, continue, var, let
+    BlockExpression // if/elseif/else, for, while, match
+    BlockHeader,
+    Block,
+*/
+
+/*
 #[derive(Debug, Clone)]
 pub enum Token {
     Control(Control),
@@ -115,51 +381,9 @@ pub enum ShortHand {
     String(String),
     Char(char),
 }
+*/
 
-#[derive(Debug, Clone)]
-pub enum BinaryOperator {
-    /* GENERAL */
-    Assignment,
-    // Used in for loops etc.
-    In,
-    // instanceOf
-    Is,
-    // cast
-    As,
-    Range,
-
-    /* NUMBERS */
-    Addition,
-    Subtraction,
-    Multiplication,
-    Division,
-    Modulus,
-    Power,
-    /* NUMBERS (BIT) */
-    BitAnd,
-    BitOr,
-    BitXor,
-    ShiftLeft,
-    ShiftRight,
-
-    /* BOOL */
-    BoolAnd,
-    BoolOr,
-}
-
-#[derive(Debug, Clone)]
-pub enum UnaryOperator {
-    /* NUMBERS */
-    IncrementPrefix,
-    IncrementPostfix,
-    DecrementPrefix,
-    DecrementPostfix,
-    /* NUMBERS (BIT) */
-    BitCompliment,
-
-    /* BOOL */
-    BoolNot,
-}
+/*
 
 #[derive(Debug, Clone)]
 pub enum Fluff {
@@ -300,3 +524,4 @@ pub struct Variable {
 pub struct Indent {
     pub size: usize
 }
+*/

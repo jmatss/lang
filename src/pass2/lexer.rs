@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{BufReader, BufRead};
 use crate::token::*;
 use crate::error::CustomError;
-use crate::error::CustomError::LexError;
+use crate::error::CustomError::Pass1Error;
 //use crate::token_iter::TokenIter;
 
 pub type CustomResult<T> = Result<T, CustomError>;

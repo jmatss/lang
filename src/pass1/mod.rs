@@ -1,2 +1,2 @@
-pub mod token;
-pub mod token_iter;
+pub mod simple_token;
+pub mod simple_token_iter;

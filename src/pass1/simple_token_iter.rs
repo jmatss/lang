@@ -1,6 +1,6 @@
-use crate::lexer::CustomResult;
-use crate::error::CustomError::LexError;
-use crate::pass1::token::{Token, Symbol};
+use crate::pass2::lexer::CustomResult;
+use crate::error::CustomError::Pass1Error;
+use crate::pass1::simple_token::{SimpleToken, Symbol};
 use std::fs::File;
 use std::io::Read;
 use std::vec::IntoIter;
@@ -9,18 +9,18 @@ use std::collections::linked_list::LinkedList;
 const BUFFER_SIZE: usize = 1 << 16;
 const MAX_PUT_BACK: usize = 5;
 
-pub struct TokenIter {
+pub struct SimpleTokenIter {
     buf: LinkedList<char>,
     it: IntoIter<char>,
 }
 
-impl TokenIter {
-    pub fn new(filename: &str) -> std::io::Result<TokenIter> {
+impl SimpleTokenIter {
+    pub fn new(filename: &str) -> std::io::Result<SimpleTokenIter> {
         // TODO: dont read whole file in one go.
         let mut file = File::open(filename)?;
         let mut string = String::new();
         file.read_to_string(&mut string)?;
-        Ok(TokenIter {
+        Ok(SimpleTokenIter {
             buf: LinkedList::new(),
             it: string.chars().collect::<Vec<_>>().into_iter()
         })
@@ -43,36 +43,36 @@ impl TokenIter {
         self.buf.push_front(c);
     }
 
-    pub fn next_token(&mut self) -> CustomResult<Token> {
+    pub fn next_token(&mut self) -> CustomResult<SimpleToken> {
         let radix = 10;
 
         if let Some((c, c_next)) = self.peek_two() {
-            if TokenIter::valid_identifier(c) {
+            if SimpleTokenIter::valid_identifier(c) {
                 let id = self.get_identifier_string()?;
 
                 // Check if this a symbol that have a valid identifier name(and, or, not).
                 if let Some(symbol_token) = Symbol::lookup_identifier(&id) {
                     Ok(symbol_token)
                 } else {
-                    Ok(Token::Identifier(id))
+                    Ok(SimpleToken::Identifier(id))
                 }
-            } else if TokenIter::valid_number(c, radix) {
+            } else if SimpleTokenIter::valid_number(c, radix) {
                 self.get_number(radix)
-            } else if TokenIter::valid_linebreak(c, c_next) {
+            } else if SimpleTokenIter::valid_linebreak(c, c_next) {
                 self.get_linebreak()
-            } else if TokenIter::valid_whitespace(c) {
+            } else if SimpleTokenIter::valid_whitespace(c) {
                 self.get_whitespaces()
             } else if let Some(symbol_token) = Symbol::lookup(c, c_next) {
                 let (token, n) = symbol_token;
                 self.skip(n);
                 Ok(token)
             } else {
-                Err(LexError(
+                Err(Pass1Error(
                     format!("Didn't match a symbol token when c: {:?} and c_next: {:?}", c, c_next)
                 ))
             }
         } else {
-            Ok(Token::EndOfFile)
+            Ok(SimpleToken::EndOfFile)
         }
     }
 
@@ -100,7 +100,7 @@ impl TokenIter {
     fn get_identifier_string(&mut self) -> CustomResult<String> {
         let mut result = String::new();
         while let Some(c) = self.next() {
-            if !TokenIter::valid_identifier(c) {
+            if !SimpleTokenIter::valid_identifier(c) {
                 self.put_back(c);
                 break;
             }
@@ -110,26 +110,26 @@ impl TokenIter {
         if !result.is_empty() {
             Ok(result)
         } else {
-            Err(LexError("Empty result in next().".to_string()))
+            Err(Pass1Error("Empty result in next().".to_string()))
         }
     }
 
     // TODO: Hex/binary numbers with prefix 0x/0b
     //  Check cast (as) and suffix etc.
-    pub fn get_number(&mut self, radix: u32) -> CustomResult<Token> {
+    pub fn get_number(&mut self, radix: u32) -> CustomResult<SimpleToken> {
         let mut number = self.get_integer(radix)?;
         if let Some('.') = self.peek() {    // True if float number.
             self.skip(1);                // Remove dot.
             number = [number, self.get_integer(radix)?].join(".");
         }
 
-        Ok(Token::Number(number))
+        Ok(SimpleToken::Number(number))
     }
 
     fn get_integer(&mut self, radix: u32) -> CustomResult<String> {
         let mut numbers = Vec::new();
         while let Some(c) = self.next() {
-            if TokenIter::valid_number(c, radix) {
+            if SimpleTokenIter::valid_number(c, radix) {
                 numbers.push(c);
             } else {
                 self.put_back(c);
@@ -140,27 +140,27 @@ impl TokenIter {
         Ok(numbers.into_iter().collect())
     }
 
-    fn get_linebreak(&mut self) -> CustomResult<Token> {
+    fn get_linebreak(&mut self) -> CustomResult<SimpleToken> {
         let c = self.next()
-            .ok_or(LexError("Reached EOF while parsing first char in get_linebreak.".to_string()))?;
+            .ok_or(Pass1Error("Reached EOF while parsing first char in get_linebreak.".to_string()))?;
 
         if c == '\n' {
-            Ok(Token::Symbol(Symbol::LineBreak))
+            Ok(SimpleToken::Symbol(Symbol::LineBreak))
         } else if c == '\r' {
             let c_next = self.next()
-                .ok_or(LexError("Reached EOF after a '\\r' had been parsed.".to_string()))?;
+                .ok_or(Pass1Error("Reached EOF after a '\\r' had been parsed.".to_string()))?;
 
             if c_next == '\n' {
-                Ok(Token::Symbol(Symbol::LineBreak))
+                Ok(SimpleToken::Symbol(Symbol::LineBreak))
             } else {
-                Err(LexError("Didn't receive a '\\n' after a '\\r'.".to_string()))
+                Err(Pass1Error("Didn't receive a '\\n' after a '\\r'.".to_string()))
             }
         } else {
-            Err(LexError("No linebreak character received in get_linebreak.".to_string()))
+            Err(Pass1Error("No linebreak character received in get_linebreak.".to_string()))
         }
     }
 
-    fn get_whitespaces(&mut self) -> CustomResult<Token> {
+    fn get_whitespaces(&mut self) -> CustomResult<SimpleToken> {
         let mut count = 0;
 
         while let Some(c) = self.next() {
@@ -172,7 +172,7 @@ impl TokenIter {
             }
         }
 
-        Ok(Token::Symbol(Symbol::WhiteSpace(count)))
+        Ok(SimpleToken::Symbol(Symbol::WhiteSpace(count)))
     }
 
     #[inline]
