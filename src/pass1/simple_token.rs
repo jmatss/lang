@@ -1,14 +1,4 @@
-use crate::pass1::simple_token::Symbol::{
-    ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd,
-    CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd,
-    Dot, Comma, QuestionMark, ExclamationMark, Equals, DoubleQuote, SingleQuote,
-    Colon, SemiColon, LineBreak, WhiteSpace, Pipe, Range, Arrow, EqualsOperator,
-    NotEquals, LessThan, GreaterThan, LessThanOrEquals, GreaterThanOrEquals,
-    Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr,
-    BitXor, ShiftLeft, ShiftRight, BitCompliment, Increment, Decrement,
-    CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, Annotation,
-    BoolNot, BoolAnd, BoolOr,
-};
+use crate::pass1::simple_token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, Dot, Comma, QuestionMark, ExclamationMark, Equals, DoubleQuote, SingleQuote, Colon, SemiColon, LineBreak, WhiteSpace, Pipe, Range, Arrow, EqualsOperator, NotEquals, LessThan, GreaterThan, LessThanOrEquals, GreaterThanOrEquals, Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BitCompliment, Increment, Decrement, CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, BoolNot, BoolAnd, BoolOr, Pound, At, Dollar};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimpleToken {
@@ -39,6 +29,9 @@ pub enum Symbol {
     SingleQuote,
     Colon,
     SemiColon,
+    Pound,
+    At,
+    Dollar,
     LineBreak,
     WhiteSpace(usize),
 
@@ -74,7 +67,6 @@ pub enum Symbol {
     CommentSingleLine,
     CommentMultiLineBegin,
     CommentMultiLineEnd,
-    Annotation,
 
     BoolNot,
     BoolAnd,
@@ -124,7 +116,10 @@ impl Symbol {
                 '&' => (SimpleToken::Symbol(BitAnd), 1),
                 '^' => (SimpleToken::Symbol(BitXor), 1),
                 '~' => (SimpleToken::Symbol(BitCompliment), 1),
-                '#' => (SimpleToken::Symbol(Annotation), 1),
+                '#' => (SimpleToken::Symbol(Pound), 1),
+                '@' => (SimpleToken::Symbol(At), 1),
+                '$' => (SimpleToken::Symbol(Dollar), 1),
+
 
                 // The out-commented symbols underneath are "matched" in other ways.
                 //"\n" => SimpleToken::Symbol(Symbol::LineBreak),
