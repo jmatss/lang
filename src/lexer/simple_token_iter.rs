@@ -1,12 +1,10 @@
-use crate::error::CustomError::Pass1Error;
-use crate::pass1::simple_token::{SimpleToken, Symbol};
+use crate::error::CustomError::LexError;
+use crate::lexer::simple_token::{SimpleToken, Symbol};
 use std::fs::File;
 use std::io::Read;
 use std::vec::IntoIter;
 use std::collections::linked_list::LinkedList;
-use crate::error::CustomError;
-
-pub type CustomResult<T> = Result<T, CustomError>;
+use crate::CustomResult;
 
 const BUFFER_SIZE: usize = 1 << 16;
 const MAX_PUT_BACK: usize = 5;
@@ -45,7 +43,8 @@ impl SimpleTokenIter {
         self.buf.push_front(c);
     }
 
-    pub fn next_token(&mut self) -> CustomResult<SimpleToken> {
+    pub fn next_simple_token(&mut self) -> CustomResult<SimpleToken> {
+        // TODO: Fix for more radixes.
         let radix = 10;
 
         if let Some((c, c_next)) = self.peek_two() {
@@ -69,7 +68,7 @@ impl SimpleTokenIter {
                 self.skip(n);
                 Ok(token)
             } else {
-                Err(Pass1Error(
+                Err(LexError(
                     format!("Didn't match a symbol token when c: {:?} and c_next: {:?}", c, c_next)
                 ))
             }
@@ -117,7 +116,7 @@ impl SimpleTokenIter {
         if !result.is_empty() {
             Ok(result)
         } else {
-            Err(Pass1Error("Empty result in next().".to_string()))
+            Err(LexError("Empty result in next().".to_string()))
         }
     }
 
@@ -149,21 +148,21 @@ impl SimpleTokenIter {
 
     fn get_linebreak(&mut self) -> CustomResult<SimpleToken> {
         let c = self.next()
-            .ok_or(Pass1Error("Reached EOF while parsing first char in get_linebreak.".to_string()))?;
+            .ok_or(LexError("Reached EOF while parsing first char in get_linebreak.".to_string()))?;
 
         if c == '\n' {
             Ok(SimpleToken::Symbol(Symbol::LineBreak))
         } else if c == '\r' {
             let c_next = self.next()
-                .ok_or(Pass1Error("Reached EOF after a '\\r' had been parsed.".to_string()))?;
+                .ok_or(LexError("Reached EOF after a '\\r' had been parsed.".to_string()))?;
 
             if c_next == '\n' {
                 Ok(SimpleToken::Symbol(Symbol::LineBreak))
             } else {
-                Err(Pass1Error("Didn't receive a '\\n' after a '\\r'.".to_string()))
+                Err(LexError("Didn't receive a '\\n' after a '\\r'.".to_string()))
             }
         } else {
-            Err(Pass1Error("No linebreak character received in get_linebreak.".to_string()))
+            Err(LexError("No linebreak character received in get_linebreak.".to_string()))
         }
     }
 
