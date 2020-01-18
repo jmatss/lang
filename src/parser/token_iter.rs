@@ -11,13 +11,7 @@ use crate::lexer::simple_token_iter::SimpleTokenIter;
 pub struct TokenIter<'a> {
     simple_tokens: &'a [SimpleToken],
     position: usize,
-    current_block: CurrentBlock,
     // Symbol::WhiteSpace(usize)
-    current_indent: Symbol,
-}
-
-struct CurrentBlock {
-    current_header: BlockHeader,
     current_indent: Symbol,
 }
 
@@ -26,10 +20,6 @@ impl<'a> TokenIter<'a> {
         TokenIter {
             simple_tokens,
             position: 0,
-            current_block: CurrentBlock {
-                current_header: BlockHeader::Default,
-                current_indent: Symbol::WhiteSpace(0),
-            },
             current_indent: Symbol::WhiteSpace(0),
         }
     }
