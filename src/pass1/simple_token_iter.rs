@@ -1,10 +1,12 @@
-use crate::pass2::lexer::CustomResult;
 use crate::error::CustomError::Pass1Error;
 use crate::pass1::simple_token::{SimpleToken, Symbol};
 use std::fs::File;
 use std::io::Read;
 use std::vec::IntoIter;
 use std::collections::linked_list::LinkedList;
+use crate::error::CustomError;
+
+pub type CustomResult<T> = Result<T, CustomError>;
 
 const BUFFER_SIZE: usize = 1 << 16;
 const MAX_PUT_BACK: usize = 5;
@@ -47,8 +49,8 @@ impl SimpleTokenIter {
         let radix = 10;
 
         if let Some((c, c_next)) = self.peek_two() {
-            if SimpleTokenIter::valid_identifier(c) {
-                let id = self.get_identifier_string()?;
+            if SimpleTokenIter::valid_identifier_start(c) {
+                let id: String = self.get_identifier_string()?;
 
                 // Check if this a symbol that have a valid identifier name(and, or, not).
                 if let Some(symbol_token) = Symbol::lookup_identifier(&id) {
@@ -77,8 +79,13 @@ impl SimpleTokenIter {
     }
 
     #[inline]
-    pub fn valid_identifier(c: char) -> bool {
+    pub fn valid_identifier_start(c: char) -> bool {
         c.is_alphabetic() || c == '_'
+    }
+
+    #[inline]
+    pub fn valid_identifier(c: char) -> bool {
+        c.is_alphanumeric() || c == '_'
     }
 
     #[inline]
