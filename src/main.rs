@@ -1,26 +1,17 @@
 mod error;
-mod pass1;
-mod pass2;
+mod lexer;
+mod parser;
 
-use pass1::simple_token_iter::SimpleTokenIter;
-use crate::pass1::simple_token::SimpleToken;
-use crate::pass2::token_iter::TokenIter;
+use crate::error::CustomError;
+use crate::lexer::lexer::lex;
+
+pub type CustomResult<T> = Result<T, CustomError>;
 
 fn main() {
-    let mut simple_token_vec = Vec::new();
-    let mut simple_it = SimpleTokenIter::new("examples/fib_recursive_4.ren")
-        .expect("Unable to create TokenIter.");
-
-    loop {
-        let token = simple_it.next_token().unwrap();
-        simple_token_vec.push(token);
-
-        println!("{:?}", token);
-
-        if token == SimpleToken::EndOfFile {
-            break;
-        }
+    // Loop through all files and lex simple tokens...
+    let simple_tokens = lex("examples/fib_iterative_4.ren").unwrap();
+    for simple_token in simple_tokens {
+        println!("{:?}", simple_token);
     }
-
-    let mut it = TokenIter::new(simple_token_vec);
+    //let mut it = TokenIter::new(simple_token_vec);
 }
