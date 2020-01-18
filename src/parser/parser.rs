@@ -1,5 +1,6 @@
-use crate::pass1::simple_token::SimpleToken;
-use crate::pass2::token::Token;
+/*
+use crate::lexer::simple_token::SimpleToken;
+use crate::parser::token::Token;
 
 pub fn parse(simple_tokens: Vec<SimpleToken>) -> Vec<Token> {
 
@@ -34,3 +35,4 @@ fn parse_identifier(id: &str) -> Token {
 fn lookup(simple_token: SimpleToken) -> Option<Token> {
 
 }
+*/

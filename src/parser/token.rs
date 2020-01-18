@@ -1,3 +1,5 @@
+use crate::parser::token::NonBlockHeader::{Var, Let, Set};
+
 #[derive(Debug, Clone)]
 pub enum Token {
     // TODO: Rust block (statement/expression (?)).
@@ -13,7 +15,10 @@ pub enum Statement {
     Return(Option<Expression>),
     Break(Option<Expression>),
     Yield(Option<Expression>),
+    // Continue == Next == Skip
     Continue,
+    Next,
+    Skip,
 
     // TODO: Maybe something else other that String.
     Use(Option<String>),
@@ -21,9 +26,16 @@ pub enum Statement {
     // TODO: throw
     Throw(Option<Expression>),
 
-    // BinaryOperation == Assignment
-    Var(Option<BinaryOperation>),
-    Let(Option<BinaryOperation>),
+    BlockHeader(BlockHeader),
+    BlockEnd,
+
+    // Headers that isn't a real block, and doesn't end with ":". (var, let, set)
+    NonBlockHeader(NonBlockHeader),
+    NonBlockEnd,
+
+    // Special cases
+    // Init: Used in constructor to initialize fields with same name as parameters of constructor.
+    Init,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +54,8 @@ pub enum Expression {
 
 #[derive(Debug, Clone)]
 pub enum BlockHeader {
+    // Default == None, i.e. if there are no current block. Ex. at the start of a file.
+    Default,
     Function(Option<Function>),
     Class(Option<Class>),
     // TODO: change inner of enum to something else.
@@ -51,11 +65,13 @@ pub enum BlockHeader {
     ElseIf(Option<Expression>),
     Else,
 
-    // BinaryOperation == MatchCase
+    // BinaryOperation == MatchCa+se
     Match(Option<Vec<BinaryOperation>>),
 
     // BinaryOperation == In
     For(Option<BinaryOperation>),
+    // For == Iterate
+    Iterate(Option<BinaryOperation>),
     While(Option<Expression>),
     Loop,
 
@@ -67,6 +83,15 @@ pub enum BlockHeader {
 
     // TODO: (?)
     Test(Option<Function>),
+}
+
+#[derive(Debug, Clone)]
+pub enum NonBlockHeader {
+    // BinaryOperation == Assignment
+    // Var can be either assignment or declaration.
+    Var(Option<VarEnum>),
+    Let(Option<BinaryOperation>),
+    Set(Option<BinaryOperation>),
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +144,11 @@ pub enum BinaryOperator {
     /* BOOL */
     BoolAnd,
     BoolOr,
+
+    // Example ExpressionAnd:
+    //  for i in 0..1 and j 0..1:
+    //  with s = Scanner(stdin) and x = Abc():
+    ExpressionAnd,
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +163,20 @@ pub enum UnaryOperator {
 
     /* BOOL */
     BoolNot,
+
+    // Declare a variable, ex.:
+    //  var text_name @ Text
+    // or
+    //  var text_name
+    Declaration,
+}
+
+#[derive(Debug, Clone)]
+pub enum VarEnum {
+    // BinaryOperation == Assignment
+    BinaryOperation(BinaryOperation),
+    // UnaryOperation == Declaration
+    UnaryOperation(UnaryOperation),
 }
 
 #[derive(Debug, Clone)]
@@ -174,6 +218,7 @@ impl Class {
     }
 }
 
+// TODO: Add generic types for functions.
 #[derive(Debug, Clone)]
 pub struct Function {
     name: String,
@@ -202,17 +247,18 @@ impl FunctionCall {
 #[derive(Debug, Clone)]
 pub struct Variable {
     name: String,
-    default: Expression,
-    var_type: Type,
+    var_type: Option<Type>,
+    // value ~= default
+    value: Option<Box<Expression>>,
 }
 
 impl Variable {
-    pub fn new(name: String, default: Expression, var_type: Type) -> Self {
-        Variable { name, default, var_type }
+    pub fn new(name: String, var_type: Option<Type>, value: Option<Box<Expression>>) -> Self {
+        Variable { name, value, var_type }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Type {
     t: String,
 }
@@ -231,38 +277,40 @@ impl Token {
                 "break" => Statement::Break(None),
                 "yield" => Statement::Yield(None),
                 "continue" => Statement::Continue,
+                "next" => Statement::Next,
+                "skip" => Statement::Skip,
 
                 "use" => Statement::Use(None),
                 "package" => Statement::Package(None),
                 "throw" => Statement::Throw(None),
 
-                "var" => Statement::Var(None),
-                "let" => Statement::Let(None),
+                "var" => Statement::NonBlockHeader(Var(None)),
+                "let" => Statement::NonBlockHeader(Let(None)),
+                "set" => Statement::NonBlockHeader(Set(None)),
 
-                "function" => BlockHeader::Function(None),
-                "class" => BlockHeader::Class(None),
-                "enum" => BlockHeader::Enum(None),
+                "function" => Statement::BlockHeader(BlockHeader::Function(None)),
+                "class" => Statement::BlockHeader(BlockHeader::Class(None)),
+                "enum" => Statement::BlockHeader(BlockHeader::Enum(None)),
 
-                "if" => BlockHeader::If(None),
+                "if" => Statement::BlockHeader(BlockHeader::If(None)),
                 "else" => {
                     // TODO: see if else if here (?)
-                    BlockHeader::Else
-                },
-                "match" => BlockHeader::Match(None),
+                    Statement::BlockHeader(BlockHeader::Else)
+                }
+                "match" => Statement::BlockHeader(BlockHeader::Match(None)),
 
-                "for" => BlockHeader::For(None),
-                "while" => BlockHeader::While(None),
-                "loop" => BlockHeader::Loop,
+                "for" => Statement::BlockHeader(BlockHeader::For(None)),
+                "while" => Statement::BlockHeader(BlockHeader::While(None)),
+                "loop" => Statement::BlockHeader(BlockHeader::Loop),
 
-                "catch" => BlockHeader::Catch(None),
+                "catch" => Statement::BlockHeader(BlockHeader::Catch(None)),
                 // TODO :test
 
                 _ => return None
             }
         )
     }
-
-
+}
 
 /*
     StringLiteral,
@@ -273,9 +321,7 @@ impl Token {
     BlockExpression // if/elseif/else, for, while, match
     BlockHeader,
     Block,
-*/
 
-/*
 #[derive(Debug, Clone)]
 pub enum Token {
     Control(Control),
@@ -383,9 +429,6 @@ pub enum ShortHand {
     String(String),
     Char(char),
 }
-*/
-
-/*
 
 #[derive(Debug, Clone)]
 pub enum Fluff {
@@ -495,7 +538,7 @@ impl Token {
         )
     }
 }
-/*
+
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
@@ -514,7 +557,6 @@ pub struct Class {
 pub struct Enum {
     pub name: String,
 }
-*/
 
 #[derive(Debug, Clone)]
 pub struct Variable {
