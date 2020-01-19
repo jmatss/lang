@@ -74,6 +74,16 @@ pub enum Symbol {
 }
 
 impl Symbol {
+    // Linebreak, manual linebreak (";") or EndOfFile.
+    pub fn is_break_symbol(simple_token: SimpleToken) -> bool {
+        match simple_token {
+            | SimpleToken::Symbol(Symbol::LineBreak)
+            | SimpleToken::Symbol(Symbol::SemiColon)
+            | SimpleToken::EndOfFile => true,
+            _ => false
+        }
+    }
+
     pub fn lookup_identifier(name: &str) -> Option<SimpleToken> {
         Some(
             match name {
