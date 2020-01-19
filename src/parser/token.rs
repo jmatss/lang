@@ -1,9 +1,8 @@
-use crate::parser::token::NonBlockHeader::{Var, Let, Set};
+use crate::parser::token::Modifier::{Static, Private, Public};
 
 #[derive(Debug, Clone)]
 pub enum Token {
     // TODO: Rust block (statement/expression (?)).
-    // EndBreak == LineBreak/ManualBreak (;).
     Expression(Expression),
     Statement(Statement),
 
@@ -13,12 +12,12 @@ pub enum Token {
 #[derive(Debug, Clone)]
 pub enum Statement {
     Return(Option<Expression>),
-    Break(Option<Expression>),
+    // Yield ~= Break with a value
     Yield(Option<Expression>),
-    // Continue == Next == Skip
+    Break,
+    // Continue == Next
     Continue,
     Next,
-    Skip,
 
     // TODO: Maybe something else other that String.
     Use(Option<String>),
@@ -26,15 +25,13 @@ pub enum Statement {
     // TODO: throw
     Throw(Option<Expression>),
 
-    BlockHeader(BlockHeader),
-    BlockEnd,
-
-    // Headers that isn't a real block, and doesn't end with ":". (var, let, set)
-    NonBlockHeader(NonBlockHeader),
-    NonBlockEnd,
+    // static, private etc.
+    Modifier(Modifier),
 
     // Special cases
     // Init: Used in constructor to initialize fields with same name as parameters of constructor.
+    // FIXME: Maybe add implements/is used in class header (?),
+    //  or is it ok for them to just be a identifier.
     Init,
 }
 
@@ -58,15 +55,17 @@ pub enum BlockHeader {
     Default,
     Function(Option<Function>),
     Class(Option<Class>),
-    // TODO: change inner of enum to something else.
-    Enum(Option<Vec<Variable>>),
+    Enum(Option<Enum>),
+    Interface(Option<Interface>),
 
     If(Option<Expression>),
     ElseIf(Option<Expression>),
-    Else,
+    // FIXME: Only use Else and no ElseIf (?)
+    Else(Option<Expression>),
 
-    // BinaryOperation == MatchCa+se
-    Match(Option<Vec<BinaryOperation>>),
+    // BinaryOperation == MatchCase
+    // TODO: Check match cases somewhere else
+    Match(Option<Expression>),
 
     // BinaryOperation == In
     For(Option<BinaryOperation>),
@@ -83,15 +82,26 @@ pub enum BlockHeader {
 
     // TODO: (?)
     Test(Option<Function>),
+
+    // Headers that isn't "real blocks". Only does declaration/assignment and doesn't end with ":".
+    // (var, let, set)
+    AssignBlockHeader(AssignBlockHeader),
 }
 
 #[derive(Debug, Clone)]
-pub enum NonBlockHeader {
+pub enum AssignBlockHeader {
     // BinaryOperation == Assignment
     // Var can be either assignment or declaration.
-    Var(Option<VarEnum>),
-    Let(Option<BinaryOperation>),
-    Set(Option<BinaryOperation>),
+    Var,
+    Let,
+    Set,
+}
+
+#[derive(Debug, Clone)]
+pub enum Modifier {
+    Static,
+    Private,
+    Public,
 }
 
 #[derive(Debug, Clone)]
@@ -146,8 +156,11 @@ pub enum BinaryOperator {
     BoolOr,
 
     // Example ExpressionAnd:
-    //  for i in 0..1 and j 0..1:
+    //  for i in 0..1 and j in 0..1:
     //  with s = Scanner(stdin) and x = Abc():
+    // Might use Comma instead:
+    //  for i in 0..1, j in 0..1:
+    //  with s = Scanner(stdin), x = Abc():
     ExpressionAnd,
 }
 
@@ -171,6 +184,7 @@ pub enum UnaryOperator {
     Declaration,
 }
 
+/*
 #[derive(Debug, Clone)]
 pub enum VarEnum {
     // BinaryOperation == Assignment
@@ -178,6 +192,7 @@ pub enum VarEnum {
     // UnaryOperation == Declaration
     UnaryOperation(UnaryOperation),
 }
+*/
 
 #[derive(Debug, Clone)]
 pub struct BinaryOperation {
@@ -207,108 +222,173 @@ impl UnaryOperation {
 
 #[derive(Debug, Clone)]
 pub struct Class {
-    name: String,
-    implements: Vec<Type>,
+    pub name: String,
+    pub generics: Vec<Type>,
+    pub implements: Vec<Type>,
     // TODO: extends: Vec<Type>
 }
 
 impl Class {
-    pub fn new(name: String, implements: Vec<Type>) -> Self {
-        Class { name, implements }
+    pub fn new(name: String, generics: Vec<Type>, implements: Vec<Type>) -> Self {
+        Class { name, generics, implements }
     }
 }
 
 // TODO: Add generic types for functions.
 #[derive(Debug, Clone)]
 pub struct Function {
-    name: String,
-    parameters: Vec<Variable>,
-    return_type: Type,
+    pub name: String,
+    pub generics: Vec<Type>,
+    pub parameters: Vec<Variable>,
+    pub return_type: Type,
 }
 
 impl Function {
-    pub fn new(name: String, parameters: Vec<Variable>, return_type: Type) -> Self {
-        Function { name, parameters, return_type }
+    pub fn new(name: String, generics: Vec<Type>, parameters: Vec<Variable>, return_type: Type) -> Self {
+        Function { name, generics, parameters, return_type }
+    }
+}
+
+// TODO: Add generic types for functions.
+#[derive(Debug, Clone)]
+pub struct Enum {
+    pub name: String,
+    pub generics: Vec<Type>,
+}
+
+impl Enum {
+    pub fn new(name: String, generics: Vec<Type>) -> Self {
+        Enum { name, generics  }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Interface {
+    pub name: String,
+    pub generics: Vec<Type>,
+}
+
+impl Interface {
+    pub fn new(name: String, generics: Vec<Type>) -> Self {
+        Interface { name, generics }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionCall {
     name: String,
-    arguments: Vec<Variable>,
+    arguments: Vec<Argument>,
 }
 
 impl FunctionCall {
-    pub fn new(name: String, arguments: Vec<Variable>) -> Self {
+    pub fn new(name: String, arguments: Vec<Argument>) -> Self {
         FunctionCall { name, arguments }
     }
 }
 
 #[derive(Debug, Clone)]
+pub struct Argument {
+    // Named used for named arguments.
+    name: Option<String>,
+    value: Expression,
+}
+
+impl Argument {
+    pub fn new(name: Option<String>, value: Expression) -> Self {
+        Argument { name, value }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Variable {
-    name: String,
-    var_type: Option<Type>,
+    pub name: String,
+    pub var_type: Option<Type>,
     // value ~= default
-    value: Option<Box<Expression>>,
+    pub value: Option<Box<Expression>>,
+    pub modifiers: Vec<Modifier>,
 }
 
 impl Variable {
-    pub fn new(name: String, var_type: Option<Type>, value: Option<Box<Expression>>) -> Self {
-        Variable { name, value, var_type }
+    pub fn new(
+        name: String,
+        var_type: Option<Type>,
+        value: Option<Box<Expression>>,
+        modifiers: Vec<Modifier>,
+    ) -> Self {
+        Variable { name, value, var_type, modifiers }
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Type {
-    t: String,
+    // None == void
+    pub t: Option<String>,
+    pub generics: Vec<Type>,
 }
 
 impl Type {
-    pub fn new(t: String) -> Self {
-        Type { t }
+    pub fn new(t: Option<String>, generics: Vec<Type>) -> Self {
+        Type { t, generics }
     }
 }
 
 impl Token {
-    pub fn lookup_identifier(name: &str) -> Option<Statement> {
+    pub fn lookup_identifier(name: &str) -> Option<Token> {
         Some(
             match name {
-                "return" => Statement::Return(None),
-                "break" => Statement::Break(None),
-                "yield" => Statement::Yield(None),
-                "continue" => Statement::Continue,
-                "next" => Statement::Next,
-                "skip" => Statement::Skip,
+                "return" => Token::ret_statement(Statement::Return(None)),
+                "yield" => Token::ret_statement(Statement::Yield(None)),
+                "break" => Token::ret_statement(Statement::Break),
+                "continue" => Token::ret_statement(Statement::Continue),
+                "next" => Token::ret_statement(Statement::Next),
 
-                "use" => Statement::Use(None),
-                "package" => Statement::Package(None),
-                "throw" => Statement::Throw(None),
+                "use" => Token::ret_statement(Statement::Use(None)),
+                "package" => Token::ret_statement(Statement::Package(None)),
+                "throw" => Token::ret_statement(Statement::Throw(None)),
 
-                "var" => Statement::NonBlockHeader(Var(None)),
-                "let" => Statement::NonBlockHeader(Let(None)),
-                "set" => Statement::NonBlockHeader(Set(None)),
+                "static" => Token::ret_statement(Statement::Modifier(Static)),
+                "private" => Token::ret_statement(Statement::Modifier(Private)),
+                "public" => Token::ret_statement(Statement::Modifier(Public)),
 
-                "function" => Statement::BlockHeader(BlockHeader::Function(None)),
-                "class" => Statement::BlockHeader(BlockHeader::Class(None)),
-                "enum" => Statement::BlockHeader(BlockHeader::Enum(None)),
+                "var" => Token::ret_assign_block_header(AssignBlockHeader::Var),
+                "let" => Token::ret_assign_block_header(AssignBlockHeader::Let),
+                "set" => Token::ret_assign_block_header(AssignBlockHeader::Set),
 
-                "if" => Statement::BlockHeader(BlockHeader::If(None)),
+                "function" => Token::ret_block_header(BlockHeader::Function(None)),
+                "class" => Token::ret_block_header(BlockHeader::Class(None)),
+                "enum" => Token::ret_block_header(BlockHeader::Enum(None)),
+                "interface" => Token::ret_block_header(BlockHeader::Interface(None)),
+
+                "if" => Token::ret_block_header(BlockHeader::If(None)),
                 "else" => {
-                    // TODO: see if else if here (?)
-                    Statement::BlockHeader(BlockHeader::Else)
+                    // TODO: see if "else if" here (?)
+                    Token::ret_block_header(BlockHeader::Else(None))
                 }
-                "match" => Statement::BlockHeader(BlockHeader::Match(None)),
+                "match" => Token::ret_block_header(BlockHeader::Match(None)),
 
-                "for" => Statement::BlockHeader(BlockHeader::For(None)),
-                "while" => Statement::BlockHeader(BlockHeader::While(None)),
-                "loop" => Statement::BlockHeader(BlockHeader::Loop),
+                "for" => Token::ret_block_header(BlockHeader::For(None)),
+                "iterate" => Token::ret_block_header(BlockHeader::Iterate(None)),
+                "while" => Token::ret_block_header(BlockHeader::While(None)),
+                "loop" => Token::ret_block_header(BlockHeader::Loop),
 
-                "catch" => Statement::BlockHeader(BlockHeader::Catch(None)),
-                // TODO :test
+                "catch" => Token::ret_block_header(BlockHeader::Catch(None)),
+                // TODO: test
 
                 _ => return None
             }
         )
+    }
+
+    fn ret_statement(statement: Statement) -> Token {
+        Token::Statement(statement)
+    }
+
+    fn ret_assign_block_header(assign_block_header: AssignBlockHeader) -> Token {
+        Token::Block(BlockHeader::AssignBlockHeader(assign_block_header), Vec::new())
+    }
+
+    fn ret_block_header(block_header: BlockHeader) -> Token {
+        Token::Block(block_header, Vec::new())
     }
 }
 
