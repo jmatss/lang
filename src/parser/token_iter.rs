@@ -1,32 +1,32 @@
 use crate::error::CustomError::ParseError;
 use crate::lexer::simple_token::{SimpleToken, Symbol};
 use crate::CustomResult;
-use crate::parser::token::{Token, Statement, BlockHeader, Expression, FunctionCall, Variable, Type, Function, BinaryOperation, BinaryOperator, Class, Interface, Enum, Argument};
+use crate::parser::token::{Token, Statement, BlockHeader, Expression, FunctionCall, Variable, Type, Function, BinaryOperation, BinaryOperator, Class, Interface, Enum, Argument, Block};
 use crate::error::CustomError;
+use crate::parser::action_tree::ActionTree;
 
+// TODO: Let line breaks be OK sometimes and treated as whitespace,
+//  ex. when having a long parameter list or argument list.
 
 pub struct TokenIter<'a> {
     pub simple_tokens: &'a [SimpleToken],
     pub position: usize,
     pub line_number: usize,
 
-    pub blocks: Vec<Block>,
-    pub indent: usize,
+    pub tree: ActionTree,
     pub indent_fixed_size: usize,
-}
-
-pub struct Block {
-    pub tokens: Vec<Token>,
-    pub header_indent: usize,
 }
 
 impl<'a> TokenIter<'a> {
     pub fn new(simple_tokens: &'a [SimpleToken], indent_fixed_size: usize) -> Self {
+        let tree = ActionTree
         let mut current_block = Vec::new();
         current_block.push(
             Block {
-                tokens: Vec::new(),
+                header: BlockHeader::Default,
                 header_indent: 0,
+                body_indent: 0,
+                tokens: Vec::new(),
             }
         );
 
@@ -35,7 +35,6 @@ impl<'a> TokenIter<'a> {
             position: 0,
             line_number: 0,
             blocks: current_block,
-            indent: 0,
             indent_fixed_size,
         }
     }
@@ -126,14 +125,73 @@ impl<'a> TokenIter<'a> {
         c.is_whitespace()
     }
 
-    // Ensure that the next token is a block end followed by a break symbol.
-    fn ensure_block_end(&mut self) -> CustomResult<()> {
+    fn current_block(&mut self) -> &Block {
+        let last = self.blocks.len() - 1;
+        &self.blocks[last]
+    }
+
+    // Ensure that the next token is a block header end.
+    fn ensure_block_header_end(&mut self) -> CustomResult<()> {
         if let SimpleToken::Symbol(Symbol::Colon) = self.next_skip_whitespace() {
-            if Symbol::is_break_symbol(self.next_skip_whitespace()) {
-                return Ok(());
+            Ok(())
+        } else {
+            Err(ParseError("Incorrect block ending.".to_string()))
+        }
+    }
+
+    fn new_line_update_indents_and_line_number(&mut self) -> CustomResult<()> {
+        // Ensure that indent size is valid.
+        let indent = self.next_whitespace();
+        if indent % self.indent_fixed_size != 0 {
+            return Err(ParseError(
+                format!("Current indent not divisible by specified fixed indent. Fixed: {}, got: {}",
+                        self.indent_fixed_size, indent
+                )
+            ));
+        }
+
+        let current_block = self.current_block();
+
+
+
+        // Ensure that indent size is not to large, i.e. bigger than header_indent + fixed_size.
+        // It can be as small as it want though, since the previous "if-check" ensures
+        // that the indent is a valid indentation relative to fixed_size.
+        if indent - self.indent_fixed_size > current_block.header_indent
+        {
+            return Err(ParseError(
+                format!("Current indent not not valid relative to header. Header: {}, current: {}",
+                        current_block.header_indent, indent
+                )
+            ));
+        }
+
+        self.line_number += 1;
+    }
+
+    fn update_indents(&mut self, new_indent: usize) -> CustomResult<()> {
+        self.
+    }
+
+    // Get SimpleTokens up to (including) the next break symbol.
+    fn next_group(&mut self) -> Vec<SimpleToken> {
+        let mut group = Vec::new();
+
+        loop {
+            let current = self.next();
+
+            if current == Symbol::LineStart {
+                self.new_line_update_indents_and_line_number();
+            }
+
+            if Symbol::is_break_symbol(&current) {
+                break;
+            } else {
+                group.push(current);
             }
         }
-        Err(ParseError("Incorrect block ending.".to_string()))
+
+        group
     }
 
     pub fn next_token(&mut self) -> CustomResult<Token> {
@@ -216,6 +274,15 @@ impl<'a> TokenIter<'a> {
         }
 
         Ok(variable)
+    }
+
+    fn next_whitespace(&mut self) -> usize {
+        if let Symbol::WhiteSpace(size) = self.next() {
+            size
+        } else {
+            self.rewind();
+            0
+        }
     }
 
     fn add_next_modifiers_and_type(&mut self, variable: &mut Variable) -> CustomResult<()> {
@@ -344,7 +411,7 @@ impl<'a> TokenIter<'a> {
                     Type::new(None, Vec::new())
                 };
 
-            self.ensure_block_end();
+            self.ensure_block_header_end();
 
             Ok(BlockHeader::Function(Some(
                 Function::new(function_name, generics, parameters, return_type)
@@ -370,7 +437,7 @@ impl<'a> TokenIter<'a> {
             }
         }
 
-        self.ensure_block_end()?;
+        self.ensure_block_header_end()?;
 
         Ok(BlockHeader::Class(Some(
             Class::new(class_name, generics, implements)
@@ -381,7 +448,7 @@ impl<'a> TokenIter<'a> {
         let interface_name = self.next_identifier()?;
         let generics = self.next_generic_list()?;
 
-        self.ensure_block_end()?;
+        self.ensure_block_header_end()?;
 
         Ok(BlockHeader::Enum(Some(
             Enum::new(interface_name, generics)
@@ -392,7 +459,7 @@ impl<'a> TokenIter<'a> {
         let interface_name = self.next_identifier()?;
         let generics = self.next_generic_list()?;
 
-        self.ensure_block_end()?;
+        self.ensure_block_header_end()?;
 
         Ok(BlockHeader::Interface(Some(
             Interface::new(interface_name, generics)
@@ -414,7 +481,7 @@ impl<'a> TokenIter<'a> {
             if let SimpleToken::Symbol(Symbol::Dot) = peek {
                 self.next_skip_whitespace();    // Remove Dot symbol.
                 continue;
-            } else if Symbol::is_break_symbol(peek) {
+            } else if Symbol::is_break_symbol(&peek) {
                 break;
             } else {
                 return Err(ParseError(
@@ -550,7 +617,7 @@ impl<'a> TokenIter<'a> {
                 // If true: Next symbol is a break which means that this return-statement
                 // doesn't return anything.
                 // Else: It returns the next expression.
-                if Symbol::is_break_symbol(self.peek_skip_whitespace()) {
+                if Symbol::is_break_symbol(&self.peek_skip_whitespace()) {
                     Ok(Statement::Return(None))
                 } else {
                     Ok(Statement::Return(Some(self.next_expression()?)))
