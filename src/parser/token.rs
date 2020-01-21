@@ -6,7 +6,7 @@ pub enum Token {
     Expression(Expression),
     Statement(Statement),
 
-    Block(BlockHeader, Vec<Token>),
+    Block(Block),
 }
 
 #[derive(Debug, Clone)]
@@ -17,7 +17,6 @@ pub enum Statement {
     Break,
     // Continue == Next
     Continue,
-    Next,
 
     // TODO: Maybe something else other that String.
     Use(Option<String>),
@@ -66,6 +65,8 @@ pub enum BlockHeader {
     // BinaryOperation == MatchCase
     // TODO: Check match cases somewhere else
     Match(Option<Expression>),
+    // Defer == After
+    Defer,
 
     // BinaryOperation == In
     For(Option<BinaryOperation>),
@@ -195,6 +196,24 @@ pub enum VarEnum {
 */
 
 #[derive(Debug, Clone)]
+pub struct Block {
+    pub header: BlockHeader,
+    pub header_indent: usize,
+    pub body_indent: usize,
+    pub tokens: Vec<Token>,
+}
+
+impl Block {
+    pub fn new(header: BlockHeader, header_indent: usize, body_indent: usize, tokens: Vec<Token>) -> Self {
+        Block { header, header_indent, body_indent, tokens }
+    }
+
+    pub fn new_empty(header: BlockHeader) -> Self {
+        Block { header, header_indent: 0, body_indent: 0, tokens: Vec::new() }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct BinaryOperation {
     operator: BinaryOperator,
     left: Box<Expression>,
@@ -258,7 +277,7 @@ pub struct Enum {
 
 impl Enum {
     pub fn new(name: String, generics: Vec<Type>) -> Self {
-        Enum { name, generics  }
+        Enum { name, generics }
     }
 }
 
@@ -340,7 +359,7 @@ impl Token {
                 "yield" => Token::ret_statement(Statement::Yield(None)),
                 "break" => Token::ret_statement(Statement::Break),
                 "continue" => Token::ret_statement(Statement::Continue),
-                "next" => Token::ret_statement(Statement::Next),
+                "next" => Token::ret_statement(Statement::Continue),
 
                 "use" => Token::ret_statement(Statement::Use(None)),
                 "package" => Token::ret_statement(Statement::Package(None)),
@@ -365,6 +384,8 @@ impl Token {
                     Token::ret_block_header(BlockHeader::Else(None))
                 }
                 "match" => Token::ret_block_header(BlockHeader::Match(None)),
+                "defer" => Token::ret_block_header(BlockHeader::Defer),
+                "after" => Token::ret_block_header(BlockHeader::Defer),
 
                 "for" => Token::ret_block_header(BlockHeader::For(None)),
                 "iterate" => Token::ret_block_header(BlockHeader::Iterate(None)),
@@ -384,11 +405,13 @@ impl Token {
     }
 
     fn ret_assign_block_header(assign_block_header: AssignBlockHeader) -> Token {
-        Token::Block(BlockHeader::AssignBlockHeader(assign_block_header), Vec::new())
+        Token::Block(
+            Block::new_empty(BlockHeader::AssignBlockHeader(assign_block_header))
+        )
     }
 
     fn ret_block_header(block_header: BlockHeader) -> Token {
-        Token::Block(block_header, Vec::new())
+        Token::Block(Block::new_empty(block_header))
     }
 }
 
