@@ -45,7 +45,7 @@ impl SimpleTokenIter {
 
     pub fn next_simple_token(&mut self) -> CustomResult<SimpleToken> {
         // TODO: Fix for more radixes.
-        let radix = 10;
+        const RADIX: u32 = 10;
 
         if let Some((c, c_next)) = self.peek_two() {
             if SimpleTokenIter::valid_identifier_start(c) {
@@ -57,8 +57,8 @@ impl SimpleTokenIter {
                 } else {
                     Ok(SimpleToken::Identifier(id))
                 }
-            } else if SimpleTokenIter::valid_number(c, radix) {
-                self.get_number(radix)
+            } else if SimpleTokenIter::valid_number(c, RADIX) {
+                self.get_number(RADIX)
             } else if SimpleTokenIter::valid_linebreak(c, c_next) {
                 self.get_linebreak()
             } else if SimpleTokenIter::valid_whitespace(c) {
