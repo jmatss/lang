@@ -4,6 +4,7 @@ use crate::lexer::simple_token::Symbol::{ParenthesisBegin, ParenthesisEnd, Squar
 pub enum SimpleToken {
     Identifier(String),
     Number(String),
+    Literal(Literal),
     Symbol(Symbol),
     EndOfFile,
     Unknown(String),
@@ -77,6 +78,12 @@ pub enum Symbol {
     Is,
     // cast
     As,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Literal {
+    StringLiteral(String),
+    CharLiteral(String),
 }
 
 impl Symbol {

@@ -1,5 +1,5 @@
 use crate::error::CustomError::LexError;
-use crate::lexer::simple_token::{SimpleToken, Symbol};
+use crate::lexer::simple_token::{SimpleToken, Symbol, Literal};
 use std::fs::File;
 use std::io::Read;
 use std::vec::IntoIter;
@@ -22,7 +22,7 @@ impl SimpleTokenIter {
         file.read_to_string(&mut string)?;
         Ok(SimpleTokenIter {
             buf: LinkedList::new(),
-            it: string.chars().collect::<Vec<_>>().into_iter()
+            it: string.chars().collect::<Vec<_>>().into_iter(),
         })
     }
 
@@ -64,9 +64,26 @@ impl SimpleTokenIter {
             } else if SimpleTokenIter::valid_whitespace(c) {
                 self.get_whitespaces()
             } else if let Some(symbol_token) = Symbol::lookup(c, c_next) {
+
+                // Add special cases for string- and char literals.
                 let (token, n) = symbol_token;
-                self.skip(n);
-                Ok(token)
+                match token {
+                    SimpleToken::Symbol(Symbol::DoubleQuote) => {
+                        let (literal_token, m) = self.get_string_literal()?;
+                        self.skip(m);
+                        Ok(literal_token)
+                    }
+                    SimpleToken::Symbol(Symbol::SingleQuote) => {
+                        let (literal_token, m) = self.get_char_literal()?;
+                        self.skip(m);
+                        Ok(literal_token)
+                    }
+                    _ => {
+                        self.skip(n);
+                        Ok(token)
+                    }
+                }
+
             } else {
                 Err(LexError(
                     format!("Didn't match a symbol token when c: {:?} and c_next: {:?}", c, c_next)
@@ -164,6 +181,54 @@ impl SimpleTokenIter {
         } else {
             Err(LexError("No linebreak character received in get_linebreak.".to_string()))
         }
+    }
+
+    // TODO: Fix escape chars etc. Ex:
+    //      "abc\"abc"
+    //  will cause an error.
+    fn get_string_literal(&mut self) -> CustomResult<(SimpleToken, usize)> {
+        let mut char_vec = Vec::new();
+        self.next();    // Remove the DoubleQuote start.
+
+        loop {
+            let current = self.next()
+                .ok_or(LexError("Reached EOF while parsing char in get_string_literal.".to_string()))?;
+
+            if let Some((SimpleToken::Symbol(Symbol::DoubleQuote), _)) = Symbol::lookup(current, None) {
+                break;
+            } else {
+                char_vec.push(current);
+            }
+        }
+
+        // Add +2 to size to include the removed quotes.
+        Ok((
+            SimpleToken::Literal(Literal::StringLiteral(char_vec.into_iter().collect())),
+            char_vec.len() + 2,
+        ))
+    }
+
+    // TODO: Fix escape chars etc.
+    fn get_char_literal(&mut self) -> CustomResult<(SimpleToken, usize)> {
+        let mut char_vec = Vec::new();
+        self.next();    // Remove the SingleQuote start.
+
+        loop {
+            let current = self.next()
+                .ok_or(LexError("Reached EOF while parsing char in get_char_literal.".to_string()))?;
+
+            if let Some((SimpleToken::Symbol(Symbol::SingleQuote), _)) = Symbol::lookup(current, None) {
+                break;
+            } else {
+                char_vec.push(current);
+            }
+        }
+
+        // Add +2 to size to include the removed quotes.
+        Ok((
+            SimpleToken::Literal(Literal::CharLiteral(char_vec.into_iter().collect())),
+            char_vec.len(),
+        ))
     }
 
     fn get_whitespaces(&mut self) -> CustomResult<SimpleToken> {
