@@ -1,9 +1,10 @@
 use crate::error::CustomError::ParseError;
-use crate::lexer::simple_token::{SimpleToken, Symbol};
+use crate::lexer::simple_token::{SimpleToken, Symbol, Literal as SimpleLiteral};
 use crate::CustomResult;
-use crate::parser::token::{Token, Statement, BlockHeader, Expression, FunctionCall, Variable, Type, Function, BinaryOperation, BinaryOperator, Class, Interface, Enum, Argument, Block};
+use crate::parser::token::{Token, Statement, BlockHeader, Expression, FunctionCall, Variable, Type, Function, BinaryOperation, BinaryOperator, Class, Interface, Enum, Argument, Block, Literal};
 use crate::error::CustomError;
 use crate::parser::action_tree::ActionTree;
+use crate::parser::token::Expression::Literal;
 
 // TODO: Let line breaks be OK sometimes and treated as whitespace,
 //  ex. when having a long parameter list or argument list.
@@ -13,13 +14,14 @@ pub struct TokenIter<'a> {
     pub position: usize,
     pub line_number: usize,
 
-    pub tree: ActionTree,
+    pub tmp_expression: Option<Expression>,
+    //pub tree: ActionTree,
     pub indent_fixed_size: usize,
 }
 
 impl<'a> TokenIter<'a> {
     pub fn new(simple_tokens: &'a [SimpleToken], indent_fixed_size: usize) -> Self {
-        let tree = ActionTree
+        /*
         let mut current_block = Vec::new();
         current_block.push(
             Block {
@@ -29,16 +31,18 @@ impl<'a> TokenIter<'a> {
                 tokens: Vec::new(),
             }
         );
+        */
 
         TokenIter {
             simple_tokens,
             position: 0,
             line_number: 0,
-            blocks: current_block,
+            tmp_expression: None,
             indent_fixed_size,
         }
     }
 
+    // FIXME: Possibility for out of bounds.
     #[inline]
     fn next(&mut self) -> SimpleToken {
         let result = self.simple_tokens[self.position].clone();
@@ -57,8 +61,32 @@ impl<'a> TokenIter<'a> {
     }
 
     #[inline]
+    fn next_skip_whitespace_and_line_break(&mut self) -> SimpleToken {
+        self.skip_whitespace_and_line_break();
+        self.next()
+    }
+
+    #[inline]
+    fn skip_whitespace_and_line_break(&mut self) {
+        loop {
+            let result = self.next();
+            match result {
+                | SimpleToken::Symbol(Symbol::WhiteSpace(_))
+                | SimpleToken::Symbol(Symbol::LineBreak) => continue,
+                _ =>
+                    self.rewind(),
+            }
+        }
+    }
+
+    #[inline]
     fn peek(&mut self) -> SimpleToken {
-        self.simple_tokens[self.position + 1].clone()
+        self.peek_n(1)
+    }
+
+    #[inline]
+    fn peek_n(&mut self, n: usize) -> SimpleToken {
+        self.simple_tokens[self.position + n].clone()
     }
 
     #[inline]
@@ -68,6 +96,22 @@ impl<'a> TokenIter<'a> {
             self.simple_tokens[self.position + 2].clone()
         } else {
             result
+        }
+    }
+
+    #[inline]
+    fn peek_skip_whitespace_and_line_break(&mut self) -> SimpleToken {
+        let mut peek_amount = 1;
+        loop {
+            let result = self.peek_n(peek_amount);
+            match result {
+                | SimpleToken::Symbol(Symbol::WhiteSpace(_))
+                | SimpleToken::Symbol(Symbol::LineBreak) => {
+                    peek_amount += 1;
+                    continue;
+                }
+                _ => return result
+            }
         }
     }
 
@@ -139,6 +183,7 @@ impl<'a> TokenIter<'a> {
         }
     }
 
+    /*
     fn new_line_update_indents_and_line_number(&mut self) -> CustomResult<()> {
         // Ensure that indent size is valid.
         let indent = self.next_whitespace();
@@ -151,7 +196,6 @@ impl<'a> TokenIter<'a> {
         }
 
         let current_block = self.current_block();
-
 
 
         // Ensure that indent size is not to large, i.e. bigger than header_indent + fixed_size.
@@ -172,6 +216,7 @@ impl<'a> TokenIter<'a> {
     fn update_indents(&mut self, new_indent: usize) -> CustomResult<()> {
         self.
     }
+        */
 
     // Get SimpleTokens up to (including) the next break symbol.
     fn next_group(&mut self) -> Vec<SimpleToken> {
@@ -204,7 +249,7 @@ impl<'a> TokenIter<'a> {
                     // If Block/BlockHeader: Add the new block to the iterator
                     //      so that new Tokens get put into this block.
                     // Else: Add the new token into this block.
-                    if let Token::Block(_, _) = token {
+                    if let Token::Block(_) = token {
                         let new_header_indent = self.indent;
                         self.blocks.push(
                             Block {
@@ -219,23 +264,11 @@ impl<'a> TokenIter<'a> {
                 }
 
                 // TODO: Make sure to update indent size when getting LineBreak.
-                SimpleToken::Symbol(symbol) =>,
-                SimpleToken::Number(number) =>,
+                | SimpleToken::Symbol(symbol)
+                | SimpleToken::Number(number) => self.parse_expression(),
                 SimpleToken::EndOfFile =>,
                 SimpleToken::Unknown(unknown) => // Err,
             }
-        }
-    }
-
-    // TODO: Parse expressions with parenthesis.
-    fn next_expression(&mut self) -> CustomResult<Expression> {
-        let token = self.next_token()?;
-        if let Token::Expression(expr_result) = token {
-            Ok(expr_result)
-        } else {
-            Err(ParseError(
-                format!("Did not get expression when in next_expression: {:?}", token)
-            ))
         }
     }
 
@@ -252,7 +285,7 @@ impl<'a> TokenIter<'a> {
 
     // Valid formats:
     //      id
-    //      id @ modifier* Type
+    //      id @ Type modifier*
     // (The assignment is handled separately, ex. id = expression)
     // TODO: Add "name, nameN" for declaring multiple variables on the same line.
     // TODO: Add support for tuples.
@@ -267,10 +300,10 @@ impl<'a> TokenIter<'a> {
             ));
         }
 
-        // If true: this variable has specified type, parse the modifiers and type.
+        // If true: this variable has specified type, parse the type and modifiers.
         if let SimpleToken::Symbol(Symbol::At) = self.peek_skip_whitespace() {
             self.next_skip_whitespace();    // Remove "At" symbol.
-            self.add_next_modifiers_and_type(&mut variable)?;
+            self.add_next_type_and_modifiers(&mut variable)?;
         }
 
         Ok(variable)
@@ -285,24 +318,22 @@ impl<'a> TokenIter<'a> {
         }
     }
 
-    fn add_next_modifiers_and_type(&mut self, variable: &mut Variable) -> CustomResult<()> {
+    fn add_next_type_and_modifiers(&mut self, variable: &mut Variable) -> CustomResult<()> {
+        // Parse the type, which have to be the first "string".
+        let var_type = self.next_type()?;
+        variable.var_type = Some(var_type);
+
         loop {
             if let SimpleToken::Identifier(identifier) = self.next_skip_whitespace() {
 
-                // This is a modifier, add to "variable" and continue parsing next token.
                 // If true: this is a modifier, add to "variable" and continue parsing next token.
-                // Else: this is the real "Type", parse and break to return.
                 if let Some(Token::Statement(Statement::Modifier(modifier))) = Token::lookup_identifier(&identifier) {
                     variable.modifiers.push(modifier);
                 } else {
-                    self.rewind();
-                    variable.var_type = Some(self.next_type()?);
                     break;
                 }
             } else {
-                return Err(CustomError::ParseError(
-                    "Didn't receive identifier during next_modifiers_and_type".to_string()
-                ));
+                break;
             }
         }
 
@@ -310,17 +341,35 @@ impl<'a> TokenIter<'a> {
     }
 
     fn next_type(&mut self) -> CustomResult<Type> {
-        let current = self.next_skip_whitespace();
-        if let SimpleToken::Identifier(identifier) = current {
-            let generics = self.next_generic_list()?;
-            let mut var_type = Type::new(Some(identifier), generics);
+        let identifier = self.next_identifier()?;
+        let generics = self.next_generic_list()?;
 
-            Ok(var_type)
-        } else {
-            Err(ParseError(
-                "Didn't receive an identifier when parsing next_type.".to_string()
-            ))
+        Ok(Type::new(Some(identifier), generics))
+    }
+
+    // Valid formats:
+    //      Type
+    //      Type1<T>, TypeN
+    // Whitespace and line breaks are allowed between the types(before and after comma).
+    fn next_type_list(&mut self) -> CustomResult<Vec<Type>> {
+        let mut types = Vec::new();
+
+        // Loop through and parse all items in the "type list".
+        loop {
+            self.skip_whitespace_and_line_break();
+            types.push(self.next_type()?);
+
+            // Removes the "current" token, either the Comma or the PointyBracketEnd.
+            let current = self.peek_skip_whitespace_and_line_break();
+            if let SimpleToken::Symbol(Symbol::Comma) = current {
+                self.next_skip_whitespace_and_line_break();    // Remove Comma symbol.
+                continue;
+            } else {
+                break;
+            }
         }
+
+        Ok(types)
     }
 
     // PS: If there are no generic list i.e. the first symbol is NOT a PointBracketBegin,
@@ -333,7 +382,7 @@ impl<'a> TokenIter<'a> {
 
             generics = self.next_type_list()?;
 
-            let current = self.next_skip_whitespace();
+            let current = self.next_skip_whitespace_and_line_break();
             if let SimpleToken::Symbol(Symbol::PointyBracketEnd) = current {
                 // Everything alright.
             } else {
@@ -346,29 +395,7 @@ impl<'a> TokenIter<'a> {
         Ok(generics)
     }
 
-    // Valid formats:
-    //      Type
-    //      Type1, TypeN
-    fn next_type_list(&mut self) -> CustomResult<Vec<Type>> {
-        let mut types = Vec::new();
-
-        // Loop through and parse all items in the "type list".
-        loop {
-            types.push(self.next_type()?);
-
-            // Removes the "current" token, either the Comma or the PointyBracketEnd.
-            let current = self.peek_skip_whitespace();
-            if let SimpleToken::Symbol(Symbol::Comma) = current {
-                self.next_skip_whitespace();    // Remove Comma symbol.
-                continue;
-            } else {
-                break;
-            }
-        }
-
-        Ok(types)
-    }
-
+    // TODO: allow linebreaks between args/parameters.
     fn next_function_header(&mut self) -> CustomResult<BlockHeader> {
         let function_name = self.next_identifier()?;
         let generics = self.next_generic_list()?;
@@ -496,6 +523,7 @@ impl<'a> TokenIter<'a> {
     // Can be preceded with var, let or set.
     // Valid format:
     //      variable = expression
+    //      variable = [LINEBREAK] expression
     // This function takes an already parsed variable as argument,
     // and starts parsing at the Equals sign.
     fn next_assignment_to_variable(&mut self, variable: Variable) -> CustomResult<BinaryOperation> {
@@ -526,63 +554,10 @@ impl<'a> TokenIter<'a> {
     }
     */
 
-
-    fn parse_function_call(&mut self, function_name: String) -> CustomResult<FunctionCall> {
-        let mut arguments = Vec::new();
-
-        // The function name has already been parsed and is sent as argument.
-        // Start by parsing the first ParenthesisBegin.
-        let mut current = self.next_skip_whitespace();
-        match current {
-            SimpleToken::Symbol(Symbol::ParenthesisBegin) => {
-                loop {
-                    // Start with the assumption that this is a named argument.
-                    // Parse identifier and equals sign.
-                    // If it is false, redo everything with the assumption that it is not a named argument.
-                    let name = self.next_identifier()?;
-                    let peek = self.peek_skip_whitespace();
-
-                    // If true: This is a named argument,
-                    // Else: This is a regular argument.
-                    if let SimpleToken::Symbol(Symbol::Equals) = peek {
-                        self.next_skip_whitespace();    // Remove Equals symbol.
-                        let expression = self.next_expression()?;
-                        arguments.push(
-                            Argument::new(Some(name), expression)
-                        );
-                    } else {
-                        self.rewind_skip_whitespace();
-                        let expression = self.next_expression()?;
-                        arguments.push(
-                            Argument::new(None, expression)
-                        );
-                    }
-
-                    let next = self.next_skip_whitespace();
-                    match next {
-                        SimpleToken::Symbol(Symbol::Comma) =>
-                            continue,
-                        SimpleToken::Symbol(Symbol::ParenthesisEnd) =>
-                            break,
-                        _ =>
-                            return Err(ParseError(
-                                format!("Received invalid symbol during next_function_call: {:?}", peek)
-                            ))
-                    }
-                }
-            }
-
-            _ => return Err(ParseError(
-                format!("Expected start of parenthesis when parsing parse_function_call, got: {:?}", current)
-            ))
-        }
-
-        Ok(FunctionCall { name: function_name, arguments })
-    }
-
     fn parse_identifier(&mut self, identifier: &str) -> CustomResult<Token> {
         // If true: A reserved keyword (either statement or header).
         // Else: a function call, variable etc.
+        /*
         if let Some(token) = Token::lookup_identifier(&identifier) {
             match token {
                 Token::Statement(statement) =>
@@ -597,18 +572,19 @@ impl<'a> TokenIter<'a> {
                     ))
             }
         } else {
-            let next_simple_token = self.peek_skip_whitespace();
-            match next_simple_token {
-                SimpleToken::Symbol(Symbol::ParenthesisBegin) => {
-                    // This is a function call.
-                    self.parse_function_call(&identifier);
-                }
-                _ => {
-                    self.next_variable()?;
-                    // Treat it as an variable.
-                }
+        */
+        let next_simple_token = self.peek_skip_whitespace();
+        match next_simple_token {
+            SimpleToken::Symbol(Symbol::ParenthesisBegin) => {
+                // This is a function call.
+                self.parse_function_call(&identifier);
+            }
+            _ => {
+                self.next_variable()?;
+                // Treat it as an variable.
             }
         }
+        //}
     }
 
     fn parse_statement(&mut self, statement: Statement) -> CustomResult<Statement> {
@@ -644,6 +620,145 @@ impl<'a> TokenIter<'a> {
                 format!("Received invalid statement in parse_statement: {:?}", statement)
             )),
         }
+    }
+
+    fn parse_expression(&mut self) -> CustomResult<Expression> {
+        let mut output_stack = Vec::new();
+        let mut operand_stack = Vec::new();
+
+        // This bool is used to ensure that all "values" are divided by operands.
+        // "value" == not an operand, i.e. literals, numbers, variables or function calls.
+        let mut previous_was_value = false;
+
+        loop {
+            let current = self.next_skip_whitespace();
+            match current {
+
+                SimpleToken::Identifier(identifier) => {
+                    if previous_was_value {
+                        return Err(ParseError("Received two \"values\" in a row in parse_expression.".to_string()));
+                    }
+
+                    if let SimpleToken::Symbol(Symbol::ParenthesisBegin) = self.peek_skip_whitespace() {
+                        // This is a function call
+                        let function_call = self.parse_function_call(&identifier)?;
+                        output_stack.push(Expression::FunctionCall(Some(function_call)));
+                    } else {
+                        // Not a function call, treat it as an variable
+                        let variable = Variable::new(identifier, None, None, Vec::new());
+                        output_stack.push(Expression::Variable(Some(variable)));
+                    }
+
+                    previous_was_value = true;
+                }
+
+                SimpleToken::Number(number_string) => {
+                    if previous_was_value {
+                        return Err(ParseError("Received two \"values\" in a row in parse_expression.".to_string()));
+                    }
+
+                    let number =
+                        if number_string.contains('.') {
+                            Expression::Float(Some(number_string))
+                        } else {
+                            Expression::Integer(Some(number_string))
+                        };
+                    output_stack.push(number);
+
+                    previous_was_value = true;
+                }
+
+                SimpleToken::Literal(literal) => {
+                    if previous_was_value {
+                        return Err(ParseError("Received two \"values\" in a row in parse_expression.".to_string()));
+                    }
+
+                    let expression =
+                        match literal {
+                            SimpleLiteral::StringLiteral(string) =>
+                                Expression::Literal(Some(Literal::StringLiteral(string))),
+                            SimpleLiteral::CharLiteral(string) =>
+                                Expression::Literal(Some(Literal::CharLiteral(string))),
+                        };
+                    output_stack.push(expression);
+
+                    previous_was_value = true;
+                }
+
+                SimpleToken::Symbol(symbol) => {
+                    Token::lookup_operator(symbol)
+
+                    previous_was_value = false;
+                }
+
+                // Ignore modifiers.
+                _ => Err(ParseError(
+                    format!("Received invalid statement in parse_statement: {:?}", statement)
+                )),
+            }
+        }
+    }
+
+    fn parse_string_literal(&mut self) {
+        let current = self.next_skip_whitespace();
+        if let SimpleToken::Symbol(Symbol::DoubleQuote) = current {} else {
+            Err(ParseError(
+                format!("parse_string_literal first symbol isn't a DoubleQuote: {:?}", current)
+            ))
+        }
+    }
+
+    fn parse_function_call(&mut self, function_name: &str) -> CustomResult<FunctionCall> {
+        let mut arguments = Vec::new();
+
+        // The function name has already been parsed and is sent as argument.
+        // Start by parsing the first ParenthesisBegin.
+        let mut current = self.next_skip_whitespace();
+        match current {
+            SimpleToken::Symbol(Symbol::ParenthesisBegin) => {
+                loop {
+                    // Start with the assumption that this is a named argument.
+                    // Parse as identifier and peek on the next simple token, that is assumed to be Equals.
+                    // If it is false, redo everything with the assumption that it is not a named argument.
+                    self.skip_whitespace_and_line_break();  // Allow linebreak.
+                    let name = self.next_identifier()?;
+                    let peek = self.peek_skip_whitespace();
+
+                    // If true: This is a named argument,
+                    // Else: This is a regular argument.
+                    // FIXME: Maybe allow line break in front/behind equals sign.
+                    if let SimpleToken::Symbol(Symbol::Equals) = self.peek_skip_whitespace() {
+                        self.next_skip_whitespace();    // Remove Equals symbol.
+                        arguments.push(
+                            Argument::new(Some(name), self.parse_expression()?)
+                        );
+                    } else {
+                        self.rewind_skip_whitespace();
+                        arguments.push(
+                            Argument::new(None, self.parse_expression()?)
+                        );
+                    }
+
+                    let next = self.next_skip_whitespace_and_line_break();
+                    match next {
+                        SimpleToken::Symbol(Symbol::Comma) =>
+                            continue,
+                        SimpleToken::Symbol(Symbol::ParenthesisEnd) =>
+                            break,
+                        _ =>
+                            return Err(ParseError(
+                                format!("Received invalid symbol during next_function_call: {:?}", peek)
+                            ))
+                    }
+                }
+            }
+
+            _ => return Err(ParseError(
+                format!("Expected start of parenthesis when parsing parse_function_call, got: {:?}", current)
+            ))
+        }
+
+        Ok(FunctionCall { name: function_name.to_string(), arguments })
     }
 
     fn parse_block_header(&mut self, block_header: BlockHeader) -> CustomResult<BlockHeader> {

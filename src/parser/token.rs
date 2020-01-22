@@ -1,4 +1,5 @@
 use crate::parser::token::Modifier::{Static, Private, Public};
+use crate::lexer::simple_token::{SimpleToken, Symbol};
 
 #[derive(Debug, Clone)]
 pub enum Token {
@@ -36,16 +37,23 @@ pub enum Statement {
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    StringLiteral(Option<String>),
-    CharLiteral(Option<char>),
+    Literal(Option<Literal>),
     Integer(Option<String>),
     Float(Option<String>),
-    Variable(Option<Variable>),
 
+    Variable(Option<Variable>),
     FunctionCall(Option<FunctionCall>),
 
     BinaryOperation(Option<BinaryOperation>),
     UnaryOperation(Option<UnaryOperation>),
+}
+
+impl Expression {
+    pub fn operation_precedence(operator: Opera) -> Option<usize> {
+        match expression {
+            Expression::BinaryOperation(Some())
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +111,20 @@ pub enum Modifier {
     Static,
     Private,
     Public,
+}
+
+#[derive(Debug, Clone)]
+pub enum Literal {
+    StringLiteral(String),
+    CharLiteral(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum Operator {
+    BinaryOperator(BinaryOperator),
+    UnaryOperator(UnaryOperator),
+    ParenthesisBegin,
+    ParenthesisEnd,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +189,11 @@ pub enum BinaryOperator {
 
 #[derive(Debug, Clone)]
 pub enum UnaryOperator {
+    // Used to indicate that this is a increment or decrement operator.
+    // Some extra logic needs to be run to figure put if it is pre- or postfix.
+    IncrementIndicator,
+    DecrementIndicator,
+
     /* NUMBERS */
     IncrementPrefix,
     IncrementPostfix,
@@ -177,12 +204,6 @@ pub enum UnaryOperator {
 
     /* BOOL */
     BoolNot,
-
-    // Declare a variable, ex.:
-    //  var text_name @ Text
-    // or
-    //  var text_name
-    Declaration,
 }
 
 /*
@@ -215,7 +236,8 @@ impl Block {
 
 #[derive(Debug, Clone)]
 pub struct BinaryOperation {
-    operator: BinaryOperator,
+    pub operator: BinaryOperator,
+    pub right_associative: bool,
     left: Box<Expression>,
     right: Box<Expression>,
 }
@@ -228,8 +250,8 @@ impl BinaryOperation {
 
 #[derive(Debug, Clone)]
 pub struct UnaryOperation {
-    operator: UnaryOperator,
-    value: Box<Expression>,
+    pub operator: UnaryOperator,
+    pub value: Box<Expression>,
 }
 
 impl UnaryOperation {
@@ -352,6 +374,116 @@ impl Type {
 }
 
 impl Token {
+    pub fn lookup_operator(symbol: Symbol) -> Option<Operator> {
+        Some(
+            match symbol {
+                Symbol::ParenthesisBegin =>
+                    Operator::ParenthesisBegin,
+                Symbol::ParenthesisEnd =>
+                    Operator::ParenthesisEnd,
+                /*
+                Symbol::SquareBracketBegin,
+                Symbol::SquareBracketEnd,
+                Symbol::CurlyBracketBegin,
+                Symbol::CurlyBracketEnd,
+                Symbol::PointyBracketBegin,
+                Symbol::PointyBracketEnd,
+                */
+
+                Symbol::Dot =>
+                    Operator::BinaryOperator(BinaryOperator::Dot),
+                //Symbol::Comma,
+                //Symbol::QuestionMark,
+                //Symbol::ExclamationMark,
+                Symbol::Equals =>
+                    Operator::BinaryOperator(BinaryOperator::Assignment),
+                //Symbol::DoubleQuote,
+                //Symbol::SingleQuote,
+                //Symbol::Colon,
+                //Symbol::SemiColon,
+                //Symbol::Pound,
+                //Symbol::At,
+                //Symbol::Dollar,
+                //Symbol::LineBreak,
+                //Symbol::WhiteSpace(usize),
+
+                // Pipe: |>  Range: ..  Arrow: ->
+                //Symbol::Pipe,
+                Symbol::Range =>
+                    Operator::BinaryOperator(BinaryOperator::Range),
+                //Symbol::Arrow,
+
+                Symbol::EqualsOperator =>
+                    Operator::BinaryOperator(BinaryOperator::Equals),
+                Symbol::NotEquals =>
+                    Operator::BinaryOperator(BinaryOperator::NotEquals),
+                Symbol::LessThan =>
+                    Operator::BinaryOperator(BinaryOperator::LessThan),
+                Symbol::GreaterThan =>
+                    Operator::BinaryOperator(BinaryOperator::GreaterThan),
+                Symbol::LessThanOrEquals =>
+                    Operator::BinaryOperator(BinaryOperator::LessThanOrEquals),
+                Symbol::GreaterThanOrEquals =>
+                    Operator::BinaryOperator(BinaryOperator::GreaterThanOrEquals),
+
+                Symbol::Addition =>
+                    Operator::BinaryOperator(BinaryOperator::Addition),
+                Symbol::Subtraction =>
+                    Operator::BinaryOperator(BinaryOperator::Subtraction),
+                Symbol::Multiplication =>
+                    Operator::BinaryOperator(BinaryOperator::Multiplication),
+                Symbol::Division =>
+                    Operator::BinaryOperator(BinaryOperator::Division),
+                Symbol::Modulus =>
+                    Operator::BinaryOperator(BinaryOperator::Modulus),
+                Symbol::Power =>
+                    Operator::BinaryOperator(BinaryOperator::Power),
+
+                Symbol::BitAnd =>
+                    Operator::BinaryOperator(BinaryOperator::BitAnd),
+                Symbol::BitOr =>
+                    Operator::BinaryOperator(BinaryOperator::BitOr),
+                Symbol::BitXor =>
+                    Operator::BinaryOperator(BinaryOperator::BitXor),
+                Symbol::ShiftLeft =>
+                    Operator::BinaryOperator(BinaryOperator::ShiftLeft),
+                Symbol::ShiftRight =>
+                    Operator::BinaryOperator(BinaryOperator::ShiftRight),
+                Symbol::BitCompliment =>
+                    Operator::UnaryOperator(UnaryOperator::BitCompliment),
+
+                // Special case
+                // The caller needs to run some extra logic to figure out if is is pre- or postfix.
+                Symbol::Increment =>
+                    Operator::UnaryOperator(UnaryOperator::IncrementIndicator),
+                Symbol::Decrement =>
+                    Operator::UnaryOperator(UnaryOperator::DecrementIndicator),
+
+                /*
+                Symbol::CommentSingleLine),
+                Symbol::CommentMultiLineBegin),
+                Symbol::CommentMultiLineEnd,
+                */
+
+                Symbol::BoolNot =>
+                    Operator::UnaryOperator(UnaryOperator::BoolNot),
+                Symbol::BoolAnd =>
+                    Operator::BinaryOperator(BinaryOperator::BoolAnd),
+                Symbol::BoolOr =>
+                    Operator::BinaryOperator(BinaryOperator::BoolOr),
+
+                Symbol::In =>
+                    Operator::BinaryOperator(BinaryOperator::In),
+                Symbol::Is =>
+                    Operator::BinaryOperator(BinaryOperator::Is),
+                Symbol::As =>
+                    Operator::BinaryOperator(BinaryOperator::As),
+
+                _ => return None,
+            }
+        )
+    }
+
     pub fn lookup_identifier(name: &str) -> Option<Token> {
         Some(
             match name {
