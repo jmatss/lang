@@ -51,7 +51,7 @@ impl SimpleTokenIter {
             if SimpleTokenIter::valid_identifier_start(c) {
                 let id: String = self.get_identifier_string()?;
 
-                // Check if this a symbol that have a valid identifier name(and, or, not).
+                // Check if this a symbol that have a valid identifier name(and, or, not, in, is, as).
                 if let Some(symbol_token) = Symbol::lookup_identifier(&id) {
                     Ok(symbol_token)
                 } else {

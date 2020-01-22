@@ -1,4 +1,4 @@
-use crate::lexer::simple_token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, Dot, Comma, QuestionMark, ExclamationMark, Equals, DoubleQuote, SingleQuote, Colon, SemiColon, LineBreak, WhiteSpace, Pipe, Range, Arrow, EqualsOperator, NotEquals, LessThan, GreaterThan, LessThanOrEquals, GreaterThanOrEquals, Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BitCompliment, Increment, Decrement, CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, BoolNot, BoolAnd, BoolOr, Pound, At, Dollar};
+use crate::lexer::simple_token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, Dot, Comma, QuestionMark, ExclamationMark, Equals, DoubleQuote, SingleQuote, Colon, SemiColon, LineBreak, WhiteSpace, Pipe, Range, Arrow, EqualsOperator, NotEquals, LessThan, GreaterThan, LessThanOrEquals, GreaterThanOrEquals, Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BitCompliment, Increment, Decrement, CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, BoolNot, BoolAnd, BoolOr, Pound, At, Dollar, In, Is, As};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimpleToken {
@@ -71,6 +71,12 @@ pub enum Symbol {
     BoolNot,
     BoolAnd,
     BoolOr,
+
+    In,
+    // is == instanceof
+    Is,
+    // cast
+    As,
 }
 
 impl Symbol {
@@ -90,6 +96,10 @@ impl Symbol {
                 "not" => SimpleToken::Symbol(BoolNot),
                 "and" => SimpleToken::Symbol(BoolAnd),
                 "or" => SimpleToken::Symbol(BoolOr),
+
+                "in" => SimpleToken::Symbol(In),
+                "is" => SimpleToken::Symbol(Is),
+                "as" => SimpleToken::Symbol(As),
 
                 _ => return None
             }
