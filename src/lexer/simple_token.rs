@@ -1,4 +1,4 @@
-use crate::lexer::simple_token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, Dot, Comma, QuestionMark, ExclamationMark, Equals, DoubleQuote, SingleQuote, Colon, SemiColon, LineBreak, WhiteSpace, Pipe, Range, Arrow, EqualsOperator, NotEquals, LessThan, GreaterThan, LessThanOrEquals, GreaterThanOrEquals, Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BitCompliment, Increment, Decrement, CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, BoolNot, BoolAnd, BoolOr, Pound, At, Dollar, In, Is, As};
+use crate::lexer::simple_token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, Dot, Comma, QuestionMark, ExclamationMark, Equals, DoubleQuote, SingleQuote, Colon, SemiColon, LineBreak, WhiteSpace, Pipe, Range, Arrow, EqualsOperator, NotEquals, LessThan, GreaterThan, LessThanOrEquals, GreaterThanOrEquals, Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BitCompliment, Increment, Decrement, CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, BoolNot, BoolAnd, BoolOr, Pound, At, Dollar, In, Is, As, AssignAddition, AssignSubtraction, AssignMultiplication, AssignDivision, AssignModulus, AssignPower, AssignBitAnd, AssignBitOr, AssignBitXor, AssignShiftLeft, AssignShiftRight};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimpleToken {
@@ -62,6 +62,19 @@ pub enum Symbol {
     ShiftRight,
     BitCompliment,
 
+    AssignAddition,
+    AssignSubtraction,
+    AssignMultiplication,
+    AssignDivision,
+    AssignModulus,
+    AssignPower,
+
+    AssignBitAnd,
+    AssignBitOr,
+    AssignBitXor,
+    AssignShiftLeft,
+    AssignShiftRight,
+
     Increment,
     Decrement,
 
@@ -113,145 +126,218 @@ impl Symbol {
         )
     }
 
-    pub fn lookup(c: char, c_next: Option<char>) -> Option<(SimpleToken, usize)> {
-        // The "..._tuple" variables has the type (char, SimpleToken::Symbol).
-        // The macro tries to match the char in "m_tuple" to the char in "second_char_option".
-        macro_rules! match_symbol {
-            ( $first_char_tuple:expr, $second_char_option:expr, $( $m_tuple:expr ),+ ) => {
-                match $second_char_option {
-                    $( Some(second_char) if second_char == $m_tuple.0 => (SimpleToken::Symbol($m_tuple.1), 2), )+
-                    None | Some(_) => (SimpleToken::Symbol($first_char_tuple.1), 1)
-                }
+    pub fn lookup_one(c1: char) -> Option<(SimpleToken, usize)> {
+        Symbol::lookup(c1, None, None)
+    }
+
+    pub fn lookup_two(c1: char, c2: Option<char>) -> Option<(SimpleToken, usize)> {
+        Symbol::lookup(c1, c2, None)
+    }
+
+    pub fn lookup_three(c1: char, c2: Option<char>, c3: Option<char>) -> Option<(SimpleToken, usize)> {
+        Symbol::lookup(c1, c2, c3)
+    }
+
+    fn lookup(c1: char, c2: Option<char>, c3: Option<char>) -> Option<(SimpleToken, usize)> {
+        let mut tmp_chars = Vec::with_capacity(3);
+        tmp_chars.push(c1);
+        if c2.is_some() {
+            tmp_chars.push(c2.expect("Unable to unwrap c3"));
+            if c3.is_some() {
+                tmp_chars.push(c3.expect("Unable to unwrap c3"));
+            }
+        }
+        let real_string: String = tmp_chars.into_iter().collect();
+
+        match c1 {
+            '(' => Symbol::ret_single_lookup(ParenthesisBegin),
+            ')' => Symbol::ret_single_lookup(ParenthesisEnd),
+            '[' => Symbol::ret_single_lookup(SquareBracketBegin),
+            ']' => Symbol::ret_single_lookup(SquareBracketEnd),
+            '{' => Symbol::ret_single_lookup(CurlyBracketBegin),
+            '}' => Symbol::ret_single_lookup(CurlyBracketEnd),
+            ',' => Symbol::ret_single_lookup(Comma),
+            '?' => Symbol::ret_single_lookup(QuestionMark),
+            '\"' => Symbol::ret_single_lookup(DoubleQuote),
+            '\'' => Symbol::ret_single_lookup(SingleQuote),
+            ':' => Symbol::ret_single_lookup(Colon),
+            ';' => Symbol::ret_single_lookup(SemiColon),
+            '~' => Symbol::ret_single_lookup(BitCompliment),
+            '#' => Symbol::ret_single_lookup(Pound),
+            '@' => Symbol::ret_single_lookup(At),
+            '$' => Symbol::ret_single_lookup(Dollar),
+
+            '%' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), Modulus),
+                        ("%=", AssignModulus)
+                    ],
+                )
+            }
+
+            '&' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), BitAnd),
+                        ("&=", AssignBitAnd)
+                    ],
+                )
+            }
+
+            '^' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), BitXor),
+                        ("^=", AssignBitXor)
+                    ],
+                )
+            }
+
+            '!' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), ExclamationMark),
+                        ("!=", NotEquals)
+                    ],
+                )
+            }
+
+            '|' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), BitOr),
+                        ("|>", Pipe),
+                        ("|=", AssignBitOr)
+                    ],
+                )
+            }
+
+            '.' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), Dot),
+                        ("..", Range)
+                    ],
+                )
+            }
+
+            '=' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), Equals),
+                        ("==", EqualsOperator)
+                    ],
+                )
+            }
+
+            '+' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), Addition),
+                        ("++", Increment),
+                        ("+=", AssignAddition)
+                    ],
+                )
+            }
+
+            '<' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), PointyBracketBegin),
+                        ("<=", LessThanOrEquals),
+                        ("<<", ShiftLeft),
+                        ("<<=", AssignShiftLeft)
+                    ],
+                )
+            }
+
+            '>' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), PointyBracketEnd),
+                        (">=", GreaterThanOrEquals),
+                        (">>", ShiftRight),
+                        (">>=", AssignShiftRight)
+                    ],
+                )
+            }
+
+            '-' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), Subtraction),
+                        ("--", Decrement),
+                        ("->", Arrow),
+                        ("-=", AssignSubtraction)
+                    ],
+                )
+            }
+
+            '*' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), Multiplication),
+                        ("*/", CommentMultiLineEnd),
+                        ("**", Power),
+                        ("*=", AssignMultiplication),
+                        ("**=", AssignPower)
+                    ],
+                )
+            }
+
+            '/' => {
+                Symbol::match_symbol(
+                    &real_string,
+                    vec![
+                        (&c1.to_string(), Division),
+                        ("//", CommentSingleLine),
+                        ("/*", CommentMultiLineBegin),
+                        ("/=", AssignDivision)
+                    ],
+                )
+            }
+
+            _ => None
+        }
+    }
+
+    fn ret_single_lookup(symbol: Symbol) -> Option<(SimpleToken, usize)> {
+        Some((SimpleToken::Symbol(symbol), 1))
+    }
+
+
+    fn match_symbol(
+        real_string: &str, mut string_symbol_tuples: Vec<(&str, Symbol)>,
+    ) -> Option<(SimpleToken, usize)> {
+        // Sort the tuples by the length of their "strings".
+        // This ensures that the longest symbols are matched
+        // (ex. "==" is always matched instead of "=").
+        string_symbol_tuples.sort_unstable_by(
+            |a, b| b.0.len().cmp(&a.0.len())
+        );
+
+        for tuple in string_symbol_tuples {
+            let current_string = tuple.0;
+            let current_symbol = tuple.1;
+
+            if real_string.starts_with(current_string) {
+                return Some((SimpleToken::Symbol(current_symbol), current_string.len()));
             }
         }
 
-        Some(
-            match c {
-                '(' => (SimpleToken::Symbol(ParenthesisBegin), 1),
-                ')' => (SimpleToken::Symbol(ParenthesisEnd), 1),
-                '[' => (SimpleToken::Symbol(SquareBracketBegin), 1),
-                ']' => (SimpleToken::Symbol(SquareBracketEnd), 1),
-                '{' => (SimpleToken::Symbol(CurlyBracketBegin), 1),
-                '}' => (SimpleToken::Symbol(CurlyBracketEnd), 1),
-                ',' => (SimpleToken::Symbol(Comma), 1),
-                '?' => (SimpleToken::Symbol(QuestionMark), 1),
-                '\"' => (SimpleToken::Symbol(DoubleQuote), 1),
-                '\'' => (SimpleToken::Symbol(SingleQuote), 1),
-                ':' => (SimpleToken::Symbol(Colon), 1),
-                ';' => (SimpleToken::Symbol(SemiColon), 1),
-                '%' => (SimpleToken::Symbol(Modulus), 1),
-                '&' => (SimpleToken::Symbol(BitAnd), 1),
-                '^' => (SimpleToken::Symbol(BitXor), 1),
-                '~' => (SimpleToken::Symbol(BitCompliment), 1),
-                '#' => (SimpleToken::Symbol(Pound), 1),
-                '@' => (SimpleToken::Symbol(At), 1),
-                '$' => (SimpleToken::Symbol(Dollar), 1),
-
-
-                // The out-commented symbols underneath are "matched" in other ways.
-                //"\n" => SimpleToken::Symbol(Symbol::LineBreak),
-                //"\r\n" => SimpleToken::Symbol(Symbol::LineBreak),
-                //" " => SimpleToken::Symbol(Symbol::WhiteSpace(1)),
-                //"\t" => SimpleToken::Symbol(Symbol::WhiteSpace(1)),
-
-                //  !  !=
-                '!' => {
-                    match_symbol!(
-                         (c, ExclamationMark),
-                         c_next,
-                         ('=', NotEquals)
-                    )
-                }
-
-                //  |  |>
-                '|' => {
-                    match_symbol!(
-                         (c, BitOr),
-                         c_next,
-                         ('>', Pipe)
-                    )
-                }
-
-
-                //  .  ..
-                '.' => {
-                    match_symbol!(
-                        (c, Dot),
-                        c_next,
-                        ('.', Range)
-                    )
-                }
-
-                //  =  ==
-                '=' => {
-                    match_symbol!(
-                        (c, Equals),
-                        c_next,
-                        ('=', EqualsOperator)
-                    )
-                }
-
-                //  +  ++
-                '+' => {
-                    match_symbol!(
-                        (c, Addition),
-                        c_next,
-                        ('+', Increment)
-                    )
-                }
-
-                //  <  <=  <<
-                '<' => {
-                    match_symbol!(
-                        (c, PointyBracketBegin),
-                        c_next,
-                        ('=', LessThanOrEquals),
-                        ('<', ShiftLeft)
-                    )
-                }
-
-                //  >  >=  >>
-                '>' => {
-                    match_symbol!(
-                        (c, PointyBracketEnd),
-                        c_next,
-                        ('=', GreaterThanOrEquals),
-                        ('>', ShiftRight)
-                    )
-                }
-
-                //  -  --  ->
-                '-' => {
-                    match_symbol!(
-                        (c, Subtraction),
-                        c_next,
-                        ('-', Decrement),
-                        ('>', Arrow)
-                    )
-                }
-
-                //  *  */ **
-                '*' => {
-                    match_symbol!(
-                        (c, Multiplication),
-                        c_next,
-                        ('/', CommentMultiLineEnd),
-                        ('*', Power)
-                    )
-                }
-
-                //  /  //  /*
-                '/' => {
-                    match_symbol!(
-                        (c, Division),
-                        c_next,
-                        ('/', CommentSingleLine),
-                        ('*', CommentMultiLineBegin)
-                    )
-                }
-
-                _ => return None
-            }
-        )
+        None
     }
 }

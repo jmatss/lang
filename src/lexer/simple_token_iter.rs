@@ -47,8 +47,8 @@ impl SimpleTokenIter {
         // TODO: Fix for more radixes.
         const RADIX: u32 = 10;
 
-        if let Some((c, c_next)) = self.peek_two() {
-            if SimpleTokenIter::valid_identifier_start(c) {
+        if let Some((c1, c2, c3)) = self.peek_three() {
+            if SimpleTokenIter::valid_identifier_start(c1) {
                 let id: String = self.get_identifier_string()?;
 
                 // Check if this a symbol that have a valid identifier name(and, or, not, in, is, as).
@@ -57,13 +57,13 @@ impl SimpleTokenIter {
                 } else {
                     Ok(SimpleToken::Identifier(id))
                 }
-            } else if SimpleTokenIter::valid_number(c, RADIX) {
+            } else if SimpleTokenIter::valid_number(c1, RADIX) {
                 self.get_number(RADIX)
-            } else if SimpleTokenIter::valid_linebreak(c, c_next) {
+            } else if SimpleTokenIter::valid_linebreak(c1, c2) {
                 self.get_linebreak()
-            } else if SimpleTokenIter::valid_whitespace(c) {
+            } else if SimpleTokenIter::valid_whitespace(c1) {
                 self.get_whitespaces()
-            } else if let Some(symbol_token) = Symbol::lookup(c, c_next) {
+            } else if let Some(symbol_token) = Symbol::lookup_three(c1, c2, c3) {
 
                 // Add special cases for string- and char literals.
                 let (token, n) = symbol_token;
@@ -83,10 +83,9 @@ impl SimpleTokenIter {
                         Ok(token)
                     }
                 }
-
             } else {
                 Err(LexError(
-                    format!("Didn't match a symbol token when c: {:?} and c_next: {:?}", c, c_next)
+                    format!("Didn't match a symbol token when c: {:?} and c_next: {:?}", c1, c2)
                 ))
             }
         } else {
@@ -194,7 +193,7 @@ impl SimpleTokenIter {
             let current = self.next()
                 .ok_or(LexError("Reached EOF while parsing char in get_string_literal.".to_string()))?;
 
-            if let Some((SimpleToken::Symbol(Symbol::DoubleQuote), _)) = Symbol::lookup(current, None) {
+            if let Some((SimpleToken::Symbol(Symbol::DoubleQuote), _)) = Symbol::lookup_one(current) {
                 break;
             } else {
                 char_vec.push(current);
@@ -217,7 +216,7 @@ impl SimpleTokenIter {
             let current = self.next()
                 .ok_or(LexError("Reached EOF while parsing char in get_char_literal.".to_string()))?;
 
-            if let Some((SimpleToken::Symbol(Symbol::SingleQuote), _)) = Symbol::lookup(current, None) {
+            if let Some((SimpleToken::Symbol(Symbol::SingleQuote), _)) = Symbol::lookup_one(current) {
                 break;
             } else {
                 char_vec.push(current);
@@ -264,18 +263,25 @@ impl SimpleTokenIter {
     }
 
     #[inline]
-    pub fn peek_two(&mut self) -> Option<(char, Option<char>)> {
-        if let Some(c_first) = self.next() {
-            if let Some(c_second) = self.next() {
-                self.put_back(c_second);
-                self.put_back(c_first);
-                Some((c_first, Some(c_second)))
-            } else {
-                self.put_back(c_first);
-                Some((c_first, None))
-            }
+    pub fn peek_three(&mut self) -> Option<(char, Option<char>, Option<char>)> {
+        let c1 = if let Some(c) = self.next() {
+            c
+        } else {
+            return None;
+        };
+
+        let c2 = if let Some(c) = self.next() {
+            Some(c)
         } else {
             None
-        }
+        };
+
+        let c3 = if let Some(c) = self.next() {
+            Some(c)
+        } else {
+            None
+        };
+
+        Some((c1, c2, c3))
     }
 }
