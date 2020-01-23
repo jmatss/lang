@@ -44,16 +44,13 @@ pub enum Expression {
     Variable(Option<Variable>),
     FunctionCall(Option<FunctionCall>),
 
-    BinaryOperation(Option<BinaryOperation>),
-    UnaryOperation(Option<UnaryOperation>),
+    Operation(Operation),
 }
 
-impl Expression {
-    pub fn operation_precedence(operator: Opera) -> Option<usize> {
-        match expression {
-            Expression::BinaryOperation(Some())
-        }
-    }
+#[derive(Debug, Clone)]
+pub enum Operation {
+    BinaryOperation(Option<BinaryOperation>),
+    UnaryOperation(Option<UnaryOperation>),
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +116,7 @@ pub enum Literal {
     CharLiteral(String),
 }
 
+
 #[derive(Debug, Clone)]
 pub enum Operator {
     BinaryOperator(BinaryOperator),
@@ -127,7 +125,155 @@ pub enum Operator {
     ParenthesisEnd,
 }
 
-#[derive(Debug, Clone)]
+// (evaluate_left_to_right, precedence)
+impl Operator {
+    // Precedence according to:
+    //      https://docs.oracle.com/javase/tutorial/java/nutsandbolts/operators.html
+    // and "power"  ~over "mul/div/mod" according to pythons:
+    //      https://www.mathcs.emory.edu/~valerie/courses/fall10/155/resources/op_precedence.html
+    // and old rust docs:
+    //      https://web.archive.org/web/20160304121349/https://doc.rust-lang.org/reference.html#unary-operator-expressions
+
+    /*
+        Precedence:
+            1   x++ x--
+            2   ++x --x ~ !
+            3   . (function calls etc.)
+            4   as
+            5   ** (power)
+            6   * / %
+            7   + -
+            8   << >>
+            9   < > <= >= is
+            10  == !=
+            11  &
+            12  ^
+            13  |
+            14  and (bool)
+            15  or (bool)
+            16  in ..
+            17  = += -? *= /= %= **= &= |= ^= <<= >>=
+    */
+    fn lookup(&self) -> Option<(bool, usize)> {
+        Some(
+            match *self {
+                Operator::UnaryOperator(UnaryOperator::IncrementPrefix) =>
+                    (true, 2),
+                Operator::UnaryOperator(UnaryOperator::IncrementPostfix) =>
+                    (true, 1),
+                Operator::UnaryOperator(UnaryOperator::DecrementPrefix) =>
+                    (true, 2),
+                Operator::UnaryOperator(UnaryOperator::DecrementPostfix) =>
+                    (true, 1),
+
+                Operator::UnaryOperator(UnaryOperator::BitCompliment) =>
+                    (true, 2),
+                Operator::UnaryOperator(UnaryOperator::BoolNot) =>
+                    (true, 2),
+
+                Operator::BinaryOperator(BinaryOperator::Assignment) =>
+                    (false, 17),
+                Operator::BinaryOperator(BinaryOperator::In) =>
+                    (false, 16),
+                Operator::BinaryOperator(BinaryOperator::Is) =>
+                    (true, 9),
+                Operator::BinaryOperator(BinaryOperator::As) =>
+                    (true, 4),
+                Operator::BinaryOperator(BinaryOperator::Range) =>
+                    (true, 16),
+                Operator::BinaryOperator(BinaryOperator::Dot) =>
+                    (true, 3),
+
+                Operator::BinaryOperator(BinaryOperator::Equals) =>
+                    (true, 10),
+                Operator::BinaryOperator(BinaryOperator::NotEquals) =>
+                    (true, 10),
+                Operator::BinaryOperator(BinaryOperator::LessThan) =>
+                    (true, 9),
+                Operator::BinaryOperator(BinaryOperator::GreaterThan) =>
+                    (true, 9),
+                Operator::BinaryOperator(BinaryOperator::LessThanOrEquals) =>
+                    (true, 9),
+                Operator::BinaryOperator(BinaryOperator::GreaterThanOrEquals) =>
+                    (true, 9),
+
+                Operator::BinaryOperator(BinaryOperator::Addition) =>
+                    (true, 7),
+                Operator::BinaryOperator(BinaryOperator::Subtraction) =>
+                    (true, 7),
+                Operator::BinaryOperator(BinaryOperator::Multiplication) =>
+                    (true, 6),
+                Operator::BinaryOperator(BinaryOperator::Division) =>
+                    (true, 6),
+                Operator::BinaryOperator(BinaryOperator::Modulus) =>
+                    (true, 6),
+                Operator::BinaryOperator(BinaryOperator::Power) =>
+                    (false, 5),
+
+                Operator::BinaryOperator(BinaryOperator::BitAnd) =>
+                    (true, 11),
+                Operator::BinaryOperator(BinaryOperator::BitOr) =>
+                    (true, 13),
+                Operator::BinaryOperator(BinaryOperator::BitXor) =>
+                    (true, 112),
+                Operator::BinaryOperator(BinaryOperator::ShiftLeft) =>
+                    (true, 8),
+                Operator::BinaryOperator(BinaryOperator::ShiftRight) =>
+                    (true, 8),
+
+                Operator::BinaryOperator(BinaryOperator::BoolAnd) =>
+                    (true, 14),
+                Operator::BinaryOperator(BinaryOperator::BoolOr) =>
+                    (true, 15),
+
+                Operator::BinaryOperator(BinaryOperator::AssignAddition) =>
+                    (false, 17),
+                Operator::BinaryOperator(BinaryOperator::AssignSubtraction) =>
+                    (false, 17),
+                Operator::BinaryOperator(BinaryOperator::AssignMultiplication) =>
+                    (false, 17),
+                Operator::BinaryOperator(BinaryOperator::AssignDivision) =>
+                    (false, 17),
+                Operator::BinaryOperator(BinaryOperator::AssignModulus) =>
+                    (false, 17),
+                Operator::BinaryOperator(BinaryOperator::AssignPower) =>
+                    (false, 17),
+
+                Operator::BinaryOperator(BinaryOperator::AssignBitAnd) =>
+                    (false, 17),
+                Operator::BinaryOperator(BinaryOperator::AssignBitOr) =>
+                    (false, 17),
+                Operator::BinaryOperator(BinaryOperator::AssignBitXor) =>
+                    (false, 17),
+                Operator::BinaryOperator(BinaryOperator::AssignShiftLeft) =>
+                    (false, 17),
+                Operator::BinaryOperator(BinaryOperator::AssignShiftRight) =>
+                    (false, 17),
+
+                _ => return None
+            }
+        )
+    }
+
+    pub fn precedence(&self) -> Option<usize> {
+        Some(self.lookup()?.1)
+    }
+
+    pub fn evaluate_left_to_right(&self) -> Option<bool> {
+        Some(self.lookup()?.0)
+    }
+
+    // Returns true if binary operation, false if unary operation.
+    pub fn binary(&self) -> bool {
+        if let Operator::BinaryOperator(operator) = self {
+            true
+        } else {
+            false   // UnaryOperation
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialOrd, PartialEq)]
 pub enum BinaryOperator {
     /* GENERAL */
     Assignment,
@@ -178,6 +324,19 @@ pub enum BinaryOperator {
     BoolAnd,
     BoolOr,
 
+    AssignAddition,
+    AssignSubtraction,
+    AssignMultiplication,
+    AssignDivision,
+    AssignModulus,
+    AssignPower,
+
+    AssignBitAnd,
+    AssignBitOr,
+    AssignBitXor,
+    AssignShiftLeft,
+    AssignShiftRight,
+
     // Example ExpressionAnd:
     //  for i in 0..1 and j in 0..1:
     //  with s = Scanner(stdin) and x = Abc():
@@ -206,16 +365,6 @@ pub enum UnaryOperator {
     BoolNot,
 }
 
-/*
-#[derive(Debug, Clone)]
-pub enum VarEnum {
-    // BinaryOperation == Assignment
-    BinaryOperation(BinaryOperation),
-    // UnaryOperation == Declaration
-    UnaryOperation(UnaryOperation),
-}
-*/
-
 #[derive(Debug, Clone)]
 pub struct Block {
     pub header: BlockHeader,
@@ -237,9 +386,8 @@ impl Block {
 #[derive(Debug, Clone)]
 pub struct BinaryOperation {
     pub operator: BinaryOperator,
-    pub right_associative: bool,
-    left: Box<Expression>,
-    right: Box<Expression>,
+    pub left: Box<Expression>,
+    pub right: Box<Expression>,
 }
 
 impl BinaryOperation {
