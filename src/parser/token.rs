@@ -6,8 +6,7 @@ pub enum Token {
     // TODO: Rust block (statement/expression (?)).
     Expression(Expression),
     Statement(Statement),
-
-    Block(Block),
+    BlockHeader(BlockHeader),
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +41,7 @@ pub enum Expression {
     Float(Option<String>),
 
     Variable(Option<Variable>),
+    ArrayAccess(Option<ArrayAccess>),
     FunctionCall(Option<FunctionCall>),
 
     Operation(Operation),
@@ -55,6 +55,8 @@ pub enum Operation {
 
 #[derive(Debug, Clone)]
 pub enum BlockHeader {
+    // TODO: Make If(/else/elseif), match, while and loop expression.
+    //  So that they can return values and be used in sub expressions.
     // Default == None, i.e. if there are no current block. Ex. at the start of a file.
     Default,
     Function(Option<Function>),
@@ -73,10 +75,10 @@ pub enum BlockHeader {
     // Defer == After
     Defer,
 
+    // For == Iterate
     // BinaryOperation == In
     For(Option<BinaryOperation>),
-    // For == Iterate
-    Iterate(Option<BinaryOperation>),
+    // TODO: Maybe merge while and loop (?)
     While(Option<Expression>),
     Loop,
 
@@ -151,8 +153,9 @@ impl Operator {
             13  |
             14  and (bool)
             15  or (bool)
-            16  in ..
-            17  = += -? *= /= %= **= &= |= ^= <<= >>=
+            16  ..
+            17  in
+            18  = += -? *= /= %= **= &= |= ^= <<= >>=
     */
     fn lookup(&self) -> Option<(bool, usize)> {
         Some(
@@ -172,9 +175,9 @@ impl Operator {
                     (true, 2),
 
                 Operator::BinaryOperator(BinaryOperator::Assignment) =>
-                    (false, 17),
+                    (false, 18),
                 Operator::BinaryOperator(BinaryOperator::In) =>
-                    (false, 16),
+                    (false, 17),
                 Operator::BinaryOperator(BinaryOperator::Is) =>
                     (true, 9),
                 Operator::BinaryOperator(BinaryOperator::As) =>
@@ -215,7 +218,7 @@ impl Operator {
                 Operator::BinaryOperator(BinaryOperator::BitOr) =>
                     (true, 13),
                 Operator::BinaryOperator(BinaryOperator::BitXor) =>
-                    (true, 112),
+                    (true, 12),
                 Operator::BinaryOperator(BinaryOperator::ShiftLeft) =>
                     (true, 8),
                 Operator::BinaryOperator(BinaryOperator::ShiftRight) =>
@@ -227,28 +230,28 @@ impl Operator {
                     (true, 15),
 
                 Operator::BinaryOperator(BinaryOperator::AssignAddition) =>
-                    (false, 17),
+                    (false, 18),
                 Operator::BinaryOperator(BinaryOperator::AssignSubtraction) =>
-                    (false, 17),
+                    (false, 18),
                 Operator::BinaryOperator(BinaryOperator::AssignMultiplication) =>
-                    (false, 17),
+                    (false, 18),
                 Operator::BinaryOperator(BinaryOperator::AssignDivision) =>
-                    (false, 17),
+                    (false, 18),
                 Operator::BinaryOperator(BinaryOperator::AssignModulus) =>
-                    (false, 17),
+                    (false, 18),
                 Operator::BinaryOperator(BinaryOperator::AssignPower) =>
-                    (false, 17),
+                    (false, 18),
 
                 Operator::BinaryOperator(BinaryOperator::AssignBitAnd) =>
-                    (false, 17),
+                    (false, 18),
                 Operator::BinaryOperator(BinaryOperator::AssignBitOr) =>
-                    (false, 17),
+                    (false, 18),
                 Operator::BinaryOperator(BinaryOperator::AssignBitXor) =>
-                    (false, 17),
+                    (false, 18),
                 Operator::BinaryOperator(BinaryOperator::AssignShiftLeft) =>
-                    (false, 17),
+                    (false, 18),
                 Operator::BinaryOperator(BinaryOperator::AssignShiftRight) =>
-                    (false, 17),
+                    (false, 18),
 
                 _ => return None
             }
@@ -363,24 +366,6 @@ pub enum UnaryOperator {
 
     /* BOOL */
     BoolNot,
-}
-
-#[derive(Debug, Clone)]
-pub struct Block {
-    pub header: BlockHeader,
-    pub header_indent: usize,
-    pub body_indent: usize,
-    pub tokens: Vec<Token>,
-}
-
-impl Block {
-    pub fn new(header: BlockHeader, header_indent: usize, body_indent: usize, tokens: Vec<Token>) -> Self {
-        Block { header, header_indent, body_indent, tokens }
-    }
-
-    pub fn new_empty(header: BlockHeader) -> Self {
-        Block { header, header_indent: 0, body_indent: 0, tokens: Vec::new() }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -505,6 +490,18 @@ impl Variable {
         modifiers: Vec<Modifier>,
     ) -> Self {
         Variable { name, value, var_type, modifiers }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ArrayAccess {
+    pub variable: Variable,
+    pub index: Box<Expression>,
+}
+
+impl ArrayAccess {
+    pub fn new(variable: Variable, index: Box<Expression>) -> Self {
+        ArrayAccess { variable, index }
     }
 }
 
@@ -667,8 +664,8 @@ impl Token {
                 "defer" => Token::ret_block_header(BlockHeader::Defer),
                 "after" => Token::ret_block_header(BlockHeader::Defer),
 
-                "for" => Token::ret_block_header(BlockHeader::For(None)),
-                "iterate" => Token::ret_block_header(BlockHeader::Iterate(None)),
+                //"for" => Token::ret_block_header(BlockHeader::For(None)),
+                "iterate" => Token::ret_block_header(BlockHeader::For(None)),
                 "while" => Token::ret_block_header(BlockHeader::While(None)),
                 "loop" => Token::ret_block_header(BlockHeader::Loop),
 
