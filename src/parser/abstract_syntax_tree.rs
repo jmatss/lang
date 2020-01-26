@@ -111,7 +111,7 @@ impl AST {
         let token = rc_token.borrow();
         println!(
             "{}{:?}",
-            vec![' '; token.indent_level].iter().collect::<String>(),
+            " ".repeat(token.indent_level),
             token.token
         );
 
