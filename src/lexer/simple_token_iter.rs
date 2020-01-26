@@ -20,6 +20,7 @@ impl SimpleTokenIter {
         let mut file = File::open(filename)?;
         let mut string = String::new();
         file.read_to_string(&mut string)?;
+
         Ok(SimpleTokenIter {
             buf: LinkedList::new(),
             it: string.chars().collect::<Vec<_>>().into_iter(),
@@ -202,7 +203,7 @@ impl SimpleTokenIter {
 
         // Add +2 to size to include the removed quotes.
         Ok((
-            SimpleToken::Literal(Literal::StringLiteral(char_vec.into_iter().collect())),
+            SimpleToken::Literal(Literal::StringLiteral(char_vec.iter().collect())),
             char_vec.len() + 2,
         ))
     }
@@ -225,8 +226,8 @@ impl SimpleTokenIter {
 
         // Add +2 to size to include the removed quotes.
         Ok((
-            SimpleToken::Literal(Literal::CharLiteral(char_vec.into_iter().collect())),
-            char_vec.len(),
+            SimpleToken::Literal(Literal::CharLiteral(char_vec.iter().collect())),
+            char_vec.len() + 2,
         ))
     }
 
@@ -281,6 +282,14 @@ impl SimpleTokenIter {
         } else {
             None
         };
+
+        if let Some(c) = c3 {
+            self.put_back(c);
+        }
+        if let Some(c) = c2 {
+            self.put_back(c);
+        }
+        self.put_back(c1);
 
         Some((c1, c2, c3))
     }
