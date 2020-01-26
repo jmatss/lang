@@ -14,11 +14,7 @@ use crate::parser::abstract_syntax_tree::AST;
 //  In the example the if-expression needs to be added to the AST,
 //  but also needs to be treated as an expression.
 
-// TODO: Add a "pattern match symbol" that evaluates to a bool.
-//  Similar to "is", or might even be merged with is.
-//  Example (x: Option<String>):
-//      if x is Some(var):
-//          print_line(var)
+// TODO: Add support for named parameters in function parameters list (panics atm.).
 
 pub struct TokenIter<'a> {
     pub simple_tokens: &'a [SimpleToken],
@@ -277,22 +273,14 @@ impl<'a> TokenIter<'a> {
         }
     }
 
-    // Valid formats:
+    // Valid formats for variables:
     //      id
-    //      id @ Type modifier*
+    //      id @ Type+ modifier*
     // (The assignment is handled separately, ex. id = expression)
     // TODO: Add "name, nameN" for declaring multiple variables on the same line.
     // TODO: Add support for tuples.
-    fn next_variable(&mut self) -> CustomResult<Variable> {
-        let peek = self.peek_skip_whitespace();
-        if let Some(SimpleToken::Symbol(symbol)) = peek {
-            return Err(CustomError::ParseError(
-                format!("A symbol was used as variable name: {:?}", symbol)
-            ));
-        }
-
-        let identifier = self.next_identifier()?;
-        let mut variable = Variable::new(identifier.clone());
+    fn parse_variable_with_identifier(&mut self, identifier: &str) -> CustomResult<Variable> {
+        let mut variable = Variable::new(identifier.to_string());
 
         // Make sure that the variable doesn't have a name that clashes with a keyword.
         if let Some(keyword) = Token::lookup_identifier(&identifier) {
@@ -304,16 +292,39 @@ impl<'a> TokenIter<'a> {
         // If true: this variable has specified type, parse the type and modifiers.
         if let Some(SimpleToken::Symbol(Symbol::At)) = self.peek_skip_whitespace() {
             self.next_skip_whitespace();    // Remove "At" symbol.
-            self.add_next_type_and_modifiers(&mut variable)?;
+            self.parse_next_type_and_modifiers(&mut variable)?;
         }
 
         Ok(variable)
     }
 
-    fn add_next_type_and_modifiers(&mut self, variable: &mut Variable) -> CustomResult<()> {
-        // Parse the type, which have to be the first "string".
-        let var_type = self.next_type()?;
-        variable.var_type = Some(var_type);
+    fn parse_variable(&mut self) -> CustomResult<Variable> {
+        let peek = self.peek_skip_whitespace();
+        if let Some(SimpleToken::Symbol(symbol)) = peek {
+            return Err(CustomError::ParseError(
+                format!("A symbol was used as variable name: {:?}", symbol)
+            ));
+        }
+
+        let identifier = self.next_identifier()?;
+        self.parse_variable_with_identifier(&identifier)
+    }
+
+    fn parse_next_type_and_modifiers(&mut self, variable: &mut Variable) -> CustomResult<()> {
+        // Parse the type, which have to be the first "identifier".
+        // If the first identifier is a modifier token, there is no type and it is set to None.
+        let peek = self.peek_skip_whitespace();
+        if let Some(SimpleToken::Identifier(identifier)) = peek {
+            if let Some(Token::Statement(Statement::Modifier(modifier))) = Token::lookup_identifier(&identifier) {
+                variable.var_type = None;
+            } else {
+                variable.var_type = Some(self.next_type()?);
+            }
+        } else {
+            return Err(ParseError(
+                format!("Expected identifier(s) in parse_next_type_and_modifiers, got: {:?}", peek)
+            ));
+        }
 
         while let Some(SimpleToken::Identifier(identifier)) = self.next_skip_whitespace() {
             // If true: this is a modifier, add to "variable" and continue parsing next token.
@@ -462,24 +473,9 @@ impl<'a> TokenIter<'a> {
 
             _ => {
                 // Treat it as an variable.
-                let variable = Variable::new(identifier.to_string());
+                let variable = self.parse_variable_with_identifier(identifier)?;
                 Ok(Token::Expression(Expression::Variable(Some(variable))))
             }
-
-            /*
-            SimpleToken::Identifier(_) => {
-                // Treat it as an variable.
-                let variable = Variable::new_empty(identifier.to_string());
-                Ok(Token::Expression(Expression::Variable(Some(variable))))
-            }
-            */
-
-            /*
-            _ =>
-                Err(ParseError(
-                    format!("Received bad peek during parse_identifier_unknown: {:?}", peek)
-                ))
-                */
         }
     }
 
@@ -493,7 +489,9 @@ impl<'a> TokenIter<'a> {
             ));
         }
 
-        let variable = Variable::new(identifier.to_string());
+        // FIXME: Is it allowed for a variable that doesn't decalare itself to use modifiers/Type (?)
+        //  Probably not, but currently the parsing allows it everywhere else, so keep it for now.
+        let variable = self.parse_variable_with_identifier(identifier)?;
         let expression = self.parse_expression_until(|simple_token| {
             if let SimpleToken::Symbol(Symbol::SquareBracketEnd) = simple_token {
                 true
@@ -1012,7 +1010,7 @@ impl<'a> TokenIter<'a> {
                 }
 
                 self.skip_whitespace_and_line_break(false)?;
-                let mut current_parameter = self.next_variable()?;
+                let mut current_parameter = self.parse_variable()?;
 
                 // If true: this parameter has a default value set.
                 if let Some(SimpleToken::Symbol(Symbol::Equals)) = self.peek_skip_whitespace() {
