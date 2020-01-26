@@ -21,6 +21,7 @@ pub struct AST {
 impl AST {
     pub fn new() -> Self {
         // Index of root_block's parent is set to max_value, should never be used.
+        // The indent_level is set to 0 and line_number to 0, should never be used.
         let token = Token::BlockHeader(BlockHeader::Default);
         let parent = usize::max_value();
         let line_number = 0;
@@ -36,29 +37,43 @@ impl AST {
     }
 
     pub fn insert_block(&mut self, token: Token, line_number: usize, indent_level: usize) -> CustomResult<()> {
-        let parent = self.current_block;
         let index = self.blocks.len();
+        let parent_index = self.current_block;
+        let parent = self.blocks[parent_index].borrow();
 
-        // Ensure that this block is one indent_level above its parent.
-        if !self.is_new_indent_level(indent_level, parent) {
+        // Special case if this is the first "real" block added.
+        if let Token::BlockHeader(BlockHeader::Default) = parent.token {
+            if indent_level != 0 {
+                return Err(ParseError(
+                    format!(
+                        "Incorrect indent_level when inserting new block into Default. Expected: {}, got: {}",
+                        0,
+                        indent_level
+                    )
+                ));
+            }
+        } else if indent_level != parent.indent_level + 1 {
             return Err(ParseError(
                 format!(
                     "Incorrect indent_level when inserting new block. Expected: {}, got: {}",
-                    self.blocks[parent].borrow_mut().indent_level + 1,
+                    parent.indent_level + 1,
                     indent_level
                 )
             ));
         }
 
+        // Need to drop parent to allow for a push into self.blocks.
+        std::mem::drop(parent);
+
         let block = Rc::new(
             RefCell::new(
-                ASTToken::new_block(token, parent, line_number, indent_level, index)
+                ASTToken::new_block(token, parent_index, line_number, indent_level, index)
             )
         );
         self.blocks.push(Rc::clone(&block));
         self.current_block = index;
 
-        self.blocks[parent].borrow_mut().add_child(block)?;
+        self.blocks[parent_index].borrow_mut().add_child(block)?;
         Ok(())
     }
 
@@ -77,40 +92,39 @@ impl AST {
         Ok(())
     }
 
-    fn is_new_indent_level(&self, indent_level: usize, parent_index: Index) -> bool {
-        let parent_indent_level = self.blocks[parent_index].borrow_mut().indent_level;
-        (indent_level == parent_indent_level + 1)
-    }
-
     // FIXME: No error checking on out of bounds etc.
     // Used to find the parent that this "token" should be put into.
     // If it is a "new indent level", traverse the parents upwards until
     // the correct indent level is found.
-    fn find_correct_parent(&self, indent_level: usize, mut parent: Index) -> Index {
-        if self.is_new_indent_level(indent_level, parent) {
-            let current_parent_indent_level = self.blocks[parent].borrow_mut().indent_level;
+    fn find_correct_parent(&self, indent_level: usize, mut parent_index: Index) -> Index {
+        let parent = self.blocks[parent_index].borrow();
+
+        // Special case if there are no "real" parents.
+        if let Token::BlockHeader(BlockHeader::Default) = parent.token {
+            parent_index = 0;
+        } else {
+            let current_parent_indent_level = parent.indent_level;
             let new_parent_indent_level = indent_level - 1;
             // "steps" represents how many parents needs to be traverse to reach the new parent.
             let steps = current_parent_indent_level - new_parent_indent_level;
 
             for _ in 0..steps {
-                parent = self.blocks[parent].borrow_mut().parent;
+                parent_index = self.blocks[parent_index].borrow_mut().parent;
             }
         }
 
-        parent
+        parent_index
     }
 
     pub fn debug_print(&self) {
-        for rc_token in &self.blocks {
-            AST::debug_print_priv(rc_token);
-        }
+        AST::debug_print_priv(&self.blocks[0]);
     }
 
     fn debug_print_priv(rc_token: &RCToken) {
         let token = rc_token.borrow();
         println!(
-            "{}{:?}",
+            "{} {}{:?}",
+            token.line_number,
             " ".repeat(token.indent_level),
             token.token
         );
@@ -153,7 +167,7 @@ impl ASTToken {
 
     pub fn add_child(&mut self, child: RCToken) -> CustomResult<()> {
         let block = self.block_data.as_mut()
-            .ok_or(ParseError(
+            .ok_or_else(|| ParseError(
                 "Unable to add child to block (probably because this isn't a block)".to_string()
             ))?;
 
