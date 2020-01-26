@@ -19,8 +19,8 @@ pub enum Statement {
     Continue,
 
     // TODO: Maybe something else other that String.
-    Use(Option<String>),
-    Package(Option<String>),
+    Use(Option<Path>),
+    Package(Option<Path>),
     // TODO: throw
     Throw(Option<Expression>),
 
@@ -29,8 +29,6 @@ pub enum Statement {
 
     // Special cases
     // Init: Used in constructor to initialize fields with same name as parameters of constructor.
-    // FIXME: Maybe add implements/is used in class header (?),
-    //  or is it ok for them to just be a identifier.
     Init,
 }
 
@@ -450,8 +448,8 @@ impl Interface {
 
 #[derive(Debug, Clone)]
 pub struct FunctionCall {
-    name: String,
-    arguments: Vec<Argument>,
+    pub name: String,
+    pub arguments: Vec<Argument>,
 }
 
 impl FunctionCall {
@@ -463,8 +461,8 @@ impl FunctionCall {
 #[derive(Debug, Clone)]
 pub struct Argument {
     // Named used for named arguments.
-    name: Option<String>,
-    value: Expression,
+    pub name: Option<String>,
+    pub value: Expression,
 }
 
 impl Argument {
@@ -491,6 +489,10 @@ impl Variable {
     ) -> Self {
         Variable { name, value, var_type, modifiers }
     }
+
+    pub fn new_empty(name: String) -> Self {
+        Variable { name, var_type: None, value: None, modifiers: Vec::new() }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -515,6 +517,21 @@ pub struct Type {
 impl Type {
     pub fn new(t: Option<String>, generics: Vec<Type>) -> Self {
         Type { t, generics }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Path {
+    pub identifiers: Vec<String>,
+}
+
+impl Path {
+    pub fn new() -> Self {
+        Path { identifiers: Vec::new() }
+    }
+
+    pub fn push(&mut self, identifier: String) {
+        self.identifiers.push(identifier);
     }
 }
 
@@ -682,13 +699,11 @@ impl Token {
     }
 
     fn ret_assign_block_header(assign_block_header: AssignBlockHeader) -> Token {
-        Token::Block(
-            Block::new_empty(BlockHeader::AssignBlockHeader(assign_block_header))
-        )
+        Token::BlockHeader(BlockHeader::AssignBlockHeader(assign_block_header))
     }
 
     fn ret_block_header(block_header: BlockHeader) -> Token {
-        Token::Block(Block::new_empty(block_header))
+        Token::BlockHeader(block_header)
     }
 }
 

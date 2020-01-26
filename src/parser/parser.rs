@@ -1,44 +1,9 @@
-
-
-
-// TODO: Make the first call like: Block<DefaultHeader, next_token()>
-//      so that it becomes the root.
-
-/*
 use crate::lexer::simple_token::SimpleToken;
-use crate::parser::token::Token;
+use crate::CustomResult;
+use crate::parser::abstract_syntax_tree::AST;
+use crate::parser::token_iter::TokenIter;
 
-pub fn parse(simple_tokens: Vec<SimpleToken>) -> Vec<Token> {
-
-    let ast = Vec::new();
-
-    for simple_token in simple_tokens.iter() {
-        match simple_token {
-            SimpleToken::Identifier(id) => {
-
-                match  { }
-
-            },
-            SimpleToken::Number(number) => {},
-            SimpleToken::Symbol(symbol) => {},
-            SimpleToken::EndOfFile => {},
-            SimpleToken::Unknown(string) => {},
-            _ => panic!("Incorrect simple token.")
-        }
-    }
-
-    ast
+pub fn parse(simple_tokens: &[SimpleToken]) -> CustomResult<AST> {
+    let mut iter = TokenIter::new(simple_tokens, 4);
+    iter.parse_abstract_syntax_tree()
 }
-
-fn parse_identifier(identifier: &str) -> Token {
-
-}
-
-fn parse_identifier(id: &str) -> Token {
-
-}
-
-fn lookup(simple_token: SimpleToken) -> Option<Token> {
-
-}
-*/
