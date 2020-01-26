@@ -1,4 +1,4 @@
-use crate::lexer::simple_token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, Dot, Comma, QuestionMark, ExclamationMark, Equals, DoubleQuote, SingleQuote, Colon, SemiColon, LineBreak, WhiteSpace, Pipe, Range, Arrow, EqualsOperator, NotEquals, LessThan, GreaterThan, LessThanOrEquals, GreaterThanOrEquals, Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BitCompliment, Increment, Decrement, CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, BoolNot, BoolAnd, BoolOr, Pound, At, Dollar, In, Is, As, AssignAddition, AssignSubtraction, AssignMultiplication, AssignDivision, AssignModulus, AssignPower, AssignBitAnd, AssignBitOr, AssignBitXor, AssignShiftLeft, AssignShiftRight};
+use crate::lexer::simple_token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, Dot, Comma, QuestionMark, ExclamationMark, Equals, DoubleQuote, SingleQuote, Colon, SemiColon, LineBreak, WhiteSpace, Pipe, Range, Arrow, EqualsOperator, NotEquals, LessThan, GreaterThan, LessThanOrEquals, GreaterThanOrEquals, Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BitCompliment, Increment, Decrement, CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, BoolNot, BoolAnd, BoolOr, Pound, At, Dollar, In, Is, As, AssignAddition, AssignSubtraction, AssignMultiplication, AssignDivision, AssignModulus, AssignPower, AssignBitAnd, AssignBitOr, AssignBitXor, AssignShiftLeft, AssignShiftRight, Of};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimpleToken {
@@ -87,10 +87,12 @@ pub enum Symbol {
     BoolOr,
 
     In,
-    // is == instanceof
+    // Is == pattern matching
     Is,
     // cast
     As,
+    // Of == instanceof
+    Of,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -120,6 +122,7 @@ impl Symbol {
                 "in" => SimpleToken::Symbol(In),
                 "is" => SimpleToken::Symbol(Is),
                 "as" => SimpleToken::Symbol(As),
+                "of" => SimpleToken::Symbol(Of),
 
                 _ => return None
             }
@@ -128,10 +131,6 @@ impl Symbol {
 
     pub fn lookup_one(c1: char) -> Option<(SimpleToken, usize)> {
         Symbol::lookup(c1, None, None)
-    }
-
-    pub fn lookup_two(c1: char, c2: Option<char>) -> Option<(SimpleToken, usize)> {
-        Symbol::lookup(c1, c2, None)
     }
 
     pub fn lookup_three(c1: char, c2: Option<char>, c3: Option<char>) -> Option<(SimpleToken, usize)> {
