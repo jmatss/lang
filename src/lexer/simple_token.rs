@@ -1,4 +1,4 @@
-use crate::lexer::simple_token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, Dot, Comma, QuestionMark, ExclamationMark, Equals, DoubleQuote, SingleQuote, Colon, SemiColon, LineBreak, WhiteSpace, Pipe, Range, Arrow, EqualsOperator, NotEquals, LessThan, GreaterThan, LessThanOrEquals, GreaterThanOrEquals, Addition, Subtraction, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BitCompliment, Increment, Decrement, CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, BoolNot, BoolAnd, BoolOr, Pound, At, Dollar, In, Is, As, AssignAddition, AssignSubtraction, AssignMultiplication, AssignDivision, AssignModulus, AssignPower, AssignBitAnd, AssignBitOr, AssignBitXor, AssignShiftLeft, AssignShiftRight, Of};
+use crate::lexer::simple_token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, Dot, Comma, QuestionMark, ExclamationMark, Equals, DoubleQuote, SingleQuote, Colon, SemiColon, LineBreak, WhiteSpace, Pipe, Range, Arrow, EqualsOperator, NotEquals, LessThanOrEquals, GreaterThanOrEquals, Plus, Minus, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BitCompliment, Increment, Decrement, CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, BoolNot, BoolAnd, BoolOr, Pound, At, Dollar, In, Is, As, AssignAddition, AssignSubtraction, AssignMultiplication, AssignDivision, AssignModulus, AssignPower, AssignBitAnd, AssignBitOr, AssignBitXor, AssignShiftLeft, AssignShiftRight, Of, RangeInclusive};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimpleToken {
@@ -36,20 +36,21 @@ pub enum Symbol {
     LineBreak,
     WhiteSpace(usize),
 
-    // Pipe: |>  Range: ..  Arrow: ->
+    // Pipe: |>  Range: ..  RangeInclusive: ..=  Arrow: ->
     Pipe,
     Range,
+    RangeInclusive,
     Arrow,
 
     EqualsOperator,
     NotEquals,
-    LessThan,
-    GreaterThan,
+    //LessThan, == PointyBracketBegin
+    //GreaterThan, == PointyBracketEnd
     LessThanOrEquals,
     GreaterThanOrEquals,
 
-    Addition,
-    Subtraction,
+    Plus,
+    Minus,
     Multiplication,
     Division,
     Modulus,
@@ -101,7 +102,7 @@ pub enum Literal {
     CharLiteral(String),
 }
 
-impl Symbol {
+impl SimpleToken {
     // Linebreak, manual linebreak (";") or EndOfFile.
     pub fn is_break_symbol(simple_token: &SimpleToken) -> bool {
         match simple_token {
@@ -130,11 +131,11 @@ impl Symbol {
     }
 
     pub fn lookup_one(c1: char) -> Option<(SimpleToken, usize)> {
-        Symbol::lookup(c1, None, None)
+        SimpleToken::lookup(c1, None, None)
     }
 
     pub fn lookup_three(c1: char, c2: Option<char>, c3: Option<char>) -> Option<(SimpleToken, usize)> {
-        Symbol::lookup(c1, c2, c3)
+        SimpleToken::lookup(c1, c2, c3)
     }
 
     fn lookup(c1: char, c2: Option<char>, c3: Option<char>) -> Option<(SimpleToken, usize)> {
@@ -149,25 +150,25 @@ impl Symbol {
         let real_string: String = tmp_chars.into_iter().collect();
 
         match c1 {
-            '(' => Symbol::ret_single_lookup(ParenthesisBegin),
-            ')' => Symbol::ret_single_lookup(ParenthesisEnd),
-            '[' => Symbol::ret_single_lookup(SquareBracketBegin),
-            ']' => Symbol::ret_single_lookup(SquareBracketEnd),
-            '{' => Symbol::ret_single_lookup(CurlyBracketBegin),
-            '}' => Symbol::ret_single_lookup(CurlyBracketEnd),
-            ',' => Symbol::ret_single_lookup(Comma),
-            '?' => Symbol::ret_single_lookup(QuestionMark),
-            '\"' => Symbol::ret_single_lookup(DoubleQuote),
-            '\'' => Symbol::ret_single_lookup(SingleQuote),
-            ':' => Symbol::ret_single_lookup(Colon),
-            ';' => Symbol::ret_single_lookup(SemiColon),
-            '~' => Symbol::ret_single_lookup(BitCompliment),
-            '#' => Symbol::ret_single_lookup(Pound),
-            '@' => Symbol::ret_single_lookup(At),
-            '$' => Symbol::ret_single_lookup(Dollar),
+            '(' => SimpleToken::ret_single_lookup(ParenthesisBegin),
+            ')' => SimpleToken::ret_single_lookup(ParenthesisEnd),
+            '[' => SimpleToken::ret_single_lookup(SquareBracketBegin),
+            ']' => SimpleToken::ret_single_lookup(SquareBracketEnd),
+            '{' => SimpleToken::ret_single_lookup(CurlyBracketBegin),
+            '}' => SimpleToken::ret_single_lookup(CurlyBracketEnd),
+            ',' => SimpleToken::ret_single_lookup(Comma),
+            '?' => SimpleToken::ret_single_lookup(QuestionMark),
+            '\"' => SimpleToken::ret_single_lookup(DoubleQuote),
+            '\'' => SimpleToken::ret_single_lookup(SingleQuote),
+            ':' => SimpleToken::ret_single_lookup(Colon),
+            ';' => SimpleToken::ret_single_lookup(SemiColon),
+            '~' => SimpleToken::ret_single_lookup(BitCompliment),
+            '#' => SimpleToken::ret_single_lookup(Pound),
+            '@' => SimpleToken::ret_single_lookup(At),
+            '$' => SimpleToken::ret_single_lookup(Dollar),
 
             '%' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
                         (&c1.to_string(), Modulus),
@@ -177,7 +178,7 @@ impl Symbol {
             }
 
             '&' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
                         (&c1.to_string(), BitAnd),
@@ -187,7 +188,7 @@ impl Symbol {
             }
 
             '^' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
                         (&c1.to_string(), BitXor),
@@ -197,7 +198,7 @@ impl Symbol {
             }
 
             '!' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
                         (&c1.to_string(), ExclamationMark),
@@ -207,7 +208,7 @@ impl Symbol {
             }
 
             '|' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
                         (&c1.to_string(), BitOr),
@@ -218,17 +219,18 @@ impl Symbol {
             }
 
             '.' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
                         (&c1.to_string(), Dot),
-                        ("..", Range)
+                        ("..", Range),
+                        ("..=", RangeInclusive),
                     ],
                 )
             }
 
             '=' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
                         (&c1.to_string(), Equals),
@@ -238,10 +240,10 @@ impl Symbol {
             }
 
             '+' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), Addition),
+                        (&c1.to_string(), Plus),
                         ("++", Increment),
                         ("+=", AssignAddition)
                     ],
@@ -249,7 +251,7 @@ impl Symbol {
             }
 
             '<' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
                         (&c1.to_string(), PointyBracketBegin),
@@ -261,7 +263,7 @@ impl Symbol {
             }
 
             '>' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
                         (&c1.to_string(), PointyBracketEnd),
@@ -273,10 +275,10 @@ impl Symbol {
             }
 
             '-' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), Subtraction),
+                        (&c1.to_string(), Minus),
                         ("--", Decrement),
                         ("->", Arrow),
                         ("-=", AssignSubtraction)
@@ -285,7 +287,7 @@ impl Symbol {
             }
 
             '*' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
                         (&c1.to_string(), Multiplication),
@@ -298,7 +300,7 @@ impl Symbol {
             }
 
             '/' => {
-                Symbol::match_symbol(
+                SimpleToken::match_symbol(
                     &real_string,
                     vec![
                         (&c1.to_string(), Division),
