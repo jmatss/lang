@@ -14,8 +14,6 @@ use crate::parser::abstract_syntax_tree::AST;
 //  In the example the if-expression needs to be added to the AST,
 //  but also needs to be treated as an expression.
 
-// TODO: Add support for named parameters in function parameters list (panics atm.).
-
 pub struct TokenIter<'a> {
     pub simple_tokens: &'a [SimpleToken],
     pub position: usize,
@@ -212,6 +210,14 @@ impl<'a> TokenIter<'a> {
         loop {
             let current = self.next()
                 .ok_or_else(|| ParseError("No more simple_tokens in start of parse_a_s_t".to_string()))?;
+
+            /*
+            println!(
+                "Current SimpleToken: {:?}, line_number: {}, indent_level: {}",
+                &current, self.line_number, self.indent_level
+            );
+            */
+
             match current {
                 SimpleToken::Identifier(identifier) => {
                     let token = self.parse_identifier(&identifier)?;
@@ -248,7 +254,7 @@ impl<'a> TokenIter<'a> {
                 | SimpleToken::Number(_)
                 | SimpleToken::Literal(_) => {
                     self.rewind();
-                    let expression = self.parse_expression()?;
+                    let expression = self.parse_expression_until_default()?;
                     let token = Token::Expression(expression);
                     self.ast.insert_token(token, self.line_number, self.indent_level)?;
                 }
@@ -406,11 +412,11 @@ impl<'a> TokenIter<'a> {
             path.push(self.next_identifier()?);
 
             let peek = self.peek_skip_whitespace()
-                .ok_or(ParseError("No more tokens in parse_path.".to_string()))?;
+                .ok_or_else(|| ParseError("No more tokens in parse_path.".to_string()))?;
             if let SimpleToken::Symbol(Symbol::Dot) = peek {
                 self.next_skip_whitespace();    // Remove Dot symbol.
                 continue;
-            } else if Symbol::is_break_symbol(&peek) {
+            } else if SimpleToken::is_break_symbol(&peek) {
                 break;
             } else {
                 return Err(ParseError(
@@ -492,7 +498,7 @@ impl<'a> TokenIter<'a> {
         // FIXME: Is it allowed for a variable that doesn't decalare itself to use modifiers/Type (?)
         //  Probably not, but currently the parsing allows it everywhere else, so keep it for now.
         let variable = self.parse_variable_with_identifier(identifier)?;
-        let expression = self.parse_expression_until(|simple_token| {
+        let expression = self.parse_expression_until(&|simple_token| {
             if let SimpleToken::Symbol(Symbol::SquareBracketEnd) = simple_token {
                 true
             } else {
@@ -514,15 +520,15 @@ impl<'a> TokenIter<'a> {
                 // Else: It returns the next expression.
                 let peek = self.peek_skip_whitespace()
                     .ok_or_else(|| ParseError("Out of tokens in parse_statement.".to_string()))?;
-                if Symbol::is_break_symbol(&peek) {
+                if SimpleToken::is_break_symbol(&peek) {
                     Ok(Statement::Return(None))
                 } else {
-                    Ok(Statement::Return(Some(self.parse_expression()?)))
+                    Ok(Statement::Return(Some(self.parse_expression_until_default()?)))
                 }
             }
 
             Statement::Yield(_) =>
-                Ok(Statement::Yield(Some(self.parse_expression()?))),
+                Ok(Statement::Yield(Some(self.parse_expression_until_default()?))),
 
             Statement::Break | Statement::Continue =>
                 Ok(statement),
@@ -534,7 +540,7 @@ impl<'a> TokenIter<'a> {
                 Ok(Statement::Package(Some(self.parse_path()?))),
 
             Statement::Throw(_) =>
-                Ok(Statement::Throw(Some(self.parse_expression()?))),
+                Ok(Statement::Throw(Some(self.parse_expression_until_default()?))),
 
             // Ignore modifiers.
             _ => Err(ParseError(
@@ -549,11 +555,12 @@ impl<'a> TokenIter<'a> {
     // PS: Skips/ignores LineBreak if they aren't specified in the stop_condition().
     fn parse_expression_with_previous_until(
         &mut self,
-        stop_condition: fn(&SimpleToken) -> bool,
+        /*stop_condition: fn(&SimpleToken) -> bool,*/
+        stop_condition: &dyn Fn(&SimpleToken) -> bool,
         previous_expression: Option<Expression>,
     ) -> CustomResult<Expression> {
         let mut output_stack: Vec<Output> = Vec::new();
-        let mut operand_stack: Vec<Operator> = Vec::new();
+        let mut operator_stack: Vec<Operator> = Vec::new();
 
         // This bool is used to ensure that all "values" are separated by operands.
         // "value" == not an operand, i.e. literals, numbers, variables or function calls.
@@ -569,10 +576,14 @@ impl<'a> TokenIter<'a> {
         loop {
             let current = self.next_skip_whitespace()
                 .ok_or_else(||
-                    ParseError("No more tokens in parse_expression_until_return_stop_token".to_string())
+                    ParseError("No more tokens in parse_expression_with_previous_until".to_string())
                 )?;
 
-            //dbg!(&current, &output_stack, &operand_stack);
+            /*
+            println!("\"current\", \"output_stack\" and \"operator_stack\" in expression parsing:\n{:?}", &current);
+            dbg!(&output_stack, &operator_stack);
+            println!();
+            */
 
             // TODO: Clean up LineBreak special case.
             // Break and stop parsing expression if stop_condition() evaluates to true.
@@ -626,7 +637,7 @@ impl<'a> TokenIter<'a> {
                         };
                     output_stack.push(Output::Value(number));
 
-                    previous_was_value = false;
+                    previous_was_value = true;
                 }
 
                 SimpleToken::Literal(literal) => {
@@ -649,15 +660,19 @@ impl<'a> TokenIter<'a> {
                 }
 
                 SimpleToken::Symbol(symbol) => {
-                    let operator = Token::lookup_operator(symbol)
-                        .ok_or_else(|| ParseError("Parsed None operator during expression.".to_string()))?;
+                    let operator = Token::lookup_operator(symbol.clone())
+                        .ok_or_else(||
+                            ParseError(
+                                format!("Parsed None operator during expression: {:?}", symbol)
+                            )
+                        )?;
                     match operator {
                         Operator::ParenthesisBegin =>
-                            operand_stack.push(operator),
+                            operator_stack.push(operator),
 
                         Operator::ParenthesisEnd => {
                             loop {
-                                let popped_operator = operand_stack.pop()
+                                let popped_operator = operator_stack.pop()
                                     .ok_or_else(|| ParseError(
                                         "Exhausted operator stack while looking for parenthesisBegin.".to_string()
                                     ))?;
@@ -670,7 +685,7 @@ impl<'a> TokenIter<'a> {
                             }
                         }
 
-                        Operator::UnaryOperator(UnaryOperator::IncrementIndicator) => {
+                        Operator::Increment => {
                             let increment_operator =
                                 if previous_was_value {
                                     Operator::UnaryOperator(UnaryOperator::IncrementPostfix)
@@ -678,14 +693,14 @@ impl<'a> TokenIter<'a> {
                                     Operator::UnaryOperator(UnaryOperator::IncrementPrefix)
                                 };
 
-                            self.parse_operator(
+                            self.add_operator(
                                 increment_operator,
                                 &mut output_stack,
-                                &mut operand_stack,
+                                &mut operator_stack,
                             )?;
                         }
 
-                        Operator::UnaryOperator(UnaryOperator::DecrementIndicator) => {
+                        Operator::Decrement => {
                             let decrement_operator =
                                 if previous_was_value {
                                     Operator::UnaryOperator(UnaryOperator::DecrementPostfix)
@@ -693,19 +708,49 @@ impl<'a> TokenIter<'a> {
                                     Operator::UnaryOperator(UnaryOperator::DecrementPrefix)
                                 };
 
-                            self.parse_operator(
+                            self.add_operator(
                                 decrement_operator,
                                 &mut output_stack,
-                                &mut operand_stack,
+                                &mut operator_stack,
+                            )?;
+                        }
+
+                        Operator::Plus => {
+                            let plus_operator =
+                                if previous_was_value {
+                                    Operator::BinaryOperator(BinaryOperator::Addition)
+                                } else {
+                                    Operator::UnaryOperator(UnaryOperator::Positive)
+                                };
+
+                            self.add_operator(
+                                plus_operator,
+                                &mut output_stack,
+                                &mut operator_stack,
+                            )?;
+                        }
+
+                        Operator::Minus => {
+                            let minus_operator =
+                                if previous_was_value {
+                                    Operator::BinaryOperator(BinaryOperator::Subtraction)
+                                } else {
+                                    Operator::UnaryOperator(UnaryOperator::Negative)
+                                };
+
+                            self.add_operator(
+                                minus_operator,
+                                &mut output_stack,
+                                &mut operator_stack,
                             )?;
                         }
 
                         _ => {
                             // Rest of the operators that aren't parenthesis or inc/dec.
-                            self.parse_operator(
+                            self.add_operator(
                                 operator,
                                 &mut output_stack,
-                                &mut operand_stack,
+                                &mut operator_stack,
                             )?;
                         }
                     }
@@ -721,27 +766,27 @@ impl<'a> TokenIter<'a> {
             }
         };
 
-        while let Some(operator) = operand_stack.pop() {
+        while let Some(operator) = operator_stack.pop() {
             output_stack.push(Output::Operator(operator));
         }
 
         Ok(self.polish_to_expression(&output_stack)?)
     }
 
-    fn parse_operator(
+    fn add_operator(
         &self,
         operator: Operator,
         output_stack: &mut Vec<Output>,
-        operand_stack: &mut Vec<Operator>,
+        operator_stack: &mut Vec<Operator>,
     ) -> CustomResult<()> {
         let operator_precedence = operator.precedence()
             .ok_or_else(|| ParseError(
                 format!("Unable to see precedence for operator: {:?}", operator)
             ))?;
-        while let Some(popped_operator) = operand_stack.pop() {
+        while let Some(popped_operator) = operator_stack.pop() {
             if let Operator::ParenthesisBegin = popped_operator {
                 // put back the start parenthesis.
-                operand_stack.push(popped_operator);
+                operator_stack.push(popped_operator);
                 break;
             }
 
@@ -766,35 +811,90 @@ impl<'a> TokenIter<'a> {
                 output_stack.push(Output::Operator(popped_operator));
                 continue;
             } else {
-                operand_stack.push(popped_operator);    // Put back
+                operator_stack.push(popped_operator);    // Put back
                 break;
             }
         }
 
-        operand_stack.push(operator);
+        operator_stack.push(operator);
         Ok(())
     }
 
-    // Uses the default stop_condition/"until" function.
-    fn parse_expression(&mut self) -> CustomResult<Expression> {
-        self.parse_expression_until(TokenIter::default_stop_condition)
+    fn parse_expression_until(&mut self, stop_condition: &dyn Fn(&SimpleToken) -> bool) -> CustomResult<Expression> {
+        self.parse_expression_with_previous_until(stop_condition, None)
     }
 
-    fn parse_expression_until(&mut self, stop_condition: fn(&SimpleToken) -> bool) -> CustomResult<Expression> {
-        self.parse_expression_with_previous_until(stop_condition, None)
+    fn parse_expression_until_default(&mut self) -> CustomResult<Expression> {
+        self.parse_expression_until(&TokenIter::default_stop_condition)
+    }
+
+    fn parse_expression_until_colon(&mut self) -> CustomResult<Expression> {
+        self.parse_expression_until(
+            &|stop|
+                if let SimpleToken::Symbol(Symbol::Colon) = stop {
+                    true
+                } else {
+                    false
+                }
+        )
+    }
+
+    fn parse_expression_until_comma_parenthesis_end(&mut self) -> CustomResult<Expression> {
+        self.parse_expression_until(
+            &|stop|
+                match stop {
+                    | SimpleToken::Symbol(Symbol::Comma)
+                    | SimpleToken::Symbol(Symbol::ParenthesisEnd) => true,
+                    _ => false
+                }
+        )
     }
 
     fn parse_expression_with_previous(&mut self, previous_expression: Expression) -> CustomResult<Expression> {
         self.parse_expression_with_previous_until(
-            TokenIter::default_stop_condition,
+            &TokenIter::default_stop_condition,
             Some(previous_expression),
         )
+    }
+
+    fn parse_expression_list_until(
+        &mut self,
+        stop_condition: &dyn Fn(&SimpleToken) -> bool,
+    ) -> CustomResult<Vec<Expression>> {
+        let mut expressions = Vec::new();
+
+        // Parses a list of expressions separated with Commas.
+        // Stops when "stop_condition" is met.
+        loop {
+            let expression = self.parse_expression_until(
+                &|simple_token| {
+                    if let SimpleToken::Symbol(Symbol::Comma) = simple_token {
+                        true
+                    } else if stop_condition(simple_token) {
+                        true
+                    } else {
+                        false
+                    }
+                }
+            )?;
+
+            expressions.push(expression);
+
+            if let Some(SimpleToken::Symbol(Symbol::Comma)) = self.peek() {
+                self.next();    // Remove comma
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        Ok(expressions)
     }
 
     // Returns true if any of these symbols are found:
     //      LineBreak, SemiColon, EndOfFile, Colon or Comma.
     fn default_stop_condition(simple_token: &SimpleToken) -> bool {
-        if Symbol::is_break_symbol(simple_token) {
+        if SimpleToken::is_break_symbol(simple_token) {
             return true;
         }
         match simple_token {
@@ -886,7 +986,7 @@ impl<'a> TokenIter<'a> {
                 }
 
                 // FIXME: Can figure out that it isn't a named argument at the first if-statement
-                //  if it doesn't match a identifier.
+                //  if it doesn't match a identifier, so can clean up code.
                 loop {
                     // Start with the assumption that this is a named argument.
                     // Parse as identifier and peek on the next simple token, that is assumed to be Equals.
@@ -905,13 +1005,15 @@ impl<'a> TokenIter<'a> {
                     // FIXME: Maybe allow line break in front/behind equals sign.
                     if let Some(SimpleToken::Symbol(Symbol::Equals)) = self.peek_skip_whitespace() {
                         self.next_skip_whitespace();    // Remove Equals symbol.
+                        let expr = self.parse_expression_until_comma_parenthesis_end()?;
                         arguments.push(
-                            Argument::new(Some(name), self.parse_expression()?)
+                            Argument::new(Some(name), expr)
                         );
                     } else {
                         self.rewind_skip_whitespace();
+                        let expr = self.parse_expression_until_comma_parenthesis_end()?;
                         arguments.push(
-                            Argument::new(None, self.parse_expression()?)
+                            Argument::new(None, expr)
                         );
                     }
 
@@ -939,9 +1041,6 @@ impl<'a> TokenIter<'a> {
 
     fn parse_block_header(&mut self, block_header: BlockHeader) -> CustomResult<BlockHeader> {
         match block_header {
-            BlockHeader::AssignBlockHeader(_) =>
-                Ok(block_header),
-
             BlockHeader::Function(_) =>
                 self.parse_function_header(),
 
@@ -955,29 +1054,46 @@ impl<'a> TokenIter<'a> {
                 self.parse_interface_header(),
 
             BlockHeader::If(_) =>
-                Ok(BlockHeader::If(Some(self.parse_expression()?))),
+                Ok(BlockHeader::If(Some(self.parse_expression_header()?))),
 
             BlockHeader::Else(_) => {
                 if self.peek_skip_whitespace() == Some(SimpleToken::Symbol(Symbol::Colon)) {
                     Ok(BlockHeader::Else(None))
                 } else {
-                    Ok(BlockHeader::Else(Some(self.parse_expression()?)))
+                    Ok(BlockHeader::Else(Some(self.parse_expression_header()?)))
                 }
             }
 
             BlockHeader::Match(_) =>
-                Ok(BlockHeader::Match(Some(self.parse_expression()?))),
+                Ok(BlockHeader::Match(Some(self.parse_expression_header()?))),
 
             BlockHeader::For(_) => {
                 // TODO: Allow for comma separated list of loops.
-                let expr = self.parse_expression()?;
-                if let Expression::Operation(Operation::BinaryOperation(Some(binary_operation))) = expr {
+                let expr = self.parse_expression_header()?;
+                if let Expression::Operation(Operation::BinaryOperation(Some(binary_operation))) = &expr {
                     if binary_operation.operator == BinaryOperator::In {
-                        return Ok(BlockHeader::For(Some(binary_operation)));
+                        return Ok(BlockHeader::For(Some(binary_operation.clone())));
                     }
                 }
 
-                Err(ParseError("Unable to parse and match \"for\" expression.".to_string()))
+                Err(ParseError(
+                    format!(
+                        "Unable to parse and match \"for\" expression. Expected: In expression, got: {:?}",
+                        expr
+                    )
+                ))
+            }
+
+            BlockHeader::With(_) => {
+                let expressions = self.parse_expression_list_until(
+                    &|simple_token|
+                        if let SimpleToken::Symbol(Symbol::Colon) = simple_token {
+                            true
+                        } else {
+                            false
+                        }
+                )?;
+                Ok(BlockHeader::With(Some(expressions)))
             }
 
             _ => Err(ParseError(
@@ -1017,16 +1133,7 @@ impl<'a> TokenIter<'a> {
                     // TODO: parse_expression breaks at end of parenthesis.
                     //  Fix so that parenthesis is allowed inside the expressions.
                     self.next_skip_whitespace();    // Remove Equals symbol.
-                    let expression = self.parse_expression_until(
-                        |simple_token| {
-                            match simple_token {
-                                | SimpleToken::Symbol(Symbol::Comma)
-                                | SimpleToken::Symbol(Symbol::ParenthesisEnd) => true,
-                                _ => false
-                            }
-                        }
-                    )?;
-                    self.next_skip_whitespace();    // Remove Comma or ParenthesisEnd.
+                    let expression = self.parse_expression_until_comma_parenthesis_end()?;
 
                     current_parameter.value = Some(Box::new(expression));
                 }
@@ -1046,7 +1153,6 @@ impl<'a> TokenIter<'a> {
                              when expecting next parameter item.".to_string()
                     ));
                 }
-
             }
 
             // Parse return type if specified, else it will be set to None(void).
@@ -1109,5 +1215,11 @@ impl<'a> TokenIter<'a> {
         Ok(BlockHeader::Interface(Some(
             Interface::new(interface_name, generics)
         )))
+    }
+
+    fn parse_expression_header(&mut self) -> CustomResult<Expression> {
+        let expression = self.parse_expression_until_colon()?;
+        self.assert_block_header_end()?;
+        Ok(expression)
     }
 }

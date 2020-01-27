@@ -1,5 +1,5 @@
 use crate::parser::token::Modifier::{Static, Private, Public};
-use crate::lexer::simple_token::{SimpleToken, Symbol};
+use crate::lexer::simple_token::Symbol;
 
 #[derive(Debug, Clone)]
 pub enum Token {
@@ -80,6 +80,9 @@ pub enum BlockHeader {
     While(Option<Expression>),
     Loop,
 
+    // AutoClosable
+    With(Option<Vec<Expression>>),
+
     // Example:
     //      catch e: EOFException:
     // or
@@ -88,19 +91,6 @@ pub enum BlockHeader {
 
     // TODO: (?)
     Test(Option<Function>),
-
-    // Headers that isn't "real blocks". Only does declaration/assignment and doesn't end with ":".
-    // (var, let, set)
-    AssignBlockHeader(AssignBlockHeader),
-}
-
-#[derive(Debug, Clone)]
-pub enum AssignBlockHeader {
-    // BinaryOperation == Assignment
-    // Var can be either assignment or declaration.
-    Var,
-    Let,
-    Set,
 }
 
 #[derive(Debug, Clone)]
@@ -126,8 +116,16 @@ pub enum Output {
 pub enum Operator {
     BinaryOperator(BinaryOperator),
     UnaryOperator(UnaryOperator),
+
+    // Special operators that needs extra logic.
+    // Need to figure out if inc/dec is pre- or post fix.
+    // Need to figure out if plus/minus is Addition/Subtraction(binary) or Positive/Minus(unary).
     ParenthesisBegin,
     ParenthesisEnd,
+    Increment,
+    Decrement,
+    Plus,
+    Minus,
 }
 
 // (evaluate_left_to_right, precedence)
@@ -141,122 +139,130 @@ impl Operator {
 
     /*
         Precedence:
-            1   x++ x--
-            2   ++x --x ~ !
-            3   . (function calls etc.)
-            4   as
-            5   ** (power)
-            6   * / %
-            7   + -
-            8   << >>
-            9   < > <= >= is of
-            10  == !=
-            11  &
-            12  ^
-            13  |
-            14  and (bool)
-            15  or (bool)
-            16  ..
-            17  in
-            18  = += -? *= /= %= **= &= |= ^= <<= >>=
+            1   +x -x
+            2   x++ x--
+            3   ++x --x ~ !
+            4   . (function calls etc.)
+            5   as
+            6   ** (power)
+            7   * / %
+            8   + -
+            9   << >>
+            10   < > <= >= is of
+            11  == !=
+            12  &
+            13  ^
+            14  |
+            15  and (bool)
+            16  or (bool)
+            17  .. ..=
+            18  in
+            19  = += -? *= /= %= **= &= |= ^= <<= >>=
     */
     fn lookup(&self) -> Option<(bool, usize)> {
         Some(
             match *self {
                 Operator::UnaryOperator(UnaryOperator::IncrementPrefix) =>
-                    (true, 2),
+                    (true, 3),
                 Operator::UnaryOperator(UnaryOperator::IncrementPostfix) =>
-                    (true, 1),
-                Operator::UnaryOperator(UnaryOperator::DecrementPrefix) =>
                     (true, 2),
+                Operator::UnaryOperator(UnaryOperator::DecrementPrefix) =>
+                    (true, 3),
                 Operator::UnaryOperator(UnaryOperator::DecrementPostfix) =>
+                    (true, 2),
+
+                Operator::UnaryOperator(UnaryOperator::Positive) =>
+                    (true, 1),
+                Operator::UnaryOperator(UnaryOperator::Negative) =>
                     (true, 1),
 
                 Operator::UnaryOperator(UnaryOperator::BitCompliment) =>
-                    (true, 2),
+                    (true, 3),
                 Operator::UnaryOperator(UnaryOperator::BoolNot) =>
-                    (true, 2),
-
-                Operator::BinaryOperator(BinaryOperator::Assignment) =>
-                    (false, 18),
-                Operator::BinaryOperator(BinaryOperator::In) =>
-                    (false, 17),
-                Operator::BinaryOperator(BinaryOperator::Is) =>
-                    (true, 9),
-                Operator::BinaryOperator(BinaryOperator::As) =>
-                    (true, 4),
-                Operator::BinaryOperator(BinaryOperator::Of) =>
-                    (true, 9),
-                Operator::BinaryOperator(BinaryOperator::Range) =>
-                    (true, 16),
-                Operator::BinaryOperator(BinaryOperator::Dot) =>
                     (true, 3),
 
+                Operator::BinaryOperator(BinaryOperator::Assignment) =>
+                    (false, 19),
+                Operator::BinaryOperator(BinaryOperator::In) =>
+                    (false, 18),
+                Operator::BinaryOperator(BinaryOperator::Is) =>
+                    (true, 10),
+                Operator::BinaryOperator(BinaryOperator::As) =>
+                    (true, 5),
+                Operator::BinaryOperator(BinaryOperator::Of) =>
+                    (true, 10),
+                Operator::BinaryOperator(BinaryOperator::Range) =>
+                    (true, 17),
+                Operator::BinaryOperator(BinaryOperator::RangeInclusive) =>
+                    (true, 17),
+                Operator::BinaryOperator(BinaryOperator::Dot) =>
+                    (true, 4),
+
                 Operator::BinaryOperator(BinaryOperator::Equals) =>
-                    (true, 10),
+                    (true, 11),
                 Operator::BinaryOperator(BinaryOperator::NotEquals) =>
-                    (true, 10),
+                    (true, 11),
                 Operator::BinaryOperator(BinaryOperator::LessThan) =>
-                    (true, 9),
+                    (true, 10),
                 Operator::BinaryOperator(BinaryOperator::GreaterThan) =>
-                    (true, 9),
+                    (true, 10),
                 Operator::BinaryOperator(BinaryOperator::LessThanOrEquals) =>
-                    (true, 9),
+                    (true, 10),
                 Operator::BinaryOperator(BinaryOperator::GreaterThanOrEquals) =>
-                    (true, 9),
+                    (true, 10),
 
                 Operator::BinaryOperator(BinaryOperator::Addition) =>
-                    (true, 7),
+                    (true, 8),
                 Operator::BinaryOperator(BinaryOperator::Subtraction) =>
-                    (true, 7),
+                    (true, 8),
                 Operator::BinaryOperator(BinaryOperator::Multiplication) =>
-                    (true, 6),
+                    (true, 7),
                 Operator::BinaryOperator(BinaryOperator::Division) =>
-                    (true, 6),
+                    (true, 7),
                 Operator::BinaryOperator(BinaryOperator::Modulus) =>
-                    (true, 6),
+                    (true, 7),
                 Operator::BinaryOperator(BinaryOperator::Power) =>
-                    (false, 5),
+                    (false, 6),
 
                 Operator::BinaryOperator(BinaryOperator::BitAnd) =>
-                    (true, 11),
-                Operator::BinaryOperator(BinaryOperator::BitOr) =>
-                    (true, 13),
-                Operator::BinaryOperator(BinaryOperator::BitXor) =>
                     (true, 12),
+                Operator::BinaryOperator(BinaryOperator::BitOr) =>
+                    (true, 14),
+                Operator::BinaryOperator(BinaryOperator::BitXor) =>
+                    (true, 13),
                 Operator::BinaryOperator(BinaryOperator::ShiftLeft) =>
-                    (true, 8),
+                    (true, 9),
                 Operator::BinaryOperator(BinaryOperator::ShiftRight) =>
-                    (true, 8),
+                    (true, 9),
 
                 Operator::BinaryOperator(BinaryOperator::BoolAnd) =>
-                    (true, 14),
-                Operator::BinaryOperator(BinaryOperator::BoolOr) =>
                     (true, 15),
+                Operator::BinaryOperator(BinaryOperator::BoolOr) =>
+                    (true, 16),
 
                 Operator::BinaryOperator(BinaryOperator::AssignAddition) =>
-                    (false, 18),
+                    (false, 19),
                 Operator::BinaryOperator(BinaryOperator::AssignSubtraction) =>
-                    (false, 18),
+                    (false, 19),
                 Operator::BinaryOperator(BinaryOperator::AssignMultiplication) =>
-                    (false, 18),
+                    (false, 19),
                 Operator::BinaryOperator(BinaryOperator::AssignDivision) =>
-                    (false, 18),
+                    (false, 19),
                 Operator::BinaryOperator(BinaryOperator::AssignModulus) =>
-                    (false, 18),
+                    (false, 19),
                 Operator::BinaryOperator(BinaryOperator::AssignPower) =>
-                    (false, 18),
+                    (false, 19),
 
                 Operator::BinaryOperator(BinaryOperator::AssignBitAnd) =>
-                    (false, 18),
+                    (false, 19),
                 Operator::BinaryOperator(BinaryOperator::AssignBitOr) =>
-                    (false, 18),
+                    (false, 19),
                 Operator::BinaryOperator(BinaryOperator::AssignBitXor) =>
-                    (false, 18),
+                    (false, 19),
                 Operator::BinaryOperator(BinaryOperator::AssignShiftLeft) =>
-                    (false, 18),
+                    (false, 19),
                 Operator::BinaryOperator(BinaryOperator::AssignShiftRight) =>
-                    (false, 18),
+                    (false, 19),
 
                 _ => return None
             }
@@ -285,6 +291,7 @@ pub enum BinaryOperator {
     As,
     Of,
     Range,
+    RangeInclusive,
 
     // TODO: Make left-hand-side a pattern.
     /* Example of MatchCase where ("a": ; do_something()) is a MatchCase.
@@ -349,16 +356,16 @@ pub enum BinaryOperator {
 
 #[derive(Debug, Clone)]
 pub enum UnaryOperator {
-    // Used to indicate that this is a increment or decrement operator.
-    // Some extra logic needs to be run to figure put if it is pre- or postfix.
-    IncrementIndicator,
-    DecrementIndicator,
-
     /* NUMBERS */
     IncrementPrefix,
     IncrementPostfix,
     DecrementPrefix,
     DecrementPostfix,
+
+    // ex: (+a + -b)  =>  { Positive(a) + Negative(b) }
+    Positive,
+    Negative,
+
     /* NUMBERS (BIT) */
     BitCompliment,
 
@@ -534,6 +541,14 @@ impl Token {
                     Operator::ParenthesisBegin,
                 Symbol::ParenthesisEnd =>
                     Operator::ParenthesisEnd,
+                Symbol::Increment =>
+                    Operator::Increment,
+                Symbol::Decrement =>
+                    Operator::Decrement,
+                Symbol::Plus =>
+                    Operator::Plus,
+                Symbol::Minus =>
+                    Operator::Minus,
                 /*
                 Symbol::SquareBracketBegin,
                 Symbol::SquareBracketEnd,
@@ -560,29 +575,26 @@ impl Token {
                 //Symbol::LineBreak,
                 //Symbol::WhiteSpace(usize),
 
-                // Pipe: |>  Range: ..  Arrow: ->
                 //Symbol::Pipe,
                 Symbol::Range =>
                     Operator::BinaryOperator(BinaryOperator::Range),
+                Symbol::RangeInclusive =>
+                    Operator::BinaryOperator(BinaryOperator::RangeInclusive),
                 //Symbol::Arrow,
 
                 Symbol::EqualsOperator =>
                     Operator::BinaryOperator(BinaryOperator::Equals),
                 Symbol::NotEquals =>
                     Operator::BinaryOperator(BinaryOperator::NotEquals),
-                Symbol::LessThan =>
+                Symbol::SquareBracketBegin =>
                     Operator::BinaryOperator(BinaryOperator::LessThan),
-                Symbol::GreaterThan =>
+                Symbol::SquareBracketEnd =>
                     Operator::BinaryOperator(BinaryOperator::GreaterThan),
                 Symbol::LessThanOrEquals =>
                     Operator::BinaryOperator(BinaryOperator::LessThanOrEquals),
                 Symbol::GreaterThanOrEquals =>
                     Operator::BinaryOperator(BinaryOperator::GreaterThanOrEquals),
 
-                Symbol::Addition =>
-                    Operator::BinaryOperator(BinaryOperator::Addition),
-                Symbol::Subtraction =>
-                    Operator::BinaryOperator(BinaryOperator::Subtraction),
                 Symbol::Multiplication =>
                     Operator::BinaryOperator(BinaryOperator::Multiplication),
                 Symbol::Division =>
@@ -605,13 +617,6 @@ impl Token {
                 Symbol::BitCompliment =>
                     Operator::UnaryOperator(UnaryOperator::BitCompliment),
 
-                // Special case
-                // The caller needs to run some extra logic to figure out if is is pre- or postfix.
-                Symbol::Increment =>
-                    Operator::UnaryOperator(UnaryOperator::IncrementIndicator),
-                Symbol::Decrement =>
-                    Operator::UnaryOperator(UnaryOperator::DecrementIndicator),
-
                 /*
                 Symbol::CommentSingleLine),
                 Symbol::CommentMultiLineBegin),
@@ -624,6 +629,30 @@ impl Token {
                     Operator::BinaryOperator(BinaryOperator::BoolAnd),
                 Symbol::BoolOr =>
                     Operator::BinaryOperator(BinaryOperator::BoolOr),
+
+                Symbol::AssignAddition =>
+                    Operator::BinaryOperator(BinaryOperator::AssignAddition),
+                Symbol::AssignSubtraction =>
+                    Operator::BinaryOperator(BinaryOperator::AssignSubtraction),
+                Symbol::AssignMultiplication =>
+                    Operator::BinaryOperator(BinaryOperator::AssignMultiplication),
+                Symbol::AssignDivision =>
+                    Operator::BinaryOperator(BinaryOperator::AssignDivision),
+                Symbol::AssignModulus =>
+                    Operator::BinaryOperator(BinaryOperator::AssignModulus),
+                Symbol::AssignPower =>
+                    Operator::BinaryOperator(BinaryOperator::AssignPower),
+
+                Symbol::AssignBitAnd =>
+                    Operator::BinaryOperator(BinaryOperator::AssignBitAnd),
+                Symbol::AssignBitOr =>
+                    Operator::BinaryOperator(BinaryOperator::AssignBitOr),
+                Symbol::AssignBitXor =>
+                    Operator::BinaryOperator(BinaryOperator::AssignBitXor),
+                Symbol::AssignShiftLeft =>
+                    Operator::BinaryOperator(BinaryOperator::AssignShiftLeft),
+                Symbol::AssignShiftRight =>
+                    Operator::BinaryOperator(BinaryOperator::AssignShiftRight),
 
                 Symbol::In =>
                     Operator::BinaryOperator(BinaryOperator::In),
@@ -656,10 +685,6 @@ impl Token {
                 "private" => Token::ret_statement(Statement::Modifier(Private)),
                 "public" => Token::ret_statement(Statement::Modifier(Public)),
 
-                "var" => Token::ret_assign_block_header(AssignBlockHeader::Var),
-                "let" => Token::ret_assign_block_header(AssignBlockHeader::Let),
-                "set" => Token::ret_assign_block_header(AssignBlockHeader::Set),
-
                 "function" => Token::ret_block_header(BlockHeader::Function(None)),
                 "class" => Token::ret_block_header(BlockHeader::Class(None)),
                 "enum" => Token::ret_block_header(BlockHeader::Enum(None)),
@@ -679,8 +704,9 @@ impl Token {
                 "while" => Token::ret_block_header(BlockHeader::While(None)),
                 "loop" => Token::ret_block_header(BlockHeader::Loop),
 
+                "with" => Token::ret_block_header(BlockHeader::With(None)),
                 "catch" => Token::ret_block_header(BlockHeader::Catch(None)),
-                // TODO: test
+                "test" => Token::ret_block_header(BlockHeader::Test(None)),
 
                 _ => return None
             }
@@ -689,10 +715,6 @@ impl Token {
 
     fn ret_statement(statement: Statement) -> Token {
         Token::Statement(statement)
-    }
-
-    fn ret_assign_block_header(assign_block_header: AssignBlockHeader) -> Token {
-        Token::BlockHeader(BlockHeader::AssignBlockHeader(assign_block_header))
     }
 
     fn ret_block_header(block_header: BlockHeader) -> Token {
