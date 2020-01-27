@@ -45,7 +45,6 @@ impl<'a> TokenIter<'a> {
         }
     }
 
-    // FIXME: Possibility for out of bounds.
     #[inline]
     fn next(&mut self) -> Option<SimpleToken> {
         let result = self.simple_tokens.get(self.position).cloned();
@@ -55,12 +54,8 @@ impl<'a> TokenIter<'a> {
 
     #[inline]
     fn next_skip_whitespace(&mut self) -> Option<SimpleToken> {
-        let result = self.next();
-        if let Some(SimpleToken::Symbol(Symbol::WhiteSpace(_))) = result {
-            self.next()
-        } else {
-            result
-        }
+        self.skip_whitespace();
+        self.next()
     }
 
     #[inline]
@@ -70,7 +65,16 @@ impl<'a> TokenIter<'a> {
     }
 
     #[inline]
+    fn skip_whitespace(&mut self) {
+        if let Some(SimpleToken::Symbol(Symbol::WhiteSpace(_))) = self.peek() {
+            self.next();    // Remove whitespace.
+        }
+    }
+
+    #[inline]
     fn skip_whitespace_and_line_break(&mut self, update_indent: bool) -> CustomResult<()> {
+        // Need to do it in a loop if there are multiple whitespace/linebreaks in a row:
+        //      whitespace|linebreak|whitespace|linebreak...
         loop {
             let result = self.next();
             match result {
@@ -94,38 +98,36 @@ impl<'a> TokenIter<'a> {
     }
 
     #[inline]
-    fn peek_n(&mut self, n: usize) -> Option<SimpleToken> {
-        self.simple_tokens.get(self.position + n).cloned()
+    fn peek_n(&mut self, n: isize) -> Option<SimpleToken> {
+        // n is isize to allow for negative peeks.
+        let index = self.position as isize + n;
+        if index < 0 {
+            return None;
+        }
+        self.simple_tokens.get(index as usize).cloned()
     }
 
     #[inline]
     fn peek_skip_whitespace(&mut self) -> Option<SimpleToken> {
-        let result = self.peek();
-        if let Some(SimpleToken::Symbol(Symbol::WhiteSpace(_))) = result {
-            self.peek_n(1)
-        } else {
-            result
-        }
+        self.skip_whitespace();
+        self.peek()
     }
 
     #[inline]
-    fn peek_skip_whitespace_and_line_break(&mut self, update_indent: bool) -> CustomResult<SimpleToken> {
+    fn peek_skip_whitespace_and_line_break(&mut self) -> CustomResult<SimpleToken> {
         let mut peek_amount = 0;
         loop {
             let result = self.peek_n(peek_amount)
                 .ok_or_else(|| ParseError("".to_string()))?;
             match result {
-                SimpleToken::Symbol(Symbol::WhiteSpace(_)) => {
+                | SimpleToken::Symbol(Symbol::WhiteSpace(_))
+                | SimpleToken::Symbol(Symbol::LineBreak) => {
                     peek_amount += 1;
                     continue;
                 }
 
-                SimpleToken::Symbol(Symbol::LineBreak) => {
-                    peek_amount += 1;
-                    continue;
-                }
-
-                _ => return Ok(result)
+                _ =>
+                    return Ok(result)
             }
         }
     }
@@ -155,12 +157,22 @@ impl<'a> TokenIter<'a> {
         }
     }
 
-    // Should be called after a LineBreak have been consumed.
+    // Can be called after a LineBreak have been consumed or right at the LineBreak.
     // Ensures that the new indent is valid and increases line_number by 1.
     // The "update_indent" arg is used to indicate if the indentation should be updated or not.
     // Examples when it should be set to false is LineBreaks before and after Commas.
     fn update_indent_and_line_number(&mut self, update_indent: bool) -> CustomResult<()> {
         if update_indent {
+            if let Some(SimpleToken::Symbol(Symbol::LineBreak)) = self.peek() {
+                self.next();    // Consume Linebreak.
+            } else if let Some(SimpleToken::Symbol(Symbol::LineBreak)) = self.peek_n(-1) {
+                // Everything alright, move along.
+            } else {
+                return Err(ParseError(
+                    "Called update_indent_and_line_number with no line break in sight.".to_string()
+                ));
+            }
+
             let indent = self.next_whitespace();
 
             // Edge case if the row is empty, ignore indents.
@@ -365,7 +377,7 @@ impl<'a> TokenIter<'a> {
             self.skip_whitespace_and_line_break(false)?;
             types.push(self.next_type()?);
 
-            let current = self.peek_skip_whitespace_and_line_break(false)?;
+            let current = self.peek_skip_whitespace_and_line_break()?;
             if let SimpleToken::Symbol(Symbol::Comma) = current {
                 self.next_skip_whitespace_and_line_break(false)?;    // Remove Comma symbol.
                 continue;
@@ -979,7 +991,7 @@ impl<'a> TokenIter<'a> {
             Some(SimpleToken::Symbol(Symbol::ParenthesisBegin)) => {
 
                 // Edge case if the call has no arguments.
-                let peek = self.peek_skip_whitespace_and_line_break(false)?;
+                let peek = self.peek_skip_whitespace_and_line_break()?;
                 if let SimpleToken::Symbol(Symbol::ParenthesisEnd) = peek {
                     self.next_skip_whitespace_and_line_break(false)?; // Remove end parenthesis.
                     return Ok(FunctionCall::new(function_name.to_string(), arguments));
@@ -1119,7 +1131,7 @@ impl<'a> TokenIter<'a> {
             loop {
 
                 // Edge case if the function has no arguments.
-                let peek = self.peek_skip_whitespace_and_line_break(false)?;
+                let peek = self.peek_skip_whitespace_and_line_break()?;
                 if let SimpleToken::Symbol(Symbol::ParenthesisEnd) = peek {
                     self.next_skip_whitespace_and_line_break(false)?; // Remove end parenthesis.
                     break;
