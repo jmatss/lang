@@ -14,8 +14,8 @@ type RCToken = Rc<RefCell<ASTToken>>;
 #[derive(Debug)]
 pub struct AST {
     pub blocks: Vec<RCToken>,
-    // current_block == current_parent
-    pub current_block: Index,
+    // current_parent == "current_block"
+    pub current_parent: Index,
 }
 
 impl AST {
@@ -33,12 +33,12 @@ impl AST {
                 ASTToken::new_block(token, parent, line_number, indent_level, index)
             )
         );
-        AST { blocks: vec![Rc::clone(&root_block)], current_block: index }
+        AST { blocks: vec![Rc::clone(&root_block)], current_parent: index }
     }
 
     pub fn insert_block(&mut self, token: Token, line_number: usize, indent_level: usize) -> CustomResult<()> {
         let index = self.blocks.len();
-        let parent_index = self.current_block;
+        let parent_index = self.current_parent;
         let parent = self.blocks[parent_index].borrow();
 
         // Special case if this is the first "real" block added.
@@ -71,24 +71,27 @@ impl AST {
             )
         );
         self.blocks.push(Rc::clone(&block));
-        self.current_block = index;
+        self.current_parent = index;
 
         self.blocks[parent_index].borrow_mut().add_child(block)?;
         Ok(())
     }
 
     pub fn insert_token(&mut self, token: Token, line_number: usize, indent_level: usize) -> CustomResult<()> {
-        // "parent" might be equals to "old_parent".
-        let old_parent = self.current_block;
-        let parent = self.find_correct_parent(indent_level, old_parent);
+        let old_parent = self.current_parent;
+        let new_parent = self.find_correct_parent(indent_level, old_parent);
+
+        if new_parent != old_parent {
+            self.current_parent = new_parent;
+        }
 
         let token = Rc::new(
             RefCell::new(
-                ASTToken::new(token, parent, line_number, indent_level)
+                ASTToken::new(token, new_parent, line_number, indent_level)
             )
         );
 
-        self.blocks[parent].borrow_mut().add_child(token)?;
+        self.blocks[new_parent].borrow_mut().add_child(token)?;
         Ok(())
     }
 
@@ -109,7 +112,7 @@ impl AST {
             let steps = current_parent_indent_level - new_parent_indent_level;
 
             for _ in 0..steps {
-                parent_index = self.blocks[parent_index].borrow_mut().parent;
+                parent_index = self.blocks[parent_index].borrow().parent;
             }
         }
 
