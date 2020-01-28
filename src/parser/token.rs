@@ -41,6 +41,7 @@ pub enum Expression {
     Variable(Option<Variable>),
     ArrayAccess(Option<ArrayAccess>),
     FunctionCall(Option<FunctionCall>),
+    MacroCall(Option<MacroCall>),
 
     Operation(Operation),
 }
@@ -475,6 +476,18 @@ pub struct FunctionCall {
 impl FunctionCall {
     pub fn new(name: String, arguments: Vec<Argument>) -> Self {
         FunctionCall { name, arguments }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MacroCall {
+    pub name: String,
+    pub arguments: Vec<Argument>,
+}
+
+impl MacroCall {
+    pub fn new(name: String, arguments: Vec<Argument>) -> Self {
+        MacroCall { name, arguments }
     }
 }
 
