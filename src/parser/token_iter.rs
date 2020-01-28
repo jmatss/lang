@@ -1,7 +1,7 @@
 use crate::error::CustomError::ParseError;
 use crate::lexer::simple_token::{SimpleToken, Symbol, Literal as SimpleLiteral};
 use crate::CustomResult;
-use crate::parser::token::{Token, Statement, BlockHeader, Expression, FunctionCall, Variable, Type, Function, BinaryOperation, BinaryOperator, Class, Interface, Enum, Argument, Literal, Operator, Operation, ArrayAccess, Path, Output, UnaryOperation, UnaryOperator, Macro, MacroCall};
+use crate::parser::token::{Token, Statement, BlockHeader, Expression, FunctionCall, Variable, Type, Function, BinaryOperation, BinaryOperator, Class, Interface, Enum, Argument, Literal, Operator, Operation, ArrayAccess, Path, Output, UnaryOperation, UnaryOperator, Macro, MacroCall, GenericHeader, Constructor};
 use crate::error::CustomError;
 use crate::parser::abstract_syntax_tree::AST;
 
@@ -1070,6 +1070,72 @@ impl<'a> TokenIter<'a> {
         Ok(arguments)
     }
 
+    fn parse_parameter_list(
+        &mut self,
+        begin_symbol: Symbol,
+        end_symbol: Symbol,
+    ) -> CustomResult<Vec<Variable>> {
+        let mut parameters = Vec::new();
+
+        let current = self.next_skip_whitespace_and_line_break(false)?;
+        match current {
+            Some(SimpleToken::Symbol(ref symbol)) if symbol == &begin_symbol => {
+
+                // Edge case if there are no parameters
+                let peek = self.peek_skip_whitespace_and_line_break()?;
+                match peek {
+                    SimpleToken::Symbol(ref symbol) if symbol == &end_symbol => {
+                        self.next_skip_whitespace_and_line_break(false)?; // Remove end symbol.
+                        return Ok(parameters);
+                    }
+                    _ => (),
+                }
+
+                // Loop through the parameters and parse one at a time until the end parenthesis.
+                loop {
+                    self.skip_whitespace_and_line_break(false)?;
+                    let mut current_parameter = self.parse_variable()?;
+
+                    // If true: this parameter has a default value set.
+                    if let Some(SimpleToken::Symbol(Symbol::Equals)) = self.peek_skip_whitespace() {
+                        // TODO: parse_expression breaks at end of parenthesis.
+                        //  Fix so that parenthesis is allowed inside the expressions.
+                        self.next_skip_whitespace();    // Remove Equals symbol.
+                        let expression = self.parse_expression(
+                            stop_on!(Symbol::Comma, Symbol::ParenthesisEnd)
+                        )?;
+
+                        current_parameter.value = Some(Box::new(expression));
+                    }
+
+                    parameters.push(current_parameter);
+
+                    let next = self.next_skip_whitespace_and_line_break(false)?;
+                    match next {
+                        Some(SimpleToken::Symbol(Symbol::Comma)) =>
+                            continue,
+                        Some(SimpleToken::Symbol(ref symbol)) if symbol == &end_symbol =>
+                            break,
+                        _ =>
+                            return Err(ParseError(
+                                format!("Received invalid symbol during parse_parameter_list: {:?}", next)
+                            ))
+                    }
+                }
+            }
+
+            _ => return Err(ParseError(
+                format!(
+                    "Expected begin_symbol at start of parse_parameter_list. Expected: {:?}, got: {:?}",
+                    begin_symbol,
+                    current
+                )
+            ))
+        }
+
+        Ok(parameters)
+    }
+
     fn parse_macro_call(&mut self, macro_name: &str) -> CustomResult<MacroCall> {
         let arguments = self.parse_argument_list(
             Symbol::CurlyBracketBegin,
@@ -1102,6 +1168,12 @@ impl<'a> TokenIter<'a> {
 
             BlockHeader::Macro(_) =>
                 self.parse_macro_header(),
+
+            BlockHeader::Constructor(_) =>
+                self.parse_constructor_header(),
+
+            BlockHeader::Destructor(_) =>
+                self.parse_destructor_header(),
 
             BlockHeader::If(_) =>
                 Ok(BlockHeader::If(Some(self.parse_expression_header()?))),
@@ -1145,80 +1217,46 @@ impl<'a> TokenIter<'a> {
         }
     }
 
-    // Allows linebreak:
-    //      before and after ParenthesisBegin
-    //      before and after Comma
-    //      before and after ParenthesisEnd
-    fn parse_function_header(&mut self) -> CustomResult<BlockHeader> {
-        let function_name = self.next_identifier()?;
-        let generics = self.next_generic_list()?;
-        let mut parameters = Vec::new();
-        let return_type;
+    // Parses a header in this order:
+    //      name -> generic list -> arguments -> return type -> :
+    // If one of the types isn't found, it tries to parse the next in the order.
+    // The only mandatory thing is the ending Colon
+    fn parse_generic_header(&mut self) -> CustomResult<GenericHeader> {
+        let mut generic_header = GenericHeader::new();
 
-        let next = self.next_skip_whitespace_and_line_break(false)?;
-        if let Some(SimpleToken::Symbol(Symbol::ParenthesisBegin)) = next {
-
-            // Loop through the parameters and parse one at a time until the end parenthesis.
-            loop {
-
-                // Edge case if the function has no arguments.
-                let peek = self.peek_skip_whitespace_and_line_break()?;
-                if let SimpleToken::Symbol(Symbol::ParenthesisEnd) = peek {
-                    self.next_skip_whitespace_and_line_break(false)?; // Remove end parenthesis.
-                    break;
-                }
-
-                self.skip_whitespace_and_line_break(false)?;
-                let mut current_parameter = self.parse_variable()?;
-
-                // If true: this parameter has a default value set.
-                if let Some(SimpleToken::Symbol(Symbol::Equals)) = self.peek_skip_whitespace() {
-                    // TODO: parse_expression breaks at end of parenthesis.
-                    //  Fix so that parenthesis is allowed inside the expressions.
-                    self.next_skip_whitespace();    // Remove Equals symbol.
-                    let expression = self.parse_expression(
-                        stop_on!(Symbol::Comma, Symbol::ParenthesisEnd)
-                    )?;
-
-                    current_parameter.value = Some(Box::new(expression));
-                }
-
-                parameters.push(current_parameter);
-
-                // Removes the "current" token, either the Comma or the ParenthesisEnd.
-                let current = self.next_skip_whitespace();
-                if let Some(SimpleToken::Symbol(Symbol::Comma)) = current {
-                    continue;
-                } else if let Some(SimpleToken::Symbol(Symbol::ParenthesisEnd)) = current {
-                    // The whole "parameter list" have been parsed, break.
-                    break;
-                } else {
-                    return Err(ParseError(
-                        "Didn't parse either a Comma or ParenthesisEnd \
-                             when expecting next parameter item.".to_string()
-                    ));
-                }
-            }
-
-            // Parse return type if specified, else it will be set to None(void).
-            return_type =
-                if let Some(SimpleToken::Symbol(Symbol::At)) = self.peek_skip_whitespace() {
-                    self.next_skip_whitespace();    // Remove At symbol.
-                    self.next_type()?
-                } else {
-                    Type::new(None, Vec::new())
-                };
-
-            self.assert_block_header_end()?;
-
-            Ok(BlockHeader::Function(Some(
-                Function::new(function_name, generics, parameters, return_type)
-            )))
-        } else {
-            Err(ParseError(
-                "Expected ParenthesisBegin when parsing next_function_header.".to_string()
-            ))
+        if let Some(SimpleToken::Identifier(identifier)) = self.peek_skip_whitespace() {
+            generic_header.name = Some(self.next_identifier()?);
         }
+
+        let generics = self.next_generic_list()?;
+        if !generics.is_empty() {
+            generic_header.generics = Some(generics);
+        }
+
+        let mut parameters = Vec::new();
+        let peek = self.peek_skip_whitespace_and_line_break()?;
+        if let Some(SimpleToken::Symbol(Symbol::ParenthesisBegin)) = peek {
+            parameters = self.parse_parameter_list(
+                Symbol::ParenthesisBegin,
+                Symbol::ParenthesisEnd,
+            )?;
+        }
+        if !parameters.is_empty() {
+            generic_header.parameters = Some(parameters);
+        }
+
+        let return_type =
+            if let Some(SimpleToken::Symbol(Symbol::At)) = self.peek_skip_whitespace() {
+                self.next_skip_whitespace();    // Remove At symbol.
+                Some(self.next_type()?)
+            } else {
+                None
+            };
+        generic_header.return_type = return_type;
+
+        self.assert_block_header_end()?;
+
+        Ok(generic_header)
     }
 
     fn parse_class_header(&mut self) -> CustomResult<BlockHeader> {
@@ -1240,48 +1278,94 @@ impl<'a> TokenIter<'a> {
         )))
     }
 
+    fn parse_function_header(&mut self) -> CustomResult<BlockHeader> {
+        let generic_header = self.parse_generic_header()?;
+
+        let name = generic_header.name
+            .ok_or_else(|| ParseError("Function has no name specified.".to_string()))?;
+        let generics =
+            if let Some(generics) = generic_header.generics {
+                generics
+            } else {
+                Vec::new()
+            };
+        let parameters = generic_header.parameters
+            .ok_or_else(|| ParseError("Function has no parameters specified.".to_string()))?;
+        let return_type =
+            if let Some(t) = generic_header.return_type {
+                t
+            } else {
+                Type::new(None, Vec::new())
+            };
+
+        let function_header = Function::new(name, generics, parameters, return_type);
+        Ok(BlockHeader::Function(Some(function_header)))
+    }
+
     fn parse_enum_header(&mut self) -> CustomResult<BlockHeader> {
-        let interface_name = self.next_identifier()?;
-        let generics = self.next_generic_list()?;
+        let generic_header = self.parse_generic_header()?;
 
-        self.assert_block_header_end()?;
+        let name = generic_header.name
+            .ok_or_else(|| ParseError("Enum has no name specified.".to_string()))?;
+        let generics =
+            if let Some(generics) = generic_header.generics {
+                generics
+            } else {
+                Vec::new()
+            };
 
-        Ok(BlockHeader::Enum(Some(
-            Enum::new(interface_name, generics)
-        )))
+        let enum_header = Enum::new(name, generics);
+        Ok(BlockHeader::Enum(Some(enum_header)))
     }
 
     fn parse_interface_header(&mut self) -> CustomResult<BlockHeader> {
-        let interface_name = self.next_identifier()?;
-        let generics = self.next_generic_list()?;
+        let generic_header = self.parse_generic_header()?;
 
-        self.assert_block_header_end()?;
+        let name = generic_header.name
+            .ok_or_else(|| ParseError("Interface has no name specified.".to_string()))?;
+        let generics =
+            if let Some(generics) = generic_header.generics {
+                generics
+            } else {
+                Vec::new()
+            };
 
-        Ok(BlockHeader::Interface(Some(
-            Interface::new(interface_name, generics)
-        )))
+        let interface_header = Interface::new(name, generics);
+        Ok(BlockHeader::Interface(Some(interface_header)))
     }
 
     fn parse_macro_header(&mut self) -> CustomResult<BlockHeader> {
-        // Parse macros as functions since they are so similar.
-        // The only difference is that macros can't have return types, so need to check that.
-        if let BlockHeader::Function(Some(function)) = self.parse_function_header()? {
-            if function.return_type.t.is_none() {
-                let macro_name = function.name;
-                let parameters = function.parameters;
-                let generics = function.generics;
+        let generic_header = self.parse_generic_header()?;
 
-                Ok(BlockHeader::Macro(Some(Macro::new(macro_name, generics, parameters))))
+        let name = generic_header.name
+            .ok_or_else(|| ParseError("Macro has no name specified.".to_string()))?;
+        let generics =
+            if let Some(generics) = generic_header.generics {
+                generics
             } else {
-                Err(ParseError(
-                    "Parsed bad macro(function) with return type parse_macro_header.".to_string()
-                ))
-            }
-        } else {
-            Err(ParseError(
-                "Parsed bad macro(function) in parse_macro_header.".to_string()
-            ))
-        }
+                Vec::new()
+            };
+        let parameters = generic_header.parameters
+            .ok_or_else(|| ParseError("Macro has no parameters specified.".to_string()))?;
+
+        let macro_header = Macro::new(name, generics, parameters);
+        Ok(BlockHeader::Macro(Some(macro_header)))
+    }
+
+    fn parse_constructor_header(&mut self) -> CustomResult<BlockHeader> {
+        let generic_header = self.parse_generic_header()?;
+
+        let generics =
+            if let Some(generics) = generic_header.generics {
+                generics
+            } else {
+                Vec::new()
+            };
+        let parameters = generic_header.parameters
+            .ok_or_else(|| ParseError("Constructor has no parameters specified.".to_string()))?;
+
+        let constructor_header = Constructor::new(generics, parameters);
+        Ok(BlockHeader::Constructor(Some(constructor_header)))
     }
 
     fn parse_expression_header(&mut self) -> CustomResult<Expression> {
