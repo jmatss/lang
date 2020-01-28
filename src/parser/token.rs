@@ -64,8 +64,8 @@ pub enum BlockHeader {
     Interface(Option<Interface>),
     Macro(Option<Macro>),
 
-    Constructor(Option<FunctionCall>),
-    Destructor(Option<FunctionCall>),
+    Constructor(Option<Constructor>),
+    Destructor(Option<Function>),
 
     If(Option<Expression>),
     ElseIf(Option<Expression>),
@@ -459,6 +459,18 @@ impl Enum {
 }
 
 #[derive(Debug, Clone)]
+pub struct Constructor {
+    pub generics: Vec<Type>,
+    pub parameters: Vec<Variable>,
+}
+
+impl Constructor {
+    pub fn new( generics: Vec<Type>, parameters: Vec<Variable>) -> Self {
+        Constructor { generics, parameters }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Interface {
     pub name: String,
     pub generics: Vec<Type>,
@@ -570,6 +582,20 @@ impl Path {
 
     pub fn push(&mut self, identifier: String) {
         self.identifiers.push(identifier);
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct GenericHeader {
+    pub name: Option<String>,
+    pub generics: Option<Vec<Type>>,
+    pub parameters: Option<Vec<Variable>>,
+    pub return_type: Option<Type>,
+}
+
+impl GenericHeader {
+    pub fn new() -> Self {
+        GenericHeader { name: None, generics: None, parameters: None, return_type: None }
     }
 }
 
