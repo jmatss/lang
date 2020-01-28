@@ -14,6 +14,16 @@ use crate::parser::abstract_syntax_tree::AST;
 //  In the example the if-expression needs to be added to the AST,
 //  but also needs to be treated as an expression.
 
+// TODO: Add array and map literals for initialization.
+//  Examples:
+//      arr @ Character[] = ['a', 'c']
+//      arr @ Map<String, Integer> = {"a_key": 1, "str": 123}
+//      x @ String = ['h', 'e', 'l', 'l', 'o'].join()
+
+// TODO: Init with:
+//      id @= expr      ==> id @ = expr
+//  It the same as a regular declaration but with an empty type/modifiers.
+
 pub struct TokenIter<'a> {
     pub simple_tokens: &'a [SimpleToken],
     pub position: usize,
@@ -355,8 +365,9 @@ impl<'a> TokenIter<'a> {
             ));
         }
 
-        // If true: this variable has specified type, parse the type and modifiers.
+        // If true: This variable has specified type/modifiers, and is therefor a declaration.
         if let Some(SimpleToken::Symbol(Symbol::At)) = self.peek_skip_whitespace() {
+            variable.set_declaration();
             self.next_skip_whitespace();    // Remove "At" symbol.
             self.parse_next_type_and_modifiers(&mut variable)?;
         }
@@ -378,32 +389,39 @@ impl<'a> TokenIter<'a> {
 
     fn parse_next_type_and_modifiers(&mut self, variable: &mut Variable) -> CustomResult<()> {
         // Parse the type, which have to be the first "identifier".
-        // If the first identifier is a modifier token, there is no type and it is set to None.
+        // If the first identifier is a modifier token, there is no type and var_type it is set to None.
         let peek = self.peek_skip_whitespace();
-        if let Some(SimpleToken::Identifier(identifier)) = peek {
-            if let Some(Token::Statement(Statement::Modifier(modifier))) = Token::lookup_identifier(&identifier) {
-                variable.var_type = None;
-            } else {
-                variable.var_type = Some(self.next_type()?);
+        match peek {
+            Some(SimpleToken::Identifier(identifier)) => {
+                let lookup = Token::lookup_identifier(&identifier);
+                if let Some(Token::Statement(Statement::Modifier(_))) = lookup {
+                    variable.var_type = None;
+                } else {
+                    variable.var_type = Some(self.next_type()?);
+                }
+
+                while let Some(SimpleToken::Identifier(identifier)) = self.next_skip_whitespace() {
+                    let lookup = Token::lookup_identifier(&identifier);
+                    if let Some(Token::Statement(Statement::Modifier(modifier))) = lookup {
+                        variable.modifiers.push(modifier);
+                    } else {
+                        break;
+                    }
+                }
+
+                self.rewind_skip_whitespace();
+
+                Ok(())
             }
-        } else {
-            return Err(ParseError(
-                format!("Expected identifier(s) in parse_next_type_and_modifiers, got: {:?}", peek)
-            ));
+
+            Some(SimpleToken::Symbol(Symbol::Equals)) =>
+                Ok(()),  // No type/modifiers specified.
+
+            _ =>
+                Err(ParseError(
+                    format!("Expected identifier(s) in parse_next_type_and_modifiers, got: {:?}", peek)
+                ))
         }
-
-        while let Some(SimpleToken::Identifier(identifier)) = self.next_skip_whitespace() {
-            // If true: this is a modifier, add to "variable" and continue parsing next token.
-            if let Some(Token::Statement(Statement::Modifier(modifier))) = Token::lookup_identifier(&identifier) {
-                variable.modifiers.push(modifier);
-            } else {
-                break;
-            }
-        }
-
-        self.rewind_skip_whitespace();
-
-        Ok(())
     }
 
     fn next_type(&mut self) -> CustomResult<Type> {
