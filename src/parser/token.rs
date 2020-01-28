@@ -64,6 +64,9 @@ pub enum BlockHeader {
     Interface(Option<Interface>),
     Macro(Option<Macro>),
 
+    Constructor(Option<FunctionCall>),
+    Destructor(Option<FunctionCall>),
+
     If(Option<Expression>),
     ElseIf(Option<Expression>),
     // FIXME: Only use Else and no ElseIf (?)
@@ -511,11 +514,22 @@ pub struct Variable {
     // value ~= default
     pub value: Option<Box<Expression>>,
     pub modifiers: Vec<Modifier>,
+    pub declaration: bool,
 }
 
 impl Variable {
     pub fn new(name: String) -> Self {
-        Variable { name, var_type: None, value: None, modifiers: Vec::new() }
+        Variable {
+            name,
+            var_type: None,
+            value: None,
+            modifiers: Vec::new(),
+            declaration: false,
+        }
+    }
+
+    pub fn set_declaration(&mut self) {
+        self.declaration = true;
     }
 }
 
@@ -716,6 +730,9 @@ impl Token {
                 "enum" => Token::ret_block_header(BlockHeader::Enum(None)),
                 "interface" => Token::ret_block_header(BlockHeader::Interface(None)),
                 "macro" => Token::ret_block_header(BlockHeader::Macro(None)),
+
+                "constructor" => Token::ret_block_header(BlockHeader::Constructor(None)),
+                "destructor" => Token::ret_block_header(BlockHeader::Destructor(None)),
 
                 "if" => Token::ret_block_header(BlockHeader::If(None)),
                 "else" => {
