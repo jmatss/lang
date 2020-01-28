@@ -1,7 +1,7 @@
 use crate::error::CustomError::ParseError;
 use crate::lexer::simple_token::{SimpleToken, Symbol, Literal as SimpleLiteral};
 use crate::CustomResult;
-use crate::parser::token::{Token, Statement, BlockHeader, Expression, FunctionCall, Variable, Type, Function, BinaryOperation, BinaryOperator, Class, Interface, Enum, Argument, Literal, Operator, Operation, ArrayAccess, Path, Output, UnaryOperation, UnaryOperator};
+use crate::parser::token::{Token, Statement, BlockHeader, Expression, FunctionCall, Variable, Type, Function, BinaryOperation, BinaryOperator, Class, Interface, Enum, Argument, Literal, Operator, Operation, ArrayAccess, Path, Output, UnaryOperation, UnaryOperator, Macro};
 use crate::error::CustomError;
 use crate::parser::abstract_syntax_tree::AST;
 
@@ -118,7 +118,9 @@ impl<'a> TokenIter<'a> {
         let mut peek_amount = 0;
         loop {
             let result = self.peek_n(peek_amount)
-                .ok_or_else(|| ParseError("".to_string()))?;
+                .ok_or_else(|| ParseError(
+                    "Out of tokens during peek_skip_whitespace_and_line_break.".to_string()
+                ))?;
             match result {
                 | SimpleToken::Symbol(Symbol::WhiteSpace(_))
                 | SimpleToken::Symbol(Symbol::LineBreak) => {
@@ -882,10 +884,8 @@ impl<'a> TokenIter<'a> {
                 &|simple_token| {
                     if let SimpleToken::Symbol(Symbol::Comma) = simple_token {
                         true
-                    } else if stop_condition(simple_token) {
-                        true
                     } else {
-                        false
+                        stop_condition(simple_token)
                     }
                 }
             )?;
@@ -1065,6 +1065,9 @@ impl<'a> TokenIter<'a> {
             BlockHeader::Interface(_) =>
                 self.parse_interface_header(),
 
+            BlockHeader::Macro(_) =>
+                self.parse_macro_header(),
+
             BlockHeader::If(_) =>
                 Ok(BlockHeader::If(Some(self.parse_expression_header()?))),
 
@@ -1227,6 +1230,28 @@ impl<'a> TokenIter<'a> {
         Ok(BlockHeader::Interface(Some(
             Interface::new(interface_name, generics)
         )))
+    }
+
+    fn parse_macro_header(&mut self) -> CustomResult<BlockHeader> {
+        // Parse macros as functions since they are so similar.
+        // The only difference is that macros can't have return types, so need to check that.
+        if let BlockHeader::Function(Some(function)) = self.parse_function_header()? {
+            if function.return_type.t.is_none() {
+                let macro_name = function.name;
+                let parameters = function.parameters;
+                let generics = function.generics;
+
+                Ok(BlockHeader::Macro(Some(Macro::new(macro_name, generics, parameters))))
+            } else {
+                Err(ParseError(
+                    "Parsed bad macro(function) with return type parse_macro_header.".to_string()
+                ))
+            }
+        } else {
+            Err(ParseError(
+                "Parsed bad macro(function) in parse_macro_header.".to_string()
+            ))
+        }
     }
 
     fn parse_expression_header(&mut self) -> CustomResult<Expression> {

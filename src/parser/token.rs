@@ -61,6 +61,7 @@ pub enum BlockHeader {
     Class(Option<Class>),
     Enum(Option<Enum>),
     Interface(Option<Interface>),
+    Macro(Option<Macro>),
 
     If(Option<Expression>),
     ElseIf(Option<Expression>),
@@ -413,7 +414,6 @@ impl Class {
     }
 }
 
-// TODO: Add generic types for functions.
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
@@ -425,6 +425,19 @@ pub struct Function {
 impl Function {
     pub fn new(name: String, generics: Vec<Type>, parameters: Vec<Variable>, return_type: Type) -> Self {
         Function { name, generics, parameters, return_type }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Macro {
+    pub name: String,
+    pub generics: Vec<Type>,
+    pub parameters: Vec<Variable>,
+}
+
+impl Macro {
+    pub fn new(name: String, generics: Vec<Type>, parameters: Vec<Variable>) -> Self {
+        Macro { name, generics, parameters }
     }
 }
 
@@ -689,6 +702,7 @@ impl Token {
                 "class" => Token::ret_block_header(BlockHeader::Class(None)),
                 "enum" => Token::ret_block_header(BlockHeader::Enum(None)),
                 "interface" => Token::ret_block_header(BlockHeader::Interface(None)),
+                "macro" => Token::ret_block_header(BlockHeader::Macro(None)),
 
                 "if" => Token::ret_block_header(BlockHeader::If(None)),
                 "else" => {
