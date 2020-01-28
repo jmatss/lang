@@ -1,7 +1,7 @@
 use crate::error::CustomError::ParseError;
 use crate::lexer::simple_token::{SimpleToken, Symbol, Literal as SimpleLiteral};
 use crate::CustomResult;
-use crate::parser::token::{Token, Statement, BlockHeader, Expression, FunctionCall, Variable, Type, Function, BinaryOperation, BinaryOperator, Class, Interface, Enum, Argument, Literal, Operator, Operation, ArrayAccess, Path, Output, UnaryOperation, UnaryOperator, Macro};
+use crate::parser::token::{Token, Statement, BlockHeader, Expression, FunctionCall, Variable, Type, Function, BinaryOperation, BinaryOperator, Class, Interface, Enum, Argument, Literal, Operator, Operation, ArrayAccess, Path, Output, UnaryOperation, UnaryOperator, Macro, MacroCall};
 use crate::error::CustomError;
 use crate::parser::abstract_syntax_tree::AST;
 
@@ -20,14 +20,59 @@ pub struct TokenIter<'a> {
 
     pub ast: AST,
 
-    // line_number and indent_level are updated in
-    // update_indent_and_line_number() every time a LineBreak is found.
-    // indent_level is the current indent size normalized by indent_fixed_size
-    // so that it is represented as: 0, 1, 2 ...
+    // indent_level is normalized to levels of: 0, 1, 2...
     pub line_number: usize,
     pub indent_level: usize,
 
     pub indent_fixed_size: usize,
+}
+
+// Returns a closure: &|simple_token: &SimpleToken| -> bool
+macro_rules! stop_on {
+    // Default returns true if any of these symbols are matched:
+    //      BreakSymbol (LineBreak, SemiColon, EndOfFile), Colon or Comma.
+    (default) => {
+        &|simple_token: &SimpleToken| -> bool {
+            stop_on!(simple_token! default);
+        }
+    };
+
+    // Used to specify symbols to stop on during expression parsing.
+    ($( $symbol:path ),+) => {
+        &|simple_token: &SimpleToken| -> bool {
+            stop_on!(simple_token! $($symbol),+;);
+        }
+    };
+
+    // Used to specify symbols and variables containing symbols to stop on during expression parsing.
+    ($( $symbol:path ),+; $( $symbol_var:ident ),*) => {
+        &|simple_token: &SimpleToken| -> bool {
+            stop_on!(simple_token! $($symbol),+; $($symbol_var),*);
+        }
+    };
+
+    ($simple_token:ident! default) => {
+        stop_on!($simple_token! break_symbol);
+        stop_on!($simple_token! Symbol::Colon, Symbol::Comma;);
+    };
+
+    ($simple_token:ident! break_symbol) => {
+        if SimpleToken::is_break_symbol($simple_token) {
+            return true;
+        }
+    };
+
+    ($simple_token:ident!  $( $symbol:path ),+) => {
+        stop_on!($simple_token! $($symbol),+;);
+    };
+
+    ($simple_token:ident!  $( $symbol:path ),+; $( $symbol_var:ident ),*) => {
+        match $simple_token {
+            $( SimpleToken::Symbol($symbol) => return true, )*
+            $( SimpleToken::Symbol(symbol) if $symbol_var == *symbol  => return true, )*
+            _ => return false
+        }
+    };
 }
 
 impl<'a> TokenIter<'a> {
@@ -67,17 +112,15 @@ impl<'a> TokenIter<'a> {
     #[inline]
     fn skip_whitespace(&mut self) {
         if let Some(SimpleToken::Symbol(Symbol::WhiteSpace(_))) = self.peek() {
-            self.next();    // Remove whitespace.
+            self.next();
         }
     }
 
     #[inline]
     fn skip_whitespace_and_line_break(&mut self, update_indent: bool) -> CustomResult<()> {
-        // Need to do it in a loop if there are multiple whitespace/linebreaks in a row:
-        //      whitespace|linebreak|whitespace|linebreak...
+        // Need to do it in a loop if there are multiple whitespace/linebreaks in a row.
         loop {
-            let result = self.next();
-            match result {
+            match self.next() {
                 Some(SimpleToken::Symbol(Symbol::WhiteSpace(_))) =>
                     continue,
                 Some(SimpleToken::Symbol(Symbol::LineBreak)) => {
@@ -86,10 +129,12 @@ impl<'a> TokenIter<'a> {
                 }
                 _ => {
                     self.rewind();
-                    return Ok(());
+                    break;
                 }
             }
         }
+
+        Ok(())
     }
 
     #[inline]
@@ -168,7 +213,7 @@ impl<'a> TokenIter<'a> {
             if let Some(SimpleToken::Symbol(Symbol::LineBreak)) = self.peek() {
                 self.next();    // Consume Linebreak.
             } else if let Some(SimpleToken::Symbol(Symbol::LineBreak)) = self.peek_n(-1) {
-                // Everything alright, move along.
+                // LineBreak already consumed, move along.
             } else {
                 return Err(ParseError(
                     "Called update_indent_and_line_number with no line break in sight.".to_string()
@@ -181,7 +226,8 @@ impl<'a> TokenIter<'a> {
             if let Some(SimpleToken::Symbol(Symbol::LineBreak)) = self.peek_skip_whitespace() {
                 self.line_number += 1;
                 return Ok(());
-            } else if indent % self.indent_fixed_size != 0 {
+            }
+            if indent % self.indent_fixed_size != 0 {
                 return Err(ParseError(
                     format!("Current indent not divisible by specified fixed indent. Fixed: {}, got: {}",
                             self.indent_fixed_size, indent
@@ -219,11 +265,10 @@ impl<'a> TokenIter<'a> {
         }
     }
 
-    // Build up the AST.
     pub fn parse_abstract_syntax_tree(&'a mut self) -> CustomResult<AST> {
         loop {
             let current = self.next()
-                .ok_or_else(|| ParseError("No more simple_tokens in start of parse_a_s_t".to_string()))?;
+                .ok_or_else(|| ParseError("No more simple_tokens in start of parse_ast...".to_string()))?;
 
             /*
             println!(
@@ -246,7 +291,8 @@ impl<'a> TokenIter<'a> {
                         Token::Expression(expression) => {
                             let expression_token = Token::Expression(
                                 self.parse_expression_with_previous(
-                                    expression.clone()
+                                    stop_on!(default),
+                                    Some(expression.clone()),
                                 )?
                             );
                             self.ast.insert_token(expression_token, self.line_number, self.indent_level)?
@@ -268,7 +314,7 @@ impl<'a> TokenIter<'a> {
                 | SimpleToken::Number(_)
                 | SimpleToken::Literal(_) => {
                     self.rewind();
-                    let expression = self.parse_expression_until_default()?;
+                    let expression = self.parse_expression(stop_on!(default))?;
                     let token = Token::Expression(expression);
                     self.ast.insert_token(token, self.line_number, self.indent_level)?;
                 }
@@ -460,9 +506,7 @@ impl<'a> TokenIter<'a> {
                     Ok(Token::BlockHeader(self.parse_block_header(block_header)?)),
 
                 _ =>
-                    Err(ParseError(
-                        format!("Received incorrect token during parse_identifier: {:?}", token)
-                    ))
+                    Err(ParseError(format!("Received incorrect token during parse_identifier: {:?}", token)))
             }
         } else {
             self.parse_identifier_as_expression(identifier)
@@ -479,6 +523,12 @@ impl<'a> TokenIter<'a> {
                 // This is a function call.
                 let function_call = self.parse_function_call(&identifier)?;
                 Ok(Token::Expression(Expression::FunctionCall(Some(function_call))))
+            }
+
+            SimpleToken::Symbol(Symbol::CurlyBracketBegin) => {
+                // This is a macro call.
+                let macro_call = self.parse_macro_call(&identifier)?;
+                Ok(Token::Expression(Expression::MacroCall(Some(macro_call))))
             }
 
             // TODO: Parse multiple dimension arrays
@@ -509,16 +559,10 @@ impl<'a> TokenIter<'a> {
             ));
         }
 
-        // FIXME: Is it allowed for a variable that doesn't decalare itself to use modifiers/Type (?)
+        // FIXME: Is it allowed for a variable that doesn't declare itself to use modifiers/Type (?)
         //  Probably not, but currently the parsing allows it everywhere else, so keep it for now.
         let variable = self.parse_variable_with_identifier(identifier)?;
-        let expression = self.parse_expression_until(&|simple_token| {
-            if let SimpleToken::Symbol(Symbol::SquareBracketEnd) = simple_token {
-                true
-            } else {
-                false
-            }
-        })?;
+        let expression = self.parse_expression(stop_on!(Symbol::SquareBracketEnd))?;
 
         self.next_skip_whitespace();    // Remove the SquareBracketEnd.
         let array_access = ArrayAccess::new(variable, Box::new(expression));
@@ -537,12 +581,12 @@ impl<'a> TokenIter<'a> {
                 if SimpleToken::is_break_symbol(&peek) {
                     Ok(Statement::Return(None))
                 } else {
-                    Ok(Statement::Return(Some(self.parse_expression_until_default()?)))
+                    Ok(Statement::Return(Some(self.parse_expression(stop_on!(default))?)))
                 }
             }
 
             Statement::Yield(_) =>
-                Ok(Statement::Yield(Some(self.parse_expression_until_default()?))),
+                Ok(Statement::Yield(Some(self.parse_expression(stop_on!(default))?))),
 
             Statement::Break | Statement::Continue =>
                 Ok(statement),
@@ -554,7 +598,7 @@ impl<'a> TokenIter<'a> {
                 Ok(Statement::Package(Some(self.parse_path()?))),
 
             Statement::Throw(_) =>
-                Ok(Statement::Throw(Some(self.parse_expression_until_default()?))),
+                Ok(Statement::Throw(Some(self.parse_expression(stop_on!(default))?))),
 
             // Ignore modifiers.
             _ => Err(ParseError(
@@ -567,9 +611,8 @@ impl<'a> TokenIter<'a> {
     // Parses expression until stop_condition evaluates to true.
     // Does NOT consume the SimpleToken that returned true.
     // PS: Skips/ignores LineBreak if they aren't specified in the stop_condition().
-    fn parse_expression_with_previous_until(
+    fn parse_expression_with_previous(
         &mut self,
-        /*stop_condition: fn(&SimpleToken) -> bool,*/
         stop_condition: &dyn Fn(&SimpleToken) -> bool,
         previous_expression: Option<Expression>,
     ) -> CustomResult<Expression> {
@@ -834,44 +877,11 @@ impl<'a> TokenIter<'a> {
         Ok(())
     }
 
-    fn parse_expression_until(&mut self, stop_condition: &dyn Fn(&SimpleToken) -> bool) -> CustomResult<Expression> {
-        self.parse_expression_with_previous_until(stop_condition, None)
+    fn parse_expression(&mut self, stop_condition: &dyn Fn(&SimpleToken) -> bool) -> CustomResult<Expression> {
+        self.parse_expression_with_previous(stop_condition, None)
     }
 
-    fn parse_expression_until_default(&mut self) -> CustomResult<Expression> {
-        self.parse_expression_until(&TokenIter::default_stop_condition)
-    }
-
-    fn parse_expression_until_colon(&mut self) -> CustomResult<Expression> {
-        self.parse_expression_until(
-            &|stop|
-                if let SimpleToken::Symbol(Symbol::Colon) = stop {
-                    true
-                } else {
-                    false
-                }
-        )
-    }
-
-    fn parse_expression_until_comma_parenthesis_end(&mut self) -> CustomResult<Expression> {
-        self.parse_expression_until(
-            &|stop|
-                match stop {
-                    | SimpleToken::Symbol(Symbol::Comma)
-                    | SimpleToken::Symbol(Symbol::ParenthesisEnd) => true,
-                    _ => false
-                }
-        )
-    }
-
-    fn parse_expression_with_previous(&mut self, previous_expression: Expression) -> CustomResult<Expression> {
-        self.parse_expression_with_previous_until(
-            &TokenIter::default_stop_condition,
-            Some(previous_expression),
-        )
-    }
-
-    fn parse_expression_list_until(
+    fn parse_expression_list(
         &mut self,
         stop_condition: &dyn Fn(&SimpleToken) -> bool,
     ) -> CustomResult<Vec<Expression>> {
@@ -880,13 +890,12 @@ impl<'a> TokenIter<'a> {
         // Parses a list of expressions separated with Commas.
         // Stops when "stop_condition" is met.
         loop {
-            let expression = self.parse_expression_until(
+            let expression = self.parse_expression(
                 &|simple_token| {
-                    if let SimpleToken::Symbol(Symbol::Comma) = simple_token {
-                        true
-                    } else {
-                        stop_condition(simple_token)
+                    if stop_condition(simple_token) {
+                        return true;
                     }
+                    stop_on!(simple_token! Symbol::Comma);
                 }
             )?;
 
@@ -901,19 +910,6 @@ impl<'a> TokenIter<'a> {
         }
 
         Ok(expressions)
-    }
-
-    // Returns true if any of these symbols are found:
-    //      LineBreak, SemiColon, EndOfFile, Colon or Comma.
-    fn default_stop_condition(simple_token: &SimpleToken) -> bool {
-        if SimpleToken::is_break_symbol(simple_token) {
-            return true;
-        }
-        match simple_token {
-            | SimpleToken::Symbol(Symbol::Colon)
-            | SimpleToken::Symbol(Symbol::Comma) => true,
-            _ => false
-        }
     }
 
     fn polish_to_expression(&self, output_stack: &[Output]) -> CustomResult<Expression> {
@@ -981,20 +977,25 @@ impl<'a> TokenIter<'a> {
         )
     }
 
-    fn parse_function_call(&mut self, function_name: &str) -> CustomResult<FunctionCall> {
+    fn parse_argument_list(
+        &mut self,
+        begin_symbol: Symbol,
+        end_symbol: Symbol,
+    ) -> CustomResult<Vec<Argument>> {
         let mut arguments = Vec::new();
 
-        // The function name has already been parsed and is sent as argument.
-        // Start by parsing the first ParenthesisBegin.
         let current = self.next_skip_whitespace();
         match current {
-            Some(SimpleToken::Symbol(Symbol::ParenthesisBegin)) => {
+            Some(SimpleToken::Symbol(ref symbol)) if symbol == &begin_symbol => {
 
-                // Edge case if the call has no arguments.
+                // Edge case if there are no arguments
                 let peek = self.peek_skip_whitespace_and_line_break()?;
-                if let SimpleToken::Symbol(Symbol::ParenthesisEnd) = peek {
-                    self.next_skip_whitespace_and_line_break(false)?; // Remove end parenthesis.
-                    return Ok(FunctionCall::new(function_name.to_string(), arguments));
+                match peek {
+                    SimpleToken::Symbol(ref symbol) if symbol == &end_symbol => {
+                        self.next_skip_whitespace_and_line_break(false)?; // Remove end symbol.
+                        return Ok(arguments);
+                    }
+                    _ => (),
                 }
 
                 // FIXME: Can figure out that it isn't a named argument at the first if-statement
@@ -1003,7 +1004,7 @@ impl<'a> TokenIter<'a> {
                     // Start with the assumption that this is a named argument.
                     // Parse as identifier and peek on the next simple token, that is assumed to be Equals.
                     // If it is false, redo everything with the assumption that it is not a named argument.
-                    self.skip_whitespace_and_line_break(false)?;  // Allow linebreak.
+                    self.skip_whitespace_and_line_break(false)?;
                     let next = self.next_skip_whitespace_and_line_break(false)?;
                     let name =
                         if let Some(SimpleToken::Identifier(identifier)) = next {
@@ -1017,37 +1018,53 @@ impl<'a> TokenIter<'a> {
                     // FIXME: Maybe allow line break in front/behind equals sign.
                     if let Some(SimpleToken::Symbol(Symbol::Equals)) = self.peek_skip_whitespace() {
                         self.next_skip_whitespace();    // Remove Equals symbol.
-                        let expr = self.parse_expression_until_comma_parenthesis_end()?;
-                        arguments.push(
-                            Argument::new(Some(name), expr)
-                        );
+                        let expr = self.parse_expression(stop_on!(Symbol::Comma; end_symbol))?;
+                        arguments.push(Argument::new(Some(name), expr));
                     } else {
                         self.rewind_skip_whitespace();
-                        let expr = self.parse_expression_until_comma_parenthesis_end()?;
-                        arguments.push(
-                            Argument::new(None, expr)
-                        );
+                        let expr = self.parse_expression(stop_on!(Symbol::Comma; end_symbol))?;
+                        arguments.push(Argument::new(None, expr));
                     }
 
                     let next = self.next_skip_whitespace_and_line_break(false)?;
                     match next {
                         Some(SimpleToken::Symbol(Symbol::Comma)) =>
                             continue,
-                        Some(SimpleToken::Symbol(Symbol::ParenthesisEnd)) =>
+                        Some(SimpleToken::Symbol(ref symbol)) if symbol == &end_symbol =>
                             break,
                         _ =>
                             return Err(ParseError(
-                                format!("Received invalid symbol during next_function_call: {:?}", next)
+                                format!("Received invalid symbol during parse_argument_list: {:?}", next)
                             ))
                     }
                 }
             }
 
             _ => return Err(ParseError(
-                format!("Expected start of parenthesis when parsing parse_function_call, got: {:?}", current)
+                format!(
+                    "Expected begin_symbol at start of parse_argument_list. Expected: {:?}, got: {:?}",
+                    begin_symbol,
+                    current
+                )
             ))
         }
 
+        Ok(arguments)
+    }
+
+    fn parse_macro_call(&mut self, macro_name: &str) -> CustomResult<MacroCall> {
+        let arguments = self.parse_argument_list(
+            Symbol::CurlyBracketBegin,
+            Symbol::CurlyBracketEnd,
+        )?;
+        Ok(MacroCall::new(macro_name.to_string(), arguments))
+    }
+
+    fn parse_function_call(&mut self, function_name: &str) -> CustomResult<FunctionCall> {
+        let arguments = self.parse_argument_list(
+            Symbol::ParenthesisBegin,
+            Symbol::ParenthesisEnd,
+        )?;
         Ok(FunctionCall::new(function_name.to_string(), arguments))
     }
 
@@ -1100,14 +1117,7 @@ impl<'a> TokenIter<'a> {
             }
 
             BlockHeader::With(_) => {
-                let expressions = self.parse_expression_list_until(
-                    &|simple_token|
-                        if let SimpleToken::Symbol(Symbol::Colon) = simple_token {
-                            true
-                        } else {
-                            false
-                        }
-                )?;
+                let expressions = self.parse_expression_list(stop_on!(Symbol::Colon))?;
                 Ok(BlockHeader::With(Some(expressions)))
             }
 
@@ -1148,7 +1158,9 @@ impl<'a> TokenIter<'a> {
                     // TODO: parse_expression breaks at end of parenthesis.
                     //  Fix so that parenthesis is allowed inside the expressions.
                     self.next_skip_whitespace();    // Remove Equals symbol.
-                    let expression = self.parse_expression_until_comma_parenthesis_end()?;
+                    let expression = self.parse_expression(
+                        stop_on!(Symbol::Comma, Symbol::ParenthesisEnd)
+                    )?;
 
                     current_parameter.value = Some(Box::new(expression));
                 }
@@ -1255,7 +1267,7 @@ impl<'a> TokenIter<'a> {
     }
 
     fn parse_expression_header(&mut self) -> CustomResult<Expression> {
-        let expression = self.parse_expression_until_colon()?;
+        let expression = self.parse_expression(stop_on!(Symbol::Colon))?;
         self.assert_block_header_end()?;
         Ok(expression)
     }
