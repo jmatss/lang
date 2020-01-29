@@ -65,7 +65,7 @@ pub enum BlockHeader {
     Macro(Option<Macro>),
 
     Constructor(Option<Constructor>),
-    Destructor(Option<Function>),
+    Destructor,
 
     If(Option<Expression>),
     ElseIf(Option<Expression>),
@@ -85,7 +85,9 @@ pub enum BlockHeader {
     While(Option<Expression>),
     Loop,
 
-    // AutoClosable
+    // AutoClosable.
+    // Allow empty expression for a generic "block", if one just wants to limit the lifetime
+    // of the variables.
     With(Option<Vec<Expression>>),
 
     // Example:
@@ -111,7 +113,7 @@ pub enum Literal {
     CharLiteral(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Output {
     Operator(Operator),
     Value(Expression),
@@ -284,7 +286,7 @@ impl Operator {
 }
 
 // TODO: Maybe add "of" (instanceof) and use "is" as pattern matching.
-#[derive(Debug, Clone, PartialOrd, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
     /* GENERAL */
     Assignment,
@@ -445,7 +447,6 @@ impl Macro {
     }
 }
 
-// TODO: Add generic types for functions.
 #[derive(Debug, Clone)]
 pub struct Enum {
     pub name: String,
@@ -557,7 +558,7 @@ impl ArrayAccess {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Type {
     // None == void
     pub t: Option<String>,
@@ -570,7 +571,7 @@ impl Type {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Path {
     pub identifiers: Vec<String>,
 }
@@ -585,7 +586,7 @@ impl Path {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct GenericHeader {
     pub name: Option<String>,
     pub generics: Option<Vec<Type>>,
@@ -758,7 +759,7 @@ impl Token {
                 "macro" => Token::ret_block_header(BlockHeader::Macro(None)),
 
                 "constructor" => Token::ret_block_header(BlockHeader::Constructor(None)),
-                "destructor" => Token::ret_block_header(BlockHeader::Destructor(None)),
+                "destructor" => Token::ret_block_header(BlockHeader::Destructor),
 
                 "if" => Token::ret_block_header(BlockHeader::If(None)),
                 "else" => {
