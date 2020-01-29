@@ -24,13 +24,17 @@ use crate::parser::abstract_syntax_tree::AST;
 //      id @= expr      ==> id @ = expr
 //  It the same as a regular declaration but with an empty type/modifiers.
 
+// TODO: Let generics implement interfaces. Example
+//      function f<T: Iterable<T>>(x @ T):
+//          iterate y in x: ...
+
 pub struct TokenIter<'a> {
     pub simple_tokens: &'a [SimpleToken],
     pub position: usize,
 
     pub ast: AST,
 
-    // indent_level is normalized to levels of: 0, 1, 2...
+    // indent_level is normalized by indent_fixed_size to levels of: (0), 1, 2, 3...
     pub line_number: usize,
     pub indent_level: usize,
 
@@ -1172,7 +1176,7 @@ impl<'a> TokenIter<'a> {
             BlockHeader::Constructor(_) =>
                 self.parse_constructor_header(),
 
-            BlockHeader::Destructor(_) =>
+            BlockHeader::Destructor =>
                 self.parse_destructor_header(),
 
             BlockHeader::If(_) =>
@@ -1207,8 +1211,16 @@ impl<'a> TokenIter<'a> {
             }
 
             BlockHeader::With(_) => {
-                let expressions = self.parse_expression_list(stop_on!(Symbol::Colon))?;
-                Ok(BlockHeader::With(Some(expressions)))
+                // Edge case if empty expression list, is allowed.
+                if let Some(SimpleToken::Symbol(Symbol::Colon)) = self.peek_skip_whitespace() {
+                    self.assert_block_header_end();
+                    Ok(BlockHeader::With(None))
+                } else {
+                    let expressions = self.parse_expression_list(
+                        stop_on!(Symbol::Colon)
+                    )?;
+                    Ok(BlockHeader::With(Some(expressions)))
+                }
             }
 
             _ => Err(ParseError(
@@ -1235,7 +1247,7 @@ impl<'a> TokenIter<'a> {
 
         let mut parameters = Vec::new();
         let peek = self.peek_skip_whitespace_and_line_break()?;
-        if let Some(SimpleToken::Symbol(Symbol::ParenthesisBegin)) = peek {
+        if let SimpleToken::Symbol(Symbol::ParenthesisBegin) = peek {
             parameters = self.parse_parameter_list(
                 Symbol::ParenthesisBegin,
                 Symbol::ParenthesisEnd,
@@ -1366,6 +1378,20 @@ impl<'a> TokenIter<'a> {
 
         let constructor_header = Constructor::new(generics, parameters);
         Ok(BlockHeader::Constructor(Some(constructor_header)))
+    }
+
+    fn parse_destructor_header(&mut self) -> CustomResult<BlockHeader> {
+         let next = self.next_skip_whitespace();
+        if let Some(SimpleToken::Symbol(Symbol::ParenthesisBegin)) = next {
+            let next = self.next_skip_whitespace_and_line_break(false)?;
+            if let Some(SimpleToken::Symbol(Symbol::ParenthesisEnd)) = next {
+                Ok(BlockHeader::Destructor)
+            } else {
+                Err(ParseError(format!("Expected ParenthesisEnd in destructor header, got: {:?}", next)))
+            }
+        } else {
+            Err(ParseError(format!("Expected ParenthesisBegin in destructor header, got: {:?}", next)))
+        }
     }
 
     fn parse_expression_header(&mut self) -> CustomResult<Expression> {
