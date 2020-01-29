@@ -126,9 +126,9 @@ impl AST {
     fn debug_print_priv(rc_token: &RCToken) {
         let token = rc_token.borrow();
         println!(
-            "{} {}{:?}",
+            "{}| {}{:?}",
             token.line_number,
-            " ".repeat(token.indent_level),
+            ">".repeat(token.indent_level),
             token.token
         );
 
