@@ -28,6 +28,14 @@ use crate::parser::abstract_syntax_tree::AST;
 //      function f<T: Iterable<T>>(x @ T):
 //          iterate y in x: ...
 
+// TODO: Implement tuples. Examples:
+//      x @= (expr, expr2)
+//      (a, b) @ (Integer, Integer) = x
+//  Maybe implement match on existing variable:
+//      x @= 1
+//      y @= 2
+//      (x, y) = (3, 4)      // => x = 3, y = 4
+
 pub struct TokenIter<'a> {
     pub simple_tokens: &'a [SimpleToken],
     pub position: usize,
