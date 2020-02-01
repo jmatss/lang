@@ -35,6 +35,24 @@ use crate::parser::abstract_syntax_tree::AST;
 //      x @= 1
 //      y @= 2
 //      (x, y) = (3, 4)      // => x = 3, y = 4
+//
+// TODO: Add closures. Variables can be moved/borrowed into them.
+//
+// TODO: Add ignore linebreak symbol. Ex. "\" so that one can write:
+//      id @ \
+//      = 3
+//
+// TODO: How should the owned/borrowed work?
+//  Should one be able to tie the lifetime to a specific function?
+//
+// TODO: Don't allow increment/decrement in other expressions.
+//  Maybe remove prefix and only allow postfix.
+//  Examples of INVALID usage of inc/dec:
+//      print_line("i: {}", i++)
+//      (--i - 3)
+//  Examples of VALID usages:
+//      print_line("i: {}", i); i++
+//      --i; (i - 3)
 
 pub struct TokenIter<'a> {
     pub simple_tokens: &'a [SimpleToken],
