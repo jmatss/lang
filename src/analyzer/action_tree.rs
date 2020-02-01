@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use crate::parser::token::Variable;
 use crate::CustomResult;
-
-// Represents a specific scope. Can be ex. function, if, while etc.
-type ScopeIndex = usize;
+use crate::parser::abstract_syntax_tree::ScopeIndex;
 
 // Use a number to indicate scope.
 // Make an ordered list all the times the variable in mentioned.
@@ -42,13 +40,14 @@ pub struct ActionTree {
     // The vector contains all the times the Variable is used in order.
     variables: HashMap<ScopeIndex, Vec<Variable>>,
 }
-/*
+
 impl ActionTree {
     pub fn new() -> Self {
         ActionTree { variables: HashMap::new() }
     }
 
     // Go through and assemble all variables into action_tree.variables.
-    pub fn step1() -> CustomResult<()> {}
+    pub fn step1() -> CustomResult<()> {
+        Ok(())
+    }
 }
-*/
