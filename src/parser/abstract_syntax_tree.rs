@@ -4,7 +4,8 @@ use crate::error::CustomError::ParseError;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-type Index = usize;
+// Number/index of current scope.
+pub type ScopeIndex = usize;
 type RCToken = Rc<RefCell<ASTToken>>;
 
 // Indices ("Index" type) corresponding to the indices of the blocks structure are used
@@ -15,7 +16,7 @@ type RCToken = Rc<RefCell<ASTToken>>;
 pub struct AST {
     pub blocks: Vec<RCToken>,
     // current_parent == "current_block"
-    pub current_parent: Index,
+    pub current_parent: ScopeIndex,
 }
 
 impl AST {
@@ -99,7 +100,7 @@ impl AST {
     // Used to find the parent that this "token" should be put into.
     // If it is a "new indent level", traverse the parents upwards until
     // the correct indent level is found.
-    fn find_correct_parent(&self, indent_level: usize, mut parent_index: Index) -> Index {
+    fn find_correct_parent(&self, indent_level: usize, mut parent_index: ScopeIndex) -> ScopeIndex {
         let parent = self.blocks[parent_index].borrow();
 
         // Special case if there are no "real" parents.
@@ -144,7 +145,7 @@ impl AST {
 #[derive(Debug)]
 pub struct ASTToken {
     pub token: Token,
-    pub parent: Index,
+    pub parent: ScopeIndex,
 
     pub line_number: usize,
     pub indent_level: usize,
@@ -153,13 +154,13 @@ pub struct ASTToken {
 }
 
 impl ASTToken {
-    pub fn new(token: Token, parent: Index, line_number: usize, indent_level: usize) -> Self {
+    pub fn new(token: Token, parent: ScopeIndex, line_number: usize, indent_level: usize) -> Self {
         ASTToken { token, parent, line_number, indent_level, block_data: None }
     }
 
     pub fn new_block(
         token: Token,
-        parent: Index,
+        parent: ScopeIndex,
         line_number: usize,
         indent_level: usize,
         index: usize,
@@ -185,6 +186,6 @@ impl ASTToken {
 // and needs to store its children.
 #[derive(Debug)]
 pub struct ASTBlock {
-    pub index: Index,
+    pub index: ScopeIndex,
     pub children: Vec<RCToken>,
 }
