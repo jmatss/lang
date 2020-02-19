@@ -37,7 +37,7 @@ impl Analyzer {
     }
 
     fn parse_variables(&self, ast_token: Ref<ASTToken>) {
-        let token = ast_token.token.borrow();
+        let token = &ast_token.token;
         match token {
             Token::Expression(expression) => {
                 // Check operations for valid types.
