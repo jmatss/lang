@@ -53,6 +53,9 @@ use crate::parser::abstract_syntax_tree::AST;
 //  Examples of VALID usages:
 //      print_line("i: {}", i); i++
 //      --i; (i - 3)
+//
+// TODO: Implement "cleanup" block that will be executed in a stack like fashion before
+//  returning to the caller. Similar to defer, but it is called before the return statement.
 
 pub struct TokenIter<'a> {
     pub simple_tokens: &'a [SimpleToken],
@@ -144,7 +147,10 @@ impl<'a> TokenIter<'a> {
     }
 
     #[inline]
-    fn next_skip_whitespace_and_line_break(&mut self, update_indent: bool) -> CustomResult<Option<SimpleToken>> {
+    fn next_skip_whitespace_and_line_break(
+        &mut self,
+        update_indent: bool,
+    ) -> CustomResult<Option<SimpleToken>> {
         self.skip_whitespace_and_line_break(update_indent)?;
         Ok(self.next())
     }
@@ -1239,7 +1245,7 @@ impl<'a> TokenIter<'a> {
             BlockHeader::With(_) => {
                 // Edge case if empty expression list, is allowed.
                 if let Some(SimpleToken::Symbol(Symbol::Colon)) = self.peek_skip_whitespace() {
-                    self.assert_block_header_end();
+                    self.assert_block_header_end()?;
                     Ok(BlockHeader::With(None))
                 } else {
                     let expressions = self.parse_expression_list(
@@ -1407,7 +1413,7 @@ impl<'a> TokenIter<'a> {
     }
 
     fn parse_destructor_header(&mut self) -> CustomResult<BlockHeader> {
-         let next = self.next_skip_whitespace();
+        let next = self.next_skip_whitespace();
         if let Some(SimpleToken::Symbol(Symbol::ParenthesisBegin)) = next {
             let next = self.next_skip_whitespace_and_line_break(false)?;
             if let Some(SimpleToken::Symbol(Symbol::ParenthesisEnd)) = next {
