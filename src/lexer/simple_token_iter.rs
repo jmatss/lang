@@ -6,7 +6,6 @@ use std::vec::IntoIter;
 use std::collections::linked_list::LinkedList;
 use crate::CustomResult;
 
-const BUFFER_SIZE: usize = 1 << 16;
 const MAX_PUT_BACK: usize = 5;
 
 pub struct SimpleTokenIter {
@@ -244,16 +243,6 @@ impl SimpleTokenIter {
     pub fn skip(&mut self, n: usize) {
         for _ in 0..n {
             self.next();
-        }
-    }
-
-    #[inline]
-    pub fn peek(&mut self) -> Option<char> {
-        if let Some(c) = self.next() {
-            self.put_back(c);
-            Some(c)
-        } else {
-            None
         }
     }
 
