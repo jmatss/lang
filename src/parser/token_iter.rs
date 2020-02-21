@@ -390,7 +390,7 @@ impl<'a> TokenIter<'a> {
 
     // Valid formats for variables:
     //      id
-    //      id @ Type+ modifier*
+    //      id @ Type* modifier*
     // (The assignment is handled separately, ex. id = expression)
     // TODO: Add "name, nameN" for declaring multiple variables on the same line.
     // TODO: Add support for tuples.
