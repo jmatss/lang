@@ -285,7 +285,6 @@ impl Operator {
     }
 }
 
-// TODO: Maybe add "of" (instanceof) and use "is" as pattern matching.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
     /* GENERAL */
