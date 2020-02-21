@@ -80,9 +80,10 @@ impl SimpleTokenIter {
                     }
                 }
             } else {
-                Err(LexError(
-                    format!("Didn't match a symbol token when c: {:?} and c_next: {:?}", c1, c2)
-                ))
+                Err(LexError(format!(
+	                   "Didn't match a symbol token when c: {:?}, c2: {:?} and c2: {:?}",
+                        c1, c2, c3
+                )))
             }
         } else {
             Ok(SimpleToken::EndOfFile)
@@ -128,12 +129,12 @@ impl SimpleTokenIter {
         if !result.is_empty() {
             Ok(result)
         } else {
-            Err(LexError("Empty result in next().".to_string()))
+            Err(LexError("Empty result in get_identifier_string().".to_string()))
         }
     }
 
     // TODO: Hex/binary numbers with prefix 0x/0b
-    //  Check cast (as) and suffix etc.
+    // Fetches both integeres and floats.
     pub fn get_number(&mut self, radix: u32) -> CustomResult<SimpleToken> {
         let mut number = self.get_integer(radix)?;
 
@@ -228,6 +229,9 @@ impl SimpleTokenIter {
         while let Some(c) = self.next() {
             let (_, c_next) = self.peek_two()
                 .ok_or_else(|| LexError("Empty peek during get_whitespaces.".to_string()))?;
+                
+            // Since linebreaks counts as whitespaces in rust, need to manually make
+            // sure that the current char(s) isn't a linebreak in the if-statement.
             if SimpleTokenIter::valid_whitespace(c) && !SimpleTokenIter::valid_linebreak(c, c_next) {
                 count += 1;
             } else {
