@@ -171,7 +171,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), Modulus),
+                        ("%", Modulus),
                         ("%=", AssignModulus)
                     ],
                 )
@@ -181,7 +181,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), BitAnd),
+                        ("&", BitAnd),
                         ("&=", AssignBitAnd)
                     ],
                 )
@@ -191,7 +191,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), BitXor),
+                        ("^", BitXor),
                         ("^=", AssignBitXor)
                     ],
                 )
@@ -201,7 +201,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), ExclamationMark),
+                        ("!", ExclamationMark),
                         ("!=", NotEquals)
                     ],
                 )
@@ -211,7 +211,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), BitOr),
+                        ("|", BitOr),
                         ("|>", Pipe),
                         ("|=", AssignBitOr)
                     ],
@@ -222,7 +222,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), Dot),
+                        (".", Dot),
                         ("..", Range),
                         ("..=", RangeInclusive),
                     ],
@@ -233,7 +233,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), Equals),
+                        ("=", Equals),
                         ("==", EqualsOperator)
                     ],
                 )
@@ -243,7 +243,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), Plus),
+                        ("+", Plus),
                         ("++", Increment),
                         ("+=", AssignAddition)
                     ],
@@ -254,7 +254,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), PointyBracketBegin),
+                        ("<", PointyBracketBegin),
                         ("<=", LessThanOrEquals),
                         ("<<", ShiftLeft),
                         ("<<=", AssignShiftLeft)
@@ -266,7 +266,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), PointyBracketEnd),
+                        (">", PointyBracketEnd),
                         (">=", GreaterThanOrEquals),
                         (">>", ShiftRight),
                         (">>=", AssignShiftRight)
@@ -278,7 +278,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), Minus),
+                        ("-", Minus),
                         ("--", Decrement),
                         ("->", Arrow),
                         ("-=", AssignSubtraction)
@@ -290,7 +290,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), Multiplication),
+                        ("*", Multiplication),
                         ("*/", CommentMultiLineEnd),
                         ("**", Power),
                         ("*=", AssignMultiplication),
@@ -303,7 +303,7 @@ impl SimpleToken {
                 SimpleToken::match_symbol(
                     &real_string,
                     vec![
-                        (&c1.to_string(), Division),
+                        ("/", Division),
                         ("//", CommentSingleLine),
                         ("/*", CommentMultiLineBegin),
                         ("/=", AssignDivision)
