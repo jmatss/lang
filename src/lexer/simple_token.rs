@@ -142,7 +142,7 @@ impl SimpleToken {
         let mut tmp_chars = Vec::with_capacity(3);
         tmp_chars.push(c1);
         if c2.is_some() {
-            tmp_chars.push(c2.expect("Unable to unwrap c3"));
+            tmp_chars.push(c2.expect("Unable to unwrap c2"));
             if c3.is_some() {
                 tmp_chars.push(c3.expect("Unable to unwrap c3"));
             }
