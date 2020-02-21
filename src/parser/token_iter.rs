@@ -25,7 +25,7 @@ use crate::parser::abstract_syntax_tree::AST;
 //  It the same as a regular declaration but with an empty type/modifiers.
 
 // TODO: Let generics implement interfaces. Example
-//      function f<T: Iterable<T>>(x @ T):
+//      function f<T: Iterable<I>>(x @ T):
 //          iterate y in x: ...
 
 // TODO: Implement tuples. Examples:
@@ -56,6 +56,9 @@ use crate::parser::abstract_syntax_tree::AST;
 //
 // TODO: Implement "cleanup" block that will be executed in a stack like fashion before
 //  returning to the caller. Similar to defer, but it is called before the return statement.
+//
+// TODO: Make "map" indexable like an array. Example:
+//      map["key"] = 3
 
 pub struct TokenIter<'a> {
     pub simple_tokens: &'a [SimpleToken],
