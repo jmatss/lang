@@ -676,9 +676,9 @@ impl<'a> TokenIter<'a> {
         let mut output_stack: Vec<Output> = Vec::new();
         let mut operator_stack: Vec<Operator> = Vec::new();
 
-        // This bool is used to ensure that all "values" are separated by operands.
-        // "value" == not an operand, i.e. literals, numbers, variables or function calls.
-        let mut previous_was_value =
+        // This bool is used to ensure that all "operands" are separated by operators.
+        // "operand" == not an operator, ex. literals, numbers, variables or function calls.
+        let mut previous_was_operand =
             if let Some(expression) = previous_expression {
                 // Add previously parsed expression if it exists.
                 output_stack.push(Output::Value(expression));
@@ -717,7 +717,7 @@ impl<'a> TokenIter<'a> {
 
             match current {
                 SimpleToken::Identifier(identifier) => {
-                    if previous_was_value {
+                    if previous_was_operand {
                         return Err(ParseError(
                             "Received two \"values\" in a row in parse_expression.".to_string()
                         ));
@@ -733,11 +733,11 @@ impl<'a> TokenIter<'a> {
                         ));
                     }
 
-                    previous_was_value = true;
+                    previous_was_operand = true;
                 }
 
                 SimpleToken::Number(number_string) => {
-                    if previous_was_value {
+                    if previous_was_operand {
                         return Err(ParseError(
                             "Received two \"values\" in a row in parse_expression.".to_string()
                         ));
@@ -751,11 +751,11 @@ impl<'a> TokenIter<'a> {
                         };
                     output_stack.push(Output::Value(number));
 
-                    previous_was_value = true;
+                    previous_was_operand = true;
                 }
 
                 SimpleToken::Literal(literal) => {
-                    if previous_was_value {
+                    if previous_was_operand {
                         return Err(ParseError(
                             "Received two \"values\" in a row in parse_expression.".to_string()
                         ));
@@ -770,7 +770,7 @@ impl<'a> TokenIter<'a> {
                         };
                     output_stack.push(Output::Value(expression));
 
-                    previous_was_value = true;
+                    previous_was_operand = true;
                 }
 
                 SimpleToken::Symbol(symbol) => {
@@ -801,7 +801,7 @@ impl<'a> TokenIter<'a> {
 
                         Operator::Increment => {
                             let increment_operator =
-                                if previous_was_value {
+                                if previous_was_operand {
                                     Operator::UnaryOperator(UnaryOperator::IncrementPostfix)
                                 } else {
                                     Operator::UnaryOperator(UnaryOperator::IncrementPrefix)
@@ -816,7 +816,7 @@ impl<'a> TokenIter<'a> {
 
                         Operator::Decrement => {
                             let decrement_operator =
-                                if previous_was_value {
+                                if previous_was_operand {
                                     Operator::UnaryOperator(UnaryOperator::DecrementPostfix)
                                 } else {
                                     Operator::UnaryOperator(UnaryOperator::DecrementPrefix)
@@ -831,7 +831,7 @@ impl<'a> TokenIter<'a> {
 
                         Operator::Plus => {
                             let plus_operator =
-                                if previous_was_value {
+                                if previous_was_operand {
                                     Operator::BinaryOperator(BinaryOperator::Addition)
                                 } else {
                                     Operator::UnaryOperator(UnaryOperator::Positive)
@@ -846,7 +846,7 @@ impl<'a> TokenIter<'a> {
 
                         Operator::Minus => {
                             let minus_operator =
-                                if previous_was_value {
+                                if previous_was_operand {
                                     Operator::BinaryOperator(BinaryOperator::Subtraction)
                                 } else {
                                     Operator::UnaryOperator(UnaryOperator::Negative)
@@ -870,7 +870,7 @@ impl<'a> TokenIter<'a> {
                     }
 
                     // Previous was (/current is) Symbol.
-                    previous_was_value = false;
+                    previous_was_operand = false;
                 }
 
                 // Ignore modifiers.
