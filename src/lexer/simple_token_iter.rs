@@ -92,12 +92,12 @@ impl SimpleTokenIter {
 
     #[inline]
     pub fn valid_identifier_start(c: char) -> bool {
-        c.is_numeric() || SimpleTokenIter::valid_identifier(c)
+        c.is_alphabetic() || c == '_'
     }
 
     #[inline]
     pub fn valid_identifier(c: char) -> bool {
-        c.is_alphanumeric() || c == '_'
+        SimpleTokenIter::valid_identifier_start(c) || c.is_numeric()
     }
 
     #[inline]
