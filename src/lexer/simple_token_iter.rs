@@ -92,7 +92,7 @@ impl SimpleTokenIter {
 
     #[inline]
     pub fn valid_identifier_start(c: char) -> bool {
-        c.is_alphabetic() || c == '_'
+        c.is_numeric() || SimpleTokenIter::valid_identifier(c)
     }
 
     #[inline]
@@ -119,11 +119,12 @@ impl SimpleTokenIter {
     fn get_identifier_string(&mut self) -> CustomResult<String> {
         let mut result = String::new();
         while let Some(c) = self.next() {
-            if !SimpleTokenIter::valid_identifier(c) {
+            if SimpleTokenIter::valid_identifier(c) {
+                result.push(c);
+            } else {
                 self.put_back(c);
                 break;
             }
-            result.push(c);
         }
 
         if !result.is_empty() {
@@ -139,6 +140,8 @@ impl SimpleTokenIter {
         let mut number = self.get_integer(radix)?;
 
         // If the next simple token is a Dot and the char after that is a number, this is a float.
+        // FIXME: (?) might not need to check number after Dot to allow for 
+        // example "1." instead of needing to write "1.0".
         if let Some(('.', Some(next))) = self.peek_two() {
             if SimpleTokenIter::valid_number(next, radix) {
                 self.skip(1);    // Remove dot.
