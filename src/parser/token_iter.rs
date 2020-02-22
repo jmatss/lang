@@ -860,7 +860,7 @@ impl<'a> TokenIter<'a> {
                         }
 
                         _ => {
-                            // Rest of the operators that aren't parenthesis or inc/dec.
+                            // Rest of the operators that aren't parenthesis, neg/pos or inc/dec.
                             self.add_operator(
                                 operator,
                                 &mut output_stack,
@@ -911,16 +911,16 @@ impl<'a> TokenIter<'a> {
                         popped_operator
                     )
                 ))?;
+            let popped_operator_eval_left_to_right = popped_operator.evaluate_left_to_right()
+                .ok_or_else(||
+                    ParseError("Unable to see if operator eval left to right.".to_string())
+                )?;
 
             // "popped operator" higher precedence than "current operator".
             // or same precedence with left-to-right evaluation.
-            if operator_precedence > popped_operator_prec
-                ||
-                (operator_precedence == popped_operator_prec
-                    && popped_operator.evaluate_left_to_right().ok_or_else(||
-                    ParseError("Unable to see if operator eval left to right."
-                        .to_string())
-                )?)
+            if operator_precedence > popped_operator_prec ||
+               (operator_precedence == popped_operator_prec && 
+                popped_operator_eval_left_to_right)
             {
                 output_stack.push(Output::Operator(popped_operator));
                 continue;
