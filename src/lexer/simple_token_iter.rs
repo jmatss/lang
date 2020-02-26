@@ -69,10 +69,10 @@ impl SimpleTokenIter {
                 let (token, n) = symbol_token;
                 match token {
                     SimpleToken::Symbol(Symbol::DoubleQuote) =>
-                        Ok(self.get_string_literal()?),
+                        Ok(self.get_literal(Symbol::DoubleQuote)?),
 
                     SimpleToken::Symbol(Symbol::SingleQuote) =>
-                        Ok(self.get_char_literal()?),
+                        Ok(self.get_literal(Symbol::SingleQuote)?),
 
                     _ => {
                         self.skip(n);
@@ -185,45 +185,27 @@ impl SimpleTokenIter {
             Err(LexError("No linebreak character received in get_linebreak.".to_string()))
         }
     }
-
+    
     // TODO: Fix escape chars etc. Ex:
     //      "abc\"abc"
     //  will cause an error.
-    fn get_string_literal(&mut self) -> CustomResult<SimpleToken> {
+    fn get_literal(&mut self, literal_symbol: Symbol) -> CustomResult<SimpleToken> {
         let mut char_vec = Vec::new();
-        self.next();    // Remove the DoubleQuote start.
+        self.next();    // Remove the start "symbol" (single or double-quote).
 
         loop {
             let current = self.next()
-                .ok_or_else(|| LexError("Reached EOF while parsing char in get_string_literal.".to_string()))?;
-
-            if let Some((SimpleToken::Symbol(Symbol::DoubleQuote), _)) = SimpleToken::lookup_one(current) {
-                break;
-            } else {
-                char_vec.push(current);
+                .ok_or_else(|| LexError("Reached EOF while parsing char(s) in get_literal.".to_string()))?;
+                
+            match SimpleToken::lookup_one(current) {
+                Some((SimpleToken::Symbol(s), _)) if s == literal_symbol => 
+                    break,
+                _ => 
+                    char_vec.push(current)
             }
         }
 
         Ok(SimpleToken::Literal(Literal::StringLiteral(char_vec.iter().collect())))
-    }
-
-    // TODO: Fix escape chars etc.
-    fn get_char_literal(&mut self) -> CustomResult<SimpleToken> {
-        let mut char_vec = Vec::new();
-        self.next();    // Remove the SingleQuote start.
-
-        loop {
-            let current = self.next()
-                .ok_or_else(|| LexError("Reached EOF while parsing char in get_char_literal.".to_string()))?;
-
-            if let Some((SimpleToken::Symbol(Symbol::SingleQuote), _)) = SimpleToken::lookup_one(current) {
-                break;
-            } else {
-                char_vec.push(current);
-            }
-        }
-
-        Ok(SimpleToken::Literal(Literal::CharLiteral(char_vec.iter().collect())))
     }
 
     fn get_whitespaces(&mut self) -> CustomResult<SimpleToken> {
