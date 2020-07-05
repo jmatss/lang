@@ -16,7 +16,7 @@ pub struct SimpleTokenIter {
 impl SimpleTokenIter {
     pub fn new(filename: &str) -> std::io::Result<SimpleTokenIter> {
         // TODO: dont read whole file in one go.
-        let mut file = File::open(filename)?;
+        let mut file: File = File::open(filename)?;
         let mut string = String::new();
         file.read_to_string(&mut string)?;
 

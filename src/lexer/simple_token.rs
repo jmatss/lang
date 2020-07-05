@@ -1,4 +1,15 @@
-use crate::lexer::simple_token::Symbol::{ParenthesisBegin, ParenthesisEnd, SquareBracketBegin, SquareBracketEnd, CurlyBracketBegin, CurlyBracketEnd, PointyBracketBegin, PointyBracketEnd, Dot, Comma, QuestionMark, ExclamationMark, Equals, DoubleQuote, SingleQuote, Colon, SemiColon, LineBreak, WhiteSpace, Pipe, Range, Arrow, EqualsOperator, NotEquals, LessThanOrEquals, GreaterThanOrEquals, Plus, Minus, Multiplication, Division, Modulus, Power, BitAnd, BitOr, BitXor, ShiftLeft, ShiftRight, BitCompliment, Increment, Decrement, CommentSingleLine, CommentMultiLineBegin, CommentMultiLineEnd, BoolNot, BoolAnd, BoolOr, Pound, At, Dollar, In, Is, As, AssignAddition, AssignSubtraction, AssignMultiplication, AssignDivision, AssignModulus, AssignPower, AssignBitAnd, AssignBitOr, AssignBitXor, AssignShiftLeft, AssignShiftRight, Of, RangeInclusive};
+use crate::lexer::simple_token::Symbol::{
+    Address, Arrow, As, AssignAddition, AssignBitAnd, AssignBitOr, AssignBitXor, AssignDivision,
+    AssignModulus, AssignMultiplication, AssignPower, AssignShiftLeft, AssignShiftRight,
+    AssignSubtraction, At, BitAnd, BitCompliment, BitOr, BitXor, BoolAnd, BoolNot, BoolOr, Colon,
+    Comma, CommentMultiLineBegin, CommentMultiLineEnd, CommentSingleLine, CurlyBracketBegin,
+    CurlyBracketEnd, Decrement, Deref, Division, Dollar, Dot, DoubleQuote, Equals, EqualsOperator,
+    ExclamationMark, GreaterThanOrEquals, In, Increment, Is, LessThanOrEquals, LineBreak, Minus,
+    Modulus, Multiplication, NotEquals, Of, ParenthesisBegin, ParenthesisEnd, Pipe, Plus,
+    PointyBracketBegin, PointyBracketEnd, Pound, Power, QuestionMark, Range, RangeInclusive,
+    SemiColon, ShiftLeft, ShiftRight, SingleQuote, SquareBracketBegin, SquareBracketEnd,
+    WhiteSpace,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimpleToken {
@@ -36,11 +47,13 @@ pub enum Symbol {
     LineBreak,
     WhiteSpace(usize),
 
-    // Pipe: |>  Range: ..  RangeInclusive: ..=  Arrow: ->
+    // Pipe: |>  Range: ..  RangeInclusive: ..=  Arrow: ->  Deref: .*  Address: .&
     Pipe,
     Range,
     RangeInclusive,
     Arrow,
+    Deref,
+    Address,
 
     EqualsOperator,
     NotEquals,
@@ -106,35 +119,37 @@ impl SimpleToken {
     // Linebreak, manual linebreak (";") or EndOfFile.
     pub fn is_break_symbol(simple_token: &SimpleToken) -> bool {
         match simple_token {
-            | SimpleToken::Symbol(Symbol::LineBreak)
+            SimpleToken::Symbol(Symbol::LineBreak)
             | SimpleToken::Symbol(Symbol::SemiColon)
             | SimpleToken::EndOfFile => true,
-            _ => false
+            _ => false,
         }
     }
 
     pub fn lookup_identifier(name: &str) -> Option<SimpleToken> {
-        Some(
-            match name {
-                "not" => SimpleToken::Symbol(BoolNot),
-                "and" => SimpleToken::Symbol(BoolAnd),
-                "or" => SimpleToken::Symbol(BoolOr),
+        Some(match name {
+            "not" => SimpleToken::Symbol(BoolNot),
+            "and" => SimpleToken::Symbol(BoolAnd),
+            "or" => SimpleToken::Symbol(BoolOr),
 
-                "in" => SimpleToken::Symbol(In),
-                "is" => SimpleToken::Symbol(Is),
-                "as" => SimpleToken::Symbol(As),
-                "of" => SimpleToken::Symbol(Of),
+            "in" => SimpleToken::Symbol(In),
+            "is" => SimpleToken::Symbol(Is),
+            "as" => SimpleToken::Symbol(As),
+            "of" => SimpleToken::Symbol(Of),
 
-                _ => return None
-            }
-        )
+            _ => return None,
+        })
     }
 
     pub fn lookup_one(c1: char) -> Option<(SimpleToken, usize)> {
         SimpleToken::lookup(c1, None, None)
     }
 
-    pub fn lookup_three(c1: char, c2: Option<char>, c3: Option<char>) -> Option<(SimpleToken, usize)> {
+    pub fn lookup_three(
+        c1: char,
+        c2: Option<char>,
+        c3: Option<char>,
+    ) -> Option<(SimpleToken, usize)> {
         SimpleToken::lookup(c1, c2, c3)
     }
 
@@ -168,150 +183,99 @@ impl SimpleToken {
             '$' => SimpleToken::ret_single_lookup(Dollar),
 
             '%' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        ("%", Modulus),
-                        ("%=", AssignModulus)
-                    ],
-                )
+                SimpleToken::match_symbol(&real_string, vec![("%", Modulus), ("%=", AssignModulus)])
             }
 
             '&' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        ("&", BitAnd),
-                        ("&=", AssignBitAnd)
-                    ],
-                )
+                SimpleToken::match_symbol(&real_string, vec![("&", BitAnd), ("&=", AssignBitAnd)])
             }
 
             '^' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        ("^", BitXor),
-                        ("^=", AssignBitXor)
-                    ],
-                )
+                SimpleToken::match_symbol(&real_string, vec![("^", BitXor), ("^=", AssignBitXor)])
             }
 
-            '!' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        ("!", ExclamationMark),
-                        ("!=", NotEquals)
-                    ],
-                )
-            }
+            '!' => SimpleToken::match_symbol(
+                &real_string,
+                vec![("!", ExclamationMark), ("!=", NotEquals)],
+            ),
 
-            '|' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        ("|", BitOr),
-                        ("|>", Pipe),
-                        ("|=", AssignBitOr)
-                    ],
-                )
-            }
+            '|' => SimpleToken::match_symbol(
+                &real_string,
+                vec![("|", BitOr), ("|>", Pipe), ("|=", AssignBitOr)],
+            ),
 
-            '.' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        (".", Dot),
-                        ("..", Range),
-                        ("..=", RangeInclusive),
-                    ],
-                )
-            }
+            '.' => SimpleToken::match_symbol(
+                &real_string,
+                vec![
+                    (".", Dot),
+                    ("..", Range),
+                    (".*", Deref),
+                    (".&", Address),
+                    ("..=", RangeInclusive),
+                ],
+            ),
 
             '=' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        ("=", Equals),
-                        ("==", EqualsOperator)
-                    ],
-                )
+                SimpleToken::match_symbol(&real_string, vec![("=", Equals), ("==", EqualsOperator)])
             }
 
-            '+' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        ("+", Plus),
-                        ("++", Increment),
-                        ("+=", AssignAddition)
-                    ],
-                )
-            }
+            '+' => SimpleToken::match_symbol(
+                &real_string,
+                vec![("+", Plus), ("++", Increment), ("+=", AssignAddition)],
+            ),
 
-            '<' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        ("<", PointyBracketBegin),
-                        ("<=", LessThanOrEquals),
-                        ("<<", ShiftLeft),
-                        ("<<=", AssignShiftLeft)
-                    ],
-                )
-            }
+            '<' => SimpleToken::match_symbol(
+                &real_string,
+                vec![
+                    ("<", PointyBracketBegin),
+                    ("<=", LessThanOrEquals),
+                    ("<<", ShiftLeft),
+                    ("<<=", AssignShiftLeft),
+                ],
+            ),
 
-            '>' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        (">", PointyBracketEnd),
-                        (">=", GreaterThanOrEquals),
-                        (">>", ShiftRight),
-                        (">>=", AssignShiftRight)
-                    ],
-                )
-            }
+            '>' => SimpleToken::match_symbol(
+                &real_string,
+                vec![
+                    (">", PointyBracketEnd),
+                    (">=", GreaterThanOrEquals),
+                    (">>", ShiftRight),
+                    (">>=", AssignShiftRight),
+                ],
+            ),
 
-            '-' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        ("-", Minus),
-                        ("--", Decrement),
-                        ("->", Arrow),
-                        ("-=", AssignSubtraction)
-                    ],
-                )
-            }
+            '-' => SimpleToken::match_symbol(
+                &real_string,
+                vec![
+                    ("-", Minus),
+                    ("--", Decrement),
+                    ("->", Arrow),
+                    ("-=", AssignSubtraction),
+                ],
+            ),
 
-            '*' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        ("*", Multiplication),
-                        ("*/", CommentMultiLineEnd),
-                        ("**", Power),
-                        ("*=", AssignMultiplication),
-                        ("**=", AssignPower)
-                    ],
-                )
-            }
+            '*' => SimpleToken::match_symbol(
+                &real_string,
+                vec![
+                    ("*", Multiplication),
+                    ("*/", CommentMultiLineEnd),
+                    ("**", Power),
+                    ("*=", AssignMultiplication),
+                    ("**=", AssignPower),
+                ],
+            ),
 
-            '/' => {
-                SimpleToken::match_symbol(
-                    &real_string,
-                    vec![
-                        ("/", Division),
-                        ("//", CommentSingleLine),
-                        ("/*", CommentMultiLineBegin),
-                        ("/=", AssignDivision)
-                    ],
-                )
-            }
+            '/' => SimpleToken::match_symbol(
+                &real_string,
+                vec![
+                    ("/", Division),
+                    ("//", CommentSingleLine),
+                    ("/*", CommentMultiLineBegin),
+                    ("/=", AssignDivision),
+                ],
+            ),
 
-            _ => None
+            _ => None,
         }
     }
 
@@ -319,16 +283,14 @@ impl SimpleToken {
         Some((SimpleToken::Symbol(symbol), 1))
     }
 
-
     fn match_symbol(
-        real_string: &str, mut string_symbol_tuples: Vec<(&str, Symbol)>,
+        real_string: &str,
+        mut string_symbol_tuples: Vec<(&str, Symbol)>,
     ) -> Option<(SimpleToken, usize)> {
         // Sort the tuples by the length of their "strings".
         // This ensures that the longest symbols are matched
         // (ex. "==" is always matched instead of "=").
-        string_symbol_tuples.sort_unstable_by(
-            |a, b| b.0.len().cmp(&a.0.len())
-        );
+        string_symbol_tuples.sort_unstable_by(|a, b| b.0.len().cmp(&a.0.len()));
 
         for tuple in string_symbol_tuples {
             let current_string = tuple.0;

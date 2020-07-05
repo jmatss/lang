@@ -1,0 +1,4 @@
+if x == y:
+    print("TRUE")
+else:
+    print("FALSE")

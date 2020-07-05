@@ -1,0 +1,6 @@
+if x == y:
+    print("TRUE")
+else x == 3:
+    print('m')
+else:
+    print("FALSE")

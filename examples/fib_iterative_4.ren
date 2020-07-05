@@ -1,0 +1,13 @@
+function fib(n @ Integer) @ Integer:
+    if n <= 1:
+        return n
+
+    fib1 = 0
+    fib2 = 1
+    sum @ Integer = 0
+    iterate i in 0..=n:
+        sum += fib1 + fib2
+        fib1 = fib2
+        fib2 = sum
+        
+    return sum

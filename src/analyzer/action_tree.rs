@@ -1,18 +1,24 @@
-use std::collections::HashMap;
-use crate::parser::token::Variable;
-use crate::CustomResult;
 use crate::parser::abstract_syntax_tree::ScopeIndex;
+use crate::parser::token::{TypeStruct, Variable as TokenVariable};
+use crate::CustomResult;
+use std::collections::HashMap;
+
+// Things that needs to be done during this "action" phase:
+//   variables: types, values, modifiers
+//   function call: types, names(corresponding parameters), values
 
 // Use a number to indicate scope.
 // Make an ordered list all the times the variable in mentioned.
 // Keep the value of the variable at all the stages, and it will be changed every time
-// am assignment is made on the variable.
+// an assignment is made on the variable.
 
 // - The lifetime of a variable is only per scope (with the exception of static variables).
 //   Valid scopes are:
 //      default("local" variables, static variables)
 //      functions(parameters, local variables),
 //      class(member fields)
+//      enum(?)
+//      interface(?)
 //      macro(parameters, local variables)
 //      if(local variables, "of" cast if it evaluates to true)
 //      else(local variables, "of" cast if it evaluates to true)
@@ -36,14 +42,28 @@ use crate::parser::abstract_syntax_tree::ScopeIndex;
 // TODO: Lifetime of throws? How should it find the next catch?
 // TODO: Maybe at assignment to case's (rusts: id @ pattern)
 // TODO: Make sure to consider functions/variables included with "use".
+/// The current reason for the `analyzer` step is to figu
+pub struct AnalyzeState {}
+
 pub struct ActionTree {
+    /// Contains
+    ancestor_scope_indices: Vec<ScopeIndex>,
     // The vector contains all the times the Variable is used in order.
-    variables: HashMap<ScopeIndex, Vec<Variable>>,
+    variables: HashMap<ScopeIndex, Vec<TokenVariable>>,
+}
+
+pub struct ActionTreeVariable {
+    name: String,
+    var_type: TypeStruct,
+    scope: usize,
+    TODO_changes: Vec<TokenVariable>,
 }
 
 impl ActionTree {
     pub fn new() -> Self {
-        ActionTree { variables: HashMap::new() }
+        ActionTree {
+            variables: HashMap::new(),
+        }
     }
 
     // Go through and assemble all variables into action_tree.variables.

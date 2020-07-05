@@ -1,0 +1,17 @@
+fun get_file(abc: &mut T) -> T?:
+    x := 123
+    if (x == 3)
+        return x
+    else (x == 2)
+        noop
+    else:
+        return y
+
+    z := [i for i in 0..=10]
+    for (i in z)
+        print("abc")
+
+data File
+{
+
+}
