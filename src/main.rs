@@ -1,10 +1,12 @@
 mod analyzer;
+mod common;
 mod error;
 mod generation;
 mod lexer;
 mod parser;
 mod transpiler;
 
+use crate::analyzer::analyzer::analyze;
 use crate::error::CustomError;
 use crate::lexer::lexer::lex;
 use crate::parser::parser::parse;
@@ -17,18 +19,24 @@ fn main() -> CustomResult<()> {
 
     // Loop through all files and lex simple tokens...
     //let simple_tokens = lex("examples/fib_iterative_4.ren").unwrap();
-    let simple_tokens = lex("test_data/if3.ren").unwrap();
+    let simple_tokens = lex("test_data/type_inference.ren").unwrap();
     for simple_token in &simple_tokens {
         println!("{:?}", simple_token);
     }
 
     println!("Lexing complete.\n");
 
-    let ast = parse(&simple_tokens, indent_size).unwrap();
-    println!("\nAST:");
+    let mut ast = parse(&simple_tokens, indent_size).unwrap();
+    println!("\nAST after parse:");
     ast.debug_print();
 
-    println!("");
+    println!();
+
+    let analyze_context = analyze(&mut ast)?;
+    println!("\nAST after analyze:");
+    ast.debug_print();
+    println!();
+    println!("{:#?}", analyze_context);
 
     /*
     let lines = transpile(&ast);

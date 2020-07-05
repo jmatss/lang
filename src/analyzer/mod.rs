@@ -1,4 +1,3 @@
-pub mod action_tree;
 pub mod analyzer;
-pub mod types;
-pub mod variable;
+pub mod declaration_analyzer;
+pub mod type_analyzer;

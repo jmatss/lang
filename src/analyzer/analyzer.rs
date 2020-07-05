@@ -1,91 +1,76 @@
-use crate::analyzer::action_tree::ActionTree;
-use crate::error::CustomError::AnalyzeError;
-use crate::parser::abstract_syntax_tree::{ASTToken, AST, RCNode};
-use crate::parser::token::Token;
+use crate::analyzer::declaration_analyzer::DeclarationAnalyzer;
+use crate::analyzer::type_analyzer::TypeAnalyzer;
+use crate::parser::abstract_syntax_tree::{ScopeIndex, AST};
+use crate::parser::token::{Class, Enum, Function, Interface, Macro, Token, TypeStruct};
 use crate::CustomResult;
-use std::cell::Ref;
+use std::collections::HashMap;
 
-pub struct Analyzer {
-    ast: AST,
-    action_tree: ActionTree,
+#[derive(Debug)]
+pub struct VariableState {
+    pub tokens: Vec<Token>,
+    pub base_type: Option<TypeStruct>,
 }
 
-pub fn analyze(ast: AST) -> CustomResult<()> {
-    let analyzer = Analyzer::new(ast);
-
-    let root_block = analyzer.ast.blocks[0].borrow();
-
-    for child in &root_block.children {
-        match child {
-            RCNode::Block(ast_block) => {
-                let a = ast_block.borrow_mut();
-            }
-            RCNode::Token(ast_token) =>
+impl VariableState {
+    pub fn new() -> Self {
+        Self {
+            tokens: Vec::new(),
+            base_type: None,
         }
-        let a = analyzer.parse(child);
     }
-
-    let root_block_data_opt = &ast.blocks[0].borrow().block_data;
-    if let Some(block_data) = root_block_data_opt {
-        for block in &block_data.children {
-            for child in &block_data.children {
-                let child_token = &child.borrow().token;
-
-                println!("TOKEN: {:?}", child_token);
-
-                match child_token {
-                    Token::BlockHeader(block_header) => {
-                        block_header.
-                        // TODO: FIXME: Temporary let else be caught in here
-                        // since they are special case.
-                        let mut result = transpile_block_header(block_header)?;
-                        lines.push(result);
-                    }
-                    Token::Expression(expr) => {
-                        let mut result = transpile_expression(expr)?;
-                        result.push_str(symbols::EXPR_BRAKE);
-                        lines.push(result);
-                    }
-                    Token::Statement(x) => {
-                        println!("{:?}", x);
-                    }
-                    _ => {}
-                }
-            }
-
-            lines.push(symbols::BLOCK_END.to_string());
-        }
-    } else {
-        panic!("NO CHILDREN IN ROOT_BLOCK.");
-    }
-
-    Ok(())
 }
 
-impl Analyzer {
-    pub fn new(ast: AST) -> Self {
-        let action_tree = ActionTree::new();
-        Analyzer { ast, action_tree }
-    }
+#[derive(Debug)]
+pub struct AnalyzeContext {
+    /// Contains all variables that have been seen traversing down to this part of the code.
+    /// The outer map has a map that represents the scope that it is declared in and the
+    /// inner map has the variable name as the key and the variable state as the value
+    /// which contains all uses and the assumed actual type.
+    pub variables: HashMap<ScopeIndex, HashMap<String, VariableState>>,
 
-    fn parse(&self, ast_token: Ref<ASTToken>) {
-        let token = &ast_token.token;
-        match token {
-            Token::Expression(expression) => {
-                // Check operations for valid types.
-                // variable declaration/assignment.
-                // function/macro calls with variables (can move/borrow).
-            }
+    // TODO: Need to have a list of all functions so that one can figure out the type
+    //       of it when used in a expression.
+    /// Contains all function calls that have been seen traversing down to this part of the code.
+    /// The outer map has a map that represents the scope that it is used in and the
+    /// inner map has the variable name as the key and the actual token as value.
+    pub functions: HashMap<ScopeIndex, HashMap<String, Function>>,
 
-            Token::Statement(statement) => {
-                // return (need to check borrow/move)
-                // yield (need to move the result (could borrow if lifetime is tied to ))
-                // throw
-            }
+    pub classes: HashMap<ScopeIndex, HashMap<String, Class>>,
+    pub enums: HashMap<ScopeIndex, HashMap<String, Enum>>,
+    pub interfaces: HashMap<ScopeIndex, HashMap<String, Interface>>,
+    pub macros: HashMap<ScopeIndex, HashMap<String, Macro>>,
 
-            Token::BlockHeader(block_header) => {
-                // variable declaration/assignment.
-            }
+    /// Temporary scope values.
+    // TODO: To this in a better way
+    /// The key is a child scope and the value is the parent of that scope.
+    pub parent_scopes: HashMap<ScopeIndex, ScopeIndex>,
+
+    /// The scope that the `analyzer` currently are in.
+    pub current_scope: ScopeIndex,
+}
+
+impl AnalyzeContext {
+    pub fn new() -> Self {
+        Self {
+            variables: HashMap::new(),
+            functions: HashMap::new(),
+            classes: HashMap::new(),
+            enums: HashMap::new(),
+            interfaces: HashMap::new(),
+            macros: HashMap::new(),
+            parent_scopes: HashMap::new(),
+            current_scope: 0,
         }
     }
+}
+
+/// Updates the AST with information about function prototypes and declarations
+/// of structures.
+pub fn analyze(ast: &mut AST) -> CustomResult<AnalyzeContext> {
+    let mut context = AnalyzeContext::new();
+
+    DeclarationAnalyzer::analyze(&mut context, ast)?;
+    TypeAnalyzer::analyze(&mut context, ast)?;
+
+    Ok(context)
 }

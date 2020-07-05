@@ -1,4 +1,4 @@
-use crate::analyzer::types::Type;
+use crate::common::variable_type::Type;
 use crate::lexer::simple_token::Symbol;
 use crate::parser::token::Modifier::{Private, Public, Static};
 
@@ -269,6 +269,8 @@ pub enum BinaryOperator {
 
     // Access function/fields ex. list.add(), tuple.0
     Dot,
+    Deref,
+    Address,
 
     Equals,
     NotEquals,
@@ -343,6 +345,7 @@ pub enum UnaryOperator {
 #[derive(Debug, Clone)]
 pub struct BinaryOperation {
     pub operator: BinaryOperator,
+    pub var_type: Option<TypeStruct>,
     pub left: Box<Expression>,
     pub right: Box<Expression>,
 }
@@ -351,6 +354,7 @@ impl BinaryOperation {
     pub fn new(operator: BinaryOperator, left: Box<Expression>, right: Box<Expression>) -> Self {
         BinaryOperation {
             operator,
+            var_type: None,
             left,
             right,
         }
@@ -360,12 +364,17 @@ impl BinaryOperation {
 #[derive(Debug, Clone)]
 pub struct UnaryOperation {
     pub operator: UnaryOperator,
+    pub var_type: Option<TypeStruct>,
     pub value: Box<Expression>,
 }
 
 impl UnaryOperation {
     pub fn new(operator: UnaryOperator, value: Box<Expression>) -> Self {
-        UnaryOperation { operator, value }
+        UnaryOperation {
+            operator,
+            var_type: None,
+            value,
+        }
     }
 }
 
@@ -474,16 +483,22 @@ impl Interface {
 
 #[derive(Debug, Clone)]
 pub struct FunctionCall {
-    pub function: Function,
+    pub name: String,
+    pub function: Option<Function>,
     pub arguments: Vec<Argument>,
 }
 
 impl FunctionCall {
-    pub fn new(function: Function, arguments: Vec<Argument>) -> Self {
+    pub fn new(name: String, arguments: Vec<Argument>) -> Self {
         FunctionCall {
-            function,
+            name,
+            function: None,
             arguments,
         }
+    }
+
+    pub fn add_definition(&mut self, function: Function) {
+        self.function = Some(function);
     }
 }
 
@@ -550,7 +565,7 @@ impl ArrayAccess {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TypeStruct {
     // None == void
     pub t: Type,
@@ -646,6 +661,9 @@ impl Token {
             Symbol::Range => Operator::BinaryOperator(BinaryOperator::Range),
             Symbol::RangeInclusive => Operator::BinaryOperator(BinaryOperator::RangeInclusive),
             //Symbol::Arrow,
+            Symbol::Deref => Operator::BinaryOperator(BinaryOperator::Deref),
+            Symbol::Address => Operator::BinaryOperator(BinaryOperator::Address),
+
             Symbol::EqualsOperator => Operator::BinaryOperator(BinaryOperator::Equals),
             Symbol::NotEquals => Operator::BinaryOperator(BinaryOperator::NotEquals),
             Symbol::SquareBracketBegin => Operator::BinaryOperator(BinaryOperator::LessThan),

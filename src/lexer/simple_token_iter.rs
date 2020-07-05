@@ -1,10 +1,10 @@
 use crate::error::CustomError::LexError;
-use crate::lexer::simple_token::{SimpleToken, Symbol, Literal};
+use crate::lexer::simple_token::{Literal, SimpleToken, Symbol};
+use crate::CustomResult;
+use std::collections::linked_list::LinkedList;
 use std::fs::File;
 use std::io::Read;
 use std::vec::IntoIter;
-use std::collections::linked_list::LinkedList;
-use crate::CustomResult;
 
 const MAX_PUT_BACK: usize = 5;
 
@@ -64,15 +64,16 @@ impl SimpleTokenIter {
             } else if SimpleTokenIter::valid_whitespace(c1) {
                 self.get_whitespaces()
             } else if let Some(symbol_token) = SimpleToken::lookup_three(c1, c2, c3) {
-
                 // Add special cases for string- and char literals.
                 let (token, n) = symbol_token;
                 match token {
-                    SimpleToken::Symbol(Symbol::DoubleQuote) =>
-                        Ok(self.get_literal(Symbol::DoubleQuote)?),
+                    SimpleToken::Symbol(Symbol::DoubleQuote) => {
+                        Ok(self.get_literal(Symbol::DoubleQuote)?)
+                    }
 
-                    SimpleToken::Symbol(Symbol::SingleQuote) =>
-                        Ok(self.get_literal(Symbol::SingleQuote)?),
+                    SimpleToken::Symbol(Symbol::SingleQuote) => {
+                        Ok(self.get_literal(Symbol::SingleQuote)?)
+                    }
 
                     _ => {
                         self.skip(n);
@@ -81,8 +82,8 @@ impl SimpleTokenIter {
                 }
             } else {
                 Err(LexError(format!(
-	                   "Didn't match a symbol token when c: {:?}, c2: {:?} and c2: {:?}",
-                        c1, c2, c3
+                    "Didn't match a symbol token when c: {:?}, c2: {:?} and c2: {:?}",
+                    c1, c2, c3
                 )))
             }
         } else {
@@ -130,7 +131,9 @@ impl SimpleTokenIter {
         if !result.is_empty() {
             Ok(result)
         } else {
-            Err(LexError("Empty result in get_identifier_string().".to_string()))
+            Err(LexError(
+                "Empty result in get_identifier_string().".to_string(),
+            ))
         }
     }
 
@@ -140,11 +143,11 @@ impl SimpleTokenIter {
         let mut number = self.get_integer(radix)?;
 
         // If the next simple token is a Dot and the char after that is a number, this is a float.
-        // FIXME: (?) might not need to check number after Dot to allow for 
+        // FIXME: (?) might not need to check number after Dot to allow for
         // example "1." instead of needing to write "1.0".
         if let Some(('.', Some(next))) = self.peek_two() {
             if SimpleTokenIter::valid_number(next, radix) {
-                self.skip(1);    // Remove dot.
+                self.skip(1); // Remove dot.
                 number = [number, self.get_integer(radix)?].join(".");
             }
         }
@@ -167,57 +170,64 @@ impl SimpleTokenIter {
     }
 
     fn get_linebreak(&mut self) -> CustomResult<SimpleToken> {
-        let c = self.next()
-            .ok_or_else(|| LexError("Reached EOF while parsing first char in get_linebreak.".to_string()))?;
+        let c = self.next().ok_or_else(|| {
+            LexError("Reached EOF while parsing first char in get_linebreak.".to_string())
+        })?;
 
         if c == '\n' {
             Ok(SimpleToken::Symbol(Symbol::LineBreak))
         } else if c == '\r' {
-            let c_next = self.next()
-                .ok_or_else(|| LexError("Reached EOF after a '\\r' had been parsed.".to_string()))?;
+            let c_next = self.next().ok_or_else(|| {
+                LexError("Reached EOF after a '\\r' had been parsed.".to_string())
+            })?;
 
             if c_next == '\n' {
                 Ok(SimpleToken::Symbol(Symbol::LineBreak))
             } else {
-                Err(LexError("Didn't receive a '\\n' after a '\\r'.".to_string()))
+                Err(LexError(
+                    "Didn't receive a '\\n' after a '\\r'.".to_string(),
+                ))
             }
         } else {
-            Err(LexError("No linebreak character received in get_linebreak.".to_string()))
+            Err(LexError(
+                "No linebreak character received in get_linebreak.".to_string(),
+            ))
         }
     }
-    
+
     // TODO: Fix escape chars etc. Ex:
     //      "abc\"abc"
     //  will cause an error.
     fn get_literal(&mut self, literal_symbol: Symbol) -> CustomResult<SimpleToken> {
         let mut char_vec = Vec::new();
-        self.next();    // Remove the start "symbol" (single or double-quote).
+        self.next(); // Remove the start "symbol" (single or double-quote).
 
         loop {
-            let current = self.next()
-                .ok_or_else(|| LexError("Reached EOF while parsing char(s) in get_literal.".to_string()))?;
-                
+            let current = self.next().ok_or_else(|| {
+                LexError("Reached EOF while parsing char(s) in get_literal.".to_string())
+            })?;
+
             match SimpleToken::lookup_one(current) {
-                Some((SimpleToken::Symbol(s), _)) if s == literal_symbol => 
-                    break,
-                _ => 
-                    char_vec.push(current)
+                Some((SimpleToken::Symbol(s), _)) if s == literal_symbol => break,
+                _ => char_vec.push(current),
             }
         }
 
-        Ok(SimpleToken::Literal(Literal::StringLiteral(char_vec.iter().collect())))
+        Ok(SimpleToken::Literal(Literal::StringLiteral(
+            char_vec.iter().collect(),
+        )))
     }
 
     fn get_whitespaces(&mut self) -> CustomResult<SimpleToken> {
         let mut count = 0;
 
         while let Some(c) = self.next() {
-            let (_, c_next) = self.peek_two()
-                .ok_or_else(|| LexError("Empty peek during get_whitespaces.".to_string()))?;
-                
-            // Since linebreaks counts as whitespaces in rust, need to manually make
+            let c_next = self.peek();
+
+            // Since line breaks counts as whitespaces in rust, need to manually make
             // sure that the current char(s) isn't a linebreak in the if-statement.
-            if SimpleTokenIter::valid_whitespace(c) && !SimpleTokenIter::valid_linebreak(c, c_next) {
+            if SimpleTokenIter::valid_whitespace(c) && !SimpleTokenIter::valid_linebreak(c, c_next)
+            {
                 count += 1;
             } else {
                 self.put_back(c);
@@ -254,27 +264,33 @@ impl SimpleTokenIter {
     }
 
     #[inline]
+    pub fn peek(&mut self) -> Option<char> {
+        let chars = self.peek_n(1);
+        if chars.len() == 1 {
+            Some(chars[0])
+        } else {
+            None
+        }
+    }
+
+    #[inline]
     pub fn peek_two(&mut self) -> Option<(char, Option<char>)> {
         let chars = self.peek_n(2);
-        Some(
-            match chars.len() {
-                2 => (chars[0], Some(chars[1])),
-                1 => (chars[0], None),
-                _ => return None
-            }
-        )
+        Some(match chars.len() {
+            2 => (chars[0], Some(chars[1])),
+            1 => (chars[0], None),
+            _ => return None,
+        })
     }
 
     #[inline]
     pub fn peek_three(&mut self) -> Option<(char, Option<char>, Option<char>)> {
         let chars = self.peek_n(3);
-        Some(
-            match chars.len() {
-                3 => (chars[0], Some(chars[1]), Some(chars[2])),
-                2 => (chars[0], Some(chars[1]), None),
-                1 => (chars[0], None, None),
-                _ => return None
-            }
-        )
+        Some(match chars.len() {
+            3 => (chars[0], Some(chars[1]), Some(chars[2])),
+            2 => (chars[0], Some(chars[1]), None),
+            1 => (chars[0], None, None),
+            _ => return None,
+        })
     }
 }

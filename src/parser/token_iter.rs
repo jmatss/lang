@@ -1,3 +1,4 @@
+use crate::common::variable_type::Type;
 use crate::error::CustomError;
 use crate::error::CustomError::ParseError;
 use crate::lexer::simple_token::{Literal as SimpleLiteral, SimpleToken, Symbol};
@@ -500,7 +501,16 @@ impl<'a> TokenIter<'a> {
         let identifier = self.next_identifier()?;
         let generics = self.next_generic_list()?;
 
-        Ok(TypeStruct::new(Some(identifier), generics))
+        let generics = if generics.len() == 0 {
+            Some(generics)
+        } else {
+            None
+        };
+
+        Ok(TypeStruct::new(
+            Type::identifier_to_type(&identifier),
+            generics,
+        ))
     }
 
     // Valid formats:
@@ -646,7 +656,7 @@ impl<'a> TokenIter<'a> {
             _ => {
                 // Treat it as an variable.
                 let variable = self.parse_variable_with_identifier(identifier)?;
-                Ok(Token::Expression(Expression::Variable(Some(variable))))
+                Ok(Token::Expression(Expression::Variable(variable)))
             }
         }
     }
@@ -793,10 +803,11 @@ impl<'a> TokenIter<'a> {
                         ));
                     }
 
+                    // TODO: Maybe parse postfix types here (?).
                     let number = if number_string.contains('.') {
-                        Expression::Float(number_string)
+                        Expression::Float(number_string, None)
                     } else {
-                        Expression::Integer(number_string)
+                        Expression::Integer(number_string, None)
                     };
                     output_stack.push(Output::Value(number));
 
@@ -927,6 +938,8 @@ impl<'a> TokenIter<'a> {
         while let Some(operator) = operator_stack.pop() {
             output_stack.push(Output::Operator(operator));
         }
+
+        println!("Output_stack: {:#?}", output_stack);
 
         Ok(self.polish_to_expression(&output_stack)?)
     }
@@ -1360,21 +1373,15 @@ impl<'a> TokenIter<'a> {
         let name = generic_header
             .name
             .ok_or_else(|| ParseError("Function has no name specified.".to_string()))?;
-        let generics = if let Some(generics) = generic_header.generics {
-            generics
-        } else {
-            Vec::new()
-        };
-        let parameters = generic_header
-            .parameters
-            .ok_or_else(|| ParseError("Function has no parameters specified.".to_string()))?;
+        let generics = generic_header.generics;
+        let parameters = generic_header.parameters;
         let return_type = if let Some(t) = generic_header.return_type {
             t
         } else {
-            TypeStruct::new(None, Vec::new())
+            TypeStruct::new(Type::Void, None)
         };
 
-        let function_header = Function::new(name, generics, parameters, return_type);
+        let function_header = Function::new(name, generics, parameters, Some(return_type));
         Ok(BlockHeader::Function(Some(function_header)))
     }
 
