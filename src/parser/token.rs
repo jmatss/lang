@@ -121,7 +121,7 @@ pub enum Output {
     Value(Expression),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Operator {
     BinaryOperator(BinaryOperator),
     UnaryOperator(UnaryOperator),
@@ -269,8 +269,6 @@ pub enum BinaryOperator {
 
     // Access function/fields ex. list.add(), tuple.0
     Dot,
-    Deref,
-    Address,
 
     Equals,
     NotEquals,
@@ -319,7 +317,7 @@ pub enum BinaryOperator {
     ExpressionAnd,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOperator {
     /* NUMBERS */
     IncrementPrefix,
@@ -661,8 +659,8 @@ impl Token {
             Symbol::Range => Operator::BinaryOperator(BinaryOperator::Range),
             Symbol::RangeInclusive => Operator::BinaryOperator(BinaryOperator::RangeInclusive),
             //Symbol::Arrow,
-            Symbol::Deref => Operator::BinaryOperator(BinaryOperator::Deref),
-            Symbol::Address => Operator::BinaryOperator(BinaryOperator::Address),
+            Symbol::Deref => Operator::UnaryOperator(UnaryOperator::Deref),
+            Symbol::Address => Operator::UnaryOperator(UnaryOperator::Address),
 
             Symbol::EqualsOperator => Operator::BinaryOperator(BinaryOperator::Equals),
             Symbol::NotEquals => Operator::BinaryOperator(BinaryOperator::NotEquals),

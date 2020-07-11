@@ -10,7 +10,7 @@ use crate::analyzer::analyzer::analyze;
 use crate::error::CustomError;
 use crate::lexer::lexer::lex;
 use crate::parser::parser::parse;
-//use crate::transpiler::transpiler::transpile;
+use crate::transpiler::transpiler::transpile;
 
 pub type CustomResult<T> = Result<T, CustomError>;
 
@@ -19,7 +19,7 @@ fn main() -> CustomResult<()> {
 
     // Loop through all files and lex simple tokens...
     //let simple_tokens = lex("examples/fib_iterative_4.ren").unwrap();
-    let simple_tokens = lex("test_data/type_inference.ren").unwrap();
+    let simple_tokens = lex("test_data/expr9.ren").unwrap();
     for simple_token in &simple_tokens {
         println!("{:?}", simple_token);
     }
@@ -38,13 +38,12 @@ fn main() -> CustomResult<()> {
     println!();
     println!("{:#?}", analyze_context);
 
-    /*
-    let lines = transpile(&ast);
+
+    let lines = transpile(&ast, &analyze_context);
     println!("LINES:");
     for line in lines? {
         println!("{}", line);
     }
-     */
 
     Ok(())
 }

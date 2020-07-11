@@ -1,2 +1,2 @@
-pub mod generation;
+pub mod code_generation;
 pub mod module;

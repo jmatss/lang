@@ -12,7 +12,7 @@ pub struct DeclarationAnalyzer<'a> {
 }
 
 impl<'a> DeclarationAnalyzer<'a> {
-    /// Takes in a abstract syntax tree and tries to infer all the missing types.
+    /// Takes in a abstract syntax tree and tries to infer all the missing declarations.
     pub fn analyze(context: &'a mut AnalyzeContext, ast: &AST) -> CustomResult<()> {
         let mut declaration_analyzer = DeclarationAnalyzer::new(context);
         let root_block = ast.blocks[0].borrow_mut();

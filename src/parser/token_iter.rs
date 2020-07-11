@@ -501,7 +501,7 @@ impl<'a> TokenIter<'a> {
         let identifier = self.next_identifier()?;
         let generics = self.next_generic_list()?;
 
-        let generics = if generics.len() == 0 {
+        let generics = if generics.is_empty() {
             Some(generics)
         } else {
             None
@@ -860,8 +860,20 @@ impl<'a> TokenIter<'a> {
                         }
 
                         Operator::Increment => {
+                            // Set as postfix operator only if the previous operator
+                            // wasn't a postfix operation.
                             let increment_operator = if previous_was_operand {
                                 Operator::UnaryOperator(UnaryOperator::IncrementPostfix)
+                            } else if let Some(Operator::UnaryOperator(prev_op)) =
+                                operator_stack.last()
+                            {
+                                if *prev_op == UnaryOperator::DecrementPostfix
+                                    || *prev_op == UnaryOperator::IncrementPostfix
+                                {
+                                    Operator::UnaryOperator(UnaryOperator::IncrementPostfix)
+                                } else {
+                                    Operator::UnaryOperator(UnaryOperator::IncrementPrefix)
+                                }
                             } else {
                                 Operator::UnaryOperator(UnaryOperator::IncrementPrefix)
                             };
@@ -874,8 +886,20 @@ impl<'a> TokenIter<'a> {
                         }
 
                         Operator::Decrement => {
+                            // Set as postfix operator only if the previous operator
+                            // wasn't a postfix operation.
                             let decrement_operator = if previous_was_operand {
                                 Operator::UnaryOperator(UnaryOperator::DecrementPostfix)
+                            } else if let Some(Operator::UnaryOperator(prev_op)) =
+                                operator_stack.last()
+                            {
+                                if *prev_op == UnaryOperator::DecrementPostfix
+                                    || *prev_op == UnaryOperator::IncrementPostfix
+                                {
+                                    Operator::UnaryOperator(UnaryOperator::DecrementPostfix)
+                                } else {
+                                    Operator::UnaryOperator(UnaryOperator::DecrementPrefix)
+                                }
                             } else {
                                 Operator::UnaryOperator(UnaryOperator::DecrementPrefix)
                             };
@@ -888,8 +912,20 @@ impl<'a> TokenIter<'a> {
                         }
 
                         Operator::Plus => {
+                            // Set as unary operator only if the previous operator
+                            // wasn't a postfix operation.
                             let plus_operator = if previous_was_operand {
                                 Operator::BinaryOperator(BinaryOperator::Addition)
+                            } else if let Some(Operator::UnaryOperator(prev_op)) =
+                                operator_stack.last()
+                            {
+                                if *prev_op == UnaryOperator::DecrementPostfix
+                                    || *prev_op == UnaryOperator::IncrementPostfix
+                                {
+                                    Operator::BinaryOperator(BinaryOperator::Addition)
+                                } else {
+                                    Operator::UnaryOperator(UnaryOperator::Positive)
+                                }
                             } else {
                                 Operator::UnaryOperator(UnaryOperator::Positive)
                             };
@@ -902,8 +938,20 @@ impl<'a> TokenIter<'a> {
                         }
 
                         Operator::Minus => {
+                            // Set as unary operator only if the previous operator
+                            // wasn't a postfix operation.
                             let minus_operator = if previous_was_operand {
                                 Operator::BinaryOperator(BinaryOperator::Subtraction)
+                            } else if let Some(Operator::UnaryOperator(prev_op)) =
+                                operator_stack.last()
+                            {
+                                if *prev_op == UnaryOperator::DecrementPostfix
+                                    || *prev_op == UnaryOperator::IncrementPostfix
+                                {
+                                    Operator::BinaryOperator(BinaryOperator::Subtraction)
+                                } else {
+                                    Operator::UnaryOperator(UnaryOperator::Negative)
+                                }
                             } else {
                                 Operator::UnaryOperator(UnaryOperator::Negative)
                             };

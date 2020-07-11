@@ -68,11 +68,11 @@ impl SimpleTokenIter {
                 let (token, n) = symbol_token;
                 match token {
                     SimpleToken::Symbol(Symbol::DoubleQuote) => {
-                        Ok(self.get_literal(Symbol::DoubleQuote)?)
+                        Ok(self.get_literal_string()?)
                     }
 
                     SimpleToken::Symbol(Symbol::SingleQuote) => {
-                        Ok(self.get_literal(Symbol::SingleQuote)?)
+                        Ok(self.get_literal_char()?)
                     }
 
                     _ => {
@@ -198,7 +198,7 @@ impl SimpleTokenIter {
     // TODO: Fix escape chars etc. Ex:
     //      "abc\"abc"
     //  will cause an error.
-    fn get_literal(&mut self, literal_symbol: Symbol) -> CustomResult<SimpleToken> {
+    fn get_literal(&mut self, literal_symbol: Symbol) -> CustomResult<String> {
         let mut char_vec = Vec::new();
         self.next(); // Remove the start "symbol" (single or double-quote).
 
@@ -213,8 +213,18 @@ impl SimpleTokenIter {
             }
         }
 
+        Ok(char_vec.iter().collect())
+    }
+
+    fn get_literal_string(&mut self) -> CustomResult<SimpleToken> {
         Ok(SimpleToken::Literal(Literal::StringLiteral(
-            char_vec.iter().collect(),
+            self.get_literal(Symbol::DoubleQuote)?
+        )))
+    }
+
+    fn get_literal_char(&mut self) -> CustomResult<SimpleToken> {
+        Ok(SimpleToken::Literal(Literal::CharLiteral(
+            self.get_literal(Symbol::SingleQuote)?
         )))
     }
 
