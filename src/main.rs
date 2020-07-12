@@ -11,6 +11,7 @@ use crate::error::CustomError;
 use crate::lexer::lexer::lex;
 use crate::parser::parser::parse;
 use crate::transpiler::transpiler::transpile;
+use crate::generation::code_generation::generate;
 
 pub type CustomResult<T> = Result<T, CustomError>;
 
@@ -38,12 +39,15 @@ fn main() -> CustomResult<()> {
     println!();
     println!("{:#?}", analyze_context);
 
+    let ir = generate(&ast, &analyze_context);
 
+    /*
     let lines = transpile(&ast, &analyze_context);
     println!("LINES:");
     for line in lines? {
         println!("{}", line);
     }
+    */
 
     Ok(())
 }

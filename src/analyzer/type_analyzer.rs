@@ -11,12 +11,12 @@ use std::cell::RefMut;
 use std::collections::HashMap;
 
 pub struct TypeAnalyzer<'a> {
-    context: &'a mut AnalyzeContext,
+    context: &'a mut AnalyzeContext<'a>,
 }
 
 impl<'a> TypeAnalyzer<'a> {
     /// Takes in a abstract syntax tree and tries to infer all the missing types.
-    pub fn analyze(context: &mut AnalyzeContext, ast: &mut AST) -> CustomResult<()> {
+    pub fn analyze(context: &'a mut AnalyzeContext, ast: &mut AST) -> CustomResult<()> {
         let mut type_analyzer = TypeAnalyzer::new(context);
         let root_block = ast.blocks[0].borrow_mut();
         type_analyzer.analyze_recursive(root_block)
@@ -110,18 +110,18 @@ impl<'a> TypeAnalyzer<'a> {
         // variable is seen. This is probably the declaration of the variable.
         self.context
             .variables
-            .entry(self.context.current_scope)
+            .entry(variable.name.clone())
             .or_insert_with(HashMap::new);
 
-        let scope_variables_opt = self.context.variables.get_mut(&self.context.current_scope);
+        let scope_variables_opt = self.context.variables.get_mut(&variable.name);
 
         if let Some(scope_variables) = scope_variables_opt {
             // Add a new map of variable state if the current variable doesn't exist in the map yet.
             scope_variables
-                .entry(variable.name.clone())
+                .entry(self.context.current_scope)
                 .or_insert_with(VariableState::new);
 
-            if let Some(variable_state) = scope_variables.get_mut(&variable.name) {
+            if let Some(variable_state) = scope_variables.get_mut(&self.context.current_scope) {
                 // Set the "one true" base_type if it isn't set yet.
                 if variable_state.base_type.is_none() {
                     variable_state.base_type = variable.var_type.clone();

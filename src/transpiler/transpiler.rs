@@ -13,7 +13,7 @@ pub struct Transpiler<'a> {
     ast: &'a AST,
 
     /// Contains the "context" parsed during analyzing.
-    context: &'a AnalyzeContext,
+    context: &'a AnalyzeContext<'a>,
 }
 
 pub fn transpile(ast: &AST, context: &AnalyzeContext) -> CustomResult<Vec<String>> {

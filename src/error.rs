@@ -1,6 +1,6 @@
 use std::error::Error;
-use std::fmt::{Display, Formatter};
 use std::fmt;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum CustomError {
@@ -20,5 +20,17 @@ impl Display for CustomError {
             CustomError::AnalyzeError(x) => write!(f, "{}", x),
             CustomError::GenerationError(x) => write!(f, "{}", x),
         }
+    }
+}
+
+impl From<std::num::ParseIntError> for CustomError {
+    fn from(e: std::num::ParseIntError) -> Self {
+        CustomError::GenerationError(e.to_string())
+    }
+}
+
+impl From<std::num::ParseFloatError> for CustomError {
+    fn from(e: std::num::ParseFloatError) -> Self {
+        CustomError::GenerationError(e.to_string())
     }
 }

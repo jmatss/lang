@@ -1,6 +1,7 @@
 use crate::common::variable_type::Type;
 use crate::lexer::simple_token::Symbol;
 use crate::parser::token::Modifier::{Private, Public, Static};
+use inkwell::values::PointerValue;
 
 #[derive(Debug, Clone)]
 pub enum Token {
