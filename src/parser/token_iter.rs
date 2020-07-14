@@ -1,7 +1,7 @@
 use crate::common::variable_type::Type;
 use crate::error::CustomError;
 use crate::error::CustomError::ParseError;
-use crate::lexer::simple_token::{Literal as SimpleLiteral, SimpleToken, Symbol};
+use crate::lexer::lex_token::{LexToken, Literal as SimpleLiteral, Symbol};
 use crate::parser::abstract_syntax_tree::AST;
 use crate::parser::token::{
     Argument, ArrayAccess, BinaryOperation, BinaryOperator, BlockHeader, Class, Constructor, Enum,
@@ -69,7 +69,7 @@ use crate::CustomResult;
 const DEBUG: bool = true;
 
 pub struct TokenIter<'a> {
-    pub simple_tokens: &'a [SimpleToken],
+    pub simple_tokens: &'a [LexToken],
     pub position: usize,
 
     pub ast: AST,
@@ -130,7 +130,7 @@ macro_rules! stop_on {
 }
 
 impl<'a> TokenIter<'a> {
-    pub fn new(simple_tokens: &'a [SimpleToken], indent_fixed_size: usize) -> Self {
+    pub fn new(simple_tokens: &'a [LexToken], indent_fixed_size: usize) -> Self {
         TokenIter {
             simple_tokens,
             position: 0,
@@ -158,7 +158,7 @@ impl<'a> TokenIter<'a> {
             }
 
             match current {
-                SimpleToken::Identifier(identifier) => {
+                LexToken::Identifier(identifier) => {
                     if DEBUG {
                         println!("Identifier");
                     }
@@ -192,14 +192,14 @@ impl<'a> TokenIter<'a> {
                     }
                 }
 
-                SimpleToken::Symbol(Symbol::LineBreak) => {
+                LexToken::Symbol(Symbol::LineBreak) => {
                     if DEBUG {
                         println!("Linebreak");
                     }
                     self.update_indent_and_line_number(true)?
                 }
 
-                SimpleToken::Symbol(Symbol::SemiColon) => {
+                LexToken::Symbol(Symbol::SemiColon) => {
                     if DEBUG {
                         println!("Semocolon");
                     }
@@ -207,7 +207,7 @@ impl<'a> TokenIter<'a> {
                 }
 
                 // TODO: Make sure to update indent size when getting LineBreak.
-                SimpleToken::Symbol(_) | SimpleToken::Number(_) | SimpleToken::Literal(_) => {
+                LexToken::Symbol(_) | LexToken::Number(_) | LexToken::Literal(_) => {
                     if DEBUG {
                         println!("Symbol, number or literal.");
                     }
@@ -218,14 +218,14 @@ impl<'a> TokenIter<'a> {
                         .insert_token(token, self.line_number, self.indent_level)?;
                 }
 
-                SimpleToken::EndOfFile => {
+                LexToken::EndOfFile => {
                     if DEBUG {
                         println!("EndOfFile");
                     }
                     return Ok(std::mem::replace(&mut self.ast, AST::new()));
                 }
 
-                SimpleToken::Unknown(unknown) => {
+                LexToken::Unknown(unknown) => {
                     return Err(ParseError(format!(
                         "Bad string (SimpleToken) during parse_next: {:?}",
                         unknown
@@ -236,14 +236,14 @@ impl<'a> TokenIter<'a> {
     }
 
     #[inline]
-    fn next(&mut self) -> Option<SimpleToken> {
+    fn next(&mut self) -> Option<LexToken> {
         let result = self.simple_tokens.get(self.position).cloned();
         self.position += 1;
         result
     }
 
     #[inline]
-    fn next_skip_whitespace(&mut self) -> Option<SimpleToken> {
+    fn next_skip_whitespace(&mut self) -> Option<LexToken> {
         self.skip_whitespace();
         self.next()
     }
@@ -252,14 +252,14 @@ impl<'a> TokenIter<'a> {
     fn next_skip_whitespace_and_line_break(
         &mut self,
         update_indent: bool,
-    ) -> CustomResult<Option<SimpleToken>> {
+    ) -> CustomResult<Option<LexToken>> {
         self.skip_whitespace_and_line_break(update_indent)?;
         Ok(self.next())
     }
 
     #[inline]
     fn skip_whitespace(&mut self) {
-        if let Some(SimpleToken::Symbol(Symbol::WhiteSpace(_))) = self.peek() {
+        if let Some(LexToken::Symbol(Symbol::WhiteSpace(_))) = self.peek() {
             self.next();
         }
     }
@@ -269,8 +269,8 @@ impl<'a> TokenIter<'a> {
         // Need to do it in a loop if there are multiple whitespace/linebreaks in a row.
         loop {
             match self.next() {
-                Some(SimpleToken::Symbol(Symbol::WhiteSpace(_))) => continue,
-                Some(SimpleToken::Symbol(Symbol::LineBreak)) => {
+                Some(LexToken::Symbol(Symbol::WhiteSpace(_))) => continue,
+                Some(LexToken::Symbol(Symbol::LineBreak)) => {
                     self.update_indent_and_line_number(update_indent)?;
                     continue;
                 }
@@ -285,12 +285,12 @@ impl<'a> TokenIter<'a> {
     }
 
     #[inline]
-    fn peek(&mut self) -> Option<SimpleToken> {
+    fn peek(&mut self) -> Option<LexToken> {
         self.peek_n(0)
     }
 
     #[inline]
-    fn peek_n(&mut self, n: isize) -> Option<SimpleToken> {
+    fn peek_n(&mut self, n: isize) -> Option<LexToken> {
         // n is isize to allow for negative peeks.
         let index = self.position as isize + n;
         if index < 0 {
@@ -300,21 +300,20 @@ impl<'a> TokenIter<'a> {
     }
 
     #[inline]
-    fn peek_skip_whitespace(&mut self) -> Option<SimpleToken> {
+    fn peek_skip_whitespace(&mut self) -> Option<LexToken> {
         self.skip_whitespace();
         self.peek()
     }
 
     #[inline]
-    fn peek_skip_whitespace_and_line_break(&mut self) -> CustomResult<SimpleToken> {
+    fn peek_skip_whitespace_and_line_break(&mut self) -> CustomResult<LexToken> {
         let mut peek_amount = 0;
         loop {
             let result = self.peek_n(peek_amount).ok_or_else(|| {
                 ParseError("Out of tokens during peek_skip_whitespace_and_line_break.".to_string())
             })?;
             match result {
-                SimpleToken::Symbol(Symbol::WhiteSpace(_))
-                | SimpleToken::Symbol(Symbol::LineBreak) => {
+                LexToken::Symbol(Symbol::WhiteSpace(_)) | LexToken::Symbol(Symbol::LineBreak) => {
                     peek_amount += 1;
                     continue;
                 }
@@ -332,7 +331,7 @@ impl<'a> TokenIter<'a> {
     #[inline]
     fn rewind_skip_whitespace(&mut self) {
         self.position -= 1;
-        if let Some(SimpleToken::Symbol(Symbol::WhiteSpace(_))) = self.peek() {
+        if let Some(LexToken::Symbol(Symbol::WhiteSpace(_))) = self.peek() {
             self.position -= 1;
         }
     }
@@ -340,7 +339,7 @@ impl<'a> TokenIter<'a> {
     // Ensure that the next token is a block header end.
     fn assert_block_header_end(&mut self) -> CustomResult<()> {
         let next = self.next_skip_whitespace();
-        if let Some(SimpleToken::Symbol(Symbol::Colon)) = next {
+        if let Some(LexToken::Symbol(Symbol::Colon)) = next {
             Ok(())
         } else {
             Err(ParseError(format!(
@@ -356,9 +355,9 @@ impl<'a> TokenIter<'a> {
     // Examples when it should be set to false is LineBreaks before and after Commas.
     fn update_indent_and_line_number(&mut self, update_indent: bool) -> CustomResult<()> {
         if update_indent {
-            if let Some(SimpleToken::Symbol(Symbol::LineBreak)) = self.peek() {
+            if let Some(LexToken::Symbol(Symbol::LineBreak)) = self.peek() {
                 self.next(); // Consume Linebreak.
-            } else if let Some(SimpleToken::Symbol(Symbol::LineBreak)) = self.peek_n(-1) {
+            } else if let Some(LexToken::Symbol(Symbol::LineBreak)) = self.peek_n(-1) {
                 // LineBreak already consumed, move along.
             } else {
                 return Err(ParseError(
@@ -369,7 +368,7 @@ impl<'a> TokenIter<'a> {
             let indent = self.next_whitespace();
 
             // Edge case if the row is empty, ignore indents.
-            if let Some(SimpleToken::Symbol(Symbol::LineBreak)) = self.peek_skip_whitespace() {
+            if let Some(LexToken::Symbol(Symbol::LineBreak)) = self.peek_skip_whitespace() {
                 self.line_number += 1;
                 return Ok(());
             }
@@ -401,7 +400,7 @@ impl<'a> TokenIter<'a> {
     }
 
     fn next_whitespace(&mut self) -> usize {
-        if let Some(SimpleToken::Symbol(Symbol::WhiteSpace(size))) = self.next() {
+        if let Some(LexToken::Symbol(Symbol::WhiteSpace(size))) = self.next() {
             size
         } else {
             self.rewind();
@@ -411,7 +410,7 @@ impl<'a> TokenIter<'a> {
 
     fn next_identifier(&mut self) -> CustomResult<String> {
         let simple_token = self.next_skip_whitespace();
-        if let Some(SimpleToken::Identifier(identifier)) = simple_token {
+        if let Some(LexToken::Identifier(identifier)) = simple_token {
             Ok(identifier)
         } else {
             Err(ParseError(format!(
@@ -439,7 +438,7 @@ impl<'a> TokenIter<'a> {
         }
 
         // If true: This variable has specified type/modifiers, and is therefor a declaration.
-        if let Some(SimpleToken::Symbol(Symbol::At)) = self.peek_skip_whitespace() {
+        if let Some(LexToken::Symbol(Symbol::At)) = self.peek_skip_whitespace() {
             variable.set_declaration();
             self.next_skip_whitespace(); // Remove "At" symbol.
             self.parse_next_type_and_modifiers(&mut variable)?;
@@ -450,7 +449,7 @@ impl<'a> TokenIter<'a> {
 
     fn parse_variable(&mut self) -> CustomResult<Variable> {
         let peek = self.peek_skip_whitespace();
-        if let Some(SimpleToken::Symbol(symbol)) = peek {
+        if let Some(LexToken::Symbol(symbol)) = peek {
             return Err(CustomError::ParseError(format!(
                 "A symbol was used as variable name: {:?}",
                 symbol
@@ -466,7 +465,7 @@ impl<'a> TokenIter<'a> {
         // If the first identifier is a modifier token, there is no type and var_type it is set to None.
         let peek = self.peek_skip_whitespace();
         match peek {
-            Some(SimpleToken::Identifier(identifier)) => {
+            Some(LexToken::Identifier(identifier)) => {
                 let lookup = Token::lookup_identifier(&identifier);
                 if let Some(Token::Statement(Statement::Modifier(_))) = lookup {
                     variable.var_type = None;
@@ -474,7 +473,7 @@ impl<'a> TokenIter<'a> {
                     variable.var_type = Some(self.next_type()?);
                 }
 
-                while let Some(SimpleToken::Identifier(identifier)) = self.next_skip_whitespace() {
+                while let Some(LexToken::Identifier(identifier)) = self.next_skip_whitespace() {
                     let lookup = Token::lookup_identifier(&identifier);
                     if let Some(Token::Statement(Statement::Modifier(modifier))) = lookup {
                         variable.modifiers.push(modifier);
@@ -488,7 +487,7 @@ impl<'a> TokenIter<'a> {
                 Ok(())
             }
 
-            Some(SimpleToken::Symbol(Symbol::Equals)) => Ok(()), // No type/modifiers specified.
+            Some(LexToken::Symbol(Symbol::Equals)) => Ok(()), // No type/modifiers specified.
 
             _ => Err(ParseError(format!(
                 "Expected identifier(s) in parse_next_type_and_modifiers, got: {:?}",
@@ -526,7 +525,7 @@ impl<'a> TokenIter<'a> {
             types.push(self.next_type()?);
 
             let current = self.peek_skip_whitespace_and_line_break()?;
-            if let SimpleToken::Symbol(Symbol::Comma) = current {
+            if let LexToken::Symbol(Symbol::Comma) = current {
                 self.next_skip_whitespace_and_line_break(false)?; // Remove Comma symbol.
                 continue;
             } else {
@@ -542,13 +541,13 @@ impl<'a> TokenIter<'a> {
     fn next_generic_list(&mut self) -> CustomResult<Vec<TypeStruct>> {
         let mut generics = Vec::new();
 
-        if let Some(SimpleToken::Symbol(Symbol::PointyBracketBegin)) = self.peek_skip_whitespace() {
+        if let Some(LexToken::Symbol(Symbol::PointyBracketBegin)) = self.peek_skip_whitespace() {
             self.next_skip_whitespace(); // Remove PointBracketBegin symbol.
 
             generics = self.next_type_list()?;
 
             let current = self.next_skip_whitespace_and_line_break(false)?;
-            if let Some(SimpleToken::Symbol(Symbol::PointyBracketEnd)) = current {
+            if let Some(LexToken::Symbol(Symbol::PointyBracketEnd)) = current {
                 // Everything alright.
             } else {
                 return Err(ParseError(format!(
@@ -575,10 +574,10 @@ impl<'a> TokenIter<'a> {
             let peek = self
                 .peek_skip_whitespace()
                 .ok_or_else(|| ParseError("No more tokens in parse_path.".to_string()))?;
-            if let SimpleToken::Symbol(Symbol::Dot) = peek {
+            if let LexToken::Symbol(Symbol::Dot) = peek {
                 self.next_skip_whitespace(); // Remove Dot symbol.
                 continue;
-            } else if SimpleToken::is_break_symbol(&peek) {
+            } else if LexToken::is_break_symbol(&peek) {
                 break;
             } else {
                 return Err(ParseError(format!(
@@ -627,7 +626,7 @@ impl<'a> TokenIter<'a> {
             ParseError("No more tokens in parse_identifier_as_expression".to_string())
         })?;
         match peek {
-            SimpleToken::Symbol(Symbol::ParenthesisBegin) => {
+            LexToken::Symbol(Symbol::ParenthesisBegin) => {
                 // This is a function call.
                 let function_call = self.parse_function_call(&identifier)?;
                 Ok(Token::Expression(Expression::FunctionCall(Some(
@@ -635,7 +634,7 @@ impl<'a> TokenIter<'a> {
                 ))))
             }
 
-            SimpleToken::Symbol(Symbol::CurlyBracketBegin) => {
+            LexToken::Symbol(Symbol::CurlyBracketBegin) => {
                 // This is a macro call.
                 let macro_call = self.parse_macro_call(&identifier)?;
                 Ok(Token::Expression(Expression::MacroCall(Some(macro_call))))
@@ -645,7 +644,7 @@ impl<'a> TokenIter<'a> {
             //  Can only do one, ex. id[expr], need to do: id[expr1][expr2]...
             // TODO: Allow linebreak after SquareBracketBegin(easy) and before SquareBracketEnd(hard).
             // TODO: Add support for init of empty vector etc. (x = [])
-            SimpleToken::Symbol(Symbol::SquareBracketBegin) => {
+            LexToken::Symbol(Symbol::SquareBracketBegin) => {
                 // This is an array access (ex. id[expr])
                 let array_access = self.parse_array_access(identifier)?;
                 Ok(Token::Expression(Expression::ArrayAccess(Some(
@@ -663,7 +662,7 @@ impl<'a> TokenIter<'a> {
 
     fn parse_array_access(&mut self, identifier: &str) -> CustomResult<ArrayAccess> {
         let next = self.next_skip_whitespace();
-        if let Some(SimpleToken::Symbol(Symbol::SquareBracketBegin)) = next {
+        if let Some(LexToken::Symbol(Symbol::SquareBracketBegin)) = next {
             // Everything ok, the SquareBracketBegin have been removed.
         } else {
             return Err(ParseError(format!(
@@ -692,7 +691,7 @@ impl<'a> TokenIter<'a> {
                 let peek = self
                     .peek_skip_whitespace()
                     .ok_or_else(|| ParseError("Out of tokens in parse_statement.".to_string()))?;
-                if SimpleToken::is_break_symbol(&peek) {
+                if LexToken::is_break_symbol(&peek) {
                     Ok(Statement::Return(None))
                 } else {
                     Ok(Statement::Return(Some(
@@ -729,7 +728,7 @@ impl<'a> TokenIter<'a> {
     // PS: Skips/ignores LineBreak if they aren't specified in the stop_condition().
     fn parse_expression_with_previous(
         &mut self,
-        stop_condition: &dyn Fn(&SimpleToken) -> bool,
+        stop_condition: &dyn Fn(&LexToken) -> bool,
         previous_expression: Option<Expression>,
     ) -> CustomResult<Expression> {
         let mut output_stack: Vec<Output> = Vec::new();
@@ -767,13 +766,13 @@ impl<'a> TokenIter<'a> {
             // If Linebreak: Update indent/linebreak and skip.
             // This allows one to use LineBreak's freely in expressions that doesn't
             // have LineBreak as a stop_condition.
-            if let SimpleToken::Symbol(Symbol::LineBreak) = current {
+            if let LexToken::Symbol(Symbol::LineBreak) = current {
                 self.update_indent_and_line_number(false)?;
                 continue;
             }
 
             match current {
-                SimpleToken::Identifier(identifier) => {
+                LexToken::Identifier(identifier) => {
                     if previous_was_operand {
                         return Err(ParseError(
                             "Received two \"values\" in a row in parse_expression.".to_string(),
@@ -796,7 +795,7 @@ impl<'a> TokenIter<'a> {
                     previous_was_operand = true;
                 }
 
-                SimpleToken::Number(number_string) => {
+                LexToken::Number(number_string) => {
                     if previous_was_operand {
                         return Err(ParseError(
                             "Received two \"values\" in a row in parse_expression.".to_string(),
@@ -814,7 +813,7 @@ impl<'a> TokenIter<'a> {
                     previous_was_operand = true;
                 }
 
-                SimpleToken::Literal(literal) => {
+                LexToken::Literal(literal) => {
                     if previous_was_operand {
                         return Err(ParseError(
                             "Received two \"values\" in a row in parse_expression.".to_string(),
@@ -834,7 +833,7 @@ impl<'a> TokenIter<'a> {
                     previous_was_operand = true;
                 }
 
-                SimpleToken::Symbol(symbol) => {
+                LexToken::Symbol(symbol) => {
                     let operator = Token::lookup_operator(symbol.clone()).ok_or_else(|| {
                         ParseError(format!(
                             "Parsed None operator during expression: {:?}",
@@ -1042,14 +1041,14 @@ impl<'a> TokenIter<'a> {
 
     fn parse_expression(
         &mut self,
-        stop_condition: &dyn Fn(&SimpleToken) -> bool,
+        stop_condition: &dyn Fn(&LexToken) -> bool,
     ) -> CustomResult<Expression> {
         self.parse_expression_with_previous(stop_condition, None)
     }
 
     fn parse_expression_list(
         &mut self,
-        stop_condition: &dyn Fn(&SimpleToken) -> bool,
+        stop_condition: &dyn Fn(&LexToken) -> bool,
     ) -> CustomResult<Vec<Expression>> {
         let mut expressions = Vec::new();
 
@@ -1065,7 +1064,7 @@ impl<'a> TokenIter<'a> {
 
             expressions.push(expression);
 
-            if let Some(SimpleToken::Symbol(Symbol::Comma)) = self.peek() {
+            if let Some(LexToken::Symbol(Symbol::Comma)) = self.peek() {
                 self.next(); // Remove comma
                 continue;
             } else {
@@ -1152,11 +1151,11 @@ impl<'a> TokenIter<'a> {
 
         let current = self.next_skip_whitespace();
         match current {
-            Some(SimpleToken::Symbol(ref symbol)) if symbol == &begin_symbol => {
+            Some(LexToken::Symbol(ref symbol)) if symbol == &begin_symbol => {
                 // Edge case if there are no arguments
                 let peek = self.peek_skip_whitespace_and_line_break()?;
                 match peek {
-                    SimpleToken::Symbol(ref symbol) if symbol == &end_symbol => {
+                    LexToken::Symbol(ref symbol) if symbol == &end_symbol => {
                         self.next_skip_whitespace_and_line_break(false)?; // Remove end symbol.
                         return Ok(arguments);
                     }
@@ -1171,7 +1170,7 @@ impl<'a> TokenIter<'a> {
                     // If it is false, redo everything with the assumption that it is not a named argument.
                     self.skip_whitespace_and_line_break(false)?;
                     let next = self.next_skip_whitespace_and_line_break(false)?;
-                    let name = if let Some(SimpleToken::Identifier(identifier)) = next {
+                    let name = if let Some(LexToken::Identifier(identifier)) = next {
                         identifier
                     } else {
                         "".to_string()
@@ -1180,7 +1179,7 @@ impl<'a> TokenIter<'a> {
                     // If true: This is a named argument,
                     // Else: This is a regular argument.
                     // FIXME: Maybe allow line break in front/behind equals sign.
-                    if let Some(SimpleToken::Symbol(Symbol::Equals)) = self.peek_skip_whitespace() {
+                    if let Some(LexToken::Symbol(Symbol::Equals)) = self.peek_skip_whitespace() {
                         self.next_skip_whitespace(); // Remove Equals symbol.
                         let expr = self.parse_expression(stop_on!(Symbol::Comma; end_symbol))?;
                         arguments.push(Argument::new(Some(name), expr));
@@ -1192,8 +1191,8 @@ impl<'a> TokenIter<'a> {
 
                     let next = self.next_skip_whitespace_and_line_break(false)?;
                     match next {
-                        Some(SimpleToken::Symbol(Symbol::Comma)) => continue,
-                        Some(SimpleToken::Symbol(ref symbol)) if symbol == &end_symbol => break,
+                        Some(LexToken::Symbol(Symbol::Comma)) => continue,
+                        Some(LexToken::Symbol(ref symbol)) if symbol == &end_symbol => break,
                         _ => {
                             return Err(ParseError(format!(
                                 "Received invalid symbol during parse_argument_list: {:?}",
@@ -1224,11 +1223,11 @@ impl<'a> TokenIter<'a> {
 
         let current = self.next_skip_whitespace_and_line_break(false)?;
         match current {
-            Some(SimpleToken::Symbol(ref symbol)) if symbol == &begin_symbol => {
+            Some(LexToken::Symbol(ref symbol)) if symbol == &begin_symbol => {
                 // Edge case if there are no parameters
                 let peek = self.peek_skip_whitespace_and_line_break()?;
                 match peek {
-                    SimpleToken::Symbol(ref symbol) if symbol == &end_symbol => {
+                    LexToken::Symbol(ref symbol) if symbol == &end_symbol => {
                         self.next_skip_whitespace_and_line_break(false)?; // Remove end symbol.
                         return Ok(parameters);
                     }
@@ -1241,7 +1240,7 @@ impl<'a> TokenIter<'a> {
                     let mut current_parameter = self.parse_variable()?;
 
                     // If true: this parameter has a default value set.
-                    if let Some(SimpleToken::Symbol(Symbol::Equals)) = self.peek_skip_whitespace() {
+                    if let Some(LexToken::Symbol(Symbol::Equals)) = self.peek_skip_whitespace() {
                         // TODO: parse_expression breaks at end of parenthesis.
                         //  Fix so that parenthesis is allowed inside the expressions.
                         self.next_skip_whitespace(); // Remove Equals symbol.
@@ -1255,8 +1254,8 @@ impl<'a> TokenIter<'a> {
 
                     let next = self.next_skip_whitespace_and_line_break(false)?;
                     match next {
-                        Some(SimpleToken::Symbol(Symbol::Comma)) => continue,
-                        Some(SimpleToken::Symbol(ref symbol)) if symbol == &end_symbol => break,
+                        Some(LexToken::Symbol(Symbol::Comma)) => continue,
+                        Some(LexToken::Symbol(ref symbol)) if symbol == &end_symbol => break,
                         _ => {
                             return Err(ParseError(format!(
                                 "Received invalid symbol during parse_parameter_list: {:?}",
@@ -1309,7 +1308,7 @@ impl<'a> TokenIter<'a> {
             BlockHeader::If(_) => Ok(BlockHeader::If(Some(self.parse_expression_header()?))),
 
             BlockHeader::Else(_) => {
-                if self.peek_skip_whitespace() == Some(SimpleToken::Symbol(Symbol::Colon)) {
+                if self.peek_skip_whitespace() == Some(LexToken::Symbol(Symbol::Colon)) {
                     self.assert_block_header_end()?;
                     Ok(BlockHeader::Else(None))
                 } else {
@@ -1340,7 +1339,7 @@ impl<'a> TokenIter<'a> {
 
             BlockHeader::With(_) => {
                 // Edge case if empty expression list, is allowed.
-                if let Some(SimpleToken::Symbol(Symbol::Colon)) = self.peek_skip_whitespace() {
+                if let Some(LexToken::Symbol(Symbol::Colon)) = self.peek_skip_whitespace() {
                     self.assert_block_header_end()?;
                     Ok(BlockHeader::With(None))
                 } else {
@@ -1363,7 +1362,7 @@ impl<'a> TokenIter<'a> {
     fn parse_generic_header(&mut self) -> CustomResult<GenericHeader> {
         let mut generic_header = GenericHeader::new();
 
-        if let Some(SimpleToken::Identifier(_)) = self.peek_skip_whitespace() {
+        if let Some(LexToken::Identifier(_)) = self.peek_skip_whitespace() {
             generic_header.name = Some(self.next_identifier()?);
         }
 
@@ -1374,7 +1373,7 @@ impl<'a> TokenIter<'a> {
 
         let mut parameters = Vec::new();
         let peek = self.peek_skip_whitespace_and_line_break()?;
-        if let SimpleToken::Symbol(Symbol::ParenthesisBegin) = peek {
+        if let LexToken::Symbol(Symbol::ParenthesisBegin) = peek {
             parameters =
                 self.parse_parameter_list(Symbol::ParenthesisBegin, Symbol::ParenthesisEnd)?;
         }
@@ -1382,8 +1381,7 @@ impl<'a> TokenIter<'a> {
             generic_header.parameters = Some(parameters);
         }
 
-        let return_type = if let Some(SimpleToken::Symbol(Symbol::At)) = self.peek_skip_whitespace()
-        {
+        let return_type = if let Some(LexToken::Symbol(Symbol::At)) = self.peek_skip_whitespace() {
             self.next_skip_whitespace(); // Remove At symbol.
             Some(self.next_type()?)
         } else {
@@ -1403,7 +1401,7 @@ impl<'a> TokenIter<'a> {
 
         // See if this class implements any interfaces.
         let peek = self.peek_skip_whitespace();
-        if let Some(SimpleToken::Symbol(Symbol::Is)) = peek {
+        if let Some(LexToken::Symbol(Symbol::Is)) = peek {
             self.next_skip_whitespace(); // Remove Is symbol.
             implements = self.next_type_list()?;
         }
@@ -1502,9 +1500,9 @@ impl<'a> TokenIter<'a> {
 
     fn parse_destructor_header(&mut self) -> CustomResult<BlockHeader> {
         let next = self.next_skip_whitespace();
-        if let Some(SimpleToken::Symbol(Symbol::ParenthesisBegin)) = next {
+        if let Some(LexToken::Symbol(Symbol::ParenthesisBegin)) = next {
             let next = self.next_skip_whitespace_and_line_break(false)?;
-            if let Some(SimpleToken::Symbol(Symbol::ParenthesisEnd)) = next {
+            if let Some(LexToken::Symbol(Symbol::ParenthesisEnd)) = next {
                 Ok(BlockHeader::Destructor)
             } else {
                 Err(ParseError(format!(

@@ -34,3 +34,9 @@ impl From<std::num::ParseFloatError> for CustomError {
         CustomError::GenerationError(e.to_string())
     }
 }
+
+impl From<std::io::Error> for CustomError {
+    fn from(e: std::io::Error) -> Self {
+        CustomError::LexError(e.to_string())
+    }
+}

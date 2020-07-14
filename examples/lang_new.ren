@@ -1,0 +1,103 @@
+use std.io;
+
+pub class PolarionConnection {
+    set session: SessionWebService;
+    tracker: TrackerWebService;
+    
+    pub fn set_session(ses: bool) {
+        this.session = session;
+    }
+    
+    fn int_to_string(num: u64?) -> String! {
+        # Equivalent, one:
+        string result;
+        if (num == null) {
+            return StringError("Number input is null.");
+        } else {
+            
+        }
+        
+        # Cascade nullable or "errorable" values.
+        # 1. to_string() success => variable contains the new string, fails => variable will contain "error", any consecutive calls in the expression will not be called.
+        # 2. trim; success => variable contains string value, fail => variable contains "null". (assuming the trim function returns "string?")
+        var x: string?! = num.to_string()!.trim();
+        
+        """
+        Should probably be possible to convert "error" to "null" type, ex. "u64! => u64?".
+        What about the other way around? "u64? => u64!", what would the type of the error be?
+        """
+        
+        var new_num: u64? = num_string.to_u64();    # Assumes to_u64() returns "u64?", since it might fail.
+        var new_num: u64! = num_string.to_u64();    # Overloaded with error (or would this make it imposible to deduce the type automatically?)
+        var new_num = num_string.to_u64();
+        
+        # Since the x might contain either "error" or "null", it needs to be checked/cascaded before use.
+        # Example:
+        
+        # Would give error (since print_line assumes that the types it prints are "T?", and does therefore not allow the type "string?!"):
+        io::print_line("The result is {x}");
+        
+        # Allowed since "error" is converted to "null":
+        io::print_line("The result is {x.err_to_null()}");
+        
+        """
+        Is this ok? Should a error count as false, and null also count as false?
+        """
+        # or:
+        if (x) {
+            io::print_line("The result is {x}");
+        }
+        
+        # or:
+        if (x is not !) {
+        
+        }
+        
+        # or:
+        match (x) {
+            "abc123" {
+                io::print_line("The result is {x}");
+            }
+            ? {
+                # Matches if the value is null, allow to print since print allows null.
+            }
+            null {
+                # Matches if the value is null, allow to print since print allows null.
+            }
+            ! {
+                # Matches if the value is error, not allowed to print in this case.
+            }
+            error {
+                # Matches if the value is error, not allowed to print in this case.
+            }
+            _ {
+                # Default case, matches the rest.
+            }            
+        }
+        
+        # Give default value is the expression evaluates to null or erro:
+        # If x is null/error, the expecression evaluates to "DEFAULT_STRING", othewise it will assign `x`.
+        const t: string = x ?? "DEFAULT_STRING";
+        const t: string = x ?! "DEFAULT_STRING";
+        
+        # What about when something should be applied to the variable only if it isn't null/error?
+        const t = x.if_not_null( x.trim() );
+        # If !! wasn't used this, this could make sense:
+        const at = x !? x.trim();
+        
+    }
+    
+    pub fn create_session<T>(session_content: T) -> Context<string, T>! {
+            
+    }
+    
+    pub key index(k: T)
+    where T: Equitable, Hashable
+    {
+        return this.collection[k];
+    }
+    
+    test "create sessin with Polarion correctly" {
+    
+    }
+}

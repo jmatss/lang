@@ -1,23 +1,19 @@
-use crate::lexer::simple_token_iter::SimpleTokenIter;
+use crate::lexer::lex_token::LexToken;
+use crate::lexer::lex_token_iter::LexTokenIter;
 use crate::CustomResult;
-use crate::lexer::simple_token::SimpleToken;
-use crate::error::CustomError;
+use super::lex_token::LexTokenType;
 
-pub fn lex(filename: &str) -> CustomResult<Vec<SimpleToken>> {
-    let mut simple_token_vec = Vec::new();
-    let mut simple_token_iter = SimpleTokenIter::new(filename)
-        .map_err(|e| CustomError::LexError(e.to_string()))?;
+/// Lexes the characters in the source code to LexToken's and returns a vector
+/// containing all lex tokens. 
+pub fn lex(filename: &str) -> CustomResult<Vec<LexToken>> {
+    let mut lex_token_vec = Vec::new();
+    let iter = LexTokenIter::new(filename)?;
 
-    loop {
-        let simple_token = simple_token_iter
-            .next_simple_token()
-            .map_err(|e| CustomError::LexError(e.to_string()))?;
-        simple_token_vec.push(simple_token.clone());
-
-        if simple_token == SimpleToken::EndOfFile {
-            break;
-        }
+    let lex_token = iter.next_token()?;
+    while lex_token.t != LexTokenType::EndOfFile {
+        lex_token_vec.push(lex_token.clone());
+        lex_token = iter.next_token()?;
     }
 
-    Ok(simple_token_vec)
+    Ok(lex_token_vec)
 }

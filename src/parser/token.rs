@@ -1,5 +1,5 @@
 use crate::common::variable_type::Type;
-use crate::lexer::simple_token::Symbol;
+use crate::lexer::lex_token::Symbol;
 use crate::parser::token::Modifier::{Private, Public, Static};
 use inkwell::values::PointerValue;
 
