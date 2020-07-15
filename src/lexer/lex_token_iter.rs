@@ -1,5 +1,5 @@
 use super::lex_token::LexTokenType;
-use crate::error::CustomError::{self, LexError};
+use crate::error::CustomError::LexError;
 use crate::lexer::lex_token::{LexToken, Literal, Symbol};
 use crate::CustomResult;
 use std::collections::linked_list::LinkedList;
@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::Read;
 use std::str::Chars;
 
+/// Max amount of chars to be put back into the iterator.
 const MAX_PUT_BACK: usize = 10;
 
 pub struct LexTokenIter<'a> {
@@ -37,14 +38,14 @@ impl<'a> LexTokenIter<'a> {
 
     /// Gets the next LexToken from the iterator.
     pub fn next_token(&mut self) -> CustomResult<LexToken> {
-        // TODO: Fix for more radixes.
+        // A radix of 10 will match all type of nmumber since non decimal numbers
+        // are prefixed with "0x", "0b" or "0o" (which starts with radix 10).
         const RADIX: u32 = 10;
-
-        // TODO: Add edge case for "bx1010" to represent binary literals.
 
         let lex_token: LexToken;
         lex_token.lineNr = self.line_nr;
         lex_token.columnNr = self.column_nr;
+
         lex_token.t = if let Some((c1, c2, c3)) = self.peek_three() {
             if LexTokenIter::valid_identifier_start(c1) {
                 let identifier: String = self.get_identifier_string()?;
@@ -59,7 +60,7 @@ impl<'a> LexTokenIter<'a> {
                     LexTokenType::Identifier(identifier)
                 }
             } else if LexTokenIter::valid_number(c1, RADIX) {
-                self.get_number(RADIX)?
+                self.get_number()?
             } else if LexTokenIter::valid_linebreak(c1, c2) {
                 self.get_linebreak()?
             } else if LexTokenIter::valid_whitespace(c1) {
@@ -140,29 +141,52 @@ impl<'a> LexTokenIter<'a> {
         }
     }
 
-    // TODO: Hex/binary numbers with prefix 0x/0b
-    // Fetches both integeres and floats.
+    // TODO: number containing scientifical notaion (e/E).
     /// Returns the number (int or float) at the current position of the iterator.
-    fn get_number(&mut self, radix: u32) -> CustomResult<LexTokenType> {
+    fn get_number(&mut self) -> CustomResult<LexTokenType> {
+        let radix = if let Some(('0', Some(sep_char))) = self.peek_two() {
+            // Remove the assumed prefix.
+            self.skip(2);
+
+            match sep_char.to_ascii_uppercase() {
+                'x' => 16,
+                'b' => 2,
+                'o' => 8,
+                _ => {
+                    // Put back the chars since they aren't part of a prefix,
+                    // this is just a decimal number that start with '0'.
+                    self.put_back(sep_char);
+                    self.put_back('0');
+                    10
+                }
+            }
+        } else {
+            // Decimal.
+            10
+        };
+
         let mut number = self.get_integer(radix)?;
 
-        // If the next simple token is a Dot and the char after that is a number,
-        // this is a float.
-        // FIXME: (?) might not need to check number after Dot to allow for
-        // example "1." instead of needing to write "1.0".
-        if let Some(('.', Some(next))) = self.peek_two() {
-            if LexTokenIter::valid_number(next, radix) {
-                self.skip(1); // Remove dot.
-                number = [number, self.get_integer(radix)?].join(".");
+        // If this is a decimal number and it contains a dot, assume it is a
+        // float number.
+        if radix == 10 {
+            // FIXME: (?) might not need to check number after Dot to allow for
+            // example "1." instead of needing to write "1.0".
+            if let Some(('.', Some(next))) = self.peek_two() {
+                if LexTokenIter::valid_number(next, radix) {
+                    self.skip(1); // Remove dot.
+                    number = [number, self.get_integer(radix)?].join(".");
+                }
             }
         }
 
         self.column_nr += number.chars().count() as u64;
 
-        Ok(LexTokenType::Literal(Literal::Number(number)))
+        Ok(LexTokenType::Literal(Literal::Number(number, radix)))
     }
 
-    /// Returns the integer at the current position of the iterator.
+    /// Returns the integer at the current position of the iterator with
+    /// the radix/base `radix`.
     fn get_integer(&mut self, radix: u32) -> CustomResult<String> {
         let mut numbers = Vec::new();
 
@@ -287,7 +311,7 @@ impl<'a> LexTokenIter<'a> {
         if self.buff.len() < MAX_PUT_BACK {
             Ok(self.buff.push_front(c))
         } else {
-            Err(CustomError::LexError("Push back buffer was full".into()))
+            Err(LexError("Push back buffer was full".into()))
         }
     }
 

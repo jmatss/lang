@@ -19,7 +19,7 @@ pub enum LexTokenType {
 pub enum Literal {
     StringLiteral(String),
     CharLiteral(String),
-    Number(String),
+    Number(String, u32), // u32 => radix
 }
 
 #[derive(Debug, Clone, PartialEq)]
