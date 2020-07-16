@@ -4,6 +4,7 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum CustomError {
+    GeneralError(&'static str),
     LexError(String),
     ParseError(String),
     AnalyzeError(String),
@@ -15,6 +16,7 @@ impl Error for CustomError {}
 impl Display for CustomError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
+            CustomError::GeneralError(x) => write!(f, "{}", x),
             CustomError::LexError(x) => write!(f, "{}", x),
             CustomError::ParseError(x) => write!(f, "{}", x),
             CustomError::AnalyzeError(x) => write!(f, "{}", x),

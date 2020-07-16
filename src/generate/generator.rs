@@ -6,7 +6,7 @@ use crate::parser::abstract_syntax_tree::{RCBlock, RCNode};
 use crate::parser::token;
 use crate::parser::token::{
     ArrayAccess, BinaryOperation, BinaryOperator, Expression, Function, FunctionCall, Literal,
-    Operation, Token, TypeStruct, UnaryOperation, Variable,
+    Operation, ParseToken, TypeStruct, UnaryOperation, Variable,
 };
 use crate::CustomResult;
 use inkwell::builder::Builder;
@@ -79,13 +79,13 @@ impl<'ctx> CodeGen<'ctx> {
 
             println!("TOKEN: {:?}", token);
             match token {
-                Token::BlockHeader(ref block_header) => {
+                ParseToken::Block(ref block_header) => {
                     let mut result = self.compile_block_header(block_header)?;
                 }
-                Token::Expression(ref expr) => {
+                ParseToken::Expression(ref expr) => {
                     let mut result = self.compile_expression(expr, scope_index)?;
                 }
-                Token::Statement(x) => {
+                ParseToken::Statement(x) => {
                     println!("{:?}", x);
                 }
                 _ => (),

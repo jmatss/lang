@@ -1,12 +1,12 @@
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexToken {
-    pub t: LexTokenType,
+    pub kind: LexTokenKind,
     pub lineNr: u64,
     pub columnNr: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum LexTokenType {
+pub enum LexTokenKind {
     Identifier(String),
     Literal(Literal),
     Keyword(Keyword),
@@ -19,7 +19,9 @@ pub enum LexTokenType {
 pub enum Literal {
     StringLiteral(String),
     CharLiteral(String),
-    Number(String, u32), // u32 => radix
+    Bool(bool),
+    Integer(String, u32), // u32 => radix
+    Float(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +43,7 @@ pub enum Keyword {
 
     Var,
     Const,
+    Static,
     Private,
     Public,
 
@@ -68,6 +71,7 @@ pub enum Symbol {
 
     Dot,
     Comma,
+    UnderScore,
     QuestionMark,
     ExclamationMark,
     Equals,
@@ -144,66 +148,77 @@ pub enum Symbol {
 }
 
 impl LexToken {
-    // Linebreak, manual linebreak (";") or EndOfFile.
+    /// Linebreak, manual linebreak (";") or EndOfFile.
     pub fn is_break_symbol(lex_token: &LexToken) -> bool {
-        match lex_token.t {
-            LexTokenType::Symbol(Symbol::LineBreak)
-            | LexTokenType::Symbol(Symbol::SemiColon)
-            | LexTokenType::EndOfFile => true,
+        match lex_token.kind {
+            LexTokenKind::Symbol(Symbol::LineBreak)
+            | LexTokenKind::Symbol(Symbol::SemiColon)
+            | LexTokenKind::EndOfFile => true,
             _ => false,
         }
     }
 
-    /// Sees if the given `identifer` is a valid symbol. If it is, returns
-    /// the symbol as a token type, otherwise returns None.
-    pub fn get_if_symbol(identifier: &str) -> Option<LexTokenType> {
-        Some(match identifier {
-            "not" => LexTokenType::Symbol(Symbol::BoolNot),
-            "and" => LexTokenType::Symbol(Symbol::BoolAnd),
-            "or" => LexTokenType::Symbol(Symbol::BoolOr),
+    /// Sees if the given `ident` is a valid bool literal. If it is, returns
+    /// the literal as a token type, otherwise returns None.
+    pub fn get_if_bool(ident: &str) -> Option<LexTokenKind> {
+        Some(match ident {
+            "true" => LexTokenKind::Literal(Literal::Bool(true)),
+            "false" => LexTokenKind::Literal(Literal::Bool(false)),
+            _ => return None,
+        })
+    }
 
-            "in" => LexTokenType::Symbol(Symbol::In),
-            "is" => LexTokenType::Symbol(Symbol::Is),
-            "as" => LexTokenType::Symbol(Symbol::As),
-            "of" => LexTokenType::Symbol(Symbol::Of),
+    /// Sees if the given `ident` is a valid symbol. If it is, returns
+    /// the symbol as a token type, otherwise returns None.
+    pub fn get_if_symbol(ident: &str) -> Option<LexTokenKind> {
+        Some(match ident {
+            "not" => LexTokenKind::Symbol(Symbol::BoolNot),
+            "and" => LexTokenKind::Symbol(Symbol::BoolAnd),
+            "or" => LexTokenKind::Symbol(Symbol::BoolOr),
+
+            "in" => LexTokenKind::Symbol(Symbol::In),
+            "is" => LexTokenKind::Symbol(Symbol::Is),
+            "as" => LexTokenKind::Symbol(Symbol::As),
+            "of" => LexTokenKind::Symbol(Symbol::Of),
 
             _ => return None,
         })
     }
 
-    /// Sees if the given `identifer` is a valid keyword. If it is, returns
+    /// Sees if the given `ident` is a valid keyword. If it is, returns
     /// the keyword as a token type, otherwise returns None.
-    pub fn get_if_keyword(identifier: &str) -> Option<LexTokenType> {
-        Some(match identifier {
-            "if" => LexTokenType::Keyword(Keyword::If),
-            "else" => LexTokenType::Keyword(Keyword::Else),
-            "match" => LexTokenType::Keyword(Keyword::Match),
+    pub fn get_if_keyword(ident: &str) -> Option<LexTokenKind> {
+        Some(match ident {
+            "if" => LexTokenKind::Keyword(Keyword::If),
+            "else" => LexTokenKind::Keyword(Keyword::Else),
+            "match" => LexTokenKind::Keyword(Keyword::Match),
 
-            "for" => LexTokenType::Keyword(Keyword::For),
-            "while" => LexTokenType::Keyword(Keyword::While),
+            "for" => LexTokenKind::Keyword(Keyword::For),
+            "while" => LexTokenKind::Keyword(Keyword::While),
 
-            "return" => LexTokenType::Keyword(Keyword::Return),
-            "yield" => LexTokenType::Keyword(Keyword::Yield),
-            "break" => LexTokenType::Keyword(Keyword::Break),
-            "continue" => LexTokenType::Keyword(Keyword::Continue),
+            "return" => LexTokenKind::Keyword(Keyword::Return),
+            "yield" => LexTokenKind::Keyword(Keyword::Yield),
+            "break" => LexTokenKind::Keyword(Keyword::Break),
+            "continue" => LexTokenKind::Keyword(Keyword::Continue),
 
-            "use" => LexTokenType::Keyword(Keyword::Use),
-            "package" => LexTokenType::Keyword(Keyword::Package),
+            "use" => LexTokenKind::Keyword(Keyword::Use),
+            "package" => LexTokenKind::Keyword(Keyword::Package),
 
-            "var" => LexTokenType::Keyword(Keyword::Var),
-            "const" => LexTokenType::Keyword(Keyword::Const),
-            "private" => LexTokenType::Keyword(Keyword::Private),
-            "public" => LexTokenType::Keyword(Keyword::Public),
+            "var" => LexTokenKind::Keyword(Keyword::Var),
+            "const" => LexTokenKind::Keyword(Keyword::Const),
+            "static" => LexTokenKind::Keyword(Keyword::Static),
+            "private" => LexTokenKind::Keyword(Keyword::Private),
+            "public" => LexTokenKind::Keyword(Keyword::Public),
 
-            "function" => LexTokenType::Keyword(Keyword::Function),
-            "struct" => LexTokenType::Keyword(Keyword::Struct),
-            "enum" => LexTokenType::Keyword(Keyword::Enum),
-            "interface" => LexTokenType::Keyword(Keyword::Interface),
+            "function" => LexTokenKind::Keyword(Keyword::Function),
+            "struct" => LexTokenKind::Keyword(Keyword::Struct),
+            "enum" => LexTokenKind::Keyword(Keyword::Enum),
+            "interface" => LexTokenKind::Keyword(Keyword::Interface),
 
-            "defer" => LexTokenType::Keyword(Keyword::Defer),
-            "with" => LexTokenType::Keyword(Keyword::With),
+            "defer" => LexTokenKind::Keyword(Keyword::Defer),
+            "with" => LexTokenKind::Keyword(Keyword::With),
 
-            "test" => LexTokenType::Keyword(Keyword::Test),
+            "test" => LexTokenKind::Keyword(Keyword::Test),
 
             _ => return None,
         })
@@ -212,7 +227,7 @@ impl LexToken {
     /// Sees if the given character `c1` is a valid symbol. Returns the
     /// symbol as a LexTokenType if this character is a symbol, otherwise None
     /// is returned.
-    pub fn get_if_symbol_char(c1: char) -> Option<(LexTokenType, usize)> {
+    pub fn get_if_symbol_char(c1: char) -> Option<(LexTokenKind, usize)> {
         LexToken::symbol_lookup_chars(c1, None, None)
     }
 
@@ -224,7 +239,7 @@ impl LexToken {
         c1: char,
         c2: Option<char>,
         c3: Option<char>,
-    ) -> Option<(LexTokenType, usize)> {
+    ) -> Option<(LexTokenKind, usize)> {
         LexToken::symbol_lookup_chars(c1, c2, c3)
     }
 
@@ -232,7 +247,7 @@ impl LexToken {
         c1: char,
         c2: Option<char>,
         c3: Option<char>,
-    ) -> Option<(LexTokenType, usize)> {
+    ) -> Option<(LexTokenKind, usize)> {
         let mut tmp_chars = Vec::with_capacity(3);
 
         // Put the characters that exists (is Some) into a string so that it can
@@ -254,6 +269,7 @@ impl LexToken {
             '{' => LexToken::ret_single_lookup(Symbol::CurlyBracketBegin),
             '}' => LexToken::ret_single_lookup(Symbol::CurlyBracketEnd),
             ',' => LexToken::ret_single_lookup(Symbol::Comma),
+            '_' => LexToken::ret_single_lookup(Symbol::UnderScore),
             '?' => LexToken::ret_single_lookup(Symbol::QuestionMark),
             '\"' => LexToken::ret_single_lookup(Symbol::DoubleQuote),
             '\'' => LexToken::ret_single_lookup(Symbol::SingleQuote),
@@ -373,8 +389,8 @@ impl LexToken {
         }
     }
 
-    fn ret_single_lookup(symbol: Symbol) -> Option<(LexTokenType, usize)> {
-        Some((LexTokenType::Symbol(symbol), 1))
+    fn ret_single_lookup(symbol: Symbol) -> Option<(LexTokenKind, usize)> {
+        Some((LexTokenKind::Symbol(symbol), 1))
     }
 
     /// Sees if the given `real_string` which is created with the "peeked"
@@ -382,7 +398,7 @@ impl LexToken {
     fn match_symbol(
         real_string: &str,
         mut string_symbol_tuples: Vec<(&str, Symbol)>,
-    ) -> Option<(LexTokenType, usize)> {
+    ) -> Option<(LexTokenKind, usize)> {
         // Sort the tuples by the length of their "strings".
         // This ensures that the longest symbols are matched
         // (ex. "==" is always matched instead of "=").
@@ -393,7 +409,7 @@ impl LexToken {
             let current_symbol = tuple.1;
 
             if real_string.starts_with(current_string) {
-                return Some((LexTokenType::Symbol(current_symbol), current_string.len()));
+                return Some((LexTokenKind::Symbol(current_symbol), current_string.len()));
             }
         }
 

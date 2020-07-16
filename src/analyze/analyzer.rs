@@ -1,14 +1,14 @@
-use crate::analyzer::declaration_analyzer::DeclarationAnalyzer;
-use crate::analyzer::type_analyzer::TypeAnalyzer;
-use crate::parser::abstract_syntax_tree::{ScopeIndex, AST};
-use crate::parser::token::{Class, Enum, Function, Interface, Macro, Token, TypeStruct};
+use crate::analyze::declaration_analyzer::DeclarationAnalyzer;
+use crate::analyze::type_analyzer::TypeAnalyzer;
+use crate::parse::abstract_syntax_tree::{ScopeIndex, AST};
+use crate::parse::parse_token::{Struct, Enum, Function, Interface, ParseToken, TypeStruct};
 use crate::CustomResult;
 use inkwell::values::PointerValue;
 use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct VariableState<'a> {
-    pub tokens: Vec<Token>,
+    pub tokens: Vec<ParseToken>,
     pub base_type: Option<TypeStruct>,
     pub pointer: Option<PointerValue<'a>>,
 }
@@ -35,10 +35,9 @@ pub struct AnalyzeContext<'a> {
     /// information about the function as the value.
     pub functions: HashMap<String, HashMap<ScopeIndex, Function>>,
 
-    pub classes: HashMap<String, HashMap<ScopeIndex, Class>>,
+    pub classes: HashMap<String, HashMap<ScopeIndex, Struct>>,
     pub enums: HashMap<String, HashMap<ScopeIndex, Enum>>,
     pub interfaces: HashMap<String, HashMap<ScopeIndex, Interface>>,
-    pub macros: HashMap<String, HashMap<ScopeIndex, Macro>>,
 
     /// Temporary scope values.
     // TODO: To this in a better way
@@ -57,7 +56,6 @@ impl<'a> AnalyzeContext<'a> {
             classes: HashMap::new(),
             enums: HashMap::new(),
             interfaces: HashMap::new(),
-            macros: HashMap::new(),
             parent_scopes: HashMap::new(),
             current_scope: 0,
         }

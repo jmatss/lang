@@ -1,7 +1,7 @@
 use crate::parser::abstract_syntax_tree::RCBlock;
 use crate::parser::abstract_syntax_tree::{RCNode, AST};
 use crate::parser::token;
-use crate::parser::token::{BlockHeader, Expression, Operation, Token};
+use crate::parser::token::{Block, Expression, Operation, ParseToken};
 use crate::transpiler::symbols;
 use crate::{analyzer::analyzer::AnalyzeContext, CustomResult};
 
@@ -53,19 +53,19 @@ impl<'a> Transpiler<'a> {
             println!("TOKEN: {:?}", token);
 
             let mut result_line = match token {
-                Token::BlockHeader(ref block_header) => {
+                ParseToken::Block(ref block_header) => {
                     // TODO: FIXME: Temporary let else be caught in here
                     // since they are special case.
                     let mut result = self.transpile_block_header(block_header)?;
                     result.push_str(&format!(" {}", symbols::BLOCK_START));
                     result
                 }
-                Token::Expression(ref expr) => {
+                ParseToken::Expression(ref expr) => {
                     let mut result = self.transpile_expression(expr)?;
                     result.push_str(symbols::EXPR_BRAKE);
                     result
                 }
-                Token::Statement(x) => {
+                ParseToken::Statement(x) => {
                     println!("{:?}", x);
                     String::new()
                 }
@@ -85,11 +85,11 @@ impl<'a> Transpiler<'a> {
         Ok(())
     }
 
-    fn transpile_block_header(&mut self, block_header: &BlockHeader) -> CustomResult<String> {
+    fn transpile_block_header(&mut self, block_header: &Block) -> CustomResult<String> {
         let mut result = String::new();
 
         match block_header {
-            BlockHeader::If(expr_opt) => {
+            Block::If(expr_opt) => {
                 if let Some(expr) = expr_opt {
                     result.push_str("if ");
                     result.push_str("(");
@@ -99,7 +99,7 @@ impl<'a> Transpiler<'a> {
                     panic!("BAD EXPRESSION");
                 }
             }
-            BlockHeader::Else(expr_opt) => {
+            Block::Else(expr_opt) => {
                 if let Some(expr) = expr_opt {
                     result.push_str("else if ");
                     result.push_str("(");

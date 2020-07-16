@@ -1,6 +1,6 @@
-use crate::analyzer::analyzer::AnalyzeContext;
-use crate::parser::abstract_syntax_tree::{ASTBlock, RCNode, AST};
-use crate::parser::token::{BlockHeader, Token};
+use crate::analyze::analyzer::AnalyzeContext;
+use crate::parse::abstract_syntax_tree::{ASTBlock, RCNode, AST};
+use crate::parse::parse_token::{Block, ParseToken};
 use crate::CustomResult;
 use std::cell::RefMut;
 use std::collections::HashMap;
@@ -39,17 +39,17 @@ impl<'a> DeclarationAnalyzer<'a> {
         Ok(())
     }
 
-    fn parse_token(&mut self, token: &mut Token) -> CustomResult<()> {
+    fn parse_token(&mut self, token: &mut ParseToken) -> CustomResult<()> {
         match token {
-            Token::BlockHeader(block_header) => self.parse_block_header(&block_header),
+            ParseToken::Block(block_header) => self.parse_block_header(&block_header),
             _ => Ok(()),
         }
     }
 
-    fn parse_block_header(&mut self, block_header: &BlockHeader) -> CustomResult<()> {
+    fn parse_block_header(&mut self, block_header: &Block) -> CustomResult<()> {
         match block_header {
-            BlockHeader::Default => Ok(()),
-            BlockHeader::Function(Some(function)) => {
+            Block::Default => Ok(()),
+            Block::Function(Some(function)) => {
                 if !self.context.functions.contains_key(&function.name) {
                     self.context
                         .functions
@@ -63,8 +63,8 @@ impl<'a> DeclarationAnalyzer<'a> {
 
                 Ok(())
             }
-            BlockHeader::Function(None) => panic!("Bad function None."),
-            BlockHeader::Class(Some(class)) => {
+            Block::Function(None) => panic!("Bad function None."),
+            Block::Class(Some(class)) => {
                 if !self.context.classes.contains_key(&class.name) {
                     self.context
                         .classes
@@ -78,8 +78,8 @@ impl<'a> DeclarationAnalyzer<'a> {
 
                 Ok(())
             }
-            BlockHeader::Class(None) => panic!("Bad class None."),
-            BlockHeader::Enum(Some(enum_)) => {
+            Block::Class(None) => panic!("Bad class None."),
+            Block::Enum(Some(enum_)) => {
                 if !self.context.enums.contains_key(&enum_.name) {
                     self.context
                         .enums
@@ -93,8 +93,8 @@ impl<'a> DeclarationAnalyzer<'a> {
 
                 Ok(())
             }
-            BlockHeader::Enum(None) => panic!("Bad enum None."),
-            BlockHeader::Interface(Some(interface)) => {
+            Block::Enum(None) => panic!("Bad enum None."),
+            Block::Interface(Some(interface)) => {
                 if !self.context.interfaces.contains_key(&interface.name) {
                     self.context
                         .interfaces
@@ -108,8 +108,8 @@ impl<'a> DeclarationAnalyzer<'a> {
 
                 Ok(())
             }
-            BlockHeader::Interface(None) => panic!("Bad interface None."),
-            BlockHeader::Macro(Some(macro_)) => {
+            Block::Interface(None) => panic!("Bad interface None."),
+            Block::Macro(Some(macro_)) => {
                 if !self.context.macros.contains_key(&macro_.name) {
                     self.context
                         .macros
@@ -124,7 +124,7 @@ impl<'a> DeclarationAnalyzer<'a> {
 
                 Ok(())
             }
-            BlockHeader::Macro(None) => panic!("Bad macro None."),
+            Block::Macro(None) => panic!("Bad macro None."),
             _ => Ok(()),
         }
     }

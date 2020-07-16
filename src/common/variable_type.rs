@@ -1,7 +1,13 @@
+use crate::parse::token::Expression;
+
 // TODO: Make Int & Uint unbounded? But then what about pointer sized int?
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
+    Pointer(Box<Type>),
+    // The Option in the "Array" enum indicates the size. If it is None, assume
+    // size is unknown (probably slice).
+    Array(Box<Type>, Option<Box<Expression>>),
     Void,
     Character,
     String,
@@ -25,7 +31,7 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn identifier_to_type(s: &str) -> Self {
+    pub fn ident_to_type(s: &str) -> Self {
         match s {
             "void" => Type::Void,
             "char" => Type::Character,

@@ -1,12 +1,15 @@
+use super::token::BlockHeader;
 use crate::error::CustomError::ParseError;
-use crate::parser::token::{BlockHeader, Token};
+use crate::parse::token::ParseToken;
 use crate::CustomResult;
 use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-// Number/index of current scope.
-pub type ScopeIndex = usize;
+/// Number/index of current block scope. Every block will get a unique number
+/// that can be used to refer to that specific block.
+pub type BlockId = usize;
+
 pub type RCBlock = Rc<RefCell<ASTBlock>>;
 pub type RCToken = Rc<RefCell<ASTToken>>;
 
@@ -15,21 +18,20 @@ pub enum RCNode {
     Token(RCToken),
 }
 
-// Indices ("Index" type) corresponding to the indices of the blocks structure are used
-// to refer to the blocks, and can be used to represent a tree.
+// Indices (BlockID) corresponding to the indices of the blocks structure are
+// used to refer to the blocks, and can be used to represent a tree.
 // Only blocks/blockHeaders are stored in the "blocks".
 // The other types will be stored inside those ASTBlock's as children.
 pub struct AST {
     pub blocks: Vec<RCBlock>,
-    // current_parent == "current_block"
-    pub current_parent_index: ScopeIndex,
+    pub current_block_id: BlockId,
 }
 
 impl AST {
     pub fn new() -> Self {
         // Index of root_block's parent is set to max_value, should never be used.
         // The indent_level is set to 0 and line_number to 0, should never be used.
-        let token = Token::BlockHeader(BlockHeader::Default);
+        let token = ParseToken::Block(BlockHeader::Default, None);
         let index = 0;
         let parent_index = usize::max_value();
         let line_number = 0;
@@ -44,7 +46,7 @@ impl AST {
 
     pub fn insert_block(
         &mut self,
-        token: Token,
+        token: ParseToken,
         line_number: usize,
         indent_level: usize,
     ) -> CustomResult<()> {
@@ -54,7 +56,7 @@ impl AST {
         let current_index = self.blocks.len();
 
         // Special case if this is the first "real" block added.
-        if let Token::BlockHeader(BlockHeader::Default) = old_parent.token {
+        if let ParseToken::Block(Block::Default) = old_parent.token {
             if indent_level != 0 {
                 return Err(ParseError(format!(
                     "{}. Expected: {}, got: {}",
@@ -99,7 +101,7 @@ impl AST {
 
     pub fn insert_token(
         &mut self,
-        token: Token,
+        token: ParseToken,
         line_number: usize,
         indent_level: usize,
     ) -> CustomResult<()> {
@@ -184,7 +186,7 @@ impl AST {
 // Needs its own Index so it can be used as parent,
 // and needs to store its children.
 pub struct ASTBlock {
-    pub token: Token,
+    pub token: ParseToken,
     pub index: ScopeIndex,
 
     pub parent_index: ScopeIndex,
@@ -196,7 +198,7 @@ pub struct ASTBlock {
 
 impl ASTBlock {
     pub fn new(
-        token: Token,
+        token: ParseToken,
         index: ScopeIndex,
         parent_index: ScopeIndex,
         line_number: usize,
@@ -213,7 +215,7 @@ impl ASTBlock {
     }
 
     pub fn new_rc(
-        token: Token,
+        token: ParseToken,
         index: ScopeIndex,
         parent_index: ScopeIndex,
         line_number: usize,
@@ -238,7 +240,7 @@ impl ASTBlock {
 #[derive(Debug)]
 pub struct ASTToken {
     // "token" will contain the BlockHeader if this is a "root".
-    pub token: Token,
+    pub token: ParseToken,
     pub parent_index: ScopeIndex,
 
     pub line_number: usize,
@@ -247,7 +249,7 @@ pub struct ASTToken {
 
 impl ASTToken {
     pub fn new(
-        token: Token,
+        token: ParseToken,
         parent_index: ScopeIndex,
         line_number: usize,
         indent_level: usize,
@@ -261,7 +263,7 @@ impl ASTToken {
     }
 
     pub fn new_rc(
-        token: Token,
+        token: ParseToken,
         parent_index: ScopeIndex,
         line_number: usize,
         indent_level: usize,

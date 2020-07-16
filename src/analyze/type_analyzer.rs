@@ -1,11 +1,11 @@
-use crate::analyzer::analyzer::{AnalyzeContext, VariableState};
+use crate::analyze::analyzer::{AnalyzeContext, VariableState};
 use crate::common::variable_type::Type;
-use crate::parser::abstract_syntax_tree::{ASTBlock, RCNode, AST};
-use crate::parser::token::{
-    ArrayAccess, BinaryOperation, Class, Function, FunctionCall, Literal, MacroCall, Operation,
-    Token, TypeStruct, UnaryOperation, Variable,
+use crate::parse::abstract_syntax_tree::{ASTBlock, RCNode, AST};
+use crate::parse::parse_token::{
+    BinaryOperation, Function, FunctionCall, Operation, ParseToken, Struct, TypeStruct,
+    UnaryOperation, Variable,
 };
-use crate::parser::token::{BlockHeader, Expression, Statement};
+use crate::parse::parse_token::{Block, Expression, Statement};
 use crate::CustomResult;
 use std::cell::RefMut;
 use std::collections::HashMap;
@@ -48,11 +48,11 @@ impl<'a> TypeAnalyzer<'a> {
         Ok(())
     }
 
-    fn parse_type(&mut self, token: &mut Token) -> CustomResult<()> {
+    fn parse_type(&mut self, token: &mut ParseToken) -> CustomResult<()> {
         match token {
-            Token::Expression(expression) => self.parse_expression_type(expression),
-            Token::Statement(statement) => self.parse_statement_type(statement),
-            Token::BlockHeader(block_header) => self.parse_block_header_type(block_header),
+            ParseToken::Expression(expression) => self.parse_expression_type(expression),
+            ParseToken::Statement(statement) => self.parse_statement_type(statement),
+            ParseToken::Block(block_header) => self.parse_block_header_type(block_header),
         }
     }
 
@@ -208,7 +208,7 @@ impl<'a> TypeAnalyzer<'a> {
                 Expression::Case(_) => None,
                 Expression::Operation(Operation::BinaryOperation(binary_operation_opt)) => {
                     if let Some(binary_operation) = binary_operation_opt {
-                        binary_operation.var_type.clone()
+                        binary_operation.return_type.clone()
                     } else {
                         None
                     }
@@ -249,7 +249,7 @@ impl<'a> TypeAnalyzer<'a> {
                 Expression::Case(_) => None,
                 Expression::Operation(Operation::BinaryOperation(binary_operation_opt)) => {
                     if let Some(binary_operation) = binary_operation_opt {
-                        binary_operation.var_type.clone()
+                        binary_operation.return_type.clone()
                     } else {
                         None
                     }
@@ -264,7 +264,7 @@ impl<'a> TypeAnalyzer<'a> {
             };
 
             let inferred_type = self.infer_type(&left_type, &right_type);
-            binary_operation.var_type = inferred_type;
+            binary_operation.return_type = inferred_type;
             // TODO: How should the types be parsed from binary operations?
             Ok(())
         } else {
@@ -307,7 +307,7 @@ impl<'a> TypeAnalyzer<'a> {
                 Expression::Case(_) => None,
                 Expression::Operation(Operation::BinaryOperation(binary_operation_opt)) => {
                     if let Some(binary_operation) = binary_operation_opt {
-                        binary_operation.var_type.clone()
+                        binary_operation.return_type.clone()
                     } else {
                         None
                     }
@@ -344,28 +344,28 @@ impl<'a> TypeAnalyzer<'a> {
         }
     }
 
-    fn parse_block_header_type(&mut self, block_header: &mut BlockHeader) -> CustomResult<()> {
+    fn parse_block_header_type(&mut self, block_header: &mut Block) -> CustomResult<()> {
         match block_header {
-            BlockHeader::Default => Ok(()),
-            BlockHeader::Function(function) => self.parse_function_type(function),
-            BlockHeader::Class(class) => self.parse_class_type(class),
-            BlockHeader::Enum(_) => Ok(()),
-            BlockHeader::Interface(_) => Ok(()),
-            BlockHeader::Macro(_) => Ok(()),
-            BlockHeader::Constructor(_) => Ok(()),
-            BlockHeader::Destructor => Ok(()),
-            BlockHeader::If(expression_opt) => self.parse_expression_type_opt(expression_opt),
-            BlockHeader::Else(Some(ref mut expression)) => self.parse_expression_type(expression),
-            BlockHeader::Else(None) => Ok(()),
-            BlockHeader::Match(expression_opt) => self.parse_expression_type_opt(expression_opt),
-            BlockHeader::Defer => Ok(()),
-            BlockHeader::For(ref mut binary_operation_opt) => {
+            Block::Default => Ok(()),
+            Block::Function(function) => self.parse_function_type(function),
+            Block::Class(class) => self.parse_class_type(class),
+            Block::Enum(_) => Ok(()),
+            Block::Interface(_) => Ok(()),
+            Block::Macro(_) => Ok(()),
+            Block::Constructor(_) => Ok(()),
+            Block::Destructor => Ok(()),
+            Block::If(expression_opt) => self.parse_expression_type_opt(expression_opt),
+            Block::Else(Some(ref mut expression)) => self.parse_expression_type(expression),
+            Block::Else(None) => Ok(()),
+            Block::Match(expression_opt) => self.parse_expression_type_opt(expression_opt),
+            Block::Defer => Ok(()),
+            Block::For(ref mut binary_operation_opt) => {
                 self.parse_binary_operation_type(binary_operation_opt)
             }
-            BlockHeader::While(expression_opt) => self.parse_expression_type_opt(expression_opt),
-            BlockHeader::Loop => Ok(()),
-            BlockHeader::With(expression_opt) => Ok(()),
-            BlockHeader::Test(test) => Ok(()),
+            Block::While(expression_opt) => self.parse_expression_type_opt(expression_opt),
+            Block::Loop => Ok(()),
+            Block::With(expression_opt) => Ok(()),
+            Block::Test(test) => Ok(()),
             _ => panic!("Bad block header: {:?}", block_header),
         }
     }
@@ -375,7 +375,7 @@ impl<'a> TypeAnalyzer<'a> {
         Ok(())
     }
 
-    fn parse_class_type(&mut self, class: &Option<Class>) -> CustomResult<()> {
+    fn parse_class_type(&mut self, class: &Option<Struct>) -> CustomResult<()> {
         // Nothing to do here atm.
         Ok(())
     }
