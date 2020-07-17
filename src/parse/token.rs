@@ -1,9 +1,28 @@
-use super::ast::BlockId;
 use crate::error::CustomError::ParseError;
 use crate::{common::variable_type::Type, lex, CustomResult};
 
+/// A unique number given to every block.
+pub type BlockId = usize;
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum ParseToken {
+pub struct ParseToken {
+    pub kind: ParseTokenKind,
+    pub line_nr: u64,
+    pub column_nr: u64,
+}
+
+impl ParseToken {
+    pub fn new(kind: ParseTokenKind, line_nr: u64, column_nr: u64) -> Self {
+        Self {
+            kind,
+            line_nr,
+            column_nr,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ParseTokenKind {
     // TODO: Rust/C block (statement/expression (?)).
     Expression(Expression),
     Statement(Statement),
@@ -54,10 +73,10 @@ pub enum BlockHeader {
     //  So that they can return values and be used in sub expressions.
     // Default == None, i.e. if there are no current block. Ex. at the start of a file.
     Default,
-    Function(Option<Function>),
-    Struct(Option<Struct>),
-    Enum(Option<Enum>),
-    Interface(Option<Interface>),
+    Function(Function),
+    Struct(Struct),
+    Enum(Enum),
+    Interface(Interface),
 
     // Any `IfCase` blocks should be grouped together under one `If`.
     // A `Ifcase` is a if/elif/else with its corresponding eval expression.
@@ -270,25 +289,22 @@ pub struct Variable {
     pub name: String,
     pub var_type: Option<TypeStruct>,
     pub modifiers: Option<Vec<Modifier>>,
+    pub const_: bool,
 }
 
 impl Variable {
-    pub fn new(name: String) -> Self {
+    pub fn new(
+        name: String,
+        var_type: Option<TypeStruct>,
+        modifiers: Option<Vec<Modifier>>,
+        const_: bool,
+    ) -> Self {
         Variable {
             name,
-            var_type: None,
-            modifiers: None,
+            var_type,
+            modifiers,
+            const_,
         }
-    }
-
-    pub fn add_modifier(&mut self, modifier: Modifier) {
-        if let Some(modifiers) = self.modifiers {
-            modifiers.push(modifier);
-        }
-    }
-
-    pub fn set_type(&mut self, var_type: TypeStruct) {
-        self.var_type = Some(var_type);
     }
 }
 
@@ -602,7 +618,7 @@ pub enum UnaryOperator {
 impl ParseToken {
     /// Returns some Operator if the given symbol is a valid operator, returns
     /// None otherwise.
-    pub fn get_if_operator(symbol: lex::token::Symbol) -> Option<Operator> {
+    pub fn get_if_operator(symbol: &lex::token::Symbol) -> Option<Operator> {
         Some(match symbol {
             lex::token::Symbol::ParenthesisBegin => Operator::ParenthesisBegin,
             lex::token::Symbol::ParenthesisEnd => Operator::ParenthesisEnd,

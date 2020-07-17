@@ -1,8 +1,18 @@
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexToken {
     pub kind: LexTokenKind,
-    pub lineNr: u64,
-    pub columnNr: u64,
+    pub line_nr: u64,
+    pub column_nr: u64,
+}
+
+impl LexToken {
+    pub fn new(kind: LexTokenKind, line_nr: u64, column_nr: u64) -> Self {
+        Self {
+            kind,
+            line_nr,
+            column_nr,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

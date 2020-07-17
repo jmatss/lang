@@ -36,7 +36,8 @@ impl<I: Clone> TokenIter<I> {
     #[inline]
     pub fn put_back(&mut self, item: I) -> CustomResult<()> {
         if self.buff.len() < MAX_PUT_BACK {
-            Ok(self.buff.push_front(item))
+            let _ = self.buff.push_front(item);
+            Ok(())
         } else {
             Err(GeneralError("Push back buffer was full"))
         }
@@ -85,7 +86,7 @@ impl<I: Clone> TokenIter<I> {
         }
 
         for item in items.iter().rev() {
-            self.put_back(item.clone());
+            let _ = self.put_back(item.clone());
         }
 
         items
@@ -110,10 +111,10 @@ impl<I: Clone> TokenIter<I> {
         let o1 = peek_items.pop();
         let o2 = peek_items.pop();
 
-        if let (Some(first), Some(second)) = (o2, o1) {
-            Some((first, Some(second)))
-        } else if let Some(first) = o1 {
-            Some((first, None))
+        if let (Some(first), Some(second)) = (&o2, &o1) {
+            Some((first.clone(), Some(second.clone())))
+        } else if let Some(first) = &o1 {
+            Some((first.clone(), None))
         } else {
             None
         }
@@ -127,10 +128,10 @@ impl<I: Clone> TokenIter<I> {
         let o2 = peek_items.pop();
         let o3 = peek_items.pop();
 
-        if let (Some(first), Some(second), Some(third)) = (o3, o2, o1) {
-            Some((first, Some(second), Some(third)))
-        } else if let (Some(first), Some(second)) = (o2, o1) {
-            Some((first, Some(second), None))
+        if let (Some(first), Some(second), Some(third)) = (&o3, &o2, &o1) {
+            Some((first.clone(), Some(second.clone()), Some(third.clone())))
+        } else if let (Some(first), Some(second)) = (&o2, &o1) {
+            Some((first.clone(), Some(second.clone()), None))
         } else if let Some(first) = o1 {
             Some((first, None, None))
         } else {

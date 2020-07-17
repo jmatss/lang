@@ -5,18 +5,15 @@ use crate::{common::iter::TokenIter, CustomResult};
 use std::fs::File;
 use std::io::Read;
 
-/// Max amount of chars to be put back into the iterator.
-const MAX_PUT_BACK: usize = 10;
-
 pub struct LexTokenIter {
     /// Use to iterate over the character tokens.
     iter: TokenIter<char>,
 
-    /// Current line number.
-    line_nr: u64,
+    /// Current line number (or rather last seen line number).
+    cur_line_nr: u64,
 
-    /// Current column number.
-    column_nr: u64,
+    /// Current column number (or rather last seen column number).
+    cur_column_nr: u64,
 }
 
 impl LexTokenIter {
@@ -26,10 +23,11 @@ impl LexTokenIter {
         let mut string = String::new();
         file.read_to_string(&mut string)?;
 
+        // TODO: This copies all chars, change to not make a copy if possible.
         Ok(Self {
-            iter: TokenIter::new(string.chars()),
-            line_nr: 1,
-            column_nr: 1,
+            iter: TokenIter::new(string.chars().collect::<Vec<_>>()),
+            cur_line_nr: 1,
+            cur_column_nr: 1,
         })
     }
 
@@ -39,11 +37,10 @@ impl LexTokenIter {
         // are prefixed with "0x", "0b" or "0o" (which starts with radix 10).
         const RADIX: u32 = 10;
 
-        let lex_token: LexToken;
-        lex_token.lineNr = self.line_nr;
-        lex_token.columnNr = self.column_nr;
+        let line_nr = self.cur_line_nr;
+        let column_nr = self.cur_column_nr;
 
-        lex_token.kind = if let Some((c1, c2, c3)) = self.iter.peek_three() {
+        let kind = if let Some((c1, c2, c3)) = self.iter.peek_three() {
             if LexTokenIter::valid_linebreak(c1, c2) {
                 self.get_linebreak()?
             } else if LexTokenIter::valid_whitespace(c1) {
@@ -76,6 +73,7 @@ impl LexTokenIter {
                     LexTokenKind::Symbol(Symbol::SingleQuote) => self.get_literal_char()?,
                     _ => {
                         self.iter.skip(n);
+                        self.cur_column_nr += n as u64;
                         symbol_type
                     }
                 }
@@ -89,7 +87,7 @@ impl LexTokenIter {
             LexTokenKind::EndOfFile
         };
 
-        Ok(lex_token)
+        Ok(LexToken::new(kind, line_nr, column_nr))
     }
 
     #[inline]
@@ -126,12 +124,12 @@ impl LexTokenIter {
             if LexTokenIter::valid_identifier(c) {
                 result.push(c);
             } else {
-                self.iter.put_back(c);
+                self.iter.put_back(c)?;
                 break;
             }
         }
 
-        self.column_nr += result.chars().count() as u64;
+        self.cur_column_nr += result.chars().count() as u64;
 
         if !result.is_empty() {
             Ok(result)
@@ -150,14 +148,14 @@ impl LexTokenIter {
             self.iter.skip(2);
 
             match sep_char.to_ascii_uppercase() {
-                'x' => 16,
-                'b' => 2,
-                'o' => 8,
+                'X' => 16,
+                'B' => 2,
+                'O' => 8,
                 _ => {
                     // Put back the chars since they aren't part of a prefix,
                     // this is just a decimal number that start with '0'.
-                    self.iter.put_back(sep_char);
-                    self.iter.put_back('0');
+                    self.iter.put_back(sep_char)?;
+                    self.iter.put_back('0')?;
                     10
                 }
             }
@@ -181,7 +179,7 @@ impl LexTokenIter {
             }
         }
 
-        self.column_nr += number.chars().count() as u64;
+        self.cur_column_nr += number.chars().count() as u64;
 
         if is_float {
             Ok(LexTokenKind::Literal(Literal::Float(number)))
@@ -199,7 +197,7 @@ impl LexTokenIter {
             if LexTokenIter::valid_number(c, radix) {
                 numbers.push(c);
             } else {
-                self.iter.put_back(c);
+                self.iter.put_back(c)?;
                 break;
             }
         }
@@ -233,7 +231,7 @@ impl LexTokenIter {
 
         // Need to add two because the begin and end quotes needs to be
         // counted as well.
-        self.column_nr += 2 + char_vec.len() as u64;
+        self.cur_column_nr += 2 + char_vec.len() as u64;
 
         Ok(char_vec.iter().collect())
     }
@@ -254,22 +252,23 @@ impl LexTokenIter {
 
     /// Returns the line break at the current position of the iterator.
     fn get_linebreak(&mut self) -> CustomResult<LexTokenKind> {
-        let c1 = self.iter.next();
-        let c2 = self.iter.next();
-        if let Some('\n') = c1 {
-            self.line_nr += 1;
-            self.column_nr = 1;
+        self.cur_line_nr += 1;
+        self.cur_column_nr = 1;
 
-            Ok(LexTokenKind::Symbol(Symbol::LineBreak))
-        } else if let (Some('\r'), Some('\n')) = (c1, c2) {
-            self.line_nr += 1;
-            self.column_nr += 2;
-
-            Ok(LexTokenKind::Symbol(Symbol::LineBreak))
+        if let Some(peek_chars) = self.iter.peek_two() {
+            if let ('\n', _) = peek_chars {
+                self.iter.skip(1);
+                Ok(LexTokenKind::Symbol(Symbol::LineBreak))
+            } else if let ('\r', Some('\n')) = peek_chars {
+                self.iter.skip(2);
+                Ok(LexTokenKind::Symbol(Symbol::LineBreak))
+            } else {
+                Err(LexError(
+                    "No linebreak character received in get_linebreak.".into(),
+                ))
+            }
         } else {
-            Err(LexError(
-                "No linebreak character received in get_linebreak.".to_string(),
-            ))
+            Err(LexError("Received None in get_linebreak.".into()))
         }
     }
 
@@ -286,12 +285,12 @@ impl LexTokenIter {
             if LexTokenIter::valid_whitespace(c) && !LexTokenIter::valid_linebreak(c, c_next) {
                 count += 1;
             } else {
-                self.iter.put_back(c);
+                self.iter.put_back(c)?;
                 break;
             }
         }
 
-        self.column_nr += count as u64;
+        self.cur_column_nr += count as u64;
 
         Ok(LexTokenKind::Symbol(Symbol::WhiteSpace(count)))
     }

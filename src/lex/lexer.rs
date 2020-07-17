@@ -7,12 +7,15 @@ use crate::CustomResult;
 /// containing all lex tokens.
 pub fn lex(filename: &str) -> CustomResult<Vec<LexToken>> {
     let mut lex_token_vec = Vec::new();
-    let iter = LexTokenIter::new(filename)?;
+    let mut iter = LexTokenIter::new(filename)?;
 
-    let lex_token = iter.next_token()?;
-    while lex_token.kind != LexTokenKind::EndOfFile {
+    loop {
+        let lex_token = iter.next_token()?;
         lex_token_vec.push(lex_token.clone());
-        lex_token = iter.next_token()?;
+
+        if lex_token.kind == LexTokenKind::EndOfFile {
+            break;
+        }
     }
 
     Ok(lex_token_vec)

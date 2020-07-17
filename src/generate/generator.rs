@@ -1,3 +1,4 @@
+/*
 use crate::analyzer::analyzer::{AnalyzeContext, VariableState};
 use crate::common::variable_type::Type;
 use crate::error::CustomError;
@@ -557,3 +558,4 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 }
+*/

@@ -1,6 +1,7 @@
-if x == y:
+if x == y {
     print("TRUE")
-else x == 3:
+} else (x == 3) {
     print('m')
-else:
+} else {
     print("FALSE")
+}

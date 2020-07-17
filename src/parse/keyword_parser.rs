@@ -1,6 +1,9 @@
 use super::{
     iter::{ParseTokenIter, DEFAULT_STOP_CONDS},
-    token::{BinaryOperator, BlockHeader, Expression, Operation, ParseToken, Path, Statement},
+    token::{
+        BinaryOperation, BinaryOperator, BlockHeader, Expression, Function, Operation, ParseToken,
+        ParseTokenKind, Path, Statement, Variable,
+    },
 };
 use crate::error::CustomError::ParseError;
 use crate::{
@@ -9,12 +12,25 @@ use crate::{
 };
 
 pub struct KeyworkParser<'a> {
-    iter: &'a ParseTokenIter,
+    iter: &'a mut ParseTokenIter,
+
+    // TODO: Rework how line_nr and column_nr are stored/parsed during parsing.
+    line_nr: u64,
+    column_nr: u64,
 }
 
 impl<'a> KeyworkParser<'a> {
-    pub fn parse(iter: &'a ParseTokenIter, keyword: Keyword) -> CustomResult<ParseToken> {
-        let keyword_parser = Self { iter };
+    pub fn parse(
+        iter: &'a mut ParseTokenIter,
+        keyword: Keyword,
+        line_nr: u64,
+        column_nr: u64,
+    ) -> CustomResult<ParseToken> {
+        let mut keyword_parser = Self {
+            iter,
+            line_nr,
+            column_nr,
+        };
         keyword_parser.parse_keyword(keyword)
     }
 
@@ -39,23 +55,20 @@ impl<'a> KeyworkParser<'a> {
 
             Keyword::Var => self.parse_var(),
             Keyword::Const => self.parse_const(),
-            Keyword::Static => (),
-            Keyword::Private => (),
-            Keyword::Public => (),
+            Keyword::Static => Err(ParseError("\"Static\" keyword not implemented.".into())),
+            Keyword::Private => Err(ParseError("\"Private\" keyword not implemented.".into())),
+            Keyword::Public => Err(ParseError("\"Public\" keyword not implemented.".into())),
 
-            Keyword::Function => (),
-            Keyword::Struct => (),
-            Keyword::Enum => (),
-            Keyword::Interface => (),
+            Keyword::Function => self.parse_func(),
+            Keyword::Struct => Err(ParseError("\"Struct\" keyword not implemented.".into())),
+            Keyword::Enum => Err(ParseError("\"Enum\" keyword not implemented.".into())),
+            Keyword::Interface => Err(ParseError("\"Interface\" keyword not implemented.".into())),
 
-            Keyword::Defer => (),
-            Keyword::With => (),
+            Keyword::Defer => Err(ParseError("\"Defer\" keyword not implemented.".into())),
+            Keyword::With => Err(ParseError("\"With\" keyword not implemented.".into())),
 
-            Keyword::Test => (),
+            Keyword::Test => Err(ParseError("\"Test\" keyword not implemented.".into())),
         }
-
-        // TODO.
-        Ok(ParseToken::EndOfFile)
     }
 
     /// Parses the matching `IfCase`s into a `If` block. This includes all "else"
@@ -101,7 +114,8 @@ impl<'a> KeyworkParser<'a> {
             }
         }
 
-        Ok(ParseToken::Block(BlockHeader::If, block_id, if_cases))
+        let kind = ParseTokenKind::Block(BlockHeader::If, block_id, if_cases);
+        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
     /// Parses a `Match` block and all its cases.
@@ -131,19 +145,14 @@ impl<'a> KeyworkParser<'a> {
             }
         }
 
-        Ok(ParseToken::Block(
-            BlockHeader::Match(match_expr),
-            block_id,
-            match_cases,
-        ))
+        let kind = ParseTokenKind::Block(BlockHeader::Match(match_expr), block_id, match_cases);
+        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
     /// Parses a for loop block.
     ///   "for <var> in <expr> { ... }"
     /// The "for" keyword has already been consumed when this function is called.
     fn parse_for(&mut self) -> CustomResult<ParseToken> {
-        let block_id = self.iter.reserve_block_id();
-
         // TODO: Can probably just parse this manual in order: <var>, "in", <expr>.
         // The "for" expression should be a binary "In" expression:
         //   "for <var> in <expr> {"
@@ -169,8 +178,6 @@ impl<'a> KeyworkParser<'a> {
     ///   "while { ... }"
     /// The "while" keyword has already been consumed when this function is called.
     fn parse_while(&mut self) -> CustomResult<ParseToken> {
-        let block_id = self.iter.reserve_block_id();
-
         // If the next lex token is a "CurlyBracketBegin", no expression is
         // given after this "while" keyword. Assume that it means a infinite
         // loop (equivalent to "while(true)").
@@ -208,7 +215,8 @@ impl<'a> KeyworkParser<'a> {
             None
         };
 
-        Ok(ParseToken::Statement(Statement::Return(expr)))
+        let kind = ParseTokenKind::Statement(Statement::Return(expr));
+        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
     /// Parses a yield statement.
@@ -216,28 +224,31 @@ impl<'a> KeyworkParser<'a> {
     /// The "yield" keyword has already been consumed when this function is called.
     fn parse_yield(&mut self) -> CustomResult<ParseToken> {
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
-        Ok(ParseToken::Statement(Statement::Yield(expr)))
+        let kind = ParseTokenKind::Statement(Statement::Yield(expr));
+        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
     /// Parses a break statement.
     ///   "break"
     /// The "break" keyword has already been consumed when this function is called.
     fn parse_break(&mut self) -> CustomResult<ParseToken> {
-        Ok(ParseToken::Statement(Statement::Break))
+        let kind = ParseTokenKind::Statement(Statement::Break);
+        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
     /// Parses a continue statement.
     ///   "continue"
     /// The "continue" keyword has already been consumed when this function is called.
     fn parse_continue(&mut self) -> CustomResult<ParseToken> {
-        Ok(ParseToken::Statement(Statement::Continue))
+        let kind = ParseTokenKind::Statement(Statement::Continue);
+        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
     /// Parses a use statement.
     ///   "use <path>"  (where path is a dot separated list of idents)
     /// The "use" keyword has already been consumed when this function is called.
     fn parse_use(&mut self) -> CustomResult<ParseToken> {
-        let path_parts = Vec::new();
+        let mut path_parts = Vec::new();
 
         loop {
             // Get the ident from the current path part.
@@ -279,14 +290,15 @@ impl<'a> KeyworkParser<'a> {
         }
 
         let path = Path::new(path_parts);
-        Ok(ParseToken::Statement(Statement::Use(path)))
+        let kind = ParseTokenKind::Statement(Statement::Use(path));
+        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
     /// Parses a package statement.
     ///   "package <path>"  (where path is a dot separated list of idents)
     /// The "package" keyword has already been consumed when this function is called.
     fn parse_package(&mut self) -> CustomResult<ParseToken> {
-        let path_parts = Vec::new();
+        let mut path_parts = Vec::new();
 
         loop {
             // Get the ident from the current path part.
@@ -328,6 +340,190 @@ impl<'a> KeyworkParser<'a> {
         }
 
         let path = Path::new(path_parts);
-        Ok(ParseToken::Statement(Statement::Package(path)))
+        let kind = ParseTokenKind::Statement(Statement::Package(path));
+        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
+    }
+
+    /// Parses a var statement.
+    ///   "var <ident> [: <type>] [= <expr>]"
+    /// The "var" keyword has already been consumed when this function is called.
+    fn parse_var(&mut self) -> CustomResult<ParseToken> {
+        // Start by parsing the identifier
+        let ident = if let Some(lex_token) = self.iter.next_skip_space() {
+            if let LexTokenKind::Identifier(ident) = lex_token.kind {
+                ident
+            } else {
+                return Err(ParseError(format!(
+                    "Expected ident when parsing \"var\", got: {:?}",
+                    lex_token
+                )));
+            }
+        } else {
+            return Err(ParseError(
+                "Received None when looking at token after \"var\".".into(),
+            ));
+        };
+
+        // If the next token is a "Colon", parse the type.
+        let var_type = if let Some(lex_token) = self.iter.peek_skip_space() {
+            if let LexTokenKind::Symbol(Symbol::Colon) = lex_token.kind {
+                self.iter.next_skip_space(); // Consume "Colon".
+                Some(self.iter.parse_type()?)
+            } else {
+                None
+            }
+        } else {
+            return Err(ParseError(
+                "Received None when looking at token after \"var <ident>\".".into(),
+            ));
+        };
+
+        // If the next token is a "Equals" this is an initializer, parse the
+        // next expression which will be the assigned value.
+        let expr_opt = if let Some(lex_token) = self.iter.peek_skip_space() {
+            if let LexTokenKind::Symbol(Symbol::Equals) = lex_token.kind {
+                self.iter.next_skip_space(); // Consume "Equals".
+                Some(self.iter.parse_expr(&DEFAULT_STOP_CONDS)?)
+            } else {
+                None
+            }
+        } else {
+            return Err(ParseError(
+                "Received None when looking at token after \"var <ident> [: <type>]\".".into(),
+            ));
+        };
+
+        // If `expr` is Some (i.e. this is initialization), a assignment needs
+        // to be added into the ParseToken and returned as well.
+        // Otherwise just return the variable.
+        let variable = Variable::new(ident, var_type, None, false);
+        let kind = if let Some(expr) = expr_opt {
+            let left = Box::new(Expression::Variable(variable));
+            let right = Box::new(expr);
+            let op = BinaryOperator::Assignment;
+
+            let assignment = Expression::Operation(Operation::BinaryOperation(
+                BinaryOperation::new(op, left, right),
+            ));
+            ParseTokenKind::Expression(assignment)
+        } else {
+            ParseTokenKind::Expression(Expression::Variable(variable))
+        };
+        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
+    }
+
+    /// Parses a const statement.
+    ///   "const <ident> : <type> = <expr>"
+    /// The "const" keyword has already been consumed when this function is called.
+    fn parse_const(&mut self) -> CustomResult<ParseToken> {
+        // Start by parsing the identifier
+        let ident = if let Some(lex_token) = self.iter.next_skip_space() {
+            if let LexTokenKind::Identifier(ident) = lex_token.kind {
+                ident
+            } else {
+                return Err(ParseError(format!(
+                    "Expected ident when parsing \"const\", got: {:?}",
+                    lex_token
+                )));
+            }
+        } else {
+            return Err(ParseError(
+                "Received None when looking at token after \"const\".".into(),
+            ));
+        };
+
+        // The the next token should be a "Colon", parse the type.
+        let var_type = if let Some(lex_token) = self.iter.next_skip_space() {
+            if let LexTokenKind::Symbol(Symbol::Colon) = lex_token.kind {
+                self.iter.parse_type()?
+            } else {
+                return Err(ParseError(format!(
+                    "Expected type when parsing \"const\", got: {:?}",
+                    lex_token
+                )));
+            }
+        } else {
+            return Err(ParseError(
+                "Received None when looking at token after \"const <ident>\".".into(),
+            ));
+        };
+
+        // The the next token should be a "Equals" (assignment), parse the expr.
+        let expr = if let Some(lex_token) = self.iter.next_skip_space() {
+            if let LexTokenKind::Symbol(Symbol::Equals) = lex_token.kind {
+                self.iter.parse_expr(&DEFAULT_STOP_CONDS)?
+            } else {
+                return Err(ParseError(format!(
+                    "Expected expressing when parsing \"const\", got: {:?}",
+                    lex_token
+                )));
+            }
+        } else {
+            return Err(ParseError(
+                "Received None when looking at \"const\" assigned value.".into(),
+            ));
+        };
+
+        let variable = Variable::new(ident, Some(var_type), None, true);
+        let left = Box::new(Expression::Variable(variable));
+        let right = Box::new(expr);
+        let op = BinaryOperator::Assignment;
+
+        let assignment = Expression::Operation(Operation::BinaryOperation(BinaryOperation::new(
+            op, left, right,
+        )));
+        let kind = ParseTokenKind::Expression(assignment);
+        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
+    }
+
+    // TODO: Parsing of generics.
+    /// Parses a function.
+    ///   "function <ident> ( [<ident>: <type>], ... ) [ <type> ] {"
+    ///   TODO: "function <ident> [ < <generic>, ... > ] ( [<ident>: <type>], ... ) [ <type> ] {"
+    /// The "function" keyword has already been consumed when this function is called.
+    fn parse_func(&mut self) -> CustomResult<ParseToken> {
+        // Start by parsing the identifier
+        let ident = if let Some(lex_token) = self.iter.next_skip_space() {
+            if let LexTokenKind::Identifier(ident) = lex_token.kind {
+                ident
+            } else {
+                return Err(ParseError(format!(
+                    "Expected ident when parsing \"function\", got: {:?}",
+                    lex_token
+                )));
+            }
+        } else {
+            return Err(ParseError(
+                "Received None when looking at token after \"function\".".into(),
+            ));
+        };
+
+        let parameters = self.iter.parse_par_list()?;
+
+        // If the next token is a "CurlyBracketBegin", assume that the function
+        // returns "void"; otherwise parse the return type.
+        let return_type = if let Some(lex_token) = self.iter.peek_skip_space_line() {
+            if let LexTokenKind::Symbol(Symbol::CurlyBracketBegin) = lex_token.kind {
+                None
+            } else {
+                Some(self.iter.parse_type()?)
+            }
+        } else {
+            return Err(ParseError(
+                "Received None when looking at token after \"function <ident>\".".into(),
+            ));
+        };
+
+        let parameters_opt = if !parameters.is_empty() {
+            Some(parameters)
+        } else {
+            None
+        };
+        // TODO: Generics.
+        let generics = None;
+        let func = Function::new(ident, generics, parameters_opt, return_type);
+        let func_header = BlockHeader::Function(func);
+
+        self.iter.next_block(func_header)
     }
 }

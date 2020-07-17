@@ -1,3 +1,4 @@
+/*
 use crate::analyze::analyzer::AnalyzeContext;
 use crate::parse::abstract_syntax_tree::{ASTBlock, RCNode, AST};
 use crate::parse::parse_token::{Block, ParseToken};
@@ -129,3 +130,4 @@ impl<'a> DeclarationAnalyzer<'a> {
         }
     }
 }
+*/

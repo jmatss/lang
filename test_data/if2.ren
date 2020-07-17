@@ -1,4 +1,8 @@
-if x == y:
+if x == y
+{
     print("TRUE")
-else:
+}
+else
+{
     print("FALSE")
+}

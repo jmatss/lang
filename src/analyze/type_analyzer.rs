@@ -1,3 +1,4 @@
+/*
 use crate::analyze::analyzer::{AnalyzeContext, VariableState};
 use crate::common::variable_type::Type;
 use crate::parse::abstract_syntax_tree::{ASTBlock, RCNode, AST};
@@ -405,3 +406,4 @@ impl<'a> TypeAnalyzer<'a> {
         }
     }
 }
+*/

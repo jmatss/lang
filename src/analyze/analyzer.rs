@@ -1,3 +1,4 @@
+/*
 use crate::analyze::declaration_analyzer::DeclarationAnalyzer;
 use crate::analyze::type_analyzer::TypeAnalyzer;
 use crate::parse::abstract_syntax_tree::{ScopeIndex, AST};
@@ -72,3 +73,4 @@ pub fn analyze(ast: &mut AST) -> CustomResult<AnalyzeContext> {
 
     Ok(context)
 }
+*/

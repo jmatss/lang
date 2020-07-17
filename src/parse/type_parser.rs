@@ -7,12 +7,12 @@ use crate::{
 };
 
 pub struct TypeParser<'a> {
-    iter: &'a ParseTokenIter,
+    iter: &'a mut ParseTokenIter,
 }
 
 impl<'a> TypeParser<'a> {
-    pub fn parse(iter: &'a ParseTokenIter) -> CustomResult<TypeStruct> {
-        let type_parser = Self { iter };
+    pub fn parse(iter: &'a mut ParseTokenIter) -> CustomResult<TypeStruct> {
+        let mut type_parser = Self { iter };
         type_parser.parse_type()
     }
 
@@ -30,43 +30,42 @@ impl<'a> TypeParser<'a> {
     ///   uint32_t *(*x)[]      x: {[{u32}]}
     ///   char *x               x: {char}
     fn parse_type(&mut self) -> CustomResult<TypeStruct> {
-        loop {
-            if let Some(lex_token) = self.iter.next_skip_space() {
-                match lex_token.kind {
-                    // Ident.
-                    LexTokenKind::Identifier(ident) => {
-                        let type_enum = Type::ident_to_type(&ident);
-                        let generics = self.parse_type_generics()?;
-
-                        let type_struct = if generics.len() == 0 {
-                            TypeStruct::new(type_enum, None)
-                        } else {
-                            TypeStruct::new(type_enum, Some(generics))
-                        };
-                    }
-
-                    // Pointer.
-                    LexTokenKind::Symbol(Symbol::CurlyBracketBegin) => {
-                        return self.parse_type_pointer()
-                    }
-
-                    // Array/slice.
-                    LexTokenKind::Symbol(Symbol::SquareBracketBegin) => {
-                        return self.parse_type_array()
-                    }
-
-                    _ => (),
+        if let Some(lex_token) = self.iter.next_skip_space() {
+            match lex_token.kind {
+                // Ident.
+                LexTokenKind::Identifier(ident) => {
+                    let type_enum = Type::ident_to_type(&ident);
+                    let generics = self.parse_type_generics()?;
+                    Ok(TypeStruct::new(type_enum, generics))
                 }
+
+                // Pointer.
+                LexTokenKind::Symbol(Symbol::CurlyBracketBegin) => self.parse_type_pointer(),
+
+                // Array/slice.
+                LexTokenKind::Symbol(Symbol::SquareBracketBegin) => self.parse_type_array(),
+
+                _ => Err(ParseError(format!("Invalid type token: {:?}", lex_token))),
             }
+        } else {
+            Err(ParseError("Received None when parsing type.".into()))
         }
     }
 
     /// Parses a list of types inside a generic "tag" (<..>).
     ///   X<T>      // Type with generic argument.
     ///   X<T, V>   // Type with multiple generic arguments.
-    fn parse_type_generics(&mut self) -> CustomResult<Vec<TypeStruct>> {
-        // Skip the "PointyBracketBegin".
-        self.iter.next_skip_space();
+    fn parse_type_generics(&mut self) -> CustomResult<Option<Vec<TypeStruct>>> {
+        // If the next token isn't a "PointyBracketBegin" there are no generic
+        // list, just return None.
+        if let Some(lex_token) = self.iter.next_skip_space() {
+            if let LexTokenKind::Symbol(Symbol::PointyBracketBegin) = lex_token.kind {
+                // Do nothing, parse generic list in logic underneath.
+            } else {
+                self.iter.put_back(lex_token)?;
+                return Ok(None);
+            }
+        }
 
         // Sanity check to see if this is a generic list with no items inside.
         if let Some(lex_token) = self.iter.peek_skip_space() {
@@ -91,7 +90,7 @@ impl<'a> TypeParser<'a> {
                         continue;
                     }
                     LexTokenKind::Symbol(Symbol::PointyBracketEnd) => {
-                        return Ok(generics);
+                        return Ok(Some(generics));
                     }
                     _ => {
                         return Err(ParseError(format!(
@@ -112,7 +111,7 @@ impl<'a> TypeParser<'a> {
     ///   {X}       // Pointer to type (is the {X} syntax be weird/ambiguous?)
     fn parse_type_pointer(&mut self) -> CustomResult<TypeStruct> {
         // The "CurlyBracketBegin" has already been skipped.
-        let type_struct = self.parse_type()?;
+        let mut type_struct = self.parse_type()?;
 
         // Wrap the parsed type into the Pointer enum.
         type_struct.t = Type::Pointer(Box::new(type_struct.t));
@@ -139,7 +138,7 @@ impl<'a> TypeParser<'a> {
     ///   [X: _]    // Array of type X with infered size.
     fn parse_type_array(&mut self) -> CustomResult<TypeStruct> {
         // The "SquareBracketBegin" has already been skipped.
-        let type_struct = self.parse_type()?;
+        let mut type_struct = self.parse_type()?;
 
         // At this point the token can either be a "Colon" to indicate that this
         // array type has a size specificed or it can be a "SquareBracketEnd"
