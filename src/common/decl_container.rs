@@ -28,6 +28,8 @@ impl<'ctx, I> DeclContainer<'ctx, I> {
         self.declarations.insert(ident, id, item)
     }
 
+    // TODO: Will be implemented when codegen is implemented.
+    #[allow(dead_code)]
     pub fn insert_ptr(&mut self, ident: &str, id: BlockId, ptr: PointerValue<'ctx>) {
         self.pointers.insert(ident, id, ptr)
     }
@@ -36,6 +38,8 @@ impl<'ctx, I> DeclContainer<'ctx, I> {
         self.declarations.get(ident, id)
     }
 
+    // TODO: Will be implemented when codegen is implemented.
+    #[allow(dead_code)]
     pub fn get_ptr(&self, ident: &str, id: BlockId) -> Option<&PointerValue<'ctx>> {
         self.pointers.get(ident, id)
     }
@@ -44,6 +48,8 @@ impl<'ctx, I> DeclContainer<'ctx, I> {
         self.declarations.get_mut(ident, id)
     }
 
+    // TODO: Will be implemented when codegen is implemented.
+    #[allow(dead_code)]
     pub fn get_ptr_mut(&mut self, ident: &str, id: BlockId) -> Option<&mut PointerValue<'ctx>> {
         self.pointers.get_mut(ident, id)
     }

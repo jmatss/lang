@@ -64,15 +64,10 @@ impl<'ctx> AnalyzeContext<'ctx> {
 /// of structures.
 pub fn analyze<'a>(ast_root: &mut ParseToken) -> CustomResult<AnalyzeContext<'a>> {
     let mut context = AnalyzeContext::new();
-    {
-        ScopeAnalyzer::analyze(&mut context, ast_root)?;
-    }
-    {
-        TypeAnalyzer::analyze(&mut context, ast_root)?;
-    }
-    {
-        DeclAnalyzer::analyze(&mut context, ast_root)?;
-    }
+
+    ScopeAnalyzer::analyze(&mut context, ast_root)?;
+    TypeAnalyzer::analyze(&mut context, ast_root)?;
+    DeclAnalyzer::analyze(&mut context, ast_root)?;
 
     Ok(context)
 }

@@ -509,18 +509,6 @@ impl Operator {
             )))
         }
     }
-
-    pub fn eval_left_to_right(&self) -> Option<bool> {
-        Some(self.lookup()?.0)
-    }
-
-    pub fn precedence(&self) -> Option<usize> {
-        Some(self.lookup()?.1)
-    }
-
-    pub fn fix(&self) -> Option<Fix> {
-        Some(self.lookup()?.2)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

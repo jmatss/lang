@@ -22,7 +22,6 @@ pub enum LexTokenKind {
     Keyword(Keyword),
     Symbol(Symbol),
     EndOfFile,
-    Unknown(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -158,16 +157,6 @@ pub enum Symbol {
 }
 
 impl LexToken {
-    /// Linebreak, manual linebreak (";") or EndOfFile.
-    pub fn is_break_symbol(lex_token: &LexToken) -> bool {
-        match lex_token.kind {
-            LexTokenKind::Symbol(Symbol::LineBreak)
-            | LexTokenKind::Symbol(Symbol::SemiColon)
-            | LexTokenKind::EndOfFile => true,
-            _ => false,
-        }
-    }
-
     /// Sees if the given `ident` is a valid bool literal. If it is, returns
     /// the literal as a token type, otherwise returns None.
     pub fn get_if_bool(ident: &str) -> Option<LexTokenKind> {

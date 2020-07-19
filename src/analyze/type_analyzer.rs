@@ -11,7 +11,8 @@ pub struct TypeAnalyzer<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> TypeAnalyzer<'a, 'ctx> {
-    /// Takes in a abstract syntax tree and tries to infer all the missing types.
+    /// Takes in the root of the AST and tries to infer all the missing types
+    /// for variables and expressions (what type the expressions evaluates to).
     pub fn analyze(
         context: &'a mut AnalyzeContext<'ctx>,
         ast_root: &mut ParseToken,
@@ -61,6 +62,8 @@ impl<'a, 'ctx> TypeAnalyzer<'a, 'ctx> {
         }
     }
 
+    // TODO: Placeholder function if this functionallity is ever needed.
+    #[allow(unused_variables)]
     fn analyze_literal_type(
         &mut self,
         literal: &Literal,
@@ -73,9 +76,11 @@ impl<'a, 'ctx> TypeAnalyzer<'a, 'ctx> {
         Ok(())
     }
 
+    // TODO: Placeholder function if this functionallity is ever needed.
+    #[allow(unused_variables)]
     fn parse_variable_type(&mut self, variable: &mut Variable) -> CustomResult<()> {
         // This is a variable inside a expression, there is no way to specify
-        // the type. Thev type will be stored in the surrounding "As" expression
+        // the type. The type will be stored in the surrounding "As" expression
         // if a cast is done.
         Ok(())
     }
@@ -93,6 +98,12 @@ impl<'a, 'ctx> TypeAnalyzer<'a, 'ctx> {
         self.analyze_expr_type(&mut bin_op.left)?;
         self.analyze_expr_type(&mut bin_op.right)?;
 
+        // TODO: If this is a assignment, the type of the right hand side should
+        //       be compared to the type of the variable. If the variable doesn't
+        //       have a type set but the right has, that type must be cascaded
+        //       to the declaration of the variable so that it can be seen during
+        //       codegen (since codegen will only look at the declaration of
+        //       a variable).
         let left_type = self.get_ret_type(&bin_op.left);
         let right_type = self.get_ret_type(&bin_op.right);
 
@@ -160,10 +171,8 @@ impl<'a, 'ctx> TypeAnalyzer<'a, 'ctx> {
             BlockHeader::For(var, expr) => {
                 // The type of the variable `var` will be infered to the same
                 // as the expression if no type is specified in the var itself.
-                self.analyze_expr_type(expr);
-                if let Some(ref mut var_type) = var.ret_type {
-                    // Do nothing, var type already set.
-                } else {
+                self.analyze_expr_type(expr)?;
+                if var.ret_type.is_none() {
                     var.ret_type = self.get_ret_type(expr);
                 }
                 Ok(())

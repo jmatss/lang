@@ -19,14 +19,20 @@ impl<I> DeclHashMap<I> {
         }
     }
 
+    // TODO: `id` will be used when logic for scopes are implemented.
+    #[allow(unused_variables)]
     pub fn insert(&mut self, ident: &str, id: BlockId, item: I) {
         self.outer.insert(ident.into(), item);
     }
 
+    // TODO: `id` will be used when logic for scopes are implemented.
+    #[allow(unused_variables)]
     pub fn get(&self, ident: &str, id: BlockId) -> Option<&I> {
         self.outer.get(ident)
     }
 
+    // TODO: `id` will be used when logic for scopes are implemented.
+    #[allow(unused_variables)]
     pub fn get_mut(&mut self, ident: &str, id: BlockId) -> Option<&mut I> {
         self.outer.get_mut(ident)
     }

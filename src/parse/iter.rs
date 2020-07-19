@@ -94,14 +94,6 @@ impl ParseTokenIter {
                 }
 
                 LexTokenKind::EndOfFile => ParseTokenKind::EndOfFile,
-
-                // Unknown
-                _ => {
-                    return Err(ParseError(format!(
-                        "Received unknown token: {:?}.",
-                        lex_token
-                    )))
-                }
             };
 
             Ok(ParseToken::new(kind, self.cur_line_nr, self.cur_column_nr))

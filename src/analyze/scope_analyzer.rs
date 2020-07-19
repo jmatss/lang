@@ -10,7 +10,7 @@ pub struct ScopeAnalyzer<'a, 'ctx> {
 
 impl<'a, 'ctx> ScopeAnalyzer<'a, 'ctx> {
     /// Takes in a the root of the AST and walks the whole tree to find all
-    /// parent->child relations and also chhecks if the parents are "root blocks"
+    /// parent->child relations and also checks if the parents are "root blocks"
     /// or not.
     pub fn analyze(
         context: &'a mut AnalyzeContext<'ctx>,
@@ -28,29 +28,31 @@ impl<'a, 'ctx> ScopeAnalyzer<'a, 'ctx> {
         }
     }
 
+    /// Only blocks are of interest in this function since they are the ones
+    /// representing scopes.
     fn analyze_token(&mut self, token: &mut ParseToken) -> CustomResult<()> {
-        match token.kind {
-            ParseTokenKind::Block(ref header, id, ref mut body) => {
-                self.context
-                    .child_to_parent
-                    .insert(id, self.cur_parent.clone());
+        if let ParseTokenKind::Block(ref header, id, ref mut body) = token.kind {
+            self.context
+                .child_to_parent
+                .insert(id, self.cur_parent.clone());
 
-                let is_root = self.analyze_is_root(header);
-                let cur_block = BlockNode::new(id, is_root);
+            let is_root = self.analyze_is_root(header);
+            let cur_block = BlockNode::new(id, is_root);
 
-                for token in body {
-                    // Since `analyze_token` recurses, need to re-set the current
-                    // block to the parent for every iteration of the loop.
-                    self.cur_parent = cur_block.clone();
-                    self.analyze_token(token)?;
-                }
+            for token in body {
+                // Since `analyze_token` recurses, need to re-set the current
+                // block to the parent for every iteration of the loop.
+                self.cur_parent = cur_block.clone();
+                self.analyze_token(token)?;
             }
-            _ => (),
         }
 
         Ok(())
     }
 
+    /// Returns true if the given header is a "root" i.e. a block that creates
+    /// a new scope where every block created inside them only has access to
+    /// this block + globals.
     fn analyze_is_root(&mut self, header: &BlockHeader) -> bool {
         match header {
             BlockHeader::Function(_)

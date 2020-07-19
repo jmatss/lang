@@ -12,7 +12,7 @@ pub struct DeclAnalyzer<'a, 'ctx> {
 impl<'a, 'ctx> DeclAnalyzer<'a, 'ctx> {
     /// Takes in a the root of the AST and walks the whole tree to find all
     /// declarations/prototypes and adds them to the `AnalyzeContext` so that
-    /// key can quickly be look up during generation of LLVM IR.
+    /// key can quickly be looked up during LLVM code generation.
     pub fn analyze(
         context: &'a mut AnalyzeContext<'ctx>,
         ast_root: &mut ParseToken,
@@ -28,7 +28,7 @@ impl<'a, 'ctx> DeclAnalyzer<'a, 'ctx> {
     fn analyze_token(&mut self, token: &mut ParseToken) -> CustomResult<()> {
         match &mut token.kind {
             ParseTokenKind::Block(header, id, body) => {
-                self.context.cur_block_id = id.clone();
+                self.context.cur_block_id = *id;
                 self.analyze_header(header)?;
                 for token in body {
                     self.analyze_token(token)?;
