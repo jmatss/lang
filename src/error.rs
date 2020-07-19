@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum CustomError {
-    GeneralError(&'static str),
+    GeneralError(String),
     LexError(String),
     ParseError(String),
     AnalyzeError(String),

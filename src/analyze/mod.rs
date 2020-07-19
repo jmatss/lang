@@ -1,3 +1,4 @@
 pub mod analyzer;
-pub mod declaration_analyzer;
+pub mod decl_analyzer;
+pub mod scope_analyzer;
 pub mod type_analyzer;

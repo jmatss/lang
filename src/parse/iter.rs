@@ -199,8 +199,6 @@ impl ParseTokenIter {
             // See if the first scenario is true. If it is not, assume that
             // the secound scenario is correct.
             let mut name = None;
-            
-            println!("HERE");
 
             let first_opt = self.peek_skip_space_line();
             let second_opt = self.peek_skip_space_line();
@@ -220,10 +218,6 @@ impl ParseTokenIter {
 
                 let stop_conds = [Symbol::Comma, Symbol::ParenthesisEnd];
                 let arg = Argument::new(name, self.parse_expr(&stop_conds)?);
-
-
-                println!("ARG: {:?}", arg);
-
 
                 arguments.push(arg);
             } else {

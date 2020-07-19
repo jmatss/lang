@@ -42,6 +42,9 @@ pub enum Statement {
     Use(Path),
     Package(Path),
 
+    // The expr will contain the assigned value if this is a initialization.
+    // Used both for "var" and "const" variables.
+    VariableDecl(Variable, Option<Expression>),
     // static, private etc.
     Modifier(Modifier),
 
@@ -52,6 +55,10 @@ pub enum Statement {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
+    // TODO: Unnecessary to have type here? Bool, string and char types are
+    //       implied. For numbers the postfix notation might be converted to a
+    //       "As" so that the type doesn't need to be stored in the literal,
+    //       it will be stored in the surrounding expression.
     Literal(lex::token::Literal, Option<TypeStruct>),
 
     Variable(Variable),
@@ -132,12 +139,9 @@ pub enum BlockHeader {
     Match(Expression),
     MatchCase(Expression),
 
-    // For == Iterate
-    // BinaryOperation == In
-    For(BinaryOperation),
+    For(Variable, Expression),
     // TODO: Maybe merge while and loop (?)
     While(Option<Expression>),
-    Loop,
 
     // AutoClosable.
     With(Option<Expression>),
@@ -160,7 +164,7 @@ pub enum Modifier {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BinaryOperation {
     pub operator: BinaryOperator,
-    pub return_type: Option<TypeStruct>,
+    pub ret_type: Option<TypeStruct>,
     pub left: Box<Expression>,
     pub right: Box<Expression>,
 }
@@ -169,7 +173,7 @@ impl BinaryOperation {
     pub fn new(operator: BinaryOperator, left: Box<Expression>, right: Box<Expression>) -> Self {
         BinaryOperation {
             operator,
-            return_type: None,
+            ret_type: None,
             left,
             right,
         }
@@ -179,7 +183,7 @@ impl BinaryOperation {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnaryOperation {
     pub operator: UnaryOperator,
-    pub var_type: Option<TypeStruct>,
+    pub ret_type: Option<TypeStruct>,
     pub value: Box<Expression>,
 }
 
@@ -187,7 +191,7 @@ impl UnaryOperation {
     pub fn new(operator: UnaryOperator, value: Box<Expression>) -> Self {
         UnaryOperation {
             operator,
-            var_type: None,
+            ret_type: None,
             value,
         }
     }
@@ -216,7 +220,7 @@ pub struct Function {
     pub name: String,
     pub generics: Option<Vec<TypeStruct>>,
     pub parameters: Option<Vec<Variable>>,
-    pub return_type: Option<TypeStruct>,
+    pub ret_type: Option<TypeStruct>,
 }
 
 impl Function {
@@ -224,13 +228,13 @@ impl Function {
         name: String,
         generics: Option<Vec<TypeStruct>>,
         parameters: Option<Vec<Variable>>,
-        return_type: Option<TypeStruct>,
+        ret_type: Option<TypeStruct>,
     ) -> Self {
         Function {
             name,
             generics,
             parameters,
-            return_type,
+            ret_type,
         }
     }
 }
@@ -287,7 +291,7 @@ impl Argument {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
     pub name: String,
-    pub var_type: Option<TypeStruct>,
+    pub ret_type: Option<TypeStruct>,
     pub modifiers: Option<Vec<Modifier>>,
     pub const_: bool,
 }
@@ -295,13 +299,13 @@ pub struct Variable {
 impl Variable {
     pub fn new(
         name: String,
-        var_type: Option<TypeStruct>,
+        ret_type: Option<TypeStruct>,
         modifiers: Option<Vec<Modifier>>,
         const_: bool,
     ) -> Self {
         Variable {
             name,
-            var_type,
+            ret_type,
             modifiers,
             const_,
         }
@@ -337,7 +341,7 @@ pub struct GenericHeader {
     pub name: Option<String>,
     pub generics: Option<Vec<TypeStruct>>,
     pub parameters: Option<Vec<Variable>>,
-    pub return_type: Option<TypeStruct>,
+    pub ret_type: Option<TypeStruct>,
 }
 
 impl GenericHeader {
@@ -346,7 +350,7 @@ impl GenericHeader {
             name: None,
             generics: None,
             parameters: None,
-            return_type: None,
+            ret_type: None,
         }
     }
 }
@@ -524,6 +528,7 @@ pub enum BinaryOperator {
     /* GENERAL */
     Assignment,
     // Used in for loops etc.
+    // TODO: Maybe make keyword instead and only allow use it in "for" loops.
     In,
     // pattern matching
     Is,
@@ -532,17 +537,6 @@ pub enum BinaryOperator {
     Of,
     Range,
     RangeInclusive,
-
-    // TODO: Make left-hand-side a pattern.
-    /* Example of MatchCase where ("a": ; do_something()) is a MatchCase.
-        match "a":
-            "a":
-                do_something()
-            _:
-                do_nothing()
-        .
-    */
-    MatchCase,
 
     // Access function/fields ex. list.add(), tuple.0
     Dot,

@@ -1,76 +1,78 @@
-/*
-use crate::analyze::declaration_analyzer::DeclarationAnalyzer;
+use super::scope_analyzer::ScopeAnalyzer;
+use crate::analyze::decl_analyzer::DeclAnalyzer;
 use crate::analyze::type_analyzer::TypeAnalyzer;
-use crate::parse::abstract_syntax_tree::{ScopeIndex, AST};
-use crate::parse::parse_token::{Struct, Enum, Function, Interface, ParseToken, TypeStruct};
-use crate::CustomResult;
-use inkwell::values::PointerValue;
+use crate::parse::token::{BlockId, Enum, Function, Interface, ParseToken, Struct, Variable};
+use crate::{common::decl_container::DeclContainer, CustomResult};
 use std::collections::HashMap;
 
-#[derive(Debug)]
-pub struct VariableState<'a> {
-    pub tokens: Vec<ParseToken>,
-    pub base_type: Option<TypeStruct>,
-    pub pointer: Option<PointerValue<'a>>,
+/// A tuple of a block and if it is a "block root" i.e. a block that starts a
+/// new scope that contains blocks that only have access to items inside this scope.
+///
+/// For example:
+///   fn f() {            // <- BlockId 0
+///     if (true) {       // <- BlockId 1
+///       if (false) {}   // <- BlockId 2
+///     }
+///   }
+/// In this example blocks 1 and 2 only lives inside block 0 (a function).
+/// So the "root block" for 1 & 2 would be 0. In turn the function would
+/// have a surrounding "root block" (which isn't shown in this example).
+#[derive(Debug, Clone)]
+pub struct BlockNode {
+    pub block_id: BlockId,
+    pub is_root: bool,
 }
 
-impl<'a> VariableState<'a> {
-    pub fn new() -> Self {
-        Self {
-            tokens: Vec::new(),
-            base_type: None,
-            pointer: None,
-        }
+impl BlockNode {
+    pub fn new(block_id: BlockId, is_root: bool) -> Self {
+        Self { block_id, is_root }
     }
 }
 
 #[derive(Debug)]
-pub struct AnalyzeContext<'a> {
-    /// Contains all variables that have been seen traversing down to this part of the code.
-    /// The outer map has the variable name as key and the inner map has the scope index as key
-    /// and the variable state as the value which contains information about the variable.
-    pub variables: HashMap<String, HashMap<ScopeIndex, VariableState<'a>>>,
+pub struct AnalyzeContext<'ctx> {
+    /// Contains all ... that have been seen traversing down to this part of the code.
+    pub variables: DeclContainer<'ctx, Variable>,
+    pub functions: DeclContainer<'ctx, Function>,
+    pub structs: DeclContainer<'ctx, Struct>,
+    pub enums: DeclContainer<'ctx, Enum>,
+    pub interfaces: DeclContainer<'ctx, Interface>,
 
-    /// Contains all functions that have been seen traversing down to this part of the code.
-    /// The outer map has the variable name as key and the inner map has the scope as the key and
-    /// information about the function as the value.
-    pub functions: HashMap<String, HashMap<ScopeIndex, Function>>,
+    /// Maps child blocks to their parents. The key is a child ID and the value
+    /// is the BlockNode of its parent.
+    pub child_to_parent: HashMap<BlockId, BlockNode>,
 
-    pub classes: HashMap<String, HashMap<ScopeIndex, Struct>>,
-    pub enums: HashMap<String, HashMap<ScopeIndex, Enum>>,
-    pub interfaces: HashMap<String, HashMap<ScopeIndex, Interface>>,
-
-    /// Temporary scope values.
-    // TODO: To this in a better way
-    /// The key is a child scope and the value is the parent of that scope.
-    pub parent_scopes: HashMap<ScopeIndex, ScopeIndex>,
-
-    /// The scope that the `analyzer` currently is in.
-    pub current_scope: ScopeIndex,
+    /// The block ID that the `analyzer` currently is in.
+    pub cur_block_id: BlockId,
 }
 
-impl<'a> AnalyzeContext<'a> {
+impl<'ctx> AnalyzeContext<'ctx> {
     pub fn new() -> Self {
         Self {
-            variables: HashMap::new(),
-            functions: HashMap::new(),
-            classes: HashMap::new(),
-            enums: HashMap::new(),
-            interfaces: HashMap::new(),
-            parent_scopes: HashMap::new(),
-            current_scope: 0,
+            variables: DeclContainer::new(),
+            functions: DeclContainer::new(),
+            structs: DeclContainer::new(),
+            enums: DeclContainer::new(),
+            interfaces: DeclContainer::new(),
+            child_to_parent: HashMap::new(),
+            cur_block_id: 0,
         }
     }
 }
 
 /// Updates the AST with information about function prototypes and declarations
 /// of structures.
-pub fn analyze(ast: &mut AST) -> CustomResult<AnalyzeContext> {
+pub fn analyze<'a>(ast_root: &mut ParseToken) -> CustomResult<AnalyzeContext<'a>> {
     let mut context = AnalyzeContext::new();
-
-    DeclarationAnalyzer::analyze(&mut context, ast)?;
-    TypeAnalyzer::analyze(&mut context, ast)?;
+    {
+        ScopeAnalyzer::analyze(&mut context, ast_root)?;
+    }
+    {
+        TypeAnalyzer::analyze(&mut context, ast_root)?;
+    }
+    {
+        DeclAnalyzer::analyze(&mut context, ast_root)?;
+    }
 
     Ok(context)
 }
-*/

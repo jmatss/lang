@@ -1,16 +1,16 @@
 mod analyze;
+mod codegen;
 mod common;
 mod error;
-mod generate;
 mod lex;
 mod parse;
 mod transpile;
 
 use crate::analyze::analyzer;
+use crate::error::CustomError;
 use crate::lex::lexer;
 use crate::parse::parser;
-
-use crate::error::CustomError;
+use parse::token::ParseToken;
 
 pub type CustomResult<T> = Result<T, CustomError>;
 
@@ -25,17 +25,13 @@ fn main() -> CustomResult<()> {
 
     println!();
 
-    let ast = parser::parse(lex_tokens).unwrap();
+    let mut ast_root: ParseToken = parser::parse(lex_tokens).unwrap();
     println!("Parsing complete.\n");
-    println!("\nAST after parse:\n{:#?}", ast);
+    println!("\nAST after parse:\n{:#?}", ast_root);
 
-    /*
-    let analyze_context = analyzer::analyze(&mut ast)?;
-    println!("\nAST after analyze:");
-    ast.debug_print();
-    println!();
-    println!("{:#?}", analyze_context);
-    */
+    let analyze_context = analyzer::analyze(&mut ast_root)?;
+    println!("Analyzing complete.\n");
+    println!("\nAST after analyze:\n{:#?}", ast_root);
 
     //let ir = generate::generate(&ast, &analyze_context);
 

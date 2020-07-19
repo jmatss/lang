@@ -1,9 +1,7 @@
 use super::token::LexTokenKind;
-use crate::error::CustomError::LexError;
+use crate::error::CustomError::{self, LexError};
 use crate::lex::token::{LexToken, Literal, Symbol};
 use crate::{common::iter::TokenIter, CustomResult};
-use std::fs::File;
-use std::io::Read;
 
 pub struct LexTokenIter {
     /// Use to iterate over the character tokens.
@@ -17,18 +15,13 @@ pub struct LexTokenIter {
 }
 
 impl LexTokenIter {
-    pub fn new(filename: &str) -> std::io::Result<Self> {
-        // TODO: dont read whole file in one go.
-        let mut file: File = File::open(filename)?;
-        let mut string = String::new();
-        file.read_to_string(&mut string)?;
-
+    pub fn new(content: &str) -> Self {
         // TODO: This copies all chars, change to not make a copy if possible.
-        Ok(Self {
-            iter: TokenIter::new(string.chars().collect::<Vec<_>>()),
+        Self {
+            iter: TokenIter::new(content.chars().collect::<Vec<_>>()),
             cur_line_nr: 1,
             cur_column_nr: 1,
-        })
+        }
     }
 
     /// Gets the next LexToken from the iterator.
@@ -48,7 +41,7 @@ impl LexTokenIter {
             } else if LexTokenIter::valid_number(c1, RADIX) {
                 self.get_number()?
             } else if LexTokenIter::valid_identifier_start(c1) {
-                let ident: String = self.get_identifier_string()?;
+                let ident: String = self.get_ident()?;
 
                 // Check if this identifier is a valid:
                 //   keyword        ("if", "enum" etc.)
@@ -78,10 +71,11 @@ impl LexTokenIter {
                     }
                 }
             } else {
-                return Err(LexError(format!(
+                let msg = format!(
                     "Didn't match a symbol token when c: {:?}, c2: {:?} and c2: {:?}",
                     c1, c2, c3
-                )));
+                );
+                return Err(self.err(&msg));
             }
         } else {
             LexTokenKind::EndOfFile
@@ -117,7 +111,7 @@ impl LexTokenIter {
     }
 
     /// Returns the identifier at the current position of the iterator.
-    fn get_identifier_string(&mut self) -> CustomResult<String> {
+    fn get_ident(&mut self) -> CustomResult<String> {
         let mut result = String::new();
 
         while let Some(c) = self.iter.next() {
@@ -134,9 +128,7 @@ impl LexTokenIter {
         if !result.is_empty() {
             Ok(result)
         } else {
-            Err(LexError(
-                "Empty result in get_identifier_string().".to_string(),
-            ))
+            Err(self.err("Empty result in get_ident()."))
         }
     }
 
@@ -263,9 +255,7 @@ impl LexTokenIter {
                 self.iter.skip(2);
                 Ok(LexTokenKind::Symbol(Symbol::LineBreak))
             } else {
-                Err(LexError(
-                    "No linebreak character received in get_linebreak.".into(),
-                ))
+                Err(self.err("No linebreak character received in get_linebreak."))
             }
         } else {
             Err(LexError("Received None in get_linebreak.".into()))
@@ -293,5 +283,13 @@ impl LexTokenIter {
         self.cur_column_nr += count as u64;
 
         Ok(LexTokenKind::Symbol(Symbol::WhiteSpace(count)))
+    }
+
+    /// Used when returing errors to include current line/column number.
+    pub fn err(&self, msg: &str) -> CustomError {
+        CustomError::LexError(format!(
+            "{} ({}:{}).",
+            msg, self.cur_line_nr, self.cur_column_nr
+        ))
     }
 }

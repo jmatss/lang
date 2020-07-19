@@ -1,8 +1,7 @@
 use super::{
     iter::{ParseTokenIter, DEFAULT_STOP_CONDS},
     token::{
-        BinaryOperation, BinaryOperator, BlockHeader, Expression, Function, Operation, ParseToken,
-        ParseTokenKind, Path, Statement, Variable,
+        BlockHeader, Expression, Function, ParseToken, ParseTokenKind, Path, Statement, Variable,
     },
 };
 use crate::error::CustomError::ParseError;
@@ -153,23 +152,37 @@ impl<'a> KeyworkParser<'a> {
     ///   "for <var> in <expr> { ... }"
     /// The "for" keyword has already been consumed when this function is called.
     fn parse_for(&mut self) -> CustomResult<ParseToken> {
+        let var = self.parse_var()?;
+        let var = if let ParseTokenKind::Expression(Expression::Variable(var)) = var.kind {
+            var
+        } else {
+            return Err(ParseError(
+                "Received invalid var when looking at \"for\".".into(),
+            ));
+        };
+
+        // Ensure that the next token is a "In".
+        if let Some(lex_token) = self.iter.next_skip_space() {
+            if let LexTokenKind::Symbol(Symbol::In) = lex_token.kind {
+                // Do nothing, everything OK.
+            } else {
+                return Err(ParseError(format!(
+                    "Expected \"In\" after for, got: {:?}.",
+                    lex_token
+                )));
+            }
+        } else {
+            return Err(ParseError(
+                "Received None when looking after \"for\"s In symbol.".into(),
+            ));
+        }
+
         // TODO: Can probably just parse this manual in order: <var>, "in", <expr>.
         // The "for" expression should be a binary "In" expression:
         //   "for <var> in <expr> {"
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
-        let bin_op = if let Expression::Operation(Operation::BinaryOperation(bin_op)) = expr {
-            if let BinaryOperator::In = bin_op.operator {
-                bin_op
-            } else {
-                return Err(ParseError(
-                    "Binary operator in for is not a \"In\": {}".into(),
-                ));
-            }
-        } else {
-            return Err(ParseError("Expression in for is not a \"In\": {}".into()));
-        };
 
-        let header = BlockHeader::For(bin_op);
+        let header = BlockHeader::For(var, expr);
         self.iter.next_block(header)
     }
 
@@ -395,20 +408,9 @@ impl<'a> KeyworkParser<'a> {
 
         // If `expr` is Some (i.e. this is initialization), a assignment needs
         // to be added into the ParseToken and returned as well.
-        // Otherwise just return the variable.
         let variable = Variable::new(ident, var_type, None, false);
-        let kind = if let Some(expr) = expr_opt {
-            let left = Box::new(Expression::Variable(variable));
-            let right = Box::new(expr);
-            let op = BinaryOperator::Assignment;
-
-            let assignment = Expression::Operation(Operation::BinaryOperation(
-                BinaryOperation::new(op, left, right),
-            ));
-            ParseTokenKind::Expression(assignment)
-        } else {
-            ParseTokenKind::Expression(Expression::Variable(variable))
-        };
+        let var_decl = Statement::VariableDecl(variable, expr_opt);
+        let kind = ParseTokenKind::Statement(var_decl);
         Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
@@ -465,14 +467,8 @@ impl<'a> KeyworkParser<'a> {
         };
 
         let variable = Variable::new(ident, Some(var_type), None, true);
-        let left = Box::new(Expression::Variable(variable));
-        let right = Box::new(expr);
-        let op = BinaryOperator::Assignment;
-
-        let assignment = Expression::Operation(Operation::BinaryOperation(BinaryOperation::new(
-            op, left, right,
-        )));
-        let kind = ParseTokenKind::Expression(assignment);
+        let var_decl = Statement::VariableDecl(variable, Some(expr));
+        let kind = ParseTokenKind::Statement(var_decl);
         Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 

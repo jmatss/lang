@@ -332,7 +332,11 @@ impl LexToken {
 
             '=' => LexToken::match_symbol(
                 &real_string,
-                vec![("=", Symbol::Equals), ("==", Symbol::EqualsOperator)],
+                vec![
+                    ("=", Symbol::Equals),
+                    ("==", Symbol::EqualsOperator),
+                    ("=>", Symbol::FatArrow),
+                ],
             ),
 
             '+' => LexToken::match_symbol(

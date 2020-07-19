@@ -39,7 +39,7 @@ impl<I: Clone> TokenIter<I> {
             let _ = self.buff.push_front(item);
             Ok(())
         } else {
-            Err(GeneralError("Push back buffer was full"))
+            Err(GeneralError("Push back buffer was full".into()))
         }
     }
 
