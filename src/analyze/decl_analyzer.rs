@@ -5,23 +5,20 @@ use crate::parse::token::{
 };
 use crate::CustomResult;
 
-pub struct DeclAnalyzer<'a, 'ctx> {
-    context: &'a mut AnalyzeContext<'ctx>,
+pub struct DeclAnalyzer<'a> {
+    context: &'a mut AnalyzeContext,
 }
 
-impl<'a, 'ctx> DeclAnalyzer<'a, 'ctx> {
+impl<'a> DeclAnalyzer<'a> {
     /// Takes in a the root of the AST and walks the whole tree to find all
     /// declarations/prototypes and adds them to the `AnalyzeContext` so that
     /// key can quickly be looked up during LLVM code generation.
-    pub fn analyze(
-        context: &'a mut AnalyzeContext<'ctx>,
-        ast_root: &mut ParseToken,
-    ) -> CustomResult<()> {
+    pub fn analyze(context: &'a mut AnalyzeContext, ast_root: &mut ParseToken) -> CustomResult<()> {
         let mut decl_analyzer = DeclAnalyzer::new(context);
         decl_analyzer.analyze_token(ast_root)
     }
 
-    fn new(context: &'a mut AnalyzeContext<'ctx>) -> Self {
+    fn new(context: &'a mut AnalyzeContext) -> Self {
         Self { context }
     }
 
@@ -57,7 +54,8 @@ impl<'a, 'ctx> DeclAnalyzer<'a, 'ctx> {
     }
 
     fn analyze_func_header(&mut self, func: &Function, id: BlockId) -> CustomResult<()> {
-        if let Some(prev_func) = self.context.functions.get_mut(&func.name, id) {
+        let key = (func.name.clone(), id);
+        if let Some(prev_func) = self.context.functions.get_mut(&key) {
             // Function already declared somewhere, make sure that the
             // current declaration and the previous one matches.
             let empty_vec = Vec::new();
@@ -102,14 +100,13 @@ impl<'a, 'ctx> DeclAnalyzer<'a, 'ctx> {
                 Err(AnalyzeError(err_msg))
             }
         } else {
-            self.context.functions.insert(&func.name, id, func.clone());
+            self.context.functions.insert(key, func.clone());
 
             // Add the parameters as variables for this scope.
             if let Some(ref params) = func.parameters {
                 for param in params {
-                    self.context
-                        .variables
-                        .insert(&param.name, id, param.clone());
+                    let param_key = (param.name.clone(), id);
+                    self.context.variables.insert(param_key, param.clone());
                 }
             }
 
@@ -118,52 +115,50 @@ impl<'a, 'ctx> DeclAnalyzer<'a, 'ctx> {
     }
 
     fn analyze_struct_header(&mut self, struct_: &Struct, id: BlockId) -> CustomResult<()> {
-        if let Some(prev_struct) = self.context.structs.get(&struct_.name, id) {
+        let key = (struct_.name.clone(), id);
+        if let Some(prev_struct) = self.context.structs.get(&key) {
             Err(AnalyzeError(format!(
                 "A struct with name \"{}\" already defined.",
                 prev_struct.name
             )))
         } else {
-            self.context
-                .structs
-                .insert(&struct_.name, id, struct_.clone());
+            self.context.structs.insert(key, struct_.clone());
             Ok(())
         }
     }
 
     fn analyze_enum_header(&mut self, enum_: &Enum, id: BlockId) -> CustomResult<()> {
-        if let Some(prev_enum) = self.context.enums.get(&enum_.name, id) {
+        let key = (enum_.name.clone(), id);
+        if let Some(prev_enum) = self.context.enums.get(&key) {
             Err(AnalyzeError(format!(
                 "A enum with name \"{}\" already defined.",
                 prev_enum.name
             )))
         } else {
-            self.context.enums.insert(&enum_.name, id, enum_.clone());
+            self.context.enums.insert(key, enum_.clone());
             Ok(())
         }
     }
 
     fn analyze_interface_header(&mut self, interface: &Interface, id: BlockId) -> CustomResult<()> {
-        if let Some(prev_interface) = self.context.interfaces.get(&interface.name, id) {
+        let key = (interface.name.clone(), id);
+        if let Some(prev_interface) = self.context.interfaces.get(&key) {
             Err(AnalyzeError(format!(
                 "A interface with name \"{}\" already defined.",
                 prev_interface.name
             )))
         } else {
-            self.context
-                .interfaces
-                .insert(&interface.name, id, interface.clone());
+            self.context.interfaces.insert(key, interface.clone());
             Ok(())
         }
     }
 
     /// Need to add declaration of variable if this stmt is a variable decl.
     fn analyze_stmt(&mut self, stmt: &Statement) -> CustomResult<()> {
-        let cur_id = self.context.cur_block_id;
+        let id = self.context.cur_block_id;
         if let Statement::VariableDecl(var, _) = stmt {
-            self.context
-                .variables
-                .insert(&var.name, cur_id, var.clone());
+            let key = (var.name.clone(), id);
+            self.context.variables.insert(key, var.clone());
         }
         Ok(())
     }

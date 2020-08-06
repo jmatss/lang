@@ -1,48 +1,48 @@
-use super::analyzer::BlockNode;
 use crate::analyze::analyzer::AnalyzeContext;
 use crate::parse::token::{BlockHeader, ParseToken, ParseTokenKind};
 use crate::CustomResult;
 
-pub struct ScopeAnalyzer<'a, 'ctx> {
-    context: &'a mut AnalyzeContext<'ctx>,
-    cur_parent: BlockNode,
+pub struct ScopeAnalyzer<'a> {
+    context: &'a mut AnalyzeContext,
 }
 
-impl<'a, 'ctx> ScopeAnalyzer<'a, 'ctx> {
+impl<'a> ScopeAnalyzer<'a> {
     /// Takes in a the root of the AST and walks the whole tree to find all
     /// parent->child relations and also checks if the parents are "root blocks"
     /// or not.
-    pub fn analyze(
-        context: &'a mut AnalyzeContext<'ctx>,
-        ast_root: &mut ParseToken,
-    ) -> CustomResult<()> {
+    pub fn analyze(context: &'a mut AnalyzeContext, ast_root: &mut ParseToken) -> CustomResult<()> {
         let mut scope_analyzer = ScopeAnalyzer::new(context);
         scope_analyzer.analyze_token(ast_root)
     }
 
-    fn new(context: &'a mut AnalyzeContext<'ctx>) -> Self {
-        let root_block_node = BlockNode::new(0, true);
-        Self {
-            context,
-            cur_parent: root_block_node,
-        }
+    fn new(context: &'a mut AnalyzeContext) -> Self {
+        // Reset the `cur_block_id` to the default block (== 0).
+        context.cur_block_id = 0;
+        Self { context }
     }
 
-    /// Only blocks are of interest in this function since they are the ones
+    /// Only "blocks" are of interest in this function since they are the ones
     /// representing scopes.
     fn analyze_token(&mut self, token: &mut ParseToken) -> CustomResult<()> {
         if let ParseTokenKind::Block(ref header, id, ref mut body) = token.kind {
-            self.context
-                .child_to_parent
-                .insert(id, self.cur_parent.clone());
+            // Update the mapping from this block to its parent.
+            // Do not set a parent for the default block.
+            if id != 0 {
+                self.context
+                    .child_to_parent
+                    .insert(id, self.context.cur_block_id);
+            }
 
+            // Set information about if this block is a "root" or not in the
+            // analyze context.
             let is_root = self.analyze_is_root(header);
-            let cur_block = BlockNode::new(id, is_root);
+            self.context.is_root_block.insert(id, is_root);
 
             for token in body {
                 // Since `analyze_token` recurses, need to re-set the current
-                // block to the parent for every iteration of the loop.
-                self.cur_parent = cur_block.clone();
+                // block to the be the "parent" (`self.context.cur_block_id`)
+                // for every iteration of the loop.
+                self.context.cur_block_id = id;
                 self.analyze_token(token)?;
             }
         }

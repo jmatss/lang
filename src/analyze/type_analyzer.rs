@@ -6,22 +6,19 @@ use crate::parse::token::{
 use crate::parse::token::{BlockHeader, Expression, ParseTokenKind, Statement};
 use crate::{lex::token::Literal, CustomResult};
 
-pub struct TypeAnalyzer<'a, 'ctx> {
-    context: &'a mut AnalyzeContext<'ctx>,
+pub struct TypeAnalyzer<'a> {
+    context: &'a mut AnalyzeContext,
 }
 
-impl<'a, 'ctx> TypeAnalyzer<'a, 'ctx> {
+impl<'a> TypeAnalyzer<'a> {
     /// Takes in the root of the AST and tries to infer all the missing types
     /// for variables and expressions (what type the expressions evaluates to).
-    pub fn analyze(
-        context: &'a mut AnalyzeContext<'ctx>,
-        ast_root: &mut ParseToken,
-    ) -> CustomResult<()> {
+    pub fn analyze(context: &'a mut AnalyzeContext, ast_root: &mut ParseToken) -> CustomResult<()> {
         let mut type_analyzer = TypeAnalyzer::new(context);
         type_analyzer.analyze_type(ast_root)
     }
 
-    fn new(context: &'a mut AnalyzeContext<'ctx>) -> Self {
+    fn new(context: &'a mut AnalyzeContext) -> Self {
         Self { context }
     }
 
@@ -58,7 +55,7 @@ impl<'a, 'ctx> TypeAnalyzer<'a, 'ctx> {
         if let Some(expression) = expression_opt {
             self.analyze_expr_type(expression)
         } else {
-            panic!("None expression.");
+            Ok(())
         }
     }
 
@@ -132,8 +129,9 @@ impl<'a, 'ctx> TypeAnalyzer<'a, 'ctx> {
             Expression::Literal(Literal::Float(_), type_opt) => type_opt.clone(),
             Expression::Variable(var) => var.ret_type.clone(),
             Expression::FunctionCall(func_call) => {
-                let cur_id = self.context.cur_block_id;
-                if let Some(func) = self.context.functions.get(&func_call.name, cur_id) {
+                let id = self.context.cur_block_id;
+                let key = (func_call.name.clone(), id);
+                if let Some(func) = self.context.functions.get(&key) {
                     func.ret_type.clone()
                 } else {
                     None
@@ -150,13 +148,20 @@ impl<'a, 'ctx> TypeAnalyzer<'a, 'ctx> {
             | Statement::Continue
             | Statement::Use(_)
             | Statement::Package(_)
-            | Statement::Modifier(_)
-            | Statement::Init => Ok(()),
+            | Statement::Modifier(_) => Ok(()),
 
             Statement::Return(return_opt) => self.analyze_expr_type_opt(return_opt),
             Statement::Yield(yield_opt) => self.analyze_expr_type(yield_opt),
-
-            _ => panic!("Bad statement: {:?}", statement),
+            Statement::Assignment(_, _var, expr) => {
+                self.analyze_expr_type(expr)?;
+                // TODO: Analyes `var` as well (?).
+                Ok(())
+            }
+            Statement::VariableDecl(_var, expr_opt) => {
+                self.analyze_expr_type_opt(expr_opt)?;
+                // TODO: Analyes `var` as well (?).
+                Ok(())
+            }
         }
     }
 
@@ -166,7 +171,7 @@ impl<'a, 'ctx> TypeAnalyzer<'a, 'ctx> {
             BlockHeader::Match(expr) => self.analyze_expr_type(expr),
             BlockHeader::MatchCase(expr) => self.analyze_expr_type(expr),
             BlockHeader::While(expr_opt) => self.analyze_expr_type_opt(expr_opt),
-            BlockHeader::With(expr_opt) => self.analyze_expr_type_opt(expr_opt),
+            BlockHeader::With(expr) => self.analyze_expr_type(expr),
 
             BlockHeader::For(var, expr) => {
                 // The type of the variable `var` will be infered to the same

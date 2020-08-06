@@ -2,11 +2,12 @@ use super::{
     expr_parser::ExprParser,
     keyword_parser::KeyworkParser,
     token::{
-        Argument, BlockHeader, BlockId, Expression, ParseToken, ParseTokenKind, TypeStruct,
-        Variable,
+        Argument, BlockHeader, BlockId, Expression, ParseToken, ParseTokenKind, Statement,
+        TypeStruct, Variable,
     },
     type_parser::TypeParser,
 };
+use crate::error::CustomError::GenerationError;
 use crate::lex::token::{Keyword, LexToken, LexTokenKind, Symbol};
 use crate::CustomResult;
 use crate::{
@@ -80,12 +81,41 @@ impl ParseTokenIter {
                     return self.next_token();
                 }
 
-                // All identifiers should be parsed as part of expressions since
-                // all the identifiers(keywords) used in statements are lexed
-                // as Keywords.
-                LexTokenKind::Identifier(_)
-                | LexTokenKind::Literal(_)
-                | LexTokenKind::Symbol(_) => {
+                // If a "line" starts with a identifier this can either be a
+                // assignment to this identifier (assignment aren't treated as
+                // expression atm) or it will be an expression.
+                LexTokenKind::Identifier(ref ident) => {
+                    // If true: This is a assignment, the left hand side will
+                    //          already have been parsed. Just need to parse the
+                    //          right hand side (and also consume assign symbol).
+                    // Else: This is a expression, put back the identifier and
+                    //       then parse it as if it is a start of a expression.
+                    if let Some(var) = self.parse_ident(ident)? {
+                        if let Some(next_lex_token) = self.next_skip_space() {
+                            if let Some(assign_op) = ParseToken::get_if_stmt_op(&next_lex_token) {
+                                let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
+                                let stmt = Statement::Assignment(assign_op, var, expr);
+                                ParseTokenKind::Statement(stmt)
+                            } else {
+                                return Err(GenerationError(format!(
+                                    "Expected assign operator when parsing ident, got: {:?}",
+                                    &lex_token
+                                )));
+                            }
+                        } else {
+                            unreachable!("No operator after ident.");
+                        }
+                    } else {
+                        self.put_back(lex_token)?;
+                        let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
+                        ParseTokenKind::Expression(expr)
+                    }
+                }
+
+                // If a literal or symbol is found, one can assume that they
+                // belong to a expression. There is a possibility that they are
+                // part of a statement, but then they should never end up here.
+                LexTokenKind::Literal(_) | LexTokenKind::Symbol(_) => {
                     // Put back the token that was just popped and then parse
                     // everything together as an expression.
                     self.put_back(lex_token)?;
@@ -146,6 +176,33 @@ impl ParseTokenIter {
         })
     }
 
+    // Parses a identifier that either starts a assignment or a expressions.
+    // If the next lex token is a assignment symbol or a colon(type specification),
+    // it is a stmt, otherwise expr.
+    fn parse_ident(&mut self, ident: &str) -> CustomResult<Option<Variable>> {
+        if let Some(next_lex_token) = self.peek_skip_space() {
+            // If this is a assignment, this function will return a variable
+            // wrapped in Some. Otherwise it will be set to None to indicate
+            // that this identifier is part of a expression.
+            Ok(match next_lex_token.kind {
+                LexTokenKind::Symbol(Symbol::Colon) => Some(self.parse_var(ident)?),
+                LexTokenKind::Symbol(_) => {
+                    if let Some(_assign_op) = ParseToken::get_if_stmt_op(&next_lex_token) {
+                        println!("ASSIGN!");
+                        Some(self.parse_var(ident)?)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+        } else {
+            Err(GenerationError(
+                "next_lex_token None when parsing ident.".into(),
+            ))
+        }
+    }
+
     pub fn parse_keyword(
         &mut self,
         keyword: Keyword,
@@ -161,6 +218,25 @@ impl ParseTokenIter {
 
     pub fn parse_type(&mut self) -> CustomResult<TypeStruct> {
         TypeParser::parse(self)
+    }
+
+    /// Parses a variable and any type that it might have specified after which
+    /// would indicate a declaration.
+    pub fn parse_var(&mut self, ident: &str) -> CustomResult<Variable> {
+        // If the next token is a colon, a type is specified after this variable.
+        // Parse it and set the `var_type` inside the variable.
+        let var_type = if let Some(next_token) = self.peek_skip_space() {
+            if let LexTokenKind::Symbol(Symbol::Colon) = next_token.kind {
+                self.next_skip_space(); // Skip the colon.
+                Some(self.parse_type()?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        Ok(Variable::new(ident.into(), var_type, None, false))
     }
 
     /// Parses a list of argument.
@@ -245,12 +321,14 @@ impl ParseTokenIter {
         let mut parameters = Vec::new();
 
         // Skip the start parenthesis of the parameter list.
-        self.iter.skip(1);
+        self.next_skip_space_line();
 
         // Edge case if this parameter list contains no items, do early return
         // with empty vector.
-        if let Some(next) = self.peek_skip_space() {
+        if let Some(next) = self.peek_skip_space_line() {
             if let LexTokenKind::Symbol(Symbol::ParenthesisEnd) = next.kind {
+                // Consume the end parenthesis of the parameter list.
+                self.next_skip_space_line();
                 return Ok(parameters);
             }
         }

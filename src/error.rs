@@ -1,3 +1,4 @@
+use inkwell::support::LLVMString;
 use std::error::Error;
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -40,5 +41,11 @@ impl From<std::num::ParseFloatError> for CustomError {
 impl From<std::io::Error> for CustomError {
     fn from(e: std::io::Error) -> Self {
         CustomError::LexError(e.to_string())
+    }
+}
+
+impl From<LLVMString> for CustomError {
+    fn from(e: LLVMString) -> Self {
+        CustomError::GenerationError(e.to_string())
     }
 }

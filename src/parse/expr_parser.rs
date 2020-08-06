@@ -2,7 +2,7 @@ use super::{
     iter::ParseTokenIter,
     token::{
         BinaryOperation, BinaryOperator, Expression, Fix, FunctionCall, Operation, Operator,
-        Output, ParseToken, UnaryOperation, UnaryOperator, Variable,
+        Output, ParseToken, UnaryOperation, UnaryOperator,
     },
 };
 use crate::{
@@ -94,7 +94,7 @@ impl<'a> ExprParser<'a> {
                 }
 
                 LexTokenKind::Symbol(symbol) => {
-                    if let Some(op) = ParseToken::get_if_operator(&symbol) {
+                    if let Some(op) = ParseToken::get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
                     } else {
                         let msg = format!(
@@ -315,34 +315,15 @@ impl<'a> ExprParser<'a> {
                 // Variable (most likely, will add more stuff here later so will
                 // not always just be variables that is caught here.)
                 _ => {
-                    let var = self.parse_expr_var(ident)?;
+                    let var = self.iter.parse_var(ident)?;
                     Ok(Expression::Variable(var))
                 }
             }
         } else {
             // TODO: Merge with logic above, same stuff.
-            let var = self.parse_expr_var(ident)?;
+            let var = self.iter.parse_var(ident)?;
             Ok(Expression::Variable(var))
         }
-    }
-
-    /// Parses a variable and any type that it might have specified after which
-    /// would indicate a declaration.
-    fn parse_expr_var(&mut self, ident: &str) -> CustomResult<Variable> {
-        // If the next token is a colon, a type is specified after this variable.
-        // Parse it and set the `var_type` inside the variable.
-        let var_type = if let Some(next_token) = self.iter.peek_skip_space() {
-            if let LexTokenKind::Symbol(Symbol::Colon) = next_token.kind {
-                self.iter.next_skip_space(); // Skip the colon.
-                Some(self.iter.parse_type()?)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        Ok(Variable::new(ident.into(), var_type, None, false))
     }
 
     /// Parses a function call.

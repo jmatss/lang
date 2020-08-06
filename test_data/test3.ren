@@ -1,0 +1,16 @@
+function test_func() i32
+{
+    var res: i32
+    
+    var x: i32 = 3
+    if x >= 3
+    {
+        res = 1
+    }
+    else
+    {
+        res = 0
+    }
+    
+    return res
+}

@@ -42,15 +42,16 @@ pub enum Statement {
     Use(Path),
     Package(Path),
 
+    Assignment(AssignOperator, Variable, Expression),
+
     // The expr will contain the assigned value if this is a initialization.
     // Used both for "var" and "const" variables.
     VariableDecl(Variable, Option<Expression>),
     // static, private etc.
     Modifier(Modifier),
-
     // Special cases
     // Init: Used in constructor to initialize fields with same name as parameters of constructor.
-    Init,
+    //Init,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -144,12 +145,12 @@ pub enum BlockHeader {
     While(Option<Expression>),
 
     // AutoClosable.
-    With(Option<Expression>),
+    With(Expression),
     // Defer -> Run this expression at the end of the current block.
-    Defer(Option<Expression>),
+    Defer(Expression),
 
     // Function for testing, allows strings as test names with spaces etc.
-    Test(Option<Function>),
+    Test(Function),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -422,6 +423,9 @@ impl Operator {
             16  or (bool)
             17  .. ..=
             18  in
+
+            (Currently assignments aren't counted as expression, but they would
+            have the lowest precedence if they were)
             19  = += -= *= /= %= **= &= |= ^= <<= >>=
     */
     fn lookup(&self) -> Option<(bool, usize, Fix)> {
@@ -436,14 +440,13 @@ impl Operator {
                 UnaryOperator::Increment => (true, 2, Fix::Postfix),
                 UnaryOperator::Decrement => (true, 2, Fix::Postfix),
 
-                UnaryOperator::BitCompliment => (true, 3, Fix::Prefix),
+                UnaryOperator::BitComplement => (true, 3, Fix::Prefix),
                 UnaryOperator::BoolNot => (true, 3, Fix::Prefix),
                 UnaryOperator::Deref => (true, 4, Fix::Postfix),
                 UnaryOperator::Address => (true, 4, Fix::Postfix),
             })
         } else if let Operator::BinaryOperator(binary_op) = self {
             Some(match binary_op {
-                BinaryOperator::Assignment => (false, 19, Fix::Dummy),
                 BinaryOperator::In => (false, 18, Fix::Dummy),
                 BinaryOperator::Is => (true, 10, Fix::Dummy),
                 BinaryOperator::As => (true, 5, Fix::Dummy),
@@ -475,19 +478,6 @@ impl Operator {
                 BinaryOperator::BoolAnd => (true, 15, Fix::Dummy),
                 BinaryOperator::BoolOr => (true, 16, Fix::Dummy),
 
-                BinaryOperator::AssignAddition => (false, 19, Fix::Dummy),
-                BinaryOperator::AssignSubtraction => (false, 19, Fix::Dummy),
-                BinaryOperator::AssignMultiplication => (false, 19, Fix::Dummy),
-                BinaryOperator::AssignDivision => (false, 19, Fix::Dummy),
-                BinaryOperator::AssignModulus => (false, 19, Fix::Dummy),
-                BinaryOperator::AssignPower => (false, 19, Fix::Dummy),
-
-                BinaryOperator::AssignBitAnd => (false, 19, Fix::Dummy),
-                BinaryOperator::AssignBitOr => (false, 19, Fix::Dummy),
-                BinaryOperator::AssignBitXor => (false, 19, Fix::Dummy),
-                BinaryOperator::AssignShiftLeft => (false, 19, Fix::Dummy),
-                BinaryOperator::AssignShiftRight => (false, 19, Fix::Dummy),
-
                 _ => return None,
             })
         } else {
@@ -512,9 +502,25 @@ impl Operator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum AssignOperator {
+    Assignment, // "Normal" assignment ("x = y").
+    AssignAddition,
+    AssignSubtraction,
+    AssignMultiplication,
+    AssignDivision,
+    AssignModulus,
+    AssignPower,
+
+    AssignBitAnd,
+    AssignBitOr,
+    AssignBitXor,
+    AssignShiftLeft,
+    AssignShiftRight,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperator {
     /* GENERAL */
-    Assignment,
     // Used in for loops etc.
     // TODO: Maybe make keyword instead and only allow use it in "for" loops.
     In,
@@ -554,19 +560,6 @@ pub enum BinaryOperator {
     BoolAnd,
     BoolOr,
 
-    AssignAddition,
-    AssignSubtraction,
-    AssignMultiplication,
-    AssignDivision,
-    AssignModulus,
-    AssignPower,
-
-    AssignBitAnd,
-    AssignBitOr,
-    AssignBitXor,
-    AssignShiftLeft,
-    AssignShiftRight,
-
     // Example ExpressionAnd:
     //  for i in 0..1 and j in 0..1:
     //  with s = Scanner(stdin) and x = Abc():
@@ -591,16 +584,16 @@ pub enum UnaryOperator {
     Negative,
 
     /* NUMBERS (BIT) */
-    BitCompliment,
+    BitComplement,
 
     /* BOOL */
     BoolNot,
 }
 
 impl ParseToken {
-    /// Returns some Operator if the given symbol is a valid operator, returns
-    /// None otherwise.
-    pub fn get_if_operator(symbol: &lex::token::Symbol) -> Option<Operator> {
+    /// Returns some Operator if the given symbol is a valid operator inside a
+    /// expression, returns None otherwise.
+    pub fn get_if_expr_op(symbol: &lex::token::Symbol) -> Option<Operator> {
         Some(match symbol {
             lex::token::Symbol::ParenthesisBegin => Operator::ParenthesisBegin,
             lex::token::Symbol::ParenthesisEnd => Operator::ParenthesisEnd,
@@ -621,7 +614,6 @@ impl ParseToken {
             //lex::token::Symbol::Comma,
             //lex::token::Symbol::QuestionMark,
             //lex::token::Symbol::ExclamationMark,
-            lex::token::Symbol::Equals => Operator::BinaryOperator(BinaryOperator::Assignment),
             //lex::token::Symbol::DoubleQuote,
             //lex::token::Symbol::SingleQuote,
             //lex::token::Symbol::Colon,
@@ -669,7 +661,7 @@ impl ParseToken {
             lex::token::Symbol::ShiftLeft => Operator::BinaryOperator(BinaryOperator::ShiftLeft),
             lex::token::Symbol::ShiftRight => Operator::BinaryOperator(BinaryOperator::ShiftRight),
             lex::token::Symbol::BitCompliment => {
-                Operator::UnaryOperator(UnaryOperator::BitCompliment)
+                Operator::UnaryOperator(UnaryOperator::BitComplement)
             }
 
             /*
@@ -681,41 +673,6 @@ impl ParseToken {
             lex::token::Symbol::BoolAnd => Operator::BinaryOperator(BinaryOperator::BoolAnd),
             lex::token::Symbol::BoolOr => Operator::BinaryOperator(BinaryOperator::BoolOr),
 
-            lex::token::Symbol::AssignAddition => {
-                Operator::BinaryOperator(BinaryOperator::AssignAddition)
-            }
-            lex::token::Symbol::AssignSubtraction => {
-                Operator::BinaryOperator(BinaryOperator::AssignSubtraction)
-            }
-            lex::token::Symbol::AssignMultiplication => {
-                Operator::BinaryOperator(BinaryOperator::AssignMultiplication)
-            }
-            lex::token::Symbol::AssignDivision => {
-                Operator::BinaryOperator(BinaryOperator::AssignDivision)
-            }
-            lex::token::Symbol::AssignModulus => {
-                Operator::BinaryOperator(BinaryOperator::AssignModulus)
-            }
-            lex::token::Symbol::AssignPower => {
-                Operator::BinaryOperator(BinaryOperator::AssignPower)
-            }
-
-            lex::token::Symbol::AssignBitAnd => {
-                Operator::BinaryOperator(BinaryOperator::AssignBitAnd)
-            }
-            lex::token::Symbol::AssignBitOr => {
-                Operator::BinaryOperator(BinaryOperator::AssignBitOr)
-            }
-            lex::token::Symbol::AssignBitXor => {
-                Operator::BinaryOperator(BinaryOperator::AssignBitXor)
-            }
-            lex::token::Symbol::AssignShiftLeft => {
-                Operator::BinaryOperator(BinaryOperator::AssignShiftLeft)
-            }
-            lex::token::Symbol::AssignShiftRight => {
-                Operator::BinaryOperator(BinaryOperator::AssignShiftRight)
-            }
-
             lex::token::Symbol::In => Operator::BinaryOperator(BinaryOperator::In),
             lex::token::Symbol::Is => Operator::BinaryOperator(BinaryOperator::Is),
             lex::token::Symbol::As => Operator::BinaryOperator(BinaryOperator::As),
@@ -723,5 +680,30 @@ impl ParseToken {
 
             _ => return None,
         })
+    }
+
+    /// Returns some Operator if the given symbol is a valid operator inside a
+    /// expression, returns None otherwise.
+    pub fn get_if_stmt_op(lex_token: &lex::token::LexToken) -> Option<AssignOperator> {
+        if let lex::token::LexTokenKind::Symbol(ref symbol) = lex_token.kind {
+            Some(match symbol {
+                lex::token::Symbol::Equals => AssignOperator::Assignment,
+                lex::token::Symbol::AssignAddition => AssignOperator::AssignAddition,
+                lex::token::Symbol::AssignSubtraction => AssignOperator::AssignSubtraction,
+                lex::token::Symbol::AssignMultiplication => AssignOperator::AssignMultiplication,
+                lex::token::Symbol::AssignDivision => AssignOperator::AssignDivision,
+                lex::token::Symbol::AssignModulus => AssignOperator::AssignModulus,
+                lex::token::Symbol::AssignPower => AssignOperator::AssignPower,
+                lex::token::Symbol::AssignBitAnd => AssignOperator::AssignBitAnd,
+                lex::token::Symbol::AssignBitOr => AssignOperator::AssignBitOr,
+                lex::token::Symbol::AssignBitXor => AssignOperator::AssignBitXor,
+                lex::token::Symbol::AssignShiftLeft => AssignOperator::AssignShiftLeft,
+                lex::token::Symbol::AssignShiftRight => AssignOperator::AssignShiftRight,
+
+                _ => return None,
+            })
+        } else {
+            None
+        }
     }
 }

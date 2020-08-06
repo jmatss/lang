@@ -1,8 +1,6 @@
 use super::{
     iter::{ParseTokenIter, DEFAULT_STOP_CONDS},
-    token::{
-        BlockHeader, Expression, Function, ParseToken, ParseTokenKind, Path, Statement, Variable,
-    },
+    token::{BlockHeader, Function, ParseToken, ParseTokenKind, Path, Statement, Variable},
 };
 use crate::error::CustomError::ParseError;
 use crate::{
@@ -52,8 +50,8 @@ impl<'a> KeyworkParser<'a> {
             Keyword::Use => self.parse_use(),
             Keyword::Package => self.parse_package(),
 
-            Keyword::Var => self.parse_var(),
-            Keyword::Const => self.parse_const(),
+            Keyword::Var => self.parse_var_decl(),
+            Keyword::Const => self.parse_const_decl(),
             Keyword::Static => Err(ParseError("\"Static\" keyword not implemented.".into())),
             Keyword::Private => Err(ParseError("\"Private\" keyword not implemented.".into())),
             Keyword::Public => Err(ParseError("\"Public\" keyword not implemented.".into())),
@@ -152,14 +150,19 @@ impl<'a> KeyworkParser<'a> {
     ///   "for <var> in <expr> { ... }"
     /// The "for" keyword has already been consumed when this function is called.
     fn parse_for(&mut self) -> CustomResult<ParseToken> {
-        let var = self.parse_var()?;
-        let var = if let ParseTokenKind::Expression(Expression::Variable(var)) = var.kind {
-            var
+        let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
+            if let LexTokenKind::Identifier(ident) = lex_token.kind {
+                ident
+            } else {
+                return Err(ParseError(format!(
+                    "Not ident when parsing \"for\" variable: {:?}",
+                    lex_token
+                )));
+            }
         } else {
-            return Err(ParseError(
-                "Received invalid var when looking at \"for\".".into(),
-            ));
+            return Err(ParseError("None when parsing \"for\" variable.".into()));
         };
+        let var = self.iter.parse_var(&ident)?;
 
         // Ensure that the next token is a "In".
         if let Some(lex_token) = self.iter.next_skip_space() {
@@ -177,9 +180,6 @@ impl<'a> KeyworkParser<'a> {
             ));
         }
 
-        // TODO: Can probably just parse this manual in order: <var>, "in", <expr>.
-        // The "for" expression should be a binary "In" expression:
-        //   "for <var> in <expr> {"
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
 
         let header = BlockHeader::For(var, expr);
@@ -360,7 +360,7 @@ impl<'a> KeyworkParser<'a> {
     /// Parses a var statement.
     ///   "var <ident> [: <type>] [= <expr>]"
     /// The "var" keyword has already been consumed when this function is called.
-    fn parse_var(&mut self) -> CustomResult<ParseToken> {
+    fn parse_var_decl(&mut self) -> CustomResult<ParseToken> {
         // Start by parsing the identifier
         let ident = if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Identifier(ident) = lex_token.kind {
@@ -414,10 +414,11 @@ impl<'a> KeyworkParser<'a> {
         Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
+    // TODO: Maybe don't force a type, let the type be infered (?).
     /// Parses a const statement.
     ///   "const <ident> : <type> = <expr>"
     /// The "const" keyword has already been consumed when this function is called.
-    fn parse_const(&mut self) -> CustomResult<ParseToken> {
+    fn parse_const_decl(&mut self) -> CustomResult<ParseToken> {
         // Start by parsing the identifier
         let ident = if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Identifier(ident) = lex_token.kind {

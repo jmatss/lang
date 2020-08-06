@@ -1,0 +1,5 @@
+function test_func()
+{
+    var x: i32 = 123
+    const y: i32 = x + 456
+}
