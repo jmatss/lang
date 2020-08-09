@@ -2,7 +2,7 @@ use super::codegen_state::CodeGenState;
 use crate::analyze::analyzer::AnalyzeContext;
 use crate::common::variable_type::Type;
 use crate::error::CustomError;
-use crate::error::CustomError::GenerationError;
+use crate::error::CustomError::CodeGenError;
 use crate::parse::token;
 use crate::parse::token::{
     BinaryOperation, Expression, Function, FunctionCall, Operation, ParseToken, TypeStruct,
@@ -13,11 +13,9 @@ use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
 use inkwell::values::{BasicValueEnum, FloatValue, FunctionValue, IntValue, PointerValue};
-use inkwell::{basic_block::BasicBlock, types::BasicTypeEnum, IntPredicate};
+use inkwell::{basic_block::BasicBlock, types::BasicTypeEnum, AddressSpace, IntPredicate};
 use std::collections::HashMap;
 use token::{AssignOperator, BlockHeader, BlockId, Modifier, ParseTokenKind, Path, Statement};
-
-const MODULE_NAME: &str = "MODULE_NAME";
 
 struct CodeGen<'a, 'ctx> {
     pub context: &'ctx Context,
@@ -40,7 +38,6 @@ pub fn generate<'a, 'ctx>(
     context: &'ctx Context,
     builder: &'a Builder<'ctx>,
     module: &'a Module<'ctx>,
-    //) -> CustomResult<CodeGen<'ctx>> {
 ) -> CustomResult<()> {
     let mut code_gen = CodeGen::new(context, analyze_context, builder, module);
     code_gen.compile_recursive(ast_root)?;
@@ -100,7 +97,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.position_at_end(entry);
             self.compile_alloca(var)
         } else {
-            Err(GenerationError(format!(
+            Err(CodeGenError(format!(
                 "No active cur func when creating var: {}",
                 &var.name
             )))
@@ -110,15 +107,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_alloca(&self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
         if let Some(var_type) = &var.ret_type {
             match var_type.t.to_codegen(&self.context)? {
-                BasicTypeEnum::ArrayType(ty) => {
-                    Err(GenerationError("TODO: Impl array alloc in func.".into()))
-                }
+                BasicTypeEnum::ArrayType(ty) => Ok(self.builder.build_alloca(ty, &var.name)),
                 BasicTypeEnum::IntType(ty) => Ok(self.builder.build_alloca(ty, &var.name)),
                 BasicTypeEnum::FloatType(ty) => Ok(self.builder.build_alloca(ty, &var.name)),
-                _ => Err(GenerationError("Not implemented!".into())),
+                BasicTypeEnum::PointerType(ty) => Ok(self.builder.build_alloca(ty, &var.name)),
+                BasicTypeEnum::StructType(ty) => Ok(self.builder.build_alloca(ty, &var.name)),
+                BasicTypeEnum::VectorType(ty) => Ok(self.builder.build_alloca(ty, &var.name)),
             }
         } else {
-            Err(GenerationError(format!(
+            Err(CodeGenError(format!(
                 "type None when allocaing var: {:?}",
                 &var.name
             )))
@@ -143,7 +140,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             //BlockHeader::Interface(interface) => self.compile_interface(interface),
             BlockHeader::If => self.compile_if(body),
             BlockHeader::IfCase(_) => {
-                Err(GenerationError("Unexpected IfCase in compile_block".into()))
+                Err(CodeGenError("Unexpected IfCase in compile_block".into()))
             }
             //BlockHeader::Match(expr) => self.compile_match(expr),
             //BlockHeader::MatchCase(expr) => self.compile_match_case(expr),
@@ -162,21 +159,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_func(&mut self, func: &'ctx Function, body: &'ctx [ParseToken]) -> CustomResult<()> {
         let old_state = self.state.clone();
 
-        let fn_val = self.compile_func_prototype(func)?;
+        let linkage = Linkage::External;
+        let fn_val = self.compile_func_proto(func, Some(linkage))?;
         let entry = self.context.append_basic_block(fn_val, "entry");
 
         self.state.cur_block = Some(entry);
         self.state.cur_func = Some(fn_val);
         self.builder.position_at_end(entry);
 
+        // TODO: How does this work with variadic parameters?
         // Get names for the parameters and alloc space in the functions stack.
         for (i, arg) in fn_val.get_param_iter().enumerate() {
             let param = if let Some(params) = &func.parameters {
                 params
                     .get(i)
-                    .ok_or_else(|| GenerationError(format!("Bad param at index: {}", i)))?
+                    .ok_or_else(|| CodeGenError(format!("Bad param at index: {}", i)))?
             } else {
-                return Err(GenerationError(format!(
+                return Err(CodeGenError(format!(
                     "Got None param when compiling func: {:?}",
                     &func.name
                 )));
@@ -201,7 +200,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.builder.position_at_end(last_block);
                 self.builder.build_return(None);
             } else {
-                return Err(GenerationError(format!(
+                return Err(CodeGenError(format!(
                     "No basic block in func: {}",
                     &func.name
                 )));
@@ -212,14 +211,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    fn compile_func_prototype(&self, func: &Function) -> CustomResult<FunctionValue<'ctx>> {
-        let param_types = if let Some(params) = &func.parameters {
+    fn compile_func_proto(
+        &self,
+        func: &Function,
+        linkage_opt: Option<Linkage>,
+    ) -> CustomResult<FunctionValue<'ctx>> {
+        let par_types = if let Some(params) = &func.parameters {
             let mut v = Vec::with_capacity(params.len());
             for param in params {
                 if let Some(param_type) = &param.ret_type {
                     v.push(param_type.t.to_codegen(self.context)?);
                 } else {
-                    return Err(GenerationError(format!(
+                    return Err(CodeGenError(format!(
                         "Bad type for fn \"{}\" param \"{}\".",
                         &func.name, &param.name
                     )));
@@ -230,24 +233,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Vec::default()
         };
 
-        let is_var_args = false;
         let fn_type = if let Some(ret_type) = &func.ret_type {
             let basic_type = ret_type.t.to_codegen(self.context)?;
             match basic_type {
-                // TODO: More types.
-                BasicTypeEnum::IntType(ty) => ty.fn_type(param_types.as_slice(), is_var_args),
-                BasicTypeEnum::FloatType(ty) => ty.fn_type(param_types.as_slice(), is_var_args),
-                _ => return Err(GenerationError(format!("Bad fn type: {:?}", basic_type))),
+                BasicTypeEnum::IntType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
+                BasicTypeEnum::FloatType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
+                BasicTypeEnum::PointerType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
+                BasicTypeEnum::ArrayType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
+                BasicTypeEnum::StructType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
+                BasicTypeEnum::VectorType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
             }
         } else {
             self.context
                 .void_type()
-                .fn_type(param_types.as_slice(), is_var_args)
+                .fn_type(par_types.as_slice(), func.is_var_arg)
         };
 
-        // TODO: What should the linkage be?
-        let linkage: Option<Linkage> = None;
-        let fn_val = self.module.add_function(&func.name, fn_type, linkage);
+        let fn_val = self.module.add_function(&func.name, fn_type, linkage_opt);
 
         // TODO: Set names?
         /*
@@ -278,12 +280,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let cur_func = self
             .state
             .cur_func
-            .ok_or_else(|| GenerationError("cur_func is None for \"If\".".into()))?;
+            .ok_or_else(|| CodeGenError("cur_func is None for \"If\".".into()))?;
 
         let cur_block = self
             .state
             .cur_block
-            .ok_or_else(|| GenerationError("cur_block is None for \"If\".".into()))?;
+            .ok_or_else(|| CodeGenError("cur_block is None for \"If\".".into()))?;
 
         // Create and store the "body" blocks of this if-statement into the "gen_state".
         // For every if-case that has a expression (if/elif) a extra block
@@ -315,7 +317,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             if let ParseTokenKind::Block(BlockHeader::IfCase(expr_opt), _, body) = &if_case.kind {
                 self.compile_if_case(&expr_opt, body.as_slice(), i)?;
             } else {
-                return Err(GenerationError(format!(
+                return Err(CodeGenError(format!(
                     "Token in \"If\" block wasn't a \"IfCase\": {:?}",
                     if_case.kind
                 )));
@@ -340,7 +342,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let merge_block = self
             .state
             .cur_merge_block
-            .ok_or_else(|| GenerationError("merge_block is None".into()))?;
+            .ok_or_else(|| CodeGenError("merge_block is None".into()))?;
 
         // If this is a if case with a expression, the branch condition should
         // be evaluated and branched from the "parent" branch block.
@@ -391,7 +393,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .cur_if_cases
             .as_ref()
             .and_then(|vec| vec.get(block_nr))
-            .ok_or_else(|| GenerationError("cur_if_cases was None".into()))
+            .ok_or_else(|| CodeGenError("cur_if_cases was None".into()))
             .map(|block| *block)
     }
 
@@ -400,7 +402,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .cur_if_branches
             .as_ref()
             .and_then(|vec| vec.get(block_nr))
-            .ok_or_else(|| GenerationError("cur_if_branches was None".into()))
+            .ok_or_else(|| CodeGenError("cur_if_branches was None".into()))
             .map(|block| *block)
     }
 
@@ -409,7 +411,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .cur_if_cases
             .as_ref()
             .map(|vec| vec.len())
-            .ok_or_else(|| GenerationError("cur_if_cases was None during len".into()))
+            .ok_or_else(|| CodeGenError("cur_if_cases was None during len".into()))
     }
 
     fn get_if_branches_len(&self) -> CustomResult<usize> {
@@ -417,7 +419,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .cur_if_branches
             .as_ref()
             .map(|vec| vec.len())
-            .ok_or_else(|| GenerationError("cur_if_branches was None during len".into()))
+            .ok_or_else(|| CodeGenError("cur_if_branches was None during len".into()))
     }
 
     fn compile_stmt(&mut self, stmt: &Statement) -> CustomResult<()> {
@@ -430,9 +432,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Statement::Package(path) => self.compile_package(path),
             Statement::VariableDecl(var, expr_opt) => {
                 self.compile_var_decl(var)?;
+                if var.is_const {
+                    if let Some(expr) = expr_opt {
+                        self.compile_var_store(var, expr)?;
+                    } else {
+                        return Err(CodeGenError(format!(
+                            "const var decl of \"{}\" has no value set",
+                            &var.name
+                        )));
+                    }
+                }
                 if let Some(expr) = expr_opt {
                     self.compile_var_store(var, expr)?;
                 }
+                Ok(())
+            }
+            Statement::ExternalDecl(func) => {
+                let linkage = Linkage::External;
+                self.compile_func_proto(func, Some(linkage))?;
                 Ok(())
             }
             Statement::Modifier(modifier) => self.compile_modifier(modifier),
@@ -453,7 +470,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_yield(&mut self, expr: &Expression) -> CustomResult<()> {
-        Err(GenerationError("TODO: Implement yield statement.".into()))
+        Err(CodeGenError("TODO: Implement yield statement.".into()))
     }
 
     fn compile_break(&mut self) -> CustomResult<()> {
@@ -461,28 +478,26 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.build_unconditional_branch(merge_block);
             Ok(())
         } else {
-            Err(GenerationError(
+            Err(CodeGenError(
                 "merge_block None when compiling break-stmt.".into(),
             ))
         }
     }
 
     fn compile_continue(&mut self) -> CustomResult<()> {
-        Err(GenerationError(
-            "TODO: Implement continue statement.".into(),
-        ))
+        Err(CodeGenError("TODO: Implement continue statement.".into()))
     }
 
     fn compile_use(&mut self, path: &Path) -> CustomResult<()> {
-        Err(GenerationError("TODO: Implement use statement.".into()))
+        Err(CodeGenError("TODO: Implement use statement.".into()))
     }
 
     fn compile_package(&mut self, path: &Path) -> CustomResult<()> {
-        Err(GenerationError("TODO: Implement package statement.".into()))
+        Err(CodeGenError("TODO: Implement package statement.".into()))
     }
 
     fn compile_modifier(&mut self, modifier: &Modifier) -> CustomResult<()> {
-        Err(GenerationError("TODO: Implement modifer statement.".into()))
+        Err(CodeGenError("TODO: Implement modifer statement.".into()))
     }
 
     // TODO: Only "int"s atm.
@@ -566,16 +581,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         match expr {
             Expression::Literal(lit, ty_opt) => self.compile_lit(lit, ty_opt),
             Expression::Variable(var) => self.compile_var_load(var),
-            Expression::FunctionCall(func_call) => {
-                if let Some(compiled_func_call) = self.compile_func_call(func_call)? {
-                    Ok(compiled_func_call)
-                } else {
-                    Err(GenerationError(format!(
-                        "TODO: Function returns void: {}",
-                        &func_call.name
-                    )))
-                }
-            }
+            Expression::FunctionCall(func_call) => self.compile_func_call(func_call),
             Expression::Operation(op) => self.compile_op(op),
         }
     }
@@ -587,11 +593,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> CustomResult<BasicValueEnum<'ctx>> {
         match lit {
             Literal::StringLiteral(str_lit) => {
-                let null_terminated = true;
-                Ok(BasicValueEnum::VectorValue(
-                    self.context
-                        .const_string(str_lit.as_bytes(), null_terminated),
-                ))
+                // Returns a pointer to the newly created string literal.
+                // The string literal will be an array of u8(/i8(?)) with a
+                // null terminator.
+                // TODO: Probably best to let string literals be a pointer to
+                //       an array so one can get the size. But for now it is
+                //       casted to a pointer to u8 to be compatible with C code.
+                // See: https://github.com/TheDan64/inkwell/issues/32
+                let lit_ptr = unsafe {
+                    self.builder
+                        .build_global_string(str_lit, "str.lit")
+                        .as_pointer_value()
+                };
+                let address_space = AddressSpace::Global;
+                let i8_ptr_type = self.context.i8_type().ptr_type(address_space);
+                Ok(lit_ptr.const_cast(i8_ptr_type).into())
             }
 
             Literal::CharLiteral(char_lit) => {
@@ -601,12 +617,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             self.context.i32_type().const_int(ch as u64, false),
                         ))
                     } else {
-                        Err(CustomError::GenerationError(
+                        Err(CustomError::CodeGenError(
                             "Unable to get char literal.".to_string(),
                         ))
                     }
                 } else {
-                    Err(CustomError::GenerationError(
+                    Err(CustomError::CodeGenError(
                         "Char literal isn't a single character.".to_string(),
                     ))
                 }
@@ -637,25 +653,66 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ty_opt: &Option<TypeStruct>,
         radix: u32,
     ) -> CustomResult<IntValue<'ctx>> {
+        // TODO: Where should the integer literal conversion be made?
+
         Ok(match ty_opt {
             Some(type_struct) => match type_struct.t {
-                Type::I8 => self.context.i8_type().const_int(lit.parse()?, true),
-                Type::U8 => self.context.i8_type().const_int(lit.parse()?, false),
-                Type::I16 => self.context.i16_type().const_int(lit.parse()?, true),
-                Type::U16 => self.context.i16_type().const_int(lit.parse()?, false),
-                Type::I32 => self.context.i32_type().const_int(lit.parse()?, true),
-                Type::U32 => self.context.i32_type().const_int(lit.parse()?, false),
-                Type::I64 => self.context.i64_type().const_int(lit.parse()?, true),
-                Type::U64 => self.context.i64_type().const_int(lit.parse()?, false),
-                Type::I128 => self.context.i128_type().const_int(lit.parse()?, true),
-                Type::U128 => self.context.i128_type().const_int(lit.parse()?, false),
+                Type::I8 => {
+                    let val = i8::from_str_radix(lit, radix)? as u64;
+                    self.context.i8_type().const_int(val, true)
+                }
+                Type::U8 => {
+                    let val = u8::from_str_radix(lit, radix)? as u64;
+                    self.context.i8_type().const_int(val, false)
+                }
+                Type::I16 => {
+                    let val = i16::from_str_radix(lit, radix)? as u64;
+                    self.context.i16_type().const_int(val, true)
+                }
+                Type::U16 => {
+                    let val = u16::from_str_radix(lit, radix)? as u64;
+                    self.context.i16_type().const_int(val, false)
+                }
+                Type::I32 => {
+                    let val = i32::from_str_radix(lit, radix)? as u64;
+                    self.context.i32_type().const_int(val, true)
+                }
+                Type::U32 => {
+                    let val = u32::from_str_radix(lit, radix)? as u64;
+                    self.context.i32_type().const_int(val, false)
+                }
+                Type::I64 => {
+                    let val = i64::from_str_radix(lit, radix)? as u64;
+                    self.context.i64_type().const_int(val, true)
+                }
+                Type::U64 => {
+                    let val = u64::from_str_radix(lit, radix)? as u64;
+                    self.context.i64_type().const_int(val, false)
+                }
+                Type::I128 => {
+                    let val = i128::from_str_radix(lit, radix)? as u64;
+                    self.context.i128_type().const_int(val, true)
+                }
+                Type::U128 => {
+                    let val = u128::from_str_radix(lit, radix)? as u64;
+                    self.context.i128_type().const_int(val, false)
+                }
                 // TODO: What should the default inte size be?
-                Type::Int => self.context.i32_type().const_int(lit.parse()?, true),
-                Type::Uint => self.context.i32_type().const_int(lit.parse()?, false),
+                Type::Int => {
+                    let val = i32::from_str_radix(lit, radix)? as u64;
+                    self.context.i32_type().const_int(val, true)
+                }
+                Type::Uint => {
+                    let val = u32::from_str_radix(lit, radix)? as u64;
+                    self.context.i32_type().const_int(val, false)
+                }
                 _ => unreachable!("Invalid integer type: {:?}", type_struct.t),
             },
             // TODO: What should the default int size be? Signed 32 atm.
-            None => self.context.i32_type().const_int(lit.parse()?, true),
+            None => {
+                let val = i32::from_str_radix(lit, radix)? as u64;
+                self.context.i32_type().const_int(val, true)
+            }
         })
     }
 
@@ -679,6 +736,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
+    // TODO: How should a declaration of a "constant" be enforced?
     fn compile_var_decl(&mut self, var: &Variable) -> CustomResult<()> {
         let id = self.state.cur_block_id;
         let key = (var.name.clone(), id);
@@ -690,7 +748,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.variables.insert(key, ptr);
             Ok(())
         } else {
-            Err(GenerationError(format!(
+            Err(CodeGenError(format!(
                 "No decl for var when compiling var decl: {}",
                 &var.name
             )))
@@ -711,13 +769,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.builder.build_store(*ptr, self.compile_expr(expr)?);
                 Ok(())
             } else {
-                Err(GenerationError(format!(
+                Err(CodeGenError(format!(
                     "No decl for var `{}` when building store.",
                     &var.name
                 )))
             }
         } else {
-            Err(GenerationError(format!(
+            Err(CodeGenError(format!(
                 "Unable to find variable with name {} in block {} during store.",
                 &var.name, self.state.cur_block_id
             )))
@@ -742,13 +800,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.builder.build_store(*ptr, basic_value);
                 Ok(())
             } else {
-                Err(GenerationError(format!(
+                Err(CodeGenError(format!(
                     "No decl for var `{}` when building store2.",
                     &var.name
                 )))
             }
         } else {
-            Err(GenerationError(format!(
+            Err(CodeGenError(format!(
                 "Unable to find variable with name {} in block {} during store2.",
                 &var.name, self.state.cur_block_id
             )))
@@ -768,13 +826,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             if let Some(ptr) = self.variables.get(&key) {
                 Ok(self.builder.build_load(*ptr, "load"))
             } else {
-                Err(GenerationError(format!(
+                Err(CodeGenError(format!(
                     "No decl for var `{}` when building load.",
                     &var.name
                 )))
             }
         } else {
-            Err(GenerationError(format!(
+            Err(CodeGenError(format!(
                 "Unable to find variable with name {} in block {} during load.",
                 &var.name, self.state.cur_block_id
             )))
@@ -783,27 +841,86 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     // TODO: Array access.
 
-    /// Generates a function call. Returns None if the given function returns
-    /// "void", returns the basic value otherwise.
+    // TODO: Temporarily treats functions return void as return i32 "0".
+    //       Should make a custom value ex rusts "()" instead.
+    /// Generates a function call. Returns the return value of the compiled
+    /// function.
     fn compile_func_call(
         &mut self,
         func_call: &FunctionCall,
-    ) -> CustomResult<Option<BasicValueEnum<'ctx>>> {
+    ) -> CustomResult<BasicValueEnum<'ctx>> {
         if let Some(func_ptr) = self.module.get_function(&func_call.name) {
+            // Checks to see if the arguments are fewer that parameters. The
+            // arguments are allowed to be greater than parameters since variadic
+            // functions are supported.
+            if func_call.arguments.len() < func_ptr.count_params() as usize {
+                return Err(CodeGenError(format!(
+                    "Wrong amount of args given when calling func: {}. Expected: {}, got: {}",
+                    &func_call.name,
+                    func_ptr.count_params(),
+                    func_call.arguments.len()
+                )));
+            }
+
             let mut args = Vec::with_capacity(func_call.arguments.len());
             for arg in &func_call.arguments {
                 args.push(self.compile_expr(&arg.value)?);
             }
 
+            for (i, param) in func_ptr.get_param_iter().enumerate() {
+                if let Some(arg) = args.get_mut(i) {
+                    // Checks to see if the types of the parameter and the
+                    // argument are the same. If they are different, see if the
+                    // type of the argument can be casted to the same type.
+                    self.infer_arg_type(i, &func_call.name, &param, arg)?;
+                } else {
+                    unreachable!("None when comparing arg and par in func call compile.");
+                }
+            }
+
             let call = self.builder.build_call(func_ptr, args.as_slice(), "call");
+
             // Left == BasicValueEnum, Right == InstructionValue.
             // Will be right if the function returns "void", left otherwise.
-            Ok(call.try_as_basic_value().left())
+            Ok(if let Some(ret_val) = call.try_as_basic_value().left() {
+                ret_val
+            } else {
+                self.context.i32_type().const_zero().into()
+            })
         } else {
-            Err(CustomError::GenerationError(format!(
+            Err(CustomError::CodeGenError(format!(
                 "Unable to find function with name {} to call.",
                 &func_call.name
             )))
+        }
+    }
+
+    fn infer_arg_type(
+        &mut self,
+        i: usize,
+        func_name: &str,
+        param: &BasicValueEnum,
+        arg: &mut BasicValueEnum,
+    ) -> CustomResult<()> {
+        return Ok(());
+        let arg_type = arg.get_type();
+        let param_type = param.get_type();
+        if arg_type != param_type {
+            // TODO: Should be able to convert a {[u8: N]} to a {u8}. This is
+            //       useful when working with for example string literals.
+            //       Is there a way to see what type a PointerValue is poiting
+            //       at through the inkwell API?
+            // TODO: Add logic/edge cases where the type of the argument can
+            //       be converted to the type of the parameter with no issues.
+            Err(CodeGenError(format!(
+                "Arg type at index {} wrong type when calling func: {}. Expected: {:?}, got: {:?}",
+                i,
+                func_name,
+                param.get_type(),
+                arg.get_type()
+            )))
+        } else {
+            Ok(())
         }
     }
 
@@ -914,7 +1031,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 //self.builder.build_load(ptr, name)
             }
             token::UnaryOperator::Address => {
-                panic!("TODO: Pointer");
+                panic!("TODO: Address");
             }
             token::UnaryOperator::Positive => {
                 // Do nothing.

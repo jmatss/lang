@@ -49,6 +49,7 @@ pub enum Keyword {
 
     Use,
     Package,
+    External,
 
     Var,
     Const,
@@ -79,6 +80,7 @@ pub enum Symbol {
     PointyBracketEnd,
 
     Dot,
+    TripleDot,
     Comma,
     UnderScore,
     QuestionMark,
@@ -202,6 +204,7 @@ impl LexToken {
 
             "use" => LexTokenKind::Keyword(Keyword::Use),
             "package" => LexTokenKind::Keyword(Keyword::Package),
+            "external" => LexTokenKind::Keyword(Keyword::External),
 
             "var" => LexTokenKind::Keyword(Keyword::Var),
             "const" => LexTokenKind::Keyword(Keyword::Const),
@@ -316,6 +319,7 @@ impl LexToken {
                     (".*", Symbol::Deref),
                     (".&", Symbol::Address),
                     ("..=", Symbol::RangeInclusive),
+                    ("...", Symbol::TripleDot),
                 ],
             ),
 

@@ -7,7 +7,7 @@ use super::{
     },
     type_parser::TypeParser,
 };
-use crate::error::CustomError::GenerationError;
+use crate::error::CustomError::CodeGenError;
 use crate::lex::token::{Keyword, LexToken, LexTokenKind, Symbol};
 use crate::CustomResult;
 use crate::{
@@ -81,6 +81,30 @@ impl ParseTokenIter {
                     return self.next_token();
                 }
 
+                // TODO: Multi line comments.
+                // If this is a comment, skip the comment and parse the token
+                // starting afterwards instead.
+                LexTokenKind::Symbol(Symbol::CommentSingleLine) => {
+                    while let Some(lex_token) = self.iter.next() {
+                        match lex_token.kind {
+                            LexTokenKind::Symbol(Symbol::LineBreak) => {
+                                return self.next_token();
+                            }
+                            LexTokenKind::EndOfFile => {
+                                self.iter.put_back(lex_token)?;
+                                return self.next_token();
+                            }
+
+                            // If no match, continue looping until a line
+                            // break or a EOF is found.
+                            _ => (),
+                        }
+                    }
+                    return Err(CodeGenError(
+                        "Received None when parsing single line comment".into(),
+                    ));
+                }
+
                 // If a "line" starts with a identifier this can either be a
                 // assignment to this identifier (assignment aren't treated as
                 // expression atm) or it will be an expression.
@@ -97,7 +121,7 @@ impl ParseTokenIter {
                                 let stmt = Statement::Assignment(assign_op, var, expr);
                                 ParseTokenKind::Statement(stmt)
                             } else {
-                                return Err(GenerationError(format!(
+                                return Err(CodeGenError(format!(
                                     "Expected assign operator when parsing ident, got: {:?}",
                                     &lex_token
                                 )));
@@ -188,7 +212,6 @@ impl ParseTokenIter {
                 LexTokenKind::Symbol(Symbol::Colon) => Some(self.parse_var(ident)?),
                 LexTokenKind::Symbol(_) => {
                     if let Some(_assign_op) = ParseToken::get_if_stmt_op(&next_lex_token) {
-                        println!("ASSIGN!");
                         Some(self.parse_var(ident)?)
                     } else {
                         None
@@ -197,7 +220,7 @@ impl ParseTokenIter {
                 _ => None,
             })
         } else {
-            Err(GenerationError(
+            Err(CodeGenError(
                 "next_lex_token None when parsing ident.".into(),
             ))
         }
@@ -271,9 +294,7 @@ impl ParseTokenIter {
             let first_opt = self.peek_skip_space_line();
             let second_opt = self.peek_skip_space_line();
             if let (Some(first), Some(second)) = (first_opt, second_opt) {
-                println!("111");
                 if let LexTokenKind::Identifier(ident) = first.kind {
-                    println!("222");
                     if let LexTokenKind::Symbol(Symbol::Equals) = second.kind {
                         // 1. Named argument.
                         // skip the ident and equals.
@@ -299,7 +320,6 @@ impl ParseTokenIter {
                 if let LexTokenKind::Symbol(Symbol::Comma) = lex_token.kind {
                     continue;
                 } else if let LexTokenKind::Symbol(Symbol::ParenthesisEnd) = lex_token.kind {
-                    println!("PAR END");
                     return Ok(arguments);
                 } else {
                     return Err(ParseError(format!(
@@ -316,9 +336,13 @@ impl ParseTokenIter {
     }
 
     /// Parses a list of parameters.
-    ///   "( [ <ident> : <type> [,]] ... )"
-    pub fn parse_par_list(&mut self) -> CustomResult<Vec<Variable>> {
+    ///   "( [ <ident> : <type> [,]] [...] )"
+    /// Using a "..." as a argument indicates that this function support
+    /// var_args/is variadic.
+    /// The returned bool in the tuple indicates if this is a variadic func.
+    pub fn parse_par_list(&mut self) -> CustomResult<(Vec<Variable>, bool)> {
         let mut parameters = Vec::new();
+        let mut is_var_arg = false;
 
         // Skip the start parenthesis of the parameter list.
         self.next_skip_space_line();
@@ -329,48 +353,37 @@ impl ParseTokenIter {
             if let LexTokenKind::Symbol(Symbol::ParenthesisEnd) = next.kind {
                 // Consume the end parenthesis of the parameter list.
                 self.next_skip_space_line();
-                return Ok(parameters);
+                return Ok((parameters, is_var_arg));
             }
         }
 
         loop {
-            // Parse the name of this specific parameter.
-            let ident = if let Some(lex_token) = self.next_skip_space_line() {
-                if let LexTokenKind::Identifier(ident) = lex_token.kind {
-                    ident
-                } else {
-                    return Err(ParseError(format!(
-                        "Invalid token when parsing ident in par list: {:?}",
-                        lex_token
-                    )));
+            if let Some(lex_token) = self.next_skip_space_line() {
+                // Parses either a identifier followed by a type or a "TipleDot"
+                // which is the indicator for a variadic function.
+                match lex_token.kind {
+                    LexTokenKind::Identifier(ident) => {
+                        let var_type = self.parse_par_list_type()?;
+                        let const_ = false;
+                        let parameter = Variable::new(ident, Some(var_type), None, const_);
+
+                        parameters.push(parameter);
+                    }
+
+                    LexTokenKind::Symbol(Symbol::TripleDot) => is_var_arg = true,
+
+                    _ => {
+                        return Err(ParseError(format!(
+                            "Invalid token when parsing ident in par list: {:?}",
+                            lex_token
+                        )))
+                    }
                 }
             } else {
                 return Err(ParseError(
                     "Received None when parsing ident in par list.".into(),
                 ));
             };
-
-            // Next token should be a "Colon", consume it and return error if it
-            // isn't a "Colon".
-            if let Some(lex_token) = self.next_skip_space() {
-                if let LexTokenKind::Symbol(Symbol::Colon) = lex_token.kind {
-                    // Colon already consumed, nothing to do here.
-                } else {
-                    return Err(ParseError(format!(
-                        "Invalid token when parsing colon in par list: {:?}",
-                        lex_token
-                    )));
-                }
-            } else {
-                return Err(ParseError(
-                    "Received None expecting colon in par list.".into(),
-                ));
-            }
-
-            let var_type = self.parse_type()?;
-            let parameter = Variable::new(ident, Some(var_type), None, false);
-
-            parameters.push(parameter);
 
             // A parameter has just been parsed above. The next character should
             // either be a comma indicating more parameters or a end parenthesis
@@ -379,7 +392,7 @@ impl ParseTokenIter {
                 if let LexTokenKind::Symbol(Symbol::Comma) = lex_token.kind {
                     continue;
                 } else if let LexTokenKind::Symbol(Symbol::ParenthesisEnd) = lex_token.kind {
-                    return Ok(parameters);
+                    return Ok((parameters, is_var_arg));
                 } else {
                     return Err(ParseError(format!(
                         "Received invalid LexToken at end of parameter in par list: {:?}",
@@ -391,6 +404,26 @@ impl ParseTokenIter {
                     "Received None at end of parameter in par list.".into(),
                 ));
             }
+        }
+    }
+
+    /// Parses the "type" part of a parameter in a parameter list. The next
+    /// token should be a "Colon", consume it or return error if it isn't a
+    /// "Colon".
+    fn parse_par_list_type(&mut self) -> CustomResult<TypeStruct> {
+        if let Some(lex_token) = self.next_skip_space() {
+            if let LexTokenKind::Symbol(Symbol::Colon) = lex_token.kind {
+                self.parse_type()
+            } else {
+                Err(ParseError(format!(
+                    "Invalid token when parsing colon in par list: {:?}",
+                    lex_token
+                )))
+            }
+        } else {
+            Err(ParseError(
+                "Received None expecting colon in par list.".into(),
+            ))
         }
     }
 

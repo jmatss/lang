@@ -1,16 +1,17 @@
 mod analyze;
 mod codegen;
 mod common;
+mod compile;
 mod error;
 mod lex;
 mod parse;
-mod transpile;
 
 #[macro_use]
 extern crate log;
 
 use crate::analyze::analyzer;
 use crate::codegen::generator;
+use crate::compile::compiler;
 use crate::error::CustomError;
 use crate::lex::lexer;
 use crate::parse::parser;
@@ -19,6 +20,9 @@ use inkwell::context::Context;
 use log::Level;
 
 pub type CustomResult<T> = Result<T, CustomError>;
+
+const MODULE_NAME: &str = "MODULE_NAME";
+const OUTPUT_PATH: &str = "a.o";
 
 fn main() -> CustomResult<()> {
     let args: Vec<_> = std::env::args().collect();
@@ -41,34 +45,29 @@ fn main() -> CustomResult<()> {
             debug!("{:?}", lex_token)
         }
     }
-    println!("Lexing complete.\n");
+    println!("Lexing complete.");
 
     let mut ast_root: ParseToken = parser::parse(lex_tokens).unwrap();
-    debug!("AST after parsing:\n{:#?}", ast_root);
-    println!("Parsing complete.\n");
+    debug!("\nAST after parsing:\n{:#?}", ast_root);
+    println!("Parsing complete.");
 
     let analyze_context = analyzer::analyze(&mut ast_root)?;
     debug!("\nAST after analyze:\n{:#?}", ast_root);
-    println!("Analyzing complete.\n");
+    println!("Analyzing complete.");
 
     let context = Context::create();
     let builder = context.create_builder();
-    let module = context.create_module("MODULE_NAME");
+    let module = context.create_module(MODULE_NAME);
     generator::generate(&ast_root, &analyze_context, &context, &builder, &module)?;
-    println!("Generating complete.\n");
+    println!("Generating complete.");
 
     if log_enabled!(Level::Debug) {
         module.print_to_stderr();
     }
     module.verify()?;
 
-    /*
-    let lines = transpile(&ast, &analyze_context);
-    println!("LINES:");
-    for line in lines? {
-        println!("{}", line);
-    }
-    */
+    compiler::compile(&module, OUTPUT_PATH)?;
+    println!("Compiled to: {}", OUTPUT_PATH);
 
     Ok(())
 }

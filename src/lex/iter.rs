@@ -62,8 +62,8 @@ impl LexTokenIter {
                 // Add special cases for string- and char literals.
                 // They start and end with " or '.
                 match symbol_type {
-                    LexTokenKind::Symbol(Symbol::DoubleQuote) => self.get_literal_string()?,
-                    LexTokenKind::Symbol(Symbol::SingleQuote) => self.get_literal_char()?,
+                    LexTokenKind::Symbol(Symbol::DoubleQuote) => self.get_lit_string()?,
+                    LexTokenKind::Symbol(Symbol::SingleQuote) => self.get_lit_char()?,
                     _ => {
                         self.iter.skip(n);
                         self.cur_column_nr += n as u64;
@@ -197,49 +197,144 @@ impl LexTokenIter {
         Ok(numbers.into_iter().collect())
     }
 
-    // TODO: Fix escape chars etc. Ex:
-    //      "abc\"abc"
-    //  will cause an error.
+    // https://doc.rust-lang.org/reference/tokens.html
+    // Valid escape chars:
+    //   \x41   ("raw byte" escape (hex))
+    //   \n     (newline)
+    //   \r     (carriage return)
+    //   \t     (tab)
+    //   \\     (backslash)
+    //   \0     (null)
+    //   \'     (single quote)
+    //   \"     (double quote)
+    //
+    // TODO: Unicode escape. Example: \u{7FFF}  (24-bit, up to 6 digits)
     /// Returns the string or char literal at the current position of the iterator.
-    fn get_literal(&mut self, literal_symbol: Symbol) -> CustomResult<String> {
-        let mut char_vec = Vec::new();
+    /// Will also escape any escape characters in the process.
+    fn get_lit(&mut self, literal_symbol: Symbol) -> CustomResult<String> {
+        let mut chars = Vec::new();
 
-        self.iter.skip(1); // Remove the start "symbol" (single or double-quote).
+        // Remove the start "symbol" (single or double-quote).
+        // `column_count` starts at 1 since it includes the start symbol.
+        self.iter.skip(1);
+        let mut column_count = 1;
 
-        loop {
-            if let Some(current) = self.iter.next() {
-                match LexToken::get_if_symbol_char(current) {
-                    // Break if the current character is the `literal_symbol`
-                    // which means that the end of the literal have been found.
-                    Some((LexTokenKind::Symbol(s), _)) if s == literal_symbol => break,
-                    _ => char_vec.push(current),
+        // Iterate through all char tokens in the string literal and add them to
+        // the `chars` vector until the end of the literal.
+        // In this loop all escaped characters will be substituted with the
+        // corresponding "raw" escape symbols.
+        let mut prev_slash = false;
+        while let Some(ch) = self.iter.next() {
+            column_count += 1;
+            match ch {
+                '\\' if prev_slash => {
+                    chars.push('\\');
+                    prev_slash = false;
                 }
-            } else {
-                return Err(LexError(
-                    "Reached EOF while parsing char(s) in get_literal.".into(),
-                ));
+                '\\' if !prev_slash => {
+                    prev_slash = true;
+                }
+
+                // TODO: Should upper 'X' be allowed?
+                'x' if prev_slash => {
+                    let new_ch = self.escape_raw_byte()?;
+                    chars.push(new_ch);
+                    prev_slash = false;
+                }
+
+                'n' if prev_slash => {
+                    chars.push('\n');
+                    prev_slash = false;
+                }
+                'r' if prev_slash => {
+                    chars.push('\r');
+                    prev_slash = false;
+                }
+                't' if prev_slash => {
+                    chars.push('\t');
+                    prev_slash = false;
+                }
+
+                '0' if prev_slash => {
+                    chars.push('\0');
+                    prev_slash = false;
+                }
+                '\"' if prev_slash => {
+                    chars.push('\"');
+                    prev_slash = false;
+                }
+                '\'' if prev_slash => {
+                    chars.push('\'');
+                    prev_slash = false;
+                }
+
+                // For every char that isn't escaped, if it is the `literal_symbol`,
+                // this is the end of the literal, break out of the loop.
+                // For all other characters, just add them to the literal result.
+                _ => {
+                    if let Some((LexTokenKind::Symbol(s), _)) = LexToken::get_if_symbol_char(ch) {
+                        if s == literal_symbol {
+                            break;
+                        }
+                    }
+                    chars.push(ch);
+                    prev_slash = false;
+                }
             }
         }
 
-        // Need to add two because the begin and end quotes needs to be
-        // counted as well.
-        self.cur_column_nr += 2 + char_vec.len() as u64;
+        self.cur_column_nr += column_count;
 
-        Ok(char_vec.iter().collect())
+        Ok(chars.iter().collect())
+    }
+
+    /// Escapes a character sequence in the format: "0xAA" inside a string or
+    /// char literal into a single character. The two digits are hex.
+    fn escape_raw_byte(&mut self) -> CustomResult<char> {
+        let radix = 16;
+        let first = self
+            .iter
+            .next()
+            .and_then(|ch| ch.to_digit(radix))
+            .ok_or_else(|| LexError("None when parsing first digit \"raw byte\".".into()))?;
+        let second = self
+            .iter
+            .next()
+            .and_then(|ch| ch.to_digit(radix))
+            .ok_or_else(|| LexError("None when parsing second digit \"raw byte\".".into()))?;
+
+        let num = (first << 4) | second;
+        if let Some(new_ch) = std::char::from_u32(num) {
+            Ok(new_ch)
+        } else {
+            Err(LexError(format!(
+                "Unable to convert escaped \"raw byte\" integer to char: {}",
+                num
+            )))
+        }
     }
 
     /// Returns the string literal at the current position of the iterator.
-    fn get_literal_string(&mut self) -> CustomResult<LexTokenKind> {
+    fn get_lit_string(&mut self) -> CustomResult<LexTokenKind> {
         Ok(LexTokenKind::Literal(Literal::StringLiteral(
-            self.get_literal(Symbol::DoubleQuote)?,
+            self.get_lit(Symbol::DoubleQuote)?,
         )))
     }
 
     /// Returns the char literal at the current position of the iterator.
-    fn get_literal_char(&mut self) -> CustomResult<LexTokenKind> {
-        Ok(LexTokenKind::Literal(Literal::CharLiteral(
-            self.get_literal(Symbol::SingleQuote)?,
-        )))
+    fn get_lit_char(&mut self) -> CustomResult<LexTokenKind> {
+        // Since this is a char literal, need to make sure that the given
+        // literal has the character length "1".
+        let char_lit = self.get_lit(Symbol::SingleQuote)?;
+        if char_lit.chars().count() == 1 {
+            Ok(LexTokenKind::Literal(Literal::CharLiteral(char_lit)))
+        } else {
+            Err(LexError(format!(
+                "Char literal length not 1, len is {}. The literal: {}",
+                char_lit.chars().count(),
+                char_lit
+            )))
+        }
     }
 
     /// Returns the line break at the current position of the iterator.
@@ -291,5 +386,162 @@ impl LexTokenIter {
             "{} ({}:{}).",
             msg, self.cur_line_nr, self.cur_column_nr
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_identifier_start() {
+        let valid_chars = ['a', 'x', '_'];
+        let invalid_chars = ['0', '-', '.', '/', '#'];
+        for ch in valid_chars.iter() {
+            assert!(LexTokenIter::valid_identifier_start(*ch));
+        }
+        for ch in invalid_chars.iter() {
+            assert!(!LexTokenIter::valid_identifier_start(*ch));
+        }
+    }
+
+    #[test]
+    fn test_valid_identifier() {
+        let valid_chars = ['a', 'x', '_', '0'];
+        let invalid_chars = ['-', '.', '/', '#'];
+        for ch in valid_chars.iter() {
+            assert!(LexTokenIter::valid_identifier(*ch));
+        }
+        for ch in invalid_chars.iter() {
+            assert!(!LexTokenIter::valid_identifier(*ch));
+        }
+    }
+
+    #[test]
+    fn test_valid_number() {
+        const DEC_RADIX: u32 = 10;
+        const HEX_RADIX: u32 = 16;
+        let invalid_dec = ['a', 'g', 'x', '-', '.', '/', '#'];
+        let invalid_hex = ['g', 'x', '-', '.', '/', '#'];
+
+        for ch in '0'..='9' {
+            assert!(LexTokenIter::valid_number(ch, DEC_RADIX));
+        }
+        for ch in '0'..='9' {
+            assert!(LexTokenIter::valid_number(ch, HEX_RADIX));
+        }
+        for ch in 'a'..='f' {
+            assert!(LexTokenIter::valid_number(ch, HEX_RADIX));
+        }
+        for ch in 'A'..='F' {
+            assert!(LexTokenIter::valid_number(ch, HEX_RADIX));
+        }
+
+        for ch in invalid_dec.iter() {
+            assert!(!LexTokenIter::valid_number(*ch, DEC_RADIX));
+        }
+        for ch in invalid_hex.iter() {
+            assert!(!LexTokenIter::valid_number(*ch, HEX_RADIX));
+        }
+    }
+
+    #[test]
+    fn test_valid_linebreak() {
+        let valid_break = [('\n', None), ('\r', Some('\n'))];
+        let invalid_break = [('a', None), ('\r', None), ('\r', Some('a'))];
+
+        for (ch1, ch2) in valid_break.iter() {
+            assert!(LexTokenIter::valid_linebreak(*ch1, *ch2));
+        }
+        for (ch1, ch2) in invalid_break.iter() {
+            assert!(!LexTokenIter::valid_linebreak(*ch1, *ch2));
+        }
+    }
+
+    #[test]
+    fn test_valid_whitespace() {
+        let valid_space = [' ', '\t'];
+        let invalid_space = ['a', '#', '_'];
+
+        for ch in valid_space.iter() {
+            assert!(LexTokenIter::valid_whitespace(*ch));
+        }
+        for ch in invalid_space.iter() {
+            assert!(!LexTokenIter::valid_whitespace(*ch));
+        }
+    }
+
+    #[test]
+    fn test_get_lit() {
+        let input = "\"abc 123 åäö\"";
+        let expected = "abc 123 åäö";
+        let actual = LexTokenIter::new(input)
+            .get_lit(Symbol::DoubleQuote)
+            .expect("Unable to parse literal.");
+        assert_eq!(expected, actual);
+
+        // Escape backslash.
+        let input = "\'\\\\\'";
+        let expected = "\\";
+        let actual = LexTokenIter::new(input)
+            .get_lit(Symbol::SingleQuote)
+            .expect("Unable to parse literal.");
+        assert_eq!(expected, actual);
+
+        // Escape "raw byte".
+        let input = "\'\\x41\'";
+        let expected = "A";
+        let actual = LexTokenIter::new(input)
+            .get_lit(Symbol::SingleQuote)
+            .expect("Unable to parse literal.");
+        assert_eq!(expected, actual);
+
+        // Escape newline.
+        let input = "\'\\n\'";
+        let expected = "\n";
+        let actual = LexTokenIter::new(input)
+            .get_lit(Symbol::SingleQuote)
+            .expect("Unable to parse literal.");
+        assert_eq!(expected, actual);
+
+        // Escape carriage return.
+        let input = "\'\\r\'";
+        let expected = "\r";
+        let actual = LexTokenIter::new(input)
+            .get_lit(Symbol::SingleQuote)
+            .expect("Unable to parse literal.");
+        assert_eq!(expected, actual);
+
+        // Escape tab.
+        let input = "\'\\t\'";
+        let expected = "\t";
+        let actual = LexTokenIter::new(input)
+            .get_lit(Symbol::SingleQuote)
+            .expect("Unable to parse literal.");
+        assert_eq!(expected, actual);
+
+        // Escape null.
+        let input = "\'\\0\'";
+        let expected = "\0";
+        let actual = LexTokenIter::new(input)
+            .get_lit(Symbol::SingleQuote)
+            .expect("Unable to parse literal.");
+        assert_eq!(expected, actual);
+
+        // Escape single quote.
+        let input = "\'\\\'\'";
+        let expected = "\'";
+        let actual = LexTokenIter::new(input)
+            .get_lit(Symbol::SingleQuote)
+            .expect("Unable to parse literal.");
+        assert_eq!(expected, actual);
+
+        // Escape double quote.
+        let input = "\'\\\"\'";
+        let expected = "\"";
+        let actual = LexTokenIter::new(input)
+            .get_lit(Symbol::SingleQuote)
+            .expect("Unable to parse literal.");
+        assert_eq!(expected, actual);
     }
 }

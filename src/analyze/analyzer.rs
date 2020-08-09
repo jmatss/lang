@@ -55,27 +55,6 @@ impl AnalyzeContext {
         }
     }
 
-    /// Returns a variable with name `ident` that exists either in the block
-    /// with ID `blockId` or any of the blocks parents.
-    pub fn get_variable(&self, ident: &str, id: BlockId) -> Option<&Variable> {
-        if let Some(var) = self.variables.get(&(ident.into(), id)) {
-            Some(var)
-        } else {
-            // Unable to find variable in the current block scope. If this block
-            // isn't a "root" block i.e. it has a parent scope, see recursively
-            // the variable exists in a parent scope.
-            if let Some(false) = self.is_root_block.get(&id) {
-                if let Some(parent_id) = self.child_to_parent.get(&id) {
-                    self.get_variable(ident, *parent_id)
-                } else {
-                    unreachable!(format!("no parent found for block with id {}", id));
-                }
-            } else {
-                None
-            }
-        }
-    }
-
     /// Given a name of a variable `ident` and a block scope `id`, returns
     /// the block in which the sought after variable was declared.
     /// If a declaration can't be found, None is returned.
@@ -101,7 +80,7 @@ impl AnalyzeContext {
 
 /// Updates the AST with information about function prototypes and declarations
 /// of structures.
-pub fn analyze<'a>(ast_root: &mut ParseToken) -> CustomResult<AnalyzeContext> {
+pub fn analyze(ast_root: &mut ParseToken) -> CustomResult<AnalyzeContext> {
     let mut context = AnalyzeContext::new();
 
     ScopeAnalyzer::analyze(&mut context, ast_root)?;

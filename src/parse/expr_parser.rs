@@ -54,7 +54,7 @@ impl<'a> ExprParser<'a> {
         };
 
         expr_parser.shunting_yard()?;
-        println!("Outputs: {:#?}", expr_parser.outputs);
+        debug!("Outputs: {:#?}", &expr_parser.outputs);
 
         expr_parser.rev_polish_to_expr()
     }
@@ -63,7 +63,7 @@ impl<'a> ExprParser<'a> {
     /// explanation of the algorithm.
     fn shunting_yard(&mut self) -> CustomResult<()> {
         while let Some(lex_token) = self.iter.next_skip_space() {
-            println!("SHUNTING: {:?}", lex_token);
+            debug!("SHUNTING: {:?}", &lex_token);
 
             // Break and stop parsing expression if a Symbol contained in
             // `stop_conds` are found or if EOF is reached.

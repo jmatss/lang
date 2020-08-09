@@ -1,0 +1,37 @@
+external function printf(format: {u8}, ...) -> i32
+external function malloc(size: i32) -> {u8}     // TODO: How should a "void*" be represented?
+external function free(ptr: {u8})
+external function itoa(value: i32, s: {u8}, radix: i32) -> {u8}
+
+function fac(n: i32) -> i32
+{
+    // TODO: Currently a "merge block" is always added after the if cases and
+    //       a branch is done at the end of last if case as well even though
+    //       those paths will never be taken. The empty merge block stops
+    //       LLVM from compiling. Can probably just check for every individual
+    //       case in a if block if it contains a "return" statement. If it does,
+    //       there is no reason to branch to the merge block at the end since
+    //       a return is guaranted.
+    var res: i32
+    if n <= 1
+    {
+        res = 1
+    }
+    else
+    {
+        res = n * fac(n - 1)
+    }
+    return res
+}
+
+function main() -> i32
+{   
+    const n: i32 = 7
+    printf("n: %d, result: %d", n, fac(n))
+    
+    var buf: {u8} = malloc(20)
+    printf("\nitoa: %s", itoa(n, buf, 10))
+    
+    free(buf)
+    return 0
+}

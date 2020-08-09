@@ -49,6 +49,7 @@ impl<'a> KeyworkParser<'a> {
 
             Keyword::Use => self.parse_use(),
             Keyword::Package => self.parse_package(),
+            Keyword::External => self.parse_external(),
 
             Keyword::Var => self.parse_var_decl(),
             Keyword::Const => self.parse_const_decl(),
@@ -357,6 +358,31 @@ impl<'a> KeyworkParser<'a> {
         Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
+    // TODO: External only valid for functions atm, add for variables.
+    /// Parses a external statement.
+    ///   "external <function_prototype>"
+    /// The "external" keyword has already been consumed when this function is called.
+    fn parse_external(&mut self) -> CustomResult<ParseToken> {
+        if let Some(lex_token) = self.iter.next_skip_space_line() {
+            let func = match lex_token.kind {
+                LexTokenKind::Keyword(Keyword::Function) => self.parse_func_proto()?,
+                _ => {
+                    return Err(ParseError(format!(
+                        "Invalid keyword after external keyword: {:?}",
+                        lex_token
+                    )))
+                }
+            };
+
+            let kind = ParseTokenKind::Statement(Statement::ExternalDecl(func));
+            Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
+        } else {
+            Err(ParseError(
+                "Received None lex token after external keyword.".into(),
+            ))
+        }
+    }
+
     /// Parses a var statement.
     ///   "var <ident> [: <type>] [= <expr>]"
     /// The "var" keyword has already been consumed when this function is called.
@@ -473,12 +499,20 @@ impl<'a> KeyworkParser<'a> {
         Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
-    // TODO: Parsing of generics.
-    /// Parses a function.
-    ///   "function <ident> ( [<ident>: <type>], ... ) [ <type> ] {"
-    ///   TODO: "function <ident> [ < <generic>, ... > ] ( [<ident>: <type>], ... ) [ <type> ] {"
+    /// Parses a function and its body. See `parse_func_proto` for the structure
+    /// of a function header/prototype.
     /// The "function" keyword has already been consumed when this function is called.
     fn parse_func(&mut self) -> CustomResult<ParseToken> {
+        let func_header = BlockHeader::Function(self.parse_func_proto()?);
+        self.iter.next_block(func_header)
+    }
+
+    // TODO: Parsing of generics.
+    /// Parses a function prototype/header.
+    ///   "function <ident> ( [<ident>: <type>], ... ) [ "->" <type> ]"
+    ///   TODO: "function <ident> [ < <generic>, ... > ] ( [<ident>: <type>], ... ) [ "->" <type> ]"
+    /// The "function" keyword has already been consumed when this function is called.
+    fn parse_func_proto(&mut self) -> CustomResult<Function> {
         // Start by parsing the identifier
         let ident = if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Identifier(ident) = lex_token.kind {
@@ -495,15 +529,18 @@ impl<'a> KeyworkParser<'a> {
             ));
         };
 
-        let parameters = self.iter.parse_par_list()?;
+        let (params, is_var_arg) = self.iter.parse_par_list()?;
 
-        // If the next token is a "CurlyBracketBegin", assume that the function
-        // returns "void"; otherwise parse the return type.
+        // If the next token is a "Arrow" ("->"), assume that the return type
+        // of the function is specified afterwards. If there are no arrow,
+        // assume that the function returns void.
         let return_type = if let Some(lex_token) = self.iter.peek_skip_space_line() {
-            if let LexTokenKind::Symbol(Symbol::CurlyBracketBegin) = lex_token.kind {
-                None
-            } else {
+            if let LexTokenKind::Symbol(Symbol::Arrow) = lex_token.kind {
+                // Consume the arrow.
+                self.iter.next_skip_space_line();
                 Some(self.iter.parse_type()?)
+            } else {
+                None
             }
         } else {
             return Err(ParseError(
@@ -511,16 +548,19 @@ impl<'a> KeyworkParser<'a> {
             ));
         };
 
-        let parameters_opt = if !parameters.is_empty() {
-            Some(parameters)
+        let params_opt = if !params.is_empty() {
+            Some(params)
         } else {
             None
         };
         // TODO: Generics.
         let generics = None;
-        let func = Function::new(ident, generics, parameters_opt, return_type);
-        let func_header = BlockHeader::Function(func);
-
-        self.iter.next_block(func_header)
+        Ok(Function::new(
+            ident,
+            generics,
+            params_opt,
+            return_type,
+            is_var_arg,
+        ))
     }
 }

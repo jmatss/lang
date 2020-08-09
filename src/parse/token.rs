@@ -47,11 +47,13 @@ pub enum Statement {
     // The expr will contain the assigned value if this is a initialization.
     // Used both for "var" and "const" variables.
     VariableDecl(Variable, Option<Expression>),
+
+    // TODO: Implement extern for variables as well.
+    // Declration of extern functions.
+    ExternalDecl(Function),
+
     // static, private etc.
     Modifier(Modifier),
-    // Special cases
-    // Init: Used in constructor to initialize fields with same name as parameters of constructor.
-    //Init,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -222,6 +224,7 @@ pub struct Function {
     pub generics: Option<Vec<TypeStruct>>,
     pub parameters: Option<Vec<Variable>>,
     pub ret_type: Option<TypeStruct>,
+    pub is_var_arg: bool,
 }
 
 impl Function {
@@ -230,12 +233,14 @@ impl Function {
         generics: Option<Vec<TypeStruct>>,
         parameters: Option<Vec<Variable>>,
         ret_type: Option<TypeStruct>,
+        is_var_arg: bool,
     ) -> Self {
         Function {
             name,
             generics,
             parameters,
             ret_type,
+            is_var_arg,
         }
     }
 }
@@ -294,7 +299,7 @@ pub struct Variable {
     pub name: String,
     pub ret_type: Option<TypeStruct>,
     pub modifiers: Option<Vec<Modifier>>,
-    pub const_: bool,
+    pub is_const: bool,
 }
 
 impl Variable {
@@ -302,13 +307,13 @@ impl Variable {
         name: String,
         ret_type: Option<TypeStruct>,
         modifiers: Option<Vec<Modifier>>,
-        const_: bool,
+        is_const: bool,
     ) -> Self {
         Variable {
             name,
             ret_type,
             modifiers,
-            const_,
+            is_const: is_const,
         }
     }
 }

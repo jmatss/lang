@@ -1,6 +1,6 @@
-use crate::error::CustomError::GenerationError;
+use crate::error::CustomError::CodeGenError;
 use crate::{parse::token::Expression, CustomResult};
-use inkwell::{context::Context, types::BasicTypeEnum};
+use inkwell::{context::Context, types::BasicTypeEnum, AddressSpace};
 
 // TODO: Make Int & Uint unbounded? But then what about pointer sized int?
 
@@ -62,21 +62,33 @@ impl Type {
         &self,
         gen_context: &'ctx Context,
     ) -> CustomResult<BasicTypeEnum<'ctx>> {
+        // TODO: What AddressSpace should be used?
+        let address_space = AddressSpace::Global;
+
         Ok(match self {
             Type::Pointer(ptr) => {
-                return Err(GenerationError(
-                    "TODO: Pointer. Need to return a \"PointerType\"".into(),
-                ))
+                // Get the type of the inner type and wrap into a "PointerType".
+                match ptr.to_codegen(gen_context)? {
+                    BasicTypeEnum::ArrayType(ty) => ty.ptr_type(address_space).into(),
+                    BasicTypeEnum::FloatType(ty) => ty.ptr_type(address_space).into(),
+                    BasicTypeEnum::IntType(ty) => ty.ptr_type(address_space).into(),
+                    BasicTypeEnum::PointerType(ty) => ty.ptr_type(address_space).into(),
+                    BasicTypeEnum::StructType(ty) => ty.ptr_type(address_space).into(),
+                    BasicTypeEnum::VectorType(ty) => ty.ptr_type(address_space).into(),
+                }
             }
             Type::Array(t, dim_opt) => {
-                return Err(GenerationError(
+                // TODO: Can fetch the inner type and call "array_type()" on it,
+                //       but the function takes a "u32" as argument, so need to
+                //       convert the "dim_opt" Expression into a u32 if possible.
+                return Err(CodeGenError(
                     "TODO: Array. Need to calculate dimension and the return a \"ArrayType\""
                         .into(),
-                ))
+                ));
             }
-            Type::Void => return Err(GenerationError("TODO: Void".into())),
+            Type::Void => return Err(CodeGenError("TODO: Void".into())),
             Type::Character => BasicTypeEnum::IntType(gen_context.i32_type()),
-            Type::String => return Err(GenerationError("TODO: String".into())),
+            Type::String => return Err(CodeGenError("TODO: String".into())),
             Type::Boolean => BasicTypeEnum::IntType(gen_context.bool_type()),
             Type::Int => BasicTypeEnum::IntType(gen_context.i32_type()),
             Type::Uint => BasicTypeEnum::IntType(gen_context.i32_type()),
@@ -93,7 +105,7 @@ impl Type {
             Type::F64 => BasicTypeEnum::FloatType(gen_context.f64_type()),
             Type::I128 => BasicTypeEnum::IntType(gen_context.i128_type()),
             Type::U128 => BasicTypeEnum::IntType(gen_context.i128_type()),
-            Type::Unknown(s) => return Err(GenerationError(format!("Unknown type: {}", s))),
+            Type::Unknown(s) => return Err(CodeGenError(format!("Unknown type: {}", s))),
         })
     }
 }
