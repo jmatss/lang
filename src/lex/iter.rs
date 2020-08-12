@@ -59,9 +59,19 @@ impl LexTokenIter {
             } else if let Some(symbol_type_tup) = LexToken::get_if_symbol_three_chars(c1, c2, c3) {
                 let (symbol_type, n) = symbol_type_tup;
 
-                // Add special cases for string- and char literals.
-                // They start and end with " or '.
+                // Add special cases for string- and char literals, they start
+                // and end with " or '.
+                // Also filter out comments. If a comment is found, debug print
+                // the comment and parse the next token after the comment.
                 match symbol_type {
+                    // TODO: Add multiline comments.
+                    LexTokenKind::Symbol(Symbol::CommentSingleLine) => {
+                        let comment = self.get_comment_single(n)?;
+                        debug!("Lexed comment: {}", &comment);
+                        // TODO: Weird to be the only return statement, do this
+                        //       in a better way.
+                        return self.next_token();
+                    }
                     LexTokenKind::Symbol(Symbol::DoubleQuote) => self.get_lit_string()?,
                     LexTokenKind::Symbol(Symbol::SingleQuote) => self.get_lit_char()?,
                     _ => {
@@ -209,6 +219,7 @@ impl LexTokenIter {
     //   \"     (double quote)
     //
     // TODO: Unicode escape. Example: \u{7FFF}  (24-bit, up to 6 digits)
+    // TODO: Formatting string. Example "num x: {x}"  (== format!("num x: {}", x))
     /// Returns the string or char literal at the current position of the iterator.
     /// Will also escape any escape characters in the process.
     fn get_lit(&mut self, literal_symbol: Symbol) -> CustomResult<String> {
@@ -378,6 +389,28 @@ impl LexTokenIter {
         self.cur_column_nr += count as u64;
 
         Ok(LexTokenKind::Symbol(Symbol::WhiteSpace(count)))
+    }
+
+    /// Lexes a single line comment and returns the comment contents.
+    /// Does NOT consume the linebreak ending the comment.
+    /// The n is the size of the "CommentSingleLine" symbol.
+    fn get_comment_single(&mut self, n: usize) -> CustomResult<String> {
+        let mut comment = Vec::new();
+
+        // Consume the "CommentSingleLine" symbol.
+        for _ in 0..n {
+            self.iter.next();
+        }
+
+        while let Some(c) = self.iter.next() {
+            if LexTokenIter::valid_linebreak(c, self.iter.peek()) {
+                self.iter.put_back(c)?;
+                break;
+            }
+            comment.push(c);
+        }
+
+        Ok(comment.iter().collect())
     }
 
     /// Used when returing errors to include current line/column number.

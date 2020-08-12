@@ -42,6 +42,11 @@ pub enum Statement {
     Use(Path),
     Package(Path),
 
+    // AutoClosable.
+    With(Expression),
+    // Defer -> Run this expression at the end of the current block.
+    Defer(Expression),
+
     Assignment(AssignOperator, Variable, Expression),
 
     // The expr will contain the assigned value if this is a initialization.
@@ -49,7 +54,7 @@ pub enum Statement {
     VariableDecl(Variable, Option<Expression>),
 
     // TODO: Implement extern for variables as well.
-    // Declration of extern functions.
+    // Declaration of extern functions.
     ExternalDecl(Function),
 
     // static, private etc.
@@ -64,6 +69,8 @@ pub enum Expression {
     //       it will be stored in the surrounding expression.
     Literal(lex::token::Literal, Option<TypeStruct>),
 
+    // TODO: FIXME: The "Variable" struct contains a type. Should the type be
+    //              in this enum instead?
     Variable(Variable),
     //ArrayAccess(Option<ArrayAccess>),
     FunctionCall(FunctionCall),
@@ -145,11 +152,6 @@ pub enum BlockHeader {
     For(Variable, Expression),
     // TODO: Maybe merge while and loop (?)
     While(Option<Expression>),
-
-    // AutoClosable.
-    With(Expression),
-    // Defer -> Run this expression at the end of the current block.
-    Defer(Expression),
 
     // Function for testing, allows strings as test names with spaces etc.
     Test(Function),

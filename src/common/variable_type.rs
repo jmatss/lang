@@ -1,6 +1,6 @@
 use crate::error::CustomError::CodeGenError;
 use crate::{parse::token::Expression, CustomResult};
-use inkwell::{context::Context, types::BasicTypeEnum, AddressSpace};
+use inkwell::{context::Context, types::AnyTypeEnum, AddressSpace};
 
 // TODO: Make Int & Uint unbounded? But then what about pointer sized int?
 
@@ -58,10 +58,7 @@ impl Type {
         }
     }
 
-    pub fn to_codegen<'ctx>(
-        &self,
-        gen_context: &'ctx Context,
-    ) -> CustomResult<BasicTypeEnum<'ctx>> {
+    pub fn to_codegen<'ctx>(&self, gen_context: &'ctx Context) -> CustomResult<AnyTypeEnum<'ctx>> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Global;
 
@@ -69,12 +66,18 @@ impl Type {
             Type::Pointer(ptr) => {
                 // Get the type of the inner type and wrap into a "PointerType".
                 match ptr.to_codegen(gen_context)? {
-                    BasicTypeEnum::ArrayType(ty) => ty.ptr_type(address_space).into(),
-                    BasicTypeEnum::FloatType(ty) => ty.ptr_type(address_space).into(),
-                    BasicTypeEnum::IntType(ty) => ty.ptr_type(address_space).into(),
-                    BasicTypeEnum::PointerType(ty) => ty.ptr_type(address_space).into(),
-                    BasicTypeEnum::StructType(ty) => ty.ptr_type(address_space).into(),
-                    BasicTypeEnum::VectorType(ty) => ty.ptr_type(address_space).into(),
+                    AnyTypeEnum::ArrayType(ty) => ty.ptr_type(address_space).into(),
+                    AnyTypeEnum::FloatType(ty) => ty.ptr_type(address_space).into(),
+                    AnyTypeEnum::FunctionType(ty) => ty.ptr_type(address_space).into(),
+                    AnyTypeEnum::IntType(ty) => ty.ptr_type(address_space).into(),
+                    AnyTypeEnum::PointerType(ty) => ty.ptr_type(address_space).into(),
+                    AnyTypeEnum::StructType(ty) => ty.ptr_type(address_space).into(),
+                    AnyTypeEnum::VectorType(ty) => ty.ptr_type(address_space).into(),
+                    AnyTypeEnum::VoidType(_) => {
+                        // TODO: FIXME: Is this OK? Can't use pointer to void, use
+                        //              poniter to a igeneric" I8 instead.
+                        gen_context.i8_type().ptr_type(address_space).into()
+                    }
                 }
             }
             Type::Array(t, dim_opt) => {
@@ -86,25 +89,26 @@ impl Type {
                         .into(),
                 ));
             }
-            Type::Void => return Err(CodeGenError("TODO: Void".into())),
-            Type::Character => BasicTypeEnum::IntType(gen_context.i32_type()),
-            Type::String => return Err(CodeGenError("TODO: String".into())),
-            Type::Boolean => BasicTypeEnum::IntType(gen_context.bool_type()),
-            Type::Int => BasicTypeEnum::IntType(gen_context.i32_type()),
-            Type::Uint => BasicTypeEnum::IntType(gen_context.i32_type()),
-            Type::Float => BasicTypeEnum::FloatType(gen_context.f32_type()),
-            Type::I8 => BasicTypeEnum::IntType(gen_context.i8_type()),
-            Type::U8 => BasicTypeEnum::IntType(gen_context.i8_type()),
-            Type::I16 => BasicTypeEnum::IntType(gen_context.i16_type()),
-            Type::U16 => BasicTypeEnum::IntType(gen_context.i16_type()),
-            Type::I32 => BasicTypeEnum::IntType(gen_context.i32_type()),
-            Type::U32 => BasicTypeEnum::IntType(gen_context.i32_type()),
-            Type::F32 => BasicTypeEnum::FloatType(gen_context.f32_type()),
-            Type::I64 => BasicTypeEnum::IntType(gen_context.i64_type()),
-            Type::U64 => BasicTypeEnum::IntType(gen_context.i64_type()),
-            Type::F64 => BasicTypeEnum::FloatType(gen_context.f64_type()),
-            Type::I128 => BasicTypeEnum::IntType(gen_context.i128_type()),
-            Type::U128 => BasicTypeEnum::IntType(gen_context.i128_type()),
+            Type::Void => AnyTypeEnum::VoidType(gen_context.void_type()),
+            Type::Character => AnyTypeEnum::IntType(gen_context.i32_type()),
+            // TODO: What type should the string be?
+            Type::String => AnyTypeEnum::PointerType(gen_context.i8_type().ptr_type(address_space)),
+            Type::Boolean => AnyTypeEnum::IntType(gen_context.bool_type()),
+            Type::Int => AnyTypeEnum::IntType(gen_context.i32_type()),
+            Type::Uint => AnyTypeEnum::IntType(gen_context.i32_type()),
+            Type::Float => AnyTypeEnum::FloatType(gen_context.f32_type()),
+            Type::I8 => AnyTypeEnum::IntType(gen_context.i8_type()),
+            Type::U8 => AnyTypeEnum::IntType(gen_context.i8_type()),
+            Type::I16 => AnyTypeEnum::IntType(gen_context.i16_type()),
+            Type::U16 => AnyTypeEnum::IntType(gen_context.i16_type()),
+            Type::I32 => AnyTypeEnum::IntType(gen_context.i32_type()),
+            Type::U32 => AnyTypeEnum::IntType(gen_context.i32_type()),
+            Type::F32 => AnyTypeEnum::FloatType(gen_context.f32_type()),
+            Type::I64 => AnyTypeEnum::IntType(gen_context.i64_type()),
+            Type::U64 => AnyTypeEnum::IntType(gen_context.i64_type()),
+            Type::F64 => AnyTypeEnum::FloatType(gen_context.f64_type()),
+            Type::I128 => AnyTypeEnum::IntType(gen_context.i128_type()),
+            Type::U128 => AnyTypeEnum::IntType(gen_context.i128_type()),
             Type::Unknown(s) => return Err(CodeGenError(format!("Unknown type: {}", s))),
         })
     }

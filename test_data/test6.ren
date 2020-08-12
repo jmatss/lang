@@ -5,9 +5,17 @@ external function itoa(value: i32, s: {u8}, radix: i32) -> {u8}
 
 function fac(n: i32) -> i32
 {
+    var res: i32
     if n <= 1
     {
-        return 1
+        if (n == 1)
+        {
+            return 1
+        }
+        else
+        {
+            return 1
+        }
     }
     else
     {

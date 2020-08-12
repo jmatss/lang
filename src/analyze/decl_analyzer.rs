@@ -53,8 +53,10 @@ impl<'a> DeclAnalyzer<'a> {
         }
     }
 
-    fn analyze_func_header(&mut self, func: &Function, id: BlockId) -> CustomResult<()> {
-        let key = (func.name.clone(), id);
+    fn analyze_func_header(&mut self, func: &Function, func_id: BlockId) -> CustomResult<()> {
+        // Add the function in the scope of its root parent (`root_parent_id`).
+        let root_parent_id = self.context.get_root_parent(func_id)?;
+        let key = (func.name.clone(), root_parent_id);
         if let Some(prev_func) = self.context.functions.get_mut(&key) {
             // Function already declared somewhere, make sure that the
             // current declaration and the previous one matches.
@@ -102,10 +104,10 @@ impl<'a> DeclAnalyzer<'a> {
         } else {
             self.context.functions.insert(key, func.clone());
 
-            // Add the parameters as variables for this scope.
+            // Add the parameters as variables in the function scope.
             if let Some(ref params) = func.parameters {
                 for param in params {
-                    let param_key = (param.name.clone(), id);
+                    let param_key = (param.name.clone(), func_id);
                     self.context.variables.insert(param_key, param.clone());
                 }
             }
@@ -114,8 +116,10 @@ impl<'a> DeclAnalyzer<'a> {
         }
     }
 
-    fn analyze_struct_header(&mut self, struct_: &Struct, id: BlockId) -> CustomResult<()> {
-        let key = (struct_.name.clone(), id);
+    fn analyze_struct_header(&mut self, struct_: &Struct, struct_id: BlockId) -> CustomResult<()> {
+        // Add the struct in the scope of its root parent (`root_parent_id`).
+        let root_parent_id = self.context.get_root_parent(struct_id)?;
+        let key = (struct_.name.clone(), root_parent_id);
         if let Some(prev_struct) = self.context.structs.get(&key) {
             Err(AnalyzeError(format!(
                 "A struct with name \"{}\" already defined.",
@@ -127,8 +131,10 @@ impl<'a> DeclAnalyzer<'a> {
         }
     }
 
-    fn analyze_enum_header(&mut self, enum_: &Enum, id: BlockId) -> CustomResult<()> {
-        let key = (enum_.name.clone(), id);
+    fn analyze_enum_header(&mut self, enum_: &Enum, enum_id: BlockId) -> CustomResult<()> {
+        // Add the enum in the scope of its root parent (`root_parent_id`).
+        let root_parent_id = self.context.get_root_parent(enum_id)?;
+        let key = (enum_.name.clone(), root_parent_id);
         if let Some(prev_enum) = self.context.enums.get(&key) {
             Err(AnalyzeError(format!(
                 "A enum with name \"{}\" already defined.",
@@ -140,8 +146,14 @@ impl<'a> DeclAnalyzer<'a> {
         }
     }
 
-    fn analyze_interface_header(&mut self, interface: &Interface, id: BlockId) -> CustomResult<()> {
-        let key = (interface.name.clone(), id);
+    fn analyze_interface_header(
+        &mut self,
+        interface: &Interface,
+        interface_id: BlockId,
+    ) -> CustomResult<()> {
+        // Add the interface in the scope of its root parent (`root_parent_id`).
+        let root_parent_id = self.context.get_root_parent(interface_id)?;
+        let key = (interface.name.clone(), root_parent_id);
         if let Some(prev_interface) = self.context.interfaces.get(&key) {
             Err(AnalyzeError(format!(
                 "A interface with name \"{}\" already defined.",
@@ -153,13 +165,26 @@ impl<'a> DeclAnalyzer<'a> {
         }
     }
 
-    /// Need to add declaration of variable if this stmt is a variable decl.
+    /// Need to add declaration of variable if this stmt is a variable decl
+    /// and a function if this stmt is a external declaration.
     fn analyze_stmt(&mut self, stmt: &Statement) -> CustomResult<()> {
         let id = self.context.cur_block_id;
-        if let Statement::VariableDecl(var, _) = stmt {
-            let key = (var.name.clone(), id);
-            self.context.variables.insert(key, var.clone());
+
+        match stmt {
+            Statement::VariableDecl(var, _) => {
+                let key = (var.name.clone(), id);
+                self.context.variables.insert(key, var.clone());
+            }
+            Statement::ExternalDecl(func) => {
+                // TODO: Don't hardcode zeros for the default block everywhere.
+                // External declarations should always be in the default block.
+                let key = (func.name.clone(), 0);
+                self.context.functions.insert(key, func.clone());
+            }
+
+            _ => (),
         }
+
         Ok(())
     }
 }

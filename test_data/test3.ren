@@ -1,4 +1,4 @@
-function test_func() i32
+function test_func() -> i32
 {
     var res: i32
     

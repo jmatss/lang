@@ -81,30 +81,6 @@ impl ParseTokenIter {
                     return self.next_token();
                 }
 
-                // TODO: Multi line comments.
-                // If this is a comment, skip the comment and parse the token
-                // starting afterwards instead.
-                LexTokenKind::Symbol(Symbol::CommentSingleLine) => {
-                    while let Some(lex_token) = self.iter.next() {
-                        match lex_token.kind {
-                            LexTokenKind::Symbol(Symbol::LineBreak) => {
-                                return self.next_token();
-                            }
-                            LexTokenKind::EndOfFile => {
-                                self.iter.put_back(lex_token)?;
-                                return self.next_token();
-                            }
-
-                            // If no match, continue looping until a line
-                            // break or a EOF is found.
-                            _ => (),
-                        }
-                    }
-                    return Err(CodeGenError(
-                        "Received None when parsing single line comment".into(),
-                    ));
-                }
-
                 // If a "line" starts with a identifier this can either be a
                 // assignment to this identifier (assignment aren't treated as
                 // expression atm) or it will be an expression.
