@@ -6,7 +6,7 @@ use super::{
     },
 };
 use crate::{
-    lex::token::{LexTokenKind, Symbol},
+    lex::token::{LexToken, LexTokenKind, Symbol},
     CustomResult,
 };
 
@@ -82,9 +82,9 @@ impl<'a> ExprParser<'a> {
                 break;
             }
 
-            match lex_token.kind {
+            match lex_token.clone().kind {
                 LexTokenKind::Identifier(ident) => {
-                    let expr = self.parse_expr_ident(&ident)?;
+                    let expr = self.parse_expr_ident(lex_token, &ident)?;
                     self.shunt_operand(expr)?;
                 }
 
@@ -301,7 +301,11 @@ impl<'a> ExprParser<'a> {
     }
 
     // TODO: Seems like this gives incorrect column when parsed in some way.
-    fn parse_expr_ident(&mut self, ident: &str) -> CustomResult<Expression> {
+    fn parse_expr_ident(
+        &mut self,
+        old_lex_token: LexToken,
+        ident: &str,
+    ) -> CustomResult<Expression> {
         // The identifier will be either a function call or a reference to
         // a variable.
         if let Some(lex_token) = self.iter.peek_skip_space() {
@@ -312,9 +316,26 @@ impl<'a> ExprParser<'a> {
                     Ok(Expression::FunctionCall(func_call))
                 }
 
-                // Variable (most likely, will add more stuff here later so will
-                // not always just be variables that is caught here.)
+                // Variables or types (most likely, will add more stuff here.)
                 _ => {
+                    // See if this is a type. It is a type if the previous
+                    // operator was a binary operator that takes a type
+                    // as the right hand side.
+                    if let Some(last_op) = self.operators.last() {
+                        match last_op {
+                            Operator::BinaryOperator(BinaryOperator::As)
+                            | Operator::BinaryOperator(BinaryOperator::Is)
+                            | Operator::BinaryOperator(BinaryOperator::Of) => {
+                                // Put back the old_lex_token contaning this
+                                // identifier and parse as type.
+                                self.iter.put_back(old_lex_token)?;
+                                let ty = self.iter.parse_type()?;
+                                return Ok(Expression::Type(ty));
+                            }
+                            _ => (),
+                        }
+                    }
+
                     let var = self.iter.parse_var(ident)?;
                     Ok(Expression::Variable(var))
                 }

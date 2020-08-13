@@ -3,7 +3,7 @@ use crate::common::variable_type::Type;
 use crate::parse::token::{
     BinaryOperation, Operation, ParseToken, TypeStruct, UnaryOperation, Variable,
 };
-use crate::parse::token::{BlockHeader, Expression, ParseTokenKind, Statement};
+use crate::parse::token::{BinaryOperator, BlockHeader, Expression, ParseTokenKind, Statement};
 use crate::{lex::token::Literal, CustomResult};
 
 pub struct TypeAnalyzer<'a> {
@@ -67,6 +67,7 @@ impl<'a> TypeAnalyzer<'a> {
                     old_type_opt.clone()
                 })
             }
+            Expression::Type(type_struct) => Ok(Some(type_struct.clone())),
             Expression::Variable(var) => {
                 // If a previous type is set, replace it with the one in `var`.
                 // The "analyze_var_type" will just go one function call deep,
@@ -187,7 +188,7 @@ impl<'a> TypeAnalyzer<'a> {
         let left_type = self.analyze_expr_type(&mut bin_op.left, prev_type_opt.clone())?;
         let right_type = self.analyze_expr_type(&mut bin_op.right, prev_type_opt)?;
 
-        let inferred_type = self.infer_type(&left_type, &right_type);
+        let inferred_type = self.infer_type(bin_op, &left_type, &right_type);
         bin_op.ret_type = inferred_type.clone();
         Ok(inferred_type)
     }
@@ -318,19 +319,93 @@ impl<'a> TypeAnalyzer<'a> {
     // TODO: How should inheritance/implements etc. work?
     fn infer_type(
         &self,
+        bin_op: &mut BinaryOperation,
         left_type_opt: &Option<TypeStruct>,
         right_type_opt: &Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         if left_type_opt.is_some() && right_type_opt.is_none() {
+            self.set_type(bin_op.right.as_mut(), left_type_opt.clone());
             left_type_opt.clone()
         } else if left_type_opt.is_none() && right_type_opt.is_some() {
+            self.set_type(bin_op.left.as_mut(), right_type_opt.clone());
             right_type_opt.clone()
         } else if left_type_opt.is_some() && right_type_opt.is_some() {
-            // TODO: Ok to always prefer the left?
-            left_type_opt.clone()
+            let left_type = left_type_opt.clone().expect("left type None");
+            let right_type = right_type_opt.clone().expect("right type None");
+
+            // TODO: Generics.
+            // Match and see if this is a binary operation where one of the
+            // sides should be prefered. Otherwise have a look at the both
+            // types and try to figure out which one to prefer.
+            Some(match bin_op.operator {
+                BinaryOperator::In => {
+                    self.set_type(bin_op.right.as_mut(), left_type_opt.clone());
+                    left_type
+                }
+                BinaryOperator::Is => {
+                    self.set_type(bin_op.left.as_mut(), right_type_opt.clone());
+                    right_type
+                }
+                BinaryOperator::As => {
+                    self.set_type(bin_op.left.as_mut(), right_type_opt.clone());
+                    right_type
+                }
+                BinaryOperator::Of => {
+                    self.set_type(bin_op.left.as_mut(), right_type_opt.clone());
+                    right_type
+                }
+                BinaryOperator::Dot => {
+                    self.set_type(bin_op.left.as_mut(), right_type_opt.clone());
+                    right_type
+                }
+                BinaryOperator::ShiftLeft => {
+                    self.set_type(bin_op.right.as_mut(), left_type_opt.clone());
+                    left_type
+                }
+                BinaryOperator::ShiftRight => {
+                    self.set_type(bin_op.right.as_mut(), left_type_opt.clone());
+                    left_type
+                }
+                _ => {
+                    // The "compare" function will try and promote values and take the
+                    // one with the "higesht priority". Returns None if unable to compare
+                    // the types.
+                    if let Some(type_choice) = left_type.compare(&right_type) {
+                        match type_choice {
+                            crate::parse::token::TypeChoice::This => {
+                                self.set_type(bin_op.right.as_mut(), left_type_opt.clone());
+                                left_type
+                            }
+                            crate::parse::token::TypeChoice::Other => {
+                                self.set_type(bin_op.left.as_mut(), right_type_opt.clone());
+                                right_type
+                            }
+                        }
+                    } else {
+                        // TODO: Arbitrary choice of left_type, just take one.
+                        left_type
+                    }
+                }
+            })
         } else {
             // Both none.
             None
+        }
+    }
+
+    /// Set the type of a expression after it has ben infered.
+    fn set_type(&self, expr: &mut Expression, new_ty: Option<TypeStruct>) {
+        match expr {
+            Expression::Literal(_, old_ty) => *old_ty = new_ty,
+            Expression::Variable(var) => var.ret_type = new_ty,
+            Expression::Operation(op) => match op {
+                Operation::BinaryOperation(bin_op) => bin_op.ret_type = new_ty,
+                Operation::UnaryOperation(un_op) => un_op.ret_type = new_ty,
+            },
+
+            // Can't set type for function call.
+            Expression::FunctionCall(_) => (),
+            Expression::Type(_) => panic!("set_type for Type: {:?}", new_ty),
         }
     }
 }

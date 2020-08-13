@@ -1,5 +1,6 @@
 use crate::error::CustomError::ParseError;
 use crate::{common::variable_type::Type, lex, CustomResult};
+use std::cmp::Ordering;
 
 /// A unique number given to every block.
 pub type BlockId = usize;
@@ -68,6 +69,10 @@ pub enum Expression {
     //       "As" so that the type doesn't need to be stored in the literal,
     //       it will be stored in the surrounding expression.
     Literal(lex::token::Literal, Option<TypeStruct>),
+
+    // TODO: Is it ok to have type as a expression? This lets one handle binary
+    //       operators like ex. "as" in a simple way.
+    Type(TypeStruct),
 
     // TODO: FIXME: The "Variable" struct contains a type. Should the type be
     //              in this enum instead?
@@ -331,6 +336,321 @@ impl TypeStruct {
     pub fn new(t: Type, generics: Option<Vec<TypeStruct>>) -> Self {
         TypeStruct { t, generics }
     }
+
+    pub fn compare(&self, other: &TypeStruct) -> Option<TypeChoice> {
+        // TODO: Generics?
+        // TODO: Implement for more types.
+        match self.t {
+            Type::Pointer(_) => None,
+            Type::Array(_, _) => None,
+            Type::Void => None,
+            Type::Character => None,
+            Type::String => None,
+            Type::Boolean => None,
+            Type::Int => match other.t {
+                Type::Int
+                | Type::Uint
+                | Type::I8
+                | Type::U8
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32 => Some(TypeChoice::This),
+
+                Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64
+                | Type::F64
+                | Type::I128
+                | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::Uint => match other.t {
+                Type::Uint
+                | Type::I8
+                | Type::U8
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32 => Some(TypeChoice::This),
+
+                Type::Int
+                | Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64
+                | Type::F64
+                | Type::I128
+                | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::Float => match other.t {
+                Type::Int
+                | Type::Uint
+                | Type::I8
+                | Type::U8
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32 => Some(TypeChoice::This),
+
+                Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64
+                | Type::F64
+                | Type::I128
+                | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::I8 => match other.t {
+                Type::I8 | Type::U8 => Some(TypeChoice::This),
+
+                Type::Int
+                | Type::Uint
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64
+                | Type::F64
+                | Type::I128
+                | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::U8 => match other.t {
+                Type::U8 => Some(TypeChoice::This),
+
+                Type::I8
+                | Type::Int
+                | Type::Uint
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64
+                | Type::F64
+                | Type::I128
+                | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::I16 => match other.t {
+                Type::I8 | Type::U8 => Some(TypeChoice::This),
+
+                Type::Int
+                | Type::Uint
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64
+                | Type::F64
+                | Type::I128
+                | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::U16 => match other.t {
+                Type::I8 | Type::U8 => Some(TypeChoice::This),
+
+                Type::Int
+                | Type::Uint
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64
+                | Type::F64
+                | Type::I128
+                | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::I32 => match other.t {
+                Type::Int | Type::Uint | Type::I8 | Type::U8 | Type::I16 | Type::U16 => {
+                    Some(TypeChoice::This)
+                }
+
+                Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64
+                | Type::F64
+                | Type::I128
+                | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::U32 => match other.t {
+                Type::Int | Type::Uint | Type::I8 | Type::U8 | Type::I16 | Type::U16 => {
+                    Some(TypeChoice::This)
+                }
+
+                Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64
+                | Type::F64
+                | Type::I128
+                | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::F32 => match other.t {
+                Type::Int
+                | Type::Uint
+                | Type::I8
+                | Type::U8
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32 => Some(TypeChoice::This),
+
+                Type::I64 | Type::U64 | Type::F64 | Type::I128 | Type::U128 => {
+                    Some(TypeChoice::Other)
+                }
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::I64 => match other.t {
+                Type::Int
+                | Type::Uint
+                | Type::I8
+                | Type::U8
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32 => Some(TypeChoice::This),
+
+                Type::I64 | Type::U64 | Type::F64 | Type::I128 | Type::U128 => {
+                    Some(TypeChoice::Other)
+                }
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::U64 => match other.t {
+                Type::Int
+                | Type::Uint
+                | Type::I8
+                | Type::U8
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32 => Some(TypeChoice::This),
+
+                Type::I64 | Type::U64 | Type::F64 | Type::I128 | Type::U128 => {
+                    Some(TypeChoice::Other)
+                }
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::F64 => match other.t {
+                Type::Int
+                | Type::Uint
+                | Type::I8
+                | Type::U8
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64 => Some(TypeChoice::This),
+
+                Type::F64 | Type::I128 | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::I128 => match other.t {
+                Type::Int
+                | Type::Uint
+                | Type::I8
+                | Type::U8
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64
+                | Type::F64 => Some(TypeChoice::This),
+
+                Type::I128 | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::U128 => match other.t {
+                Type::Int
+                | Type::Uint
+                | Type::I8
+                | Type::U8
+                | Type::I16
+                | Type::U16
+                | Type::I32
+                | Type::U32
+                | Type::Float
+                | Type::F32
+                | Type::I64
+                | Type::U64
+                | Type::F64 => Some(TypeChoice::This),
+
+                Type::I128 | Type::U128 => Some(TypeChoice::Other),
+
+                Type::Unknown(_) => None,
+                _ => None,
+            },
+            Type::Unknown(_) => None,
+        }
+    }
+}
+
+pub enum TypeChoice {
+    This,
+    Other,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -611,9 +931,14 @@ impl ParseToken {
             lex::token::Symbol::SquareBracketEnd,
             lex::token::Symbol::CurlyBracketBegin,
             lex::token::Symbol::CurlyBracketEnd,
-            lex::token::Symbol::PointyBracketBegin,
-            lex::token::Symbol::PointyBracketEnd,
             */
+            lex::token::Symbol::PointyBracketBegin => {
+                Operator::BinaryOperator(BinaryOperator::LessThan)
+            }
+            lex::token::Symbol::PointyBracketEnd => {
+                Operator::BinaryOperator(BinaryOperator::GreaterThan)
+            }
+
             lex::token::Symbol::Increment => Operator::UnaryOperator(UnaryOperator::Increment),
             lex::token::Symbol::Decrement => Operator::UnaryOperator(UnaryOperator::Decrement),
 

@@ -1,0 +1,15 @@
+external function printf(format: {u8}, ...) -> i32
+
+function main() -> int
+{
+    var f = 1.0 as f64
+    if f > 2.0
+    {
+        printf("unreachable!")
+    }
+    else
+    {
+        printf("Result: %f", f)
+    }
+    return 0
+}

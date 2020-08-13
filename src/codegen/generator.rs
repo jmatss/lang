@@ -17,7 +17,7 @@ use inkwell::values::{
 };
 use inkwell::{
     basic_block::BasicBlock,
-    types::{AnyTypeEnum, BasicTypeEnum},
+    types::{AnyTypeEnum, BasicTypeEnum, PointerType},
     AddressSpace, FloatPredicate, IntPredicate,
 };
 use std::collections::HashMap;
@@ -948,6 +948,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Expression::Variable(var) => Ok(self.compile_var_load(var)?.into()),
             Expression::FunctionCall(func_call) => self.compile_func_call(func_call),
             Expression::Operation(op) => self.compile_op(op),
+            Expression::Type(ty) => {
+                // TODO: Does something need to be done here? Does a proper value
+                //       need to be returned? For now just return a dummy value.
+                Ok(match ty.t.to_codegen(&self.context)? {
+                    AnyTypeEnum::ArrayType(ty) => ty.const_zero().into(),
+                    AnyTypeEnum::FloatType(ty) => ty.const_zero().into(),
+                    AnyTypeEnum::IntType(ty) => ty.const_zero().into(),
+                    AnyTypeEnum::PointerType(ty) => ty.const_null().into(),
+                    AnyTypeEnum::StructType(ty) => ty.const_zero().into(),
+                    AnyTypeEnum::VectorType(ty) => ty.const_zero().into(),
+                    AnyTypeEnum::FunctionType(ty) => panic!("TODO: compile_exr function type?"),
+                    AnyTypeEnum::VoidType(ty) => panic!("TODO: compile_exr void type?"),
+                })
+            }
         }
     }
 
@@ -1281,7 +1295,37 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(match bin_op.operator {
             token::BinaryOperator::In => panic!("TODO: In"),
             token::BinaryOperator::Is => panic!("TODO: Is"),
-            token::BinaryOperator::As => panic!("TODO: As"),
+            token::BinaryOperator::As => {
+                // TODO: Will probably need to check both sides before doing a
+                //       cast. For example now, if the ret_type is float,
+                //       the left will be casted into a float. But it assumes
+                //       that the left side is some sort of float already.
+                match ret_type {
+                    AnyTypeEnum::ArrayType(ty) => {
+                        self.builder.build_bitcast(left, ty, "cast.array").into()
+                    }
+                    AnyTypeEnum::FloatType(ty) => self
+                        .builder
+                        .build_float_cast(left.into_float_value(), ty, "cast.float")
+                        .into(),
+                    AnyTypeEnum::IntType(ty) => self
+                        .builder
+                        .build_int_cast(left.into_int_value(), ty, "cast.int")
+                        .into(),
+                    AnyTypeEnum::PointerType(ty) => self
+                        .builder
+                        .build_pointer_cast(left.into_pointer_value(), ty, "cast.ptr")
+                        .into(),
+                    AnyTypeEnum::StructType(ty) => {
+                        self.builder.build_bitcast(left, ty, "cast.struct").into()
+                    }
+                    AnyTypeEnum::VectorType(ty) => {
+                        self.builder.build_bitcast(left, ty, "cast.vector").into()
+                    }
+                    AnyTypeEnum::FunctionType(_) => panic!("TODO: compile_bin_op function type."),
+                    AnyTypeEnum::VoidType(_) => panic!("TODO: compile_bin_op void type."),
+                }
+            }
             token::BinaryOperator::Of => panic!("TODO: Of"),
 
             // Create some sort of typedef that then can be used to iterate over.

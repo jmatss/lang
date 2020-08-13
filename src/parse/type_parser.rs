@@ -10,6 +10,9 @@ pub struct TypeParser<'a> {
     iter: &'a mut ParseTokenIter,
 }
 
+// TODO: Need to accept "right shift" (>>) as part of a type when generics are
+//       implemented.
+
 impl<'a> TypeParser<'a> {
     pub fn parse(iter: &'a mut ParseTokenIter) -> CustomResult<TypeStruct> {
         let mut type_parser = Self { iter };
