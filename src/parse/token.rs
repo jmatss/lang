@@ -1,6 +1,5 @@
-use crate::error::CustomError::ParseError;
+use crate::error::{LangError, LangErrorKind::ParseError};
 use crate::{common::variable_type::Type, lex, CustomResult};
-use std::cmp::Ordering;
 
 /// A unique number given to every block.
 pub type BlockId = usize;
@@ -320,7 +319,7 @@ impl Variable {
             name,
             ret_type,
             modifiers,
-            is_const: is_const,
+            is_const,
         }
     }
 }
@@ -820,10 +819,13 @@ impl Operator {
                 fix: info.2,
             })
         } else {
-            Err(ParseError(format!(
-                "Invalid operator, unable to get info: {:?}.",
-                self
-            )))
+            Err(LangError::new(
+                format!("Invalid operator, unable to get info: {:?}.", self),
+                ParseError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
+            ))
         }
     }
 }

@@ -12,14 +12,14 @@ extern crate log;
 use crate::analyze::analyzer;
 use crate::codegen::generator;
 use crate::compile::compiler;
-use crate::error::CustomError;
+use crate::error::LangErrorKind::GeneralError;
 use crate::lex::lexer;
 use crate::parse::parser;
-use crate::parse::token::ParseToken;
+use error::LangError;
 use inkwell::context::Context;
 use log::Level;
 
-pub type CustomResult<T> = Result<T, CustomError>;
+pub type CustomResult<T> = Result<T, LangError>;
 
 const MODULE_NAME: &str = "MODULE_NAME";
 const OUTPUT_PATH: &str = "a.o";
@@ -33,13 +33,22 @@ fn main() -> CustomResult<()> {
             args.len(),
             args[0]
         );
-        return Err(CustomError::GeneralError(msg));
+        return Err(LangError::new(msg, GeneralError));
     }
     let input_file = &args[1];
+    let module_name = args[1].split('/').last().unwrap();
 
     env_logger::init();
 
-    let lex_tokens = lexer::lex(input_file).unwrap();
+    let lex_tokens = match lexer::lex(input_file) {
+        Ok(lex_tokens) => lex_tokens,
+        Err(errs) => {
+            for e in errs {
+                error!("{}", e);
+            }
+            std::process::exit(1);
+        }
+    };
     if log_enabled!(Level::Debug) {
         for lex_token in &lex_tokens {
             debug!("{:?}", lex_token)
@@ -47,7 +56,15 @@ fn main() -> CustomResult<()> {
     }
     println!("Lexing complete.");
 
-    let mut ast_root: ParseToken = parser::parse(lex_tokens).unwrap();
+    let mut ast_root = match parser::parse(lex_tokens) {
+        Ok(ast_root) => ast_root,
+        Err(errs) => {
+            for e in errs {
+                error!("{}", e);
+            }
+            std::process::exit(1);
+        }
+    };
     debug!("\nAST after parsing:\n{:#?}", ast_root);
     println!("Parsing complete.");
 

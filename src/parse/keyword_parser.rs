@@ -2,7 +2,6 @@ use super::{
     iter::{ParseTokenIter, DEFAULT_STOP_CONDS},
     token::{BlockHeader, Function, ParseToken, ParseTokenKind, Path, Statement, Variable},
 };
-use crate::error::CustomError::ParseError;
 use crate::{
     lex::token::{Keyword, LexTokenKind, Symbol},
     CustomResult,
@@ -35,8 +34,7 @@ impl<'a> KeyworkParser<'a> {
         match keyword {
             // Parses all the else(x)/else blocks after aswell.
             Keyword::If => self.parse_if(),
-            Keyword::Else => Err(ParseError("Else keyword in keyword parser.".into())),
-
+            Keyword::Else => Err(self.iter.err("Else keyword in keyword parser.".into())),
             Keyword::Match => self.parse_match(),
 
             Keyword::For => self.parse_for(),
@@ -53,19 +51,21 @@ impl<'a> KeyworkParser<'a> {
 
             Keyword::Var => self.parse_var_decl(),
             Keyword::Const => self.parse_const_decl(),
-            Keyword::Static => Err(ParseError("\"Static\" keyword not implemented.".into())),
-            Keyword::Private => Err(ParseError("\"Private\" keyword not implemented.".into())),
-            Keyword::Public => Err(ParseError("\"Public\" keyword not implemented.".into())),
+            Keyword::Static => Err(self.iter.err("\"Static\" keyword not implemented.".into())),
+            Keyword::Private => Err(self.iter.err("\"Private\" keyword not implemented.".into())),
+            Keyword::Public => Err(self.iter.err("\"Public\" keyword not implemented.".into())),
 
             Keyword::Function => self.parse_func(),
-            Keyword::Struct => Err(ParseError("\"Struct\" keyword not implemented.".into())),
-            Keyword::Enum => Err(ParseError("\"Enum\" keyword not implemented.".into())),
-            Keyword::Interface => Err(ParseError("\"Interface\" keyword not implemented.".into())),
+            Keyword::Struct => Err(self.iter.err("\"Struct\" keyword not implemented.".into())),
+            Keyword::Enum => Err(self.iter.err("\"Enum\" keyword not implemented.".into())),
+            Keyword::Interface => Err(self
+                .iter
+                .err("\"Interface\" keyword not implemented.".into())),
 
-            Keyword::Defer => Err(ParseError("\"Defer\" keyword not implemented.".into())),
-            Keyword::With => Err(ParseError("\"With\" keyword not implemented.".into())),
+            Keyword::Defer => Err(self.iter.err("\"Defer\" keyword not implemented.".into())),
+            Keyword::With => Err(self.iter.err("\"With\" keyword not implemented.".into())),
 
-            Keyword::Test => Err(ParseError("\"Test\" keyword not implemented.".into())),
+            Keyword::Test => Err(self.iter.err("\"Test\" keyword not implemented.".into())),
         }
     }
 
@@ -88,9 +88,9 @@ impl<'a> KeyworkParser<'a> {
                     Some(self.iter.parse_expr(&DEFAULT_STOP_CONDS)?)
                 }
             } else {
-                return Err(ParseError(
-                    "Received None when looking at \"if case\" expr.".into(),
-                ));
+                return Err(self
+                    .iter
+                    .err("Received None when looking at \"if case\" expr.".into()));
             };
             let header = BlockHeader::IfCase(expr);
 
@@ -155,13 +155,13 @@ impl<'a> KeyworkParser<'a> {
             if let LexTokenKind::Identifier(ident) = lex_token.kind {
                 ident
             } else {
-                return Err(ParseError(format!(
+                return Err(self.iter.err(format!(
                     "Not ident when parsing \"for\" variable: {:?}",
                     lex_token
                 )));
             }
         } else {
-            return Err(ParseError("None when parsing \"for\" variable.".into()));
+            return Err(self.iter.err("None when parsing \"for\" variable.".into()));
         };
         let var = self.iter.parse_var(&ident)?;
 
@@ -170,15 +170,14 @@ impl<'a> KeyworkParser<'a> {
             if let LexTokenKind::Symbol(Symbol::In) = lex_token.kind {
                 // Do nothing, everything OK.
             } else {
-                return Err(ParseError(format!(
-                    "Expected \"In\" after for, got: {:?}.",
-                    lex_token
-                )));
+                return Err(self
+                    .iter
+                    .err(format!("Expected \"In\" after for, got: {:?}.", lex_token)));
             }
         } else {
-            return Err(ParseError(
-                "Received None when looking after \"for\"s In symbol.".into(),
-            ));
+            return Err(self
+                .iter
+                .err("Received None when looking after \"for\"s In symbol.".into()));
         }
 
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
@@ -202,9 +201,9 @@ impl<'a> KeyworkParser<'a> {
                 Some(self.iter.parse_expr(&DEFAULT_STOP_CONDS)?)
             }
         } else {
-            return Err(ParseError(
-                "Received None when looking at \"while\" expr.".into(),
-            ));
+            return Err(self
+                .iter
+                .err("Received None when looking at \"while\" expr.".into()));
         };
 
         let header = BlockHeader::While(expr);
@@ -270,15 +269,15 @@ impl<'a> KeyworkParser<'a> {
                 if let LexTokenKind::Identifier(ident) = lex_token.kind {
                     path_parts.push(ident);
                 } else {
-                    return Err(ParseError(format!(
+                    return Err(self.iter.err(format!(
                         "Expected ident when parsing \"use\" path, got: {:?}",
                         lex_token
                     )));
                 }
             } else {
-                return Err(ParseError(
-                    "Received None when looking at \"use\" path.".into(),
-                ));
+                return Err(self
+                    .iter
+                    .err("Received None when looking at \"use\" path.".into()));
             }
 
             // The next symbol should either be a dot which indicates that the
@@ -292,14 +291,14 @@ impl<'a> KeyworkParser<'a> {
                     self.iter.next_skip_space(); // Consume "LineBreak".
                     break;
                 } else {
-                    return Err(ParseError(
-                        "Received None when looking at \"use\" path.".into(),
-                    ));
+                    return Err(self
+                        .iter
+                        .err("Received None when looking at \"use\" path.".into()));
                 }
             } else {
-                return Err(ParseError(
-                    "Received None when looking at separator in \"use\" path.".into(),
-                ));
+                return Err(self
+                    .iter
+                    .err("Received None when looking at separator in \"use\" path.".into()));
             }
         }
 
@@ -320,15 +319,15 @@ impl<'a> KeyworkParser<'a> {
                 if let LexTokenKind::Identifier(ident) = lex_token.kind {
                     path_parts.push(ident);
                 } else {
-                    return Err(ParseError(format!(
+                    return Err(self.iter.err(format!(
                         "Expected ident when parsing \"package\" path, got: {:?}",
                         lex_token
                     )));
                 }
             } else {
-                return Err(ParseError(
-                    "Received None when looking at \"package\" path.".into(),
-                ));
+                return Err(self
+                    .iter
+                    .err("Received None when looking at \"package\" path.".into()));
             }
 
             // The next symbol should either be a dot which indicates that the
@@ -342,14 +341,14 @@ impl<'a> KeyworkParser<'a> {
                     self.iter.next_skip_space(); // Consume "LineBreak".
                     break;
                 } else {
-                    return Err(ParseError(
-                        "Received None when looking at \"package\" path.".into(),
-                    ));
+                    return Err(self
+                        .iter
+                        .err("Received None when looking at \"package\" path.".into()));
                 }
             } else {
-                return Err(ParseError(
-                    "Received None when looking at separator in \"package\" path.".into(),
-                ));
+                return Err(self
+                    .iter
+                    .err("Received None when looking at separator in \"package\" path.".into()));
             }
         }
 
@@ -367,19 +366,19 @@ impl<'a> KeyworkParser<'a> {
             let func = match lex_token.kind {
                 LexTokenKind::Keyword(Keyword::Function) => self.parse_func_proto()?,
                 _ => {
-                    return Err(ParseError(format!(
+                    return Err(self.iter.err(format!(
                         "Invalid keyword after external keyword: {:?}",
                         lex_token
-                    )))
+                    )));
                 }
             };
 
             let kind = ParseTokenKind::Statement(Statement::ExternalDecl(func));
             Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
         } else {
-            Err(ParseError(
-                "Received None lex token after external keyword.".into(),
-            ))
+            Err(self
+                .iter
+                .err("Received None lex token after external keyword.".into()))
         }
     }
 
@@ -392,15 +391,15 @@ impl<'a> KeyworkParser<'a> {
             if let LexTokenKind::Identifier(ident) = lex_token.kind {
                 ident
             } else {
-                return Err(ParseError(format!(
+                return Err(self.iter.err(format!(
                     "Expected ident when parsing \"var\", got: {:?}",
                     lex_token
                 )));
             }
         } else {
-            return Err(ParseError(
-                "Received None when looking at token after \"var\".".into(),
-            ));
+            return Err(self
+                .iter
+                .err("Received None when looking at token after \"var\".".into()));
         };
 
         // If the next token is a "Colon", parse the type.
@@ -412,9 +411,9 @@ impl<'a> KeyworkParser<'a> {
                 None
             }
         } else {
-            return Err(ParseError(
-                "Received None when looking at token after \"var <ident>\".".into(),
-            ));
+            return Err(self
+                .iter
+                .err("Received None when looking at token after \"var <ident>\".".into()));
         };
 
         // If the next token is a "Equals" this is an initializer, parse the
@@ -427,7 +426,7 @@ impl<'a> KeyworkParser<'a> {
                 None
             }
         } else {
-            return Err(ParseError(
+            return Err(self.iter.err(
                 "Received None when looking at token after \"var <ident> [: <type>]\".".into(),
             ));
         };
@@ -450,15 +449,15 @@ impl<'a> KeyworkParser<'a> {
             if let LexTokenKind::Identifier(ident) = lex_token.kind {
                 ident
             } else {
-                return Err(ParseError(format!(
+                return Err(self.iter.err(format!(
                     "Expected ident when parsing \"const\", got: {:?}",
                     lex_token
                 )));
             }
         } else {
-            return Err(ParseError(
-                "Received None when looking at token after \"const\".".into(),
-            ));
+            return Err(self
+                .iter
+                .err("Received None when looking at token after \"const\".".into()));
         };
 
         // The the next token should be a "Colon", parse the type.
@@ -466,15 +465,15 @@ impl<'a> KeyworkParser<'a> {
             if let LexTokenKind::Symbol(Symbol::Colon) = lex_token.kind {
                 self.iter.parse_type()?
             } else {
-                return Err(ParseError(format!(
+                return Err(self.iter.err(format!(
                     "Expected type when parsing \"const\", got: {:?}",
                     lex_token
                 )));
             }
         } else {
-            return Err(ParseError(
-                "Received None when looking at token after \"const <ident>\".".into(),
-            ));
+            return Err(self
+                .iter
+                .err("Received None when looking at token after \"const <ident>\".".into()));
         };
 
         // The the next token should be a "Equals" (assignment), parse the expr.
@@ -482,15 +481,15 @@ impl<'a> KeyworkParser<'a> {
             if let LexTokenKind::Symbol(Symbol::Equals) = lex_token.kind {
                 self.iter.parse_expr(&DEFAULT_STOP_CONDS)?
             } else {
-                return Err(ParseError(format!(
+                return Err(self.iter.err(format!(
                     "Expected expressing when parsing \"const\", got: {:?}",
                     lex_token
                 )));
             }
         } else {
-            return Err(ParseError(
-                "Received None when looking at \"const\" assigned value.".into(),
-            ));
+            return Err(self
+                .iter
+                .err("Received None when looking at \"const\" assigned value.".into()));
         };
 
         let variable = Variable::new(ident, Some(var_type), None, true);
@@ -518,15 +517,15 @@ impl<'a> KeyworkParser<'a> {
             if let LexTokenKind::Identifier(ident) = lex_token.kind {
                 ident
             } else {
-                return Err(ParseError(format!(
+                return Err(self.iter.err(format!(
                     "Expected ident when parsing \"function\", got: {:?}",
                     lex_token
                 )));
             }
         } else {
-            return Err(ParseError(
-                "Received None when looking at token after \"function\".".into(),
-            ));
+            return Err(self
+                .iter
+                .err("Received None when looking at token after \"function\".".into()));
         };
 
         let (params, is_var_arg) = self.iter.parse_par_list()?;
@@ -543,9 +542,9 @@ impl<'a> KeyworkParser<'a> {
                 None
             }
         } else {
-            return Err(ParseError(
-                "Received None when looking at token after \"function <ident>\".".into(),
-            ));
+            return Err(self
+                .iter
+                .err("Received None when looking at token after \"function <ident>\".".into()));
         };
 
         let params_opt = if !params.is_empty() {

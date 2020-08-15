@@ -159,6 +159,15 @@ pub enum Symbol {
 }
 
 impl LexToken {
+    pub fn is_break_symbol(&self) -> bool {
+        match self.kind {
+            LexTokenKind::Symbol(Symbol::LineBreak) | LexTokenKind::Symbol(Symbol::SemiColon) => {
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Sees if the given `ident` is a valid bool literal. If it is, returns
     /// the literal as a token type, otherwise returns None.
     pub fn get_if_bool(ident: &str) -> Option<LexTokenKind> {

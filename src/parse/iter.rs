@@ -7,12 +7,11 @@ use super::{
     },
     type_parser::TypeParser,
 };
-use crate::error::CustomError::CodeGenError;
 use crate::lex::token::{Keyword, LexToken, LexTokenKind, Symbol};
 use crate::CustomResult;
 use crate::{
     common::iter::TokenIter,
-    error::CustomError::{self, ParseError},
+    error::{LangError, LangErrorKind::ParseError},
 };
 
 /// The common stop conditions used when parsing expressions.
@@ -68,6 +67,14 @@ impl ParseTokenIter {
             self.cur_line_nr = lex_token.line_nr;
             self.cur_column_nr = lex_token.column_nr;
 
+            // Skip any "break" and white space symbols. Call this function
+            // recursively to get an "actual" token.
+            if lex_token.is_break_symbol() {
+                return self.next_token();
+            } else if let LexTokenKind::Symbol(Symbol::WhiteSpace(_)) = lex_token.kind {
+                return self.next_token();
+            }
+
             let kind = match lex_token.kind {
                 LexTokenKind::Keyword(keyword) => {
                     return self.parse_keyword(keyword, lex_token.line_nr, lex_token.column_nr);
@@ -97,7 +104,7 @@ impl ParseTokenIter {
                                 let stmt = Statement::Assignment(assign_op, var, expr);
                                 ParseTokenKind::Statement(stmt)
                             } else {
-                                return Err(CodeGenError(format!(
+                                return Err(self.err(format!(
                                     "Expected assign operator when parsing ident, got: {:?}",
                                     &lex_token
                                 )));
@@ -110,6 +117,18 @@ impl ParseTokenIter {
                         let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
                         ParseTokenKind::Expression(expr)
                     }
+                }
+
+                // Error if the iterator finds a lonely symbol of these types:
+                LexTokenKind::Symbol(Symbol::ParenthesisEnd)
+                | LexTokenKind::Symbol(Symbol::CurlyBracketEnd)
+                | LexTokenKind::Symbol(Symbol::PointyBracketEnd)
+                | LexTokenKind::Symbol(Symbol::SquareBracketEnd) => {
+                    let msg = format!(
+                        "Found end symbol with no corresponding start: {:?}",
+                        lex_token
+                    );
+                    return Err(self.err(msg));
                 }
 
                 // If a literal or symbol is found, one can assume that they
@@ -128,7 +147,8 @@ impl ParseTokenIter {
 
             Ok(ParseToken::new(kind, self.cur_line_nr, self.cur_column_nr))
         } else {
-            Err(ParseError("Received None when parsing next token.".into()))
+            let kind = ParseTokenKind::EndOfFile;
+            Ok(ParseToken::new(kind, 0, 0))
         }
     }
 
@@ -146,13 +166,13 @@ impl ParseTokenIter {
                 line_nr = lex_token.line_nr;
                 column_nr = lex_token.column_nr;
             } else {
-                return Err(ParseError(format!(
+                return Err(self.err(format!(
                     "Received invalid token at start of block: {:?}",
                     lex_token
                 )));
             }
         } else {
-            return Err(ParseError("Received None at start of block.".into()));
+            return Err(self.err("Received None at start of block.".into()));
         }
 
         loop {
@@ -196,9 +216,7 @@ impl ParseTokenIter {
                 _ => None,
             })
         } else {
-            Err(CodeGenError(
-                "next_lex_token None when parsing ident.".into(),
-            ))
+            Err(self.err("next_lex_token None when parsing ident.".into()))
         }
     }
 
@@ -298,15 +316,13 @@ impl ParseTokenIter {
                 } else if let LexTokenKind::Symbol(Symbol::ParenthesisEnd) = lex_token.kind {
                     return Ok(arguments);
                 } else {
-                    return Err(ParseError(format!(
+                    return Err(self.err(format!(
                         "Received invalid LexToken at end of argument in arg list: {:?}",
                         lex_token
                     )));
                 }
             } else {
-                return Err(ParseError(
-                    "Received None at end of argument in arg list.".into(),
-                ));
+                return Err(self.err("Received None at end of argument in arg list.".into()));
             }
         }
     }
@@ -349,16 +365,14 @@ impl ParseTokenIter {
                     LexTokenKind::Symbol(Symbol::TripleDot) => is_var_arg = true,
 
                     _ => {
-                        return Err(ParseError(format!(
+                        return Err(self.err(format!(
                             "Invalid token when parsing ident in par list: {:?}",
                             lex_token
-                        )))
+                        )));
                     }
                 }
             } else {
-                return Err(ParseError(
-                    "Received None when parsing ident in par list.".into(),
-                ));
+                return Err(self.err("Received None when parsing ident in par list.".into()));
             };
 
             // A parameter has just been parsed above. The next character should
@@ -370,15 +384,13 @@ impl ParseTokenIter {
                 } else if let LexTokenKind::Symbol(Symbol::ParenthesisEnd) = lex_token.kind {
                     return Ok((parameters, is_var_arg));
                 } else {
-                    return Err(ParseError(format!(
+                    return Err(self.err(format!(
                         "Received invalid LexToken at end of parameter in par list: {:?}",
                         lex_token
                     )));
                 }
             } else {
-                return Err(ParseError(
-                    "Received None at end of parameter in par list.".into(),
-                ));
+                return Err(self.err("Received None at end of parameter in par list.".into()));
             }
         }
     }
@@ -391,15 +403,13 @@ impl ParseTokenIter {
             if let LexTokenKind::Symbol(Symbol::Colon) = lex_token.kind {
                 self.parse_type()
             } else {
-                Err(ParseError(format!(
+                Err(self.err(format!(
                     "Invalid token when parsing colon in par list: {:?}",
                     lex_token
                 )))
             }
         } else {
-            Err(ParseError(
-                "Received None expecting colon in par list.".into(),
-            ))
+            Err(self.err("Received None expecting colon in par list.".into()))
         }
     }
 
@@ -502,10 +512,22 @@ impl ParseTokenIter {
     //       and "common.iter.putback" is called (need to keep track of it is
     //       a line break that is next/putback).
     /// Used when returing errors to include current line/column number.
-    pub fn err(&self, msg: &str) -> CustomError {
-        CustomError::ParseError(format!(
-            "{} ({}:{}).",
-            msg, self.cur_line_nr, self.cur_column_nr
-        ))
+    /// When a error is found, the iterator will move forward until a "break"
+    /// symbol is found. This is done to try and find a good new starting point
+    /// to continue parsing from.
+    pub(super) fn err(&mut self, msg: String) -> LangError {
+        while let Some(lex_token) = self.iter.next() {
+            if lex_token.is_break_symbol() {
+                break;
+            }
+        }
+        LangError::new_backtrace(
+            msg,
+            ParseError {
+                line_nr: self.cur_line_nr,
+                column_nr: self.cur_column_nr,
+            },
+            false,
+        )
     }
 }

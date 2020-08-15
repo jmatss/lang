@@ -1,5 +1,5 @@
 use crate::analyze::analyzer::AnalyzeContext;
-use crate::error::CustomError::AnalyzeError;
+use crate::error::{LangError, LangErrorKind::AnalyzeError};
 use crate::parse::token::{
     BlockHeader, BlockId, Enum, Function, Interface, ParseToken, ParseTokenKind, Statement, Struct,
 };
@@ -12,7 +12,7 @@ pub struct DeclAnalyzer<'a> {
 impl<'a> DeclAnalyzer<'a> {
     /// Takes in a the root of the AST and walks the whole tree to find all
     /// declarations/prototypes and adds them to the `AnalyzeContext` so that
-    /// key can quickly be looked up during LLVM code generation.
+    /// they can quickly be looked up during LLVM code generation.
     pub fn analyze(context: &'a mut AnalyzeContext, ast_root: &mut ParseToken) -> CustomResult<()> {
         let mut decl_analyzer = DeclAnalyzer::new(context);
         decl_analyzer.analyze_token(ast_root)
@@ -99,7 +99,7 @@ impl<'a> DeclAnalyzer<'a> {
                     "Function \"{}\" has two unequal declarations: ",
                     &func.name
                 ));
-                Err(AnalyzeError(err_msg))
+                Err(LangError::new(err_msg, AnalyzeError))
             }
         } else {
             self.context.functions.insert(key, func.clone());
@@ -121,10 +121,13 @@ impl<'a> DeclAnalyzer<'a> {
         let root_parent_id = self.context.get_root_parent(struct_id)?;
         let key = (struct_.name.clone(), root_parent_id);
         if let Some(prev_struct) = self.context.structs.get(&key) {
-            Err(AnalyzeError(format!(
-                "A struct with name \"{}\" already defined.",
-                prev_struct.name
-            )))
+            Err(LangError::new(
+                format!(
+                    "A struct with name \"{}\" already defined.",
+                    prev_struct.name
+                ),
+                AnalyzeError,
+            ))
         } else {
             self.context.structs.insert(key, struct_.clone());
             Ok(())
@@ -136,10 +139,10 @@ impl<'a> DeclAnalyzer<'a> {
         let root_parent_id = self.context.get_root_parent(enum_id)?;
         let key = (enum_.name.clone(), root_parent_id);
         if let Some(prev_enum) = self.context.enums.get(&key) {
-            Err(AnalyzeError(format!(
-                "A enum with name \"{}\" already defined.",
-                prev_enum.name
-            )))
+            Err(LangError::new(
+                format!("A enum with name \"{}\" already defined.", prev_enum.name),
+                AnalyzeError,
+            ))
         } else {
             self.context.enums.insert(key, enum_.clone());
             Ok(())
@@ -155,10 +158,13 @@ impl<'a> DeclAnalyzer<'a> {
         let root_parent_id = self.context.get_root_parent(interface_id)?;
         let key = (interface.name.clone(), root_parent_id);
         if let Some(prev_interface) = self.context.interfaces.get(&key) {
-            Err(AnalyzeError(format!(
-                "A interface with name \"{}\" already defined.",
-                prev_interface.name
-            )))
+            Err(LangError::new(
+                format!(
+                    "A interface with name \"{}\" already defined.",
+                    prev_interface.name
+                ),
+                AnalyzeError,
+            ))
         } else {
             self.context.interfaces.insert(key, interface.clone());
             Ok(())

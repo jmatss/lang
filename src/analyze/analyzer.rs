@@ -1,7 +1,7 @@
 use super::block_analyzer::BlockAnalyzer;
 use crate::analyze::decl_analyzer::DeclAnalyzer;
 use crate::analyze::type_analyzer::TypeAnalyzer;
-use crate::error::CustomError::AnalyzeError;
+use crate::error::{LangError, LangErrorKind::AnalyzeError};
 use crate::parse::token::{BlockId, Enum, Function, Interface, ParseToken, Struct, Variable};
 use crate::CustomResult;
 use std::collections::HashMap;
@@ -22,9 +22,10 @@ pub struct BlockInfo {
     pub contains_with: bool,
 
     /// Contains information about the control flow of children. If all children
-    /// contains a specific statement, some branch instructions might not have
-    /// to be generated for the current block during code generation.
-    pub all_children_contains_return: bool,
+    /// contains a branch instruction, this block doesn't not need to add a
+    /// implicit "terminator" at the end of the basic block, since there is no
+    /// logical path that leads to the end of this block.
+    pub all_children_contains_branches: bool,
 
     /// A "block root" is a block that starts a new scope that contains blocks that
     /// only have access to items inside this scope.
@@ -53,7 +54,7 @@ impl BlockInfo {
             contains_continue: false,
             contains_defer: false,
             contains_with: false,
-            all_children_contains_return: false,
+            all_children_contains_branches: false,
             is_root_block,
         }
     }
@@ -103,23 +104,29 @@ impl AnalyzeContext {
             if let Some(block_info) = self.block_info.get(&id) {
                 // TODO: How should this work for the default block?
                 if id == block_info.parent_id {
-                    Err(AnalyzeError(format!(
-                        "Block with id {} is its own parent in block info.",
-                        id
-                    )))
+                    Err(LangError::new(
+                        format!("Block with id {} is its own parent in block info.", id),
+                        AnalyzeError,
+                    ))
                 } else if !block_info.is_root_block {
                     self.get_var_decl_scope(ident, block_info.parent_id)
                 } else {
-                    Err(AnalyzeError(format!(
-                        "Unable to find var decl for \"{}\" in scope of root block {}.",
-                        ident, id
-                    )))
+                    Err(LangError::new(
+                        format!(
+                            "Unable to find var decl for \"{}\" in scope of root block {}.",
+                            ident, id
+                        ),
+                        AnalyzeError,
+                    ))
                 }
             } else {
-                Err(AnalyzeError(format!(
-                    "Unable to get var decl block info for block with id: {}",
-                    id
-                )))
+                Err(LangError::new(
+                    format!(
+                        "Unable to get var decl block info for block with id: {}",
+                        id
+                    ),
+                    AnalyzeError,
+                ))
             }
         }
     }
@@ -137,10 +144,13 @@ impl AnalyzeContext {
             cur_id = block_info.parent_id;
         }
 
-        Err(AnalyzeError(format!(
-            "Unable to get func \"{}\" block info for block with id: {}, ended at ID: {}.",
-            &ident, &id, &cur_id
-        )))
+        Err(LangError::new(
+            format!(
+                "Unable to get func \"{}\" block info for block with id: {}, ended at ID: {}.",
+                &ident, &id, &cur_id
+            ),
+            AnalyzeError,
+        ))
     }
 
     /// Given a block id `id`, returns the ID for the first root block
@@ -153,10 +163,10 @@ impl AnalyzeContext {
         let mut cur_id = if let Some(block_info) = self.block_info.get(&id) {
             block_info.parent_id
         } else {
-            return Err(AnalyzeError(format!(
-                "The given block id doesn't have a parent: {}",
-                id
-            )));
+            return Err(LangError::new(
+                format!("The given block id doesn't have a parent: {}", id),
+                AnalyzeError,
+            ));
         };
 
         while let Some(block_info) = self.block_info.get(&cur_id) {
@@ -168,10 +178,13 @@ impl AnalyzeContext {
             }
         }
 
-        Err(AnalyzeError(format!(
-            "Unable to get root block info for block with id {}, ended at block ID: {}.",
-            &id, &cur_id
-        )))
+        Err(LangError::new(
+            format!(
+                "Unable to get root block info for block with id {}, ended at block ID: {}.",
+                &id, &cur_id
+            ),
+            AnalyzeError,
+        ))
     }
 }
 

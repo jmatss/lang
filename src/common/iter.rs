@@ -1,4 +1,4 @@
-use crate::error::CustomError::GeneralError;
+use crate::error::{LangError, LangErrorKind::GeneralError};
 use crate::CustomResult;
 use std::collections::LinkedList;
 
@@ -39,7 +39,10 @@ impl<I: Clone> TokenIter<I> {
             let _ = self.buff.push_front(item);
             Ok(())
         } else {
-            Err(GeneralError("Push back buffer was full".into()))
+            Err(LangError::new(
+                "Push back buffer was full".into(),
+                GeneralError,
+            ))
         }
     }
 

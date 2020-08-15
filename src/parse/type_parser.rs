@@ -1,5 +1,4 @@
 use super::{iter::ParseTokenIter, token::TypeStruct};
-use crate::error::CustomError::ParseError;
 use crate::{
     common::variable_type::Type,
     lex::token::{LexTokenKind, Symbol},
@@ -48,10 +47,12 @@ impl<'a> TypeParser<'a> {
                 // Array/slice.
                 LexTokenKind::Symbol(Symbol::SquareBracketBegin) => self.parse_type_array(),
 
-                _ => Err(ParseError(format!("Invalid type token: {:?}", lex_token))),
+                _ => Err(self
+                    .iter
+                    .err(format!("Invalid type token: {:?}", lex_token))),
             }
         } else {
-            Err(ParseError("Received None when parsing type.".into()))
+            Err(self.iter.err("Received None when parsing type.".into()))
         }
     }
 
@@ -73,7 +74,7 @@ impl<'a> TypeParser<'a> {
         // Sanity check to see if this is a generic list with no items inside.
         if let Some(lex_token) = self.iter.peek_skip_space() {
             if let LexTokenKind::Symbol(Symbol::PointyBracketEnd) = lex_token.kind {
-                return Err(ParseError("Empty generic list.".into()));
+                return Err(self.iter.err("Empty generic list.".into()));
             }
         }
 
@@ -96,16 +97,16 @@ impl<'a> TypeParser<'a> {
                         return Ok(Some(generics));
                     }
                     _ => {
-                        return Err(ParseError(format!(
+                        return Err(self.iter.err(format!(
                             "Received unexpected token after argument in generic list: {:?}",
                             lex_token
-                        )))
+                        )));
                     }
                 }
             } else {
-                return Err(ParseError(
-                    "Received None after argument in generic list.".into(),
-                ));
+                return Err(self
+                    .iter
+                    .err("Received None after argument in generic list.".into()));
             }
         }
     }
@@ -125,13 +126,15 @@ impl<'a> TypeParser<'a> {
             if let LexTokenKind::Symbol(Symbol::CurlyBracketEnd) = lex_token.kind {
                 Ok(type_struct)
             } else {
-                Err(ParseError(format!(
+                Err(self.iter.err(format!(
                     "Expected curlybrace at end of pointer type, got: {:?}.",
                     lex_token
                 )))
             }
         } else {
-            Err(ParseError("Received None at end of pointer type.".into()))
+            Err(self
+                .iter
+                .err("Received None at end of pointer type.".into()))
         }
     }
 
@@ -177,24 +180,24 @@ impl<'a> TypeParser<'a> {
                     if let LexTokenKind::Symbol(Symbol::SquareBracketEnd) = next_lex_token.kind {
                         Ok(type_struct)
                     } else {
-                        Err(ParseError(format!(
+                        Err(self.iter.err(format!(
                             "Received invalid token in end of array type: {:?}.",
                             next_lex_token
                         )))
                     }
                 } else {
-                    Err(ParseError(
-                        "Received None at end of array type with size.".into(),
-                    ))
+                    Err(self
+                        .iter
+                        .err("Received None at end of array type with size.".into()))
                 }
             } else {
-                Err(ParseError(format!(
+                Err(self.iter.err(format!(
                     "Received invalid token in array type: {:?}.",
                     lex_token
                 )))
             }
         } else {
-            Err(ParseError("Received None at end of array type.".into()))
+            Err(self.iter.err("Received None at end of array type.".into()))
         }
     }
 }

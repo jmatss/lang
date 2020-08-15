@@ -1,4 +1,4 @@
-use crate::error::CustomError::CodeGenError;
+use crate::error::{LangError, LangErrorKind::CodeGenError};
 use crate::{parse::token::Expression, CustomResult};
 use inkwell::{context::Context, types::AnyTypeEnum, AddressSpace};
 
@@ -84,9 +84,10 @@ impl Type {
                 // TODO: Can fetch the inner type and call "array_type()" on it,
                 //       but the function takes a "u32" as argument, so need to
                 //       convert the "dim_opt" Expression into a u32 if possible.
-                return Err(CodeGenError(
+                return Err(LangError::new(
                     "TODO: Array. Need to calculate dimension and the return a \"ArrayType\""
                         .into(),
+                    CodeGenError,
                 ));
             }
             Type::Void => AnyTypeEnum::VoidType(gen_context.void_type()),
@@ -109,7 +110,9 @@ impl Type {
             Type::F64 => AnyTypeEnum::FloatType(gen_context.f64_type()),
             Type::I128 => AnyTypeEnum::IntType(gen_context.i128_type()),
             Type::U128 => AnyTypeEnum::IntType(gen_context.i128_type()),
-            Type::Unknown(s) => return Err(CodeGenError(format!("Unknown type: {}", s))),
+            Type::Unknown(s) => {
+                return Err(LangError::new(format!("Unknown type: {}", s), CodeGenError))
+            }
         })
     }
 }

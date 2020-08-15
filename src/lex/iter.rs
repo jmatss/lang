@@ -1,5 +1,5 @@
 use super::token::LexTokenKind;
-use crate::error::CustomError::{self, LexError};
+use crate::error::{LangError, LangErrorKind::LexError};
 use crate::lex::token::{LexToken, Literal, Symbol};
 use crate::{common::iter::TokenIter, CustomResult};
 
@@ -47,27 +47,26 @@ impl LexTokenIter {
                 //   keyword        ("if", "enum" etc.)
                 //   symbol         ("and", "as" etc.)
                 //   bool literal   (true/false)
-                if let Some(symbol_type) = LexToken::get_if_symbol(&ident) {
-                    symbol_type
-                } else if let Some(keyword_type) = LexToken::get_if_keyword(&ident) {
-                    keyword_type
-                } else if let Some(bool_type) = LexToken::get_if_bool(&ident) {
-                    bool_type
+                if let Some(symbol_kind) = LexToken::get_if_symbol(&ident) {
+                    symbol_kind
+                } else if let Some(keyword_kind) = LexToken::get_if_keyword(&ident) {
+                    keyword_kind
+                } else if let Some(bool_kind) = LexToken::get_if_bool(&ident) {
+                    bool_kind
                 } else {
                     LexTokenKind::Identifier(ident)
                 }
-            } else if let Some(symbol_type_tup) = LexToken::get_if_symbol_three_chars(c1, c2, c3) {
-                let (symbol_type, n) = symbol_type_tup;
+            } else if let Some(symbol_kind_tup) = LexToken::get_if_symbol_three_chars(c1, c2, c3) {
+                let (symbol_kind, n) = symbol_kind_tup;
 
                 // Add special cases for string- and char literals, they start
                 // and end with " or '.
                 // Also filter out comments. If a comment is found, debug print
                 // the comment and parse the next token after the comment.
-                match symbol_type {
+                match symbol_kind {
                     // TODO: Add multiline comments.
                     LexTokenKind::Symbol(Symbol::CommentSingleLine) => {
-                        let comment = self.get_comment_single(n)?;
-                        debug!("Lexed comment: {}", &comment);
+                        let _ = self.get_comment_single(n)?;
                         // TODO: Weird to be the only return statement, do this
                         //       in a better way.
                         return self.next_token();
@@ -77,7 +76,7 @@ impl LexTokenIter {
                     _ => {
                         self.iter.skip(n);
                         self.cur_column_nr += n as u64;
-                        symbol_type
+                        symbol_kind
                     }
                 }
             } else {
@@ -85,7 +84,9 @@ impl LexTokenIter {
                     "Didn't match a symbol token when c: {:?}, c2: {:?} and c2: {:?}",
                     c1, c2, c3
                 );
-                return Err(self.err(&msg));
+                // Consume a token to move the iterator forward.
+                self.iter.next();
+                return Err(self.err(msg));
             }
         } else {
             LexTokenKind::EndOfFile
@@ -138,7 +139,7 @@ impl LexTokenIter {
         if !result.is_empty() {
             Ok(result)
         } else {
-            Err(self.err("Empty result in get_ident()."))
+            Err(self.err("Empty result in get_ident().".into()))
         }
     }
 
@@ -307,18 +308,18 @@ impl LexTokenIter {
             .iter
             .next()
             .and_then(|ch| ch.to_digit(radix))
-            .ok_or_else(|| LexError("None when parsing first digit \"raw byte\".".into()))?;
+            .ok_or_else(|| self.err("None when parsing first digit \"raw byte\".".into()))?;
         let second = self
             .iter
             .next()
             .and_then(|ch| ch.to_digit(radix))
-            .ok_or_else(|| LexError("None when parsing second digit \"raw byte\".".into()))?;
+            .ok_or_else(|| self.err("None when parsing second digit \"raw byte\".".into()))?;
 
         let num = (first << 4) | second;
         if let Some(new_ch) = std::char::from_u32(num) {
             Ok(new_ch)
         } else {
-            Err(LexError(format!(
+            Err(self.err(format!(
                 "Unable to convert escaped \"raw byte\" integer to char: {}",
                 num
             )))
@@ -340,7 +341,7 @@ impl LexTokenIter {
         if char_lit.chars().count() == 1 {
             Ok(LexTokenKind::Literal(Literal::CharLiteral(char_lit)))
         } else {
-            Err(LexError(format!(
+            Err(self.err(format!(
                 "Char literal length not 1, len is {}. The literal: {}",
                 char_lit.chars().count(),
                 char_lit
@@ -361,10 +362,10 @@ impl LexTokenIter {
                 self.iter.skip(2);
                 Ok(LexTokenKind::Symbol(Symbol::LineBreak))
             } else {
-                Err(self.err("No linebreak character received in get_linebreak."))
+                Err(self.err("No linebreak character received in get_linebreak.".into()))
             }
         } else {
-            Err(LexError("Received None in get_linebreak.".into()))
+            Err(self.err("Received None in get_linebreak.".into()))
         }
     }
 
@@ -414,11 +415,15 @@ impl LexTokenIter {
     }
 
     /// Used when returing errors to include current line/column number.
-    pub fn err(&self, msg: &str) -> CustomError {
-        CustomError::LexError(format!(
-            "{} ({}:{}).",
-            msg, self.cur_line_nr, self.cur_column_nr
-        ))
+    pub fn err(&self, msg: String) -> LangError {
+        LangError::new_backtrace(
+            msg,
+            LexError {
+                line_nr: self.cur_line_nr,
+                column_nr: self.cur_column_nr,
+            },
+            false,
+        )
     }
 }
 

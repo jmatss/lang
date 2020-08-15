@@ -1,4 +1,4 @@
-use crate::error::CustomError::CompileError;
+use crate::error::{LangError, LangErrorKind::CompileError};
 use crate::CustomResult;
 use inkwell::{
     module::Module,
@@ -24,8 +24,11 @@ pub fn compile(module: &Module, output_path: &str) -> CustomResult<()> {
         let file_type = FileType::Object;
         machine
             .write_to_file(&module, file_type, output_path.as_ref())
-            .map_err(|e| CompileError(e.to_string()))
+            .map_err(|e| LangError::new(e.to_string(), CompileError))
     } else {
-        Err(CompileError("Unable to create target machine.".into()))
+        Err(LangError::new(
+            "Unable to create target machine.".into(),
+            CompileError,
+        ))
     }
 }

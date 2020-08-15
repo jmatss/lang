@@ -13,6 +13,11 @@ use crate::{
 pub struct ExprParser<'a> {
     iter: &'a mut ParseTokenIter,
 
+    /// Keeps a count of the amount of tokens seen. If no tokens have been seen
+    /// before a "stop condition" is seen, something has gone wrong. This
+    /// count is used to prevent a infinite loop if that error occures.
+    token_count: usize,
+
     /// Containers used during the shunting yard algorithm to store operators
     /// and operand.
     outputs: Vec<Output>,
@@ -45,9 +50,10 @@ impl<'a> ExprParser<'a> {
         stop_conds: &'a [Symbol],
     ) -> CustomResult<Expression> {
         let mut expr_parser = Self {
+            iter,
+            token_count: 0,
             outputs: Vec::new(),
             operators: Vec::new(),
-            iter,
             stop_conds,
             prev_was_operand: false,
             parenthesis_count: 0,
@@ -71,8 +77,14 @@ impl<'a> ExprParser<'a> {
             // part of the expression (`self.parenthesis_count < 0`).
             if let LexTokenKind::Symbol(ref symbol) = lex_token.kind {
                 if self.stop_conds.contains(symbol) {
-                    self.iter.put_back(lex_token)?;
-                    break;
+                    if self.token_count != 0 {
+                        self.iter.put_back(lex_token)?;
+                        break;
+                    } else {
+                        return Err(self
+                            .iter
+                            .err(format!("A `stop_cond` found before token: {:?}", symbol)));
+                    }
                 }
             } else if let LexTokenKind::EndOfFile = lex_token.kind {
                 self.iter.put_back(lex_token)?;
@@ -81,6 +93,8 @@ impl<'a> ExprParser<'a> {
                 self.iter.put_back(lex_token)?;
                 break;
             }
+
+            self.token_count += 1;
 
             match lex_token.clone().kind {
                 LexTokenKind::Identifier(ident) => {
@@ -97,17 +111,18 @@ impl<'a> ExprParser<'a> {
                     if let Some(op) = ParseToken::get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
                     } else {
-                        let msg = format!(
+                        return Err(self.iter.err(format!(
                             "Parsed None operator during expression for symbol: {:?}",
                             symbol
-                        );
-                        return Err(self.iter.err(&msg));
+                        )));
                     }
                 }
 
                 _ => {
-                    let msg = format!("Parsed invalid token during expression: {:?}", lex_token);
-                    return Err(self.iter.err(&msg));
+                    return Err(self.iter.err(format!(
+                        "Parsed invalid token during expression: {:?}",
+                        lex_token
+                    )));
                 }
             }
         }
@@ -127,8 +142,9 @@ impl<'a> ExprParser<'a> {
             self.prev_was_operand = true;
             Ok(())
         } else {
-            let msg = "Received two operands in a row (or a postfix operator).";
-            Err(self.iter.err(msg))
+            Err(self
+                .iter
+                .err("Received two operands in a row (or a postfix operator).".into()))
         }
     }
 
@@ -257,8 +273,9 @@ impl<'a> ExprParser<'a> {
                         let op = UnaryOperation::new(unary_op, Box::new(expr));
                         expr_stack.push(Expression::Operation(Operation::UnaryOperation(op)));
                     } else {
-                        let msg = "Empty expr in expr_stack when popping (unary).";
-                        return Err(self.iter.err(msg));
+                        return Err(self
+                            .iter
+                            .err("Empty expr in expr_stack when popping (unary).".into()));
                     }
                 }
 
@@ -268,21 +285,22 @@ impl<'a> ExprParser<'a> {
                             let op = BinaryOperation::new(bin_op, Box::new(left), Box::new(right));
                             expr_stack.push(Expression::Operation(Operation::BinaryOperation(op)));
                         } else {
-                            let msg = "Empty expr in expr_stack when popping (binary left).";
-                            return Err(self.iter.err(msg));
+                            return Err(self.iter.err(
+                                "Empty expr in expr_stack when popping (binary left).".into(),
+                            ));
                         }
                     } else {
-                        let msg = "Empty expr in expr_stack when popping (binary right).";
-                        return Err(self.iter.err(msg));
+                        return Err(self
+                            .iter
+                            .err("Empty expr in expr_stack when popping (binary right).".into()));
                     }
                 }
 
                 _ => {
-                    let msg = format!(
+                    return Err(self.iter.err(format!(
                         "Bad match during rev_polish_to_expr with Output: {:?}",
                         output
-                    );
-                    return Err(self.iter.err(&msg));
+                    )));
                 }
             }
         }
@@ -290,11 +308,10 @@ impl<'a> ExprParser<'a> {
         // When the loop above have finished, the remaining expression in the
         // `expr_stack` should be the final expression to be returned.
         if expr_stack.len() != 1 {
-            let msg = format!(
+            return Err(self.iter.err(format!(
                 "Not one expression left at end of rev_polish_to_expr, amount: {}",
                 expr_stack.len()
-            );
-            return Err(self.iter.err(&msg));
+            )));
         }
 
         Ok(expr_stack.remove(0))
