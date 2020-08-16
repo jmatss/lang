@@ -8,6 +8,7 @@ use crate::parse::token::{
 };
 use crate::parse::token::{
     BinaryOperator, BlockHeader, Expression, FunctionCall, ParseTokenKind, Statement, StructInit,
+    UnaryOperator,
 };
 use crate::{lex::token::Literal, CustomResult};
 
@@ -74,21 +75,13 @@ impl<'a> TypeAnalyzer<'a> {
             }
             Expression::Type(type_struct) => Ok(Some(type_struct.clone())),
             Expression::Variable(var) => {
-                // If a previous type is set, replace it with the one in `var`.
-                // The "analyze_var_type" will just go one function call deep,
-                // so there is no need to update the "prev_type_opt", it will
-                // stop being used after this call.
-                if let Some(prev_type) = &prev_type_opt {
-                    var.ret_type = Some(prev_type.clone());
-                }
-
                 // If this is a struct member, it will be at the right hand side
                 // of a "Dot" binary operation. It that case the `prev_type_opt`
                 // will come from the left hand side and it will be the type of
                 // the struct. Look up the struct and see what type this struct
                 // member has.
                 if var.is_struct_member {
-                    if let Some(struct_type) = prev_type_opt {
+                    if let Some(struct_type) = prev_type_opt.clone() {
                         self.analyze_struct_member(var, struct_type)
                     } else {
                         Err(LangError::new(
@@ -350,7 +343,7 @@ impl<'a> TypeAnalyzer<'a> {
         self.context.variables.entry(key.clone()).and_modify(|e| {
             if e.ret_type.is_some() {
                 var.ret_type = e.ret_type.clone();
-            } else {
+            } else if var.ret_type.is_some() {
                 e.ret_type = var.ret_type.clone();
             }
 
@@ -418,7 +411,38 @@ impl<'a> TypeAnalyzer<'a> {
         un_op: &mut UnaryOperation,
         prev_type_opt: Option<TypeStruct>,
     ) -> CustomResult<Option<TypeStruct>> {
-        let ret_type = self.analyze_expr_type(&mut un_op.value, prev_type_opt)?;
+        let ret_type = match un_op.operator {
+            UnaryOperator::Deref => {
+                // Analyze the inner value. Then dereference the result to get
+                // the value that is inside the pointer.
+                if let Some(type_struct) =
+                    self.analyze_expr_type(&mut un_op.value, prev_type_opt)?
+                {
+                    if let Type::Pointer(inner) = type_struct.t {
+                        Some(*inner)
+                    } else {
+                        return Err(LangError::new(
+                            format!("Trying to dereference non pointer type: {:?}", type_struct),
+                            AnalyzeError,
+                        ));
+                    }
+                } else {
+                    return Err(LangError::new(
+                        "Type set to None when dereferencing.".into(),
+                        AnalyzeError,
+                    ));
+                }
+            }
+            // TODO: Address
+            UnaryOperator::Address => self.analyze_expr_type(&mut un_op.value, prev_type_opt)?,
+
+            UnaryOperator::Increment
+            | UnaryOperator::Decrement
+            | UnaryOperator::Positive
+            | UnaryOperator::Negative
+            | UnaryOperator::BitComplement
+            | UnaryOperator::BoolNot => self.analyze_expr_type(&mut un_op.value, prev_type_opt)?,
+        };
         un_op.ret_type = ret_type.clone();
         Ok(ret_type)
     }
@@ -558,34 +582,13 @@ impl<'a> TypeAnalyzer<'a> {
             // sides should be prefered. Otherwise have a look at the both
             // types and try to figure out which one to prefer.
             Some(match bin_op.operator {
-                BinaryOperator::In => {
-                    self.set_type(bin_op.right.as_mut(), left_type_opt.clone());
-                    left_type
-                }
-                BinaryOperator::Is => {
-                    self.set_type(bin_op.left.as_mut(), right_type_opt.clone());
-                    right_type
-                }
-                BinaryOperator::As => {
-                    self.set_type(bin_op.left.as_mut(), right_type_opt.clone());
-                    right_type
-                }
-                BinaryOperator::Of => {
-                    self.set_type(bin_op.left.as_mut(), right_type_opt.clone());
-                    right_type
-                }
-                BinaryOperator::Dot => {
-                    self.set_type(bin_op.left.as_mut(), right_type_opt.clone());
-                    right_type
-                }
-                BinaryOperator::ShiftLeft => {
-                    self.set_type(bin_op.right.as_mut(), left_type_opt.clone());
-                    left_type
-                }
-                BinaryOperator::ShiftRight => {
-                    self.set_type(bin_op.right.as_mut(), left_type_opt.clone());
-                    left_type
-                }
+                BinaryOperator::In => left_type,
+                BinaryOperator::Is => right_type,
+                BinaryOperator::As => right_type,
+                BinaryOperator::Of => right_type,
+                BinaryOperator::Dot => right_type,
+                BinaryOperator::ShiftLeft => left_type,
+                BinaryOperator::ShiftRight => left_type,
                 _ => {
                     // The "compare" function will try and promote values and take the
                     // one with the "higesht priority". Returns None if unable to compare

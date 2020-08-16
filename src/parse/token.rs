@@ -624,7 +624,7 @@ pub enum UnaryOperator {
     Increment,
     Decrement,
 
-    // Dereference pointer and take address of value (.* & .&).
+    // Dereference pointer and take address of value (.* and .&).
     Deref,
     Address,
 

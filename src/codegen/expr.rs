@@ -26,7 +26,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Expression::Type(ty) => {
                 // TODO: Does something need to be done here? Does a proper value
                 //       need to be returned? For now just return a dummy value.
-                Ok(match self.compile_type(&ty.t)? {
+                Ok(match self.compile_type(&ty)? {
                     AnyTypeEnum::ArrayType(ty) => ty.const_zero().into(),
                     AnyTypeEnum::FloatType(ty) => ty.const_zero().into(),
                     AnyTypeEnum::IntType(ty) => ty.const_zero().into(),
@@ -313,15 +313,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
 
-        // TODO: This is const. Is it OK to return the values as consts? Should
-        //       probably not be, but do it for other. Might be best to just
-        //       internal rewrite:
-        //         var x = Type { 1, 2 }
-        //       to:
-        //         var x: Type
-        //         x.0 = 1; x.1 = 2
-        //       before code gen so that the values can be handled as all other
-        //       expressions.
         // TODO: How should the init of a struct work? Currently the var decl
         //       will create a store for the struct. But in this, to access the
         //       members, one has to get a pointer from somewhere. So for now

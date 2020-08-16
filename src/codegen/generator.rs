@@ -10,12 +10,13 @@ use inkwell::module::Module;
 use inkwell::values::{AnyValueEnum, BasicValueEnum, PointerValue};
 use inkwell::{
     basic_block::BasicBlock,
+    targets::TargetMachine,
     types::{AnyTypeEnum, BasicTypeEnum},
     AddressSpace,
 };
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use token::{BlockId, ParseTokenKind};
+use token::{BlockId, ParseTokenKind, TypeStruct};
 
 pub(super) struct CodeGen<'a, 'ctx> {
     pub context: &'ctx Context,
@@ -24,6 +25,7 @@ pub(super) struct CodeGen<'a, 'ctx> {
 
     pub analyze_context: &'ctx AnalyzeContext,
     pub state: CodeGenState<'ctx>,
+    pub target_machine: &'a TargetMachine,
 
     /// Contains pointers to mutable variables that have been compiled.
     pub variables: HashMap<(String, BlockId), PointerValue<'ctx>>,
@@ -40,8 +42,9 @@ pub fn generate<'a, 'ctx>(
     context: &'ctx Context,
     builder: &'a Builder<'ctx>,
     module: &'a Module<'ctx>,
+    target_machine: &'a TargetMachine,
 ) -> CustomResult<()> {
-    let mut code_gen = CodeGen::new(context, analyze_context, builder, module);
+    let mut code_gen = CodeGen::new(context, analyze_context, builder, module, target_machine);
     code_gen.compile_recursive(ast_root)?;
 
     // TODO: Temporary solution, loop through all merge blocks and look for all
@@ -94,6 +97,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         analyze_context: &'ctx AnalyzeContext,
         builder: &'a Builder<'ctx>,
         module: &'a Module<'ctx>,
+        target_machine: &'a TargetMachine,
     ) -> Self {
         Self {
             context,
@@ -102,6 +106,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             builder,
             module,
+            target_machine,
 
             variables: HashMap::default(),
             constants: HashMap::default(),
@@ -126,7 +131,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub(super) fn compile_alloca(&self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
         if let Some(var_type) = &var.ret_type {
-            Ok(match self.compile_type(&var_type.t)? {
+            Ok(match self.compile_type(&var_type)? {
                 AnyTypeEnum::ArrayType(ty) => {
                     // TODO: Alloca array, need to figure out constant size first.
                     //self.builder.build_array_alloca(ty, &var.name)
@@ -376,12 +381,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile_type(&self, ty: &Type) -> CustomResult<AnyTypeEnum<'ctx>> {
+    pub(super) fn compile_type(&self, type_struct: &TypeStruct) -> CustomResult<AnyTypeEnum<'ctx>> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Global;
 
-        Ok(match ty {
-            Type::Pointer(ptr) => {
+        Ok(match &type_struct.t {
+            Type::Pointer(ref ptr) => {
                 // Get the type of the inner type and wrap into a "PointerType".
                 match self.compile_type(ptr)? {
                     AnyTypeEnum::ArrayType(ty) => ty.ptr_type(address_space).into(),

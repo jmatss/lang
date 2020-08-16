@@ -71,10 +71,12 @@ fn main() -> CustomResult<()> {
     debug!("\nAST after analyze:\n{:#?}", ast_root);
     println!("Analyzing complete.");
 
+    let target_machine = compiler::setup_target()?;
+
     let context = Context::create();
     let builder = context.create_builder();
     let module = context.create_module(module_name);
-    generator::generate(&mut ast_root, &analyze_context, &context, &builder, &module)?;
+    generator::generate(&mut ast_root, &analyze_context, &context, &builder, &module, &target_machine)?;
     println!("Generating complete.");
 
     if log_enabled!(Level::Debug) {
@@ -82,7 +84,7 @@ fn main() -> CustomResult<()> {
     }
     module.verify()?;
 
-    compiler::compile(&module, OUTPUT_PATH)?;
+    compiler::compile(target_machine, &module, OUTPUT_PATH)?;
     println!("Compiled to: {}", OUTPUT_PATH);
 
     Ok(())

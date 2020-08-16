@@ -106,7 +106,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> CustomResult<()> {
         // TODO: Can one always assume that the `ret_type` will be set at this point?
         let ret_type = if let Some(ref ret_type) = var.ret_type {
-            self.compile_type(&ret_type.t)?
+            self.compile_type(&ret_type)?
         } else {
             return Err(LangError::new(
                 format!(

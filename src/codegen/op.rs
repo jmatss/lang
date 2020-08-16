@@ -7,7 +7,7 @@ use crate::{
 use inkwell::{
     types::{AnyTypeEnum, BasicTypeEnum},
     values::{AnyValueEnum, BasicValueEnum},
-    FloatPredicate, IntPredicate,
+    AddressSpace, FloatPredicate, IntPredicate,
 };
 use token::{BinaryOperator, UnaryOperation, UnaryOperator};
 
@@ -26,7 +26,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_bin_op(&mut self, bin_op: &mut BinaryOperation) -> CustomResult<AnyValueEnum<'ctx>> {
         // TODO: Can one always assume that the `ret_type` will be set at this point?
         let ret_type = if let Some(ref ret_type) = bin_op.ret_type {
-            self.compile_type(&ret_type.t)?
+            self.compile_type(&ret_type)?
         } else {
             return Err(LangError::new(
                 format!(
@@ -62,7 +62,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if !self.is_same_base_type(left_type, right_type) {
                     return Err(LangError::new(
                     format!(
-                        "Left & right type different base types during as. left_type: {:?}, right_type: {:?}",
+                        "Left & right type different base types during bin op. left_type: {:?}, right_type: {:?}",
                         left_type,
                         right_type,
                     ),
@@ -136,7 +136,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_un_op(&mut self, un_op: &mut UnaryOperation) -> CustomResult<AnyValueEnum<'ctx>> {
         // TODO: Can one always assume that the `ret_type` will be set at this point?
         let ret_type = if let Some(ref ret_type) = un_op.ret_type {
-            self.compile_type(&ret_type.t)?
+            self.compile_type(&ret_type)?
         } else {
             return Err(LangError::new(
                 format!(
@@ -159,13 +159,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             UnaryOperator::Decrement => {
                 self.compile_un_op_decrement(ret_type, un_op.is_const, value)?
             }
-            UnaryOperator::Deref => {
-                panic!("TODO: Deref");
-                //self.builder.build_load(ptr, name)
-            }
-            UnaryOperator::Address => {
-                panic!("TODO: Address");
-            }
+            UnaryOperator::Deref => self.compile_un_op_deref(ret_type, value)?,
+            UnaryOperator::Address => self.compile_un_op_address(ret_type, value)?,
             UnaryOperator::Positive => {
                 // Do nothing.
                 value.into()
@@ -191,6 +186,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         //       cast. For example now, if the ret_type is float,
         //       the left will be casted into a float. But it assumes
         //       that the left side is some sort of float already.
+        let left_type = left.get_type();
         let right_type = right.get_type();
 
         // TODO: Figure out sign extensions.
@@ -198,40 +194,76 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(if is_const {
             match right_type {
                 BasicTypeEnum::ArrayType(ty) => panic!("TODO: Const array \"as\"."),
-                BasicTypeEnum::FloatType(ty) => left.into_float_value().const_cast(ty).into(),
+                BasicTypeEnum::FloatType(ty) => {
+                    if left_type.is_float_type() {
+                        left.into_float_value().const_cast(ty).into()
+                    } else if left_type.is_int_type() {
+                        left.into_int_value().const_signed_to_float(ty).into()
+                    } else {
+                        return Err(LangError::new(
+                            format!("Invalid type when casting \"as\" float: {:?}", left_type),
+                            CodeGenError,
+                        ));
+                    }
+                }
                 BasicTypeEnum::IntType(ty) => {
-                    let is_signed = true;
-                    left.into_int_value().const_cast(ty, is_signed).into()
+                    if left_type.is_float_type() {
+                        left.into_float_value().const_to_signed_int(ty).into()
+                    } else if left_type.is_int_type() {
+                        let is_signed = true;
+                        left.into_int_value().const_cast(ty, is_signed).into()
+                    } else {
+                        return Err(LangError::new(
+                            format!("Invalid type when casting \"as\" int: {:?}", left_type),
+                            CodeGenError,
+                        ));
+                    }
                 }
                 BasicTypeEnum::PointerType(ty) => left.into_pointer_value().const_cast(ty).into(),
                 BasicTypeEnum::StructType(ty) => panic!("TODO: Const struct \"as\"."),
                 BasicTypeEnum::VectorType(ty) => panic!("TODO: Const vector \"as\"."),
             }
         } else {
-            match ret_type {
-                AnyTypeEnum::ArrayType(ty) => {
+            match right_type {
+                BasicTypeEnum::ArrayType(ty) => {
                     self.builder.build_bitcast(left, ty, "cast.array").into()
                 }
-                AnyTypeEnum::FloatType(ty) => self
-                    .builder
-                    .build_float_cast(left.into_float_value(), ty, "cast.float")
-                    .into(),
-                AnyTypeEnum::IntType(ty) => self
-                    .builder
-                    .build_int_cast(left.into_int_value(), ty, "cast.int")
-                    .into(),
-                AnyTypeEnum::PointerType(ty) => self
+                BasicTypeEnum::FloatType(ty) => {
+                    if left_type.is_float_type() {
+                        self.builder
+                            .build_float_cast(left.into_float_value(), ty, "cast.float")
+                            .into()
+                    } else if left_type.is_int_type() {
+                        self.builder
+                            .build_signed_int_to_float(left.into_int_value(), ty, "cast.float")
+                            .into()
+                    } else {
+                        self.builder.build_bitcast(left, ty, "cast.float").into()
+                    }
+                }
+                BasicTypeEnum::IntType(ty) => {
+                    if left_type.is_float_type() {
+                        self.builder
+                            .build_float_to_signed_int(left.into_float_value(), ty, "cast.int")
+                            .into()
+                    } else if left_type.is_int_type() {
+                        self.builder
+                            .build_int_cast(left.into_int_value(), ty, "cast.int")
+                            .into()
+                    } else {
+                        self.builder.build_bitcast(left, ty, "cast.int").into()
+                    }
+                }
+                BasicTypeEnum::PointerType(ty) => self
                     .builder
                     .build_pointer_cast(left.into_pointer_value(), ty, "cast.ptr")
                     .into(),
-                AnyTypeEnum::StructType(ty) => {
+                BasicTypeEnum::StructType(ty) => {
                     self.builder.build_bitcast(left, ty, "cast.struct").into()
                 }
-                AnyTypeEnum::VectorType(ty) => {
+                BasicTypeEnum::VectorType(ty) => {
                     self.builder.build_bitcast(left, ty, "cast.vector").into()
                 }
-                AnyTypeEnum::FunctionType(_) => panic!("TODO: compile_bin_op function type."),
-                AnyTypeEnum::VoidType(_) => panic!("TODO: compile_bin_op void type."),
             }
         })
     }
@@ -858,6 +890,61 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
+    fn compile_un_op_deref(
+        &mut self,
+        ret_type: AnyTypeEnum<'ctx>,
+        value: BasicValueEnum<'ctx>,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
+        Ok(match value.get_type() {
+            BasicTypeEnum::PointerType(_) => self
+                .builder
+                .build_load(value.into_pointer_value(), "deref")
+                .into(),
+
+            BasicTypeEnum::FloatType(_)
+            | BasicTypeEnum::IntType(_)
+            | BasicTypeEnum::ArrayType(_)
+            | BasicTypeEnum::StructType(_)
+            | BasicTypeEnum::VectorType(_) => {
+                return Err(LangError::new(
+                    format!("Invalid type for UnaryOperator::Deref: {:?}", ret_type),
+                    CodeGenError,
+                ))
+            }
+        })
+    }
+
+    fn compile_un_op_address(
+        &mut self,
+        ret_type: AnyTypeEnum<'ctx>,
+        value: BasicValueEnum<'ctx>,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
+        Ok(match value.get_type() {
+            // TODO: Is this correct? Do you wan't to take the address of a
+            //       pointer or should it be a value?
+            BasicTypeEnum::PointerType(_) => {
+                let target_data = &self.target_machine.get_target_data();
+                let address_space = Some(AddressSpace::Global);
+                let ptr_type = self.context.ptr_sized_int_type(target_data, address_space);
+
+                let ptr = self.builder.build_alloca(ptr_type, "address.alloc");
+                self.builder.build_store(ptr, value);
+                self.builder.build_load(ptr, "address.load").into()
+            }
+
+            BasicTypeEnum::FloatType(_)
+            | BasicTypeEnum::IntType(_)
+            | BasicTypeEnum::ArrayType(_)
+            | BasicTypeEnum::StructType(_)
+            | BasicTypeEnum::VectorType(_) => {
+                return Err(LangError::new(
+                    format!("Invalid type for UnaryOperator::Deref: {:?}", ret_type),
+                    CodeGenError,
+                ))
+            }
+        })
+    }
+
     fn compile_un_op_negative(
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
@@ -945,10 +1032,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
                 BasicValueEnum::VectorValue(val) => val.is_const(),
             };
-            if is_const {
-                return true;
+            if !is_const {
+                return false;
             }
         }
-        false
+        true
     }
 }

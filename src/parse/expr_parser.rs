@@ -159,8 +159,6 @@ impl<'a> ExprParser<'a> {
             Operator::ParenthesisEnd => {
                 self.parenthesis_count -= 1;
 
-                println!("op size: {}", self.operators.len());
-
                 // If `parenthesis_count` is < 0, assume that the current
                 // end parenthesis isn't part of the expression.
                 if self.parenthesis_count >= 0 {

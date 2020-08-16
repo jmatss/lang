@@ -6,7 +6,7 @@ use inkwell::{
     OptimizationLevel,
 };
 
-pub fn compile(module: &Module, output_path: &str) -> CustomResult<()> {
+pub fn setup_target() -> CustomResult<TargetMachine> {
     Target::initialize_all(&InitializationConfig::default());
 
     // TODO: Allow the user to specify target from command line.
@@ -21,14 +21,18 @@ pub fn compile(module: &Module, output_path: &str) -> CustomResult<()> {
     if let Some(machine) =
         target.create_target_machine(&triple, &cpu, &features, level, reloc_mode, code_model)
     {
-        let file_type = FileType::Object;
-        machine
-            .write_to_file(&module, file_type, output_path.as_ref())
-            .map_err(|e| LangError::new(e.to_string(), CompileError))
+        Ok(machine)
     } else {
         Err(LangError::new(
             "Unable to create target machine.".into(),
             CompileError,
         ))
     }
+}
+
+pub fn compile(machine: TargetMachine, module: &Module, output_path: &str) -> CustomResult<()> {
+    let file_type = FileType::Object;
+    machine
+        .write_to_file(&module, file_type, output_path.as_ref())
+        .map_err(|e| LangError::new(e.to_string(), CompileError))
 }

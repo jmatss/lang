@@ -1,13 +1,13 @@
-use crate::parse::token::Expression;
+use crate::parse::token::{Expression, TypeStruct};
 
 // TODO: Make Int & Uint unbounded? But then what about pointer sized int?
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    Pointer(Box<Type>),
+    Pointer(Box<TypeStruct>),
     // The Option in the "Array" enum indicates the size. If it is None, assume
     // size is unknown (probably slice).
-    Array(Box<Type>, Option<Box<Expression>>),
+    Array(Box<TypeStruct>, Option<Box<Expression>>),
     Void,
     Character,
     String, // TODO: String type (?)

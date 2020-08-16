@@ -118,7 +118,7 @@ impl<'a> TypeParser<'a> {
         let mut type_struct = self.parse_type()?;
 
         // Wrap the parsed type into the Pointer enum.
-        type_struct.t = Type::Pointer(Box::new(type_struct.t));
+        type_struct.t = Type::Pointer(Box::new(type_struct.clone()));
 
         // At this point the token should be a "CurlyBracketEnd" since this is
         // the end of the pointer.
@@ -153,7 +153,7 @@ impl<'a> TypeParser<'a> {
             if let LexTokenKind::Symbol(Symbol::SquareBracketEnd) = lex_token.kind {
                 // Wrap the inner type into the Array enum and set the size
                 // to None to indicate that it is unknown.
-                type_struct.t = Type::Array(Box::new(type_struct.t), None);
+                type_struct.t = Type::Array(Box::new(type_struct.clone()), None);
                 Ok(type_struct)
             } else if let LexTokenKind::Symbol(Symbol::Colon) = lex_token.kind {
                 if let Some(lex_tok) = self.iter.peek_skip_space() {
@@ -161,14 +161,14 @@ impl<'a> TypeParser<'a> {
                     // should be infered (currently the parse output doesn
                     // differ between this and just not having a size at all (?)).
                     if let LexTokenKind::Symbol(Symbol::UnderScore) = lex_tok.kind {
-                        type_struct.t = Type::Array(Box::new(type_struct.t), None);
+                        type_struct.t = Type::Array(Box::new(type_struct.clone()), None);
                     } else {
                         // Parse the next expression and assume it is the size of the
                         // array. Wrap the inner type into the Array enum and set the
                         // parsed expression as the size.
                         let stop_conds = [Symbol::SquareBracketEnd];
                         let size = Box::new(self.iter.parse_expr(&stop_conds)?);
-                        type_struct.t = Type::Array(Box::new(type_struct.t), Some(size));
+                        type_struct.t = Type::Array(Box::new(type_struct.clone()), Some(size));
                     }
                 } else {
                     unreachable!();

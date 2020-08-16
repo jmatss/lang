@@ -185,7 +185,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let mut v = Vec::with_capacity(params.len());
             for param in params {
                 if let Some(param_type_struct) = &param.ret_type {
-                    let any_type = self.compile_type(&param_type_struct.t)?;
+                    let any_type = self.compile_type(&param_type_struct)?;
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
                     v.push(basic_type);
                 } else {
@@ -204,7 +204,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let fn_type = if let Some(ret_type) = &func.ret_type {
-            let any_type = self.compile_type(&ret_type.t)?;
+            let any_type = self.compile_type(&ret_type)?;
             match any_type {
                 AnyTypeEnum::ArrayType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
                 AnyTypeEnum::FloatType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
@@ -395,7 +395,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let mut v = Vec::with_capacity(members.len());
             for member in members {
                 if let Some(member_type_struct) = &member.ret_type {
-                    let any_type = self.compile_type(&member_type_struct.t)?;
+                    let any_type = self.compile_type(&member_type_struct)?;
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
                     v.push(basic_type);
                 } else {
