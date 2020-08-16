@@ -364,7 +364,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .map_err(|_| {
                     LangError::new(
                         format!(
-                            "Unable to struct_gep for struct {:?}, index {}.",
+                            "Unable to gep member in struct {:?}, index {}.",
                             &var.struct_name, var.member_index
                         ),
                         CodeGenError,
@@ -383,7 +383,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub(super) fn compile_type(&self, type_struct: &TypeStruct) -> CustomResult<AnyTypeEnum<'ctx>> {
         // TODO: What AddressSpace should be used?
-        let address_space = AddressSpace::Global;
+        let address_space = AddressSpace::Generic;
 
         Ok(match &type_struct.t {
             Type::Pointer(ref ptr) => {

@@ -413,8 +413,8 @@ impl<'a> TypeAnalyzer<'a> {
     ) -> CustomResult<Option<TypeStruct>> {
         let ret_type = match un_op.operator {
             UnaryOperator::Deref => {
-                // Analyze the inner value. Then dereference the result to get
-                // the value that is inside the pointer.
+                // Analyze the "outer" value that should be a pointer. Then deref
+                // the result to get the value that is inside the pointer.
                 if let Some(type_struct) =
                     self.analyze_expr_type(&mut un_op.value, prev_type_opt)?
                 {
@@ -434,7 +434,22 @@ impl<'a> TypeAnalyzer<'a> {
                 }
             }
             // TODO: Address
-            UnaryOperator::Address => self.analyze_expr_type(&mut un_op.value, prev_type_opt)?,
+            UnaryOperator::Address => {
+                // Analyze the "inner" value. Then take the address of that
+                // which will give us the address.
+                if let Some(type_struct) =
+                    self.analyze_expr_type(&mut un_op.value, prev_type_opt)?
+                {
+                    let new_ptr = Type::Pointer(Box::new(type_struct));
+                    let generics = None;
+                    Some(TypeStruct::new(new_ptr, generics))
+                } else {
+                    return Err(LangError::new(
+                        "Type set to None when taking address.".into(),
+                        AnalyzeError,
+                    ));
+                }
+            }
 
             UnaryOperator::Increment
             | UnaryOperator::Decrement

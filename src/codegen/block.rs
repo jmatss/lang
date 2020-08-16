@@ -161,19 +161,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         // Add a "invisible" return at the end of the last block if this is a
-        // function with no return type.
+        // function with no return type. Also check to see if this block
+        // conntains a return stmt even though it should return anything.
         if func.ret_type.is_none() {
             if let Some(last_block) = fn_val.get_last_basic_block() {
-                self.builder.position_at_end(last_block);
-                self.builder.build_return(None);
+                if last_block.get_terminator().is_none() {
+                    self.builder.position_at_end(last_block);
+                    self.builder.build_return(None);
+                    Ok(())
+                } else {
+                    Err(LangError::new(
+                        format!(
+                            "Found return stmt in func \"{}\", but it has no return type.",
+                            &func.name
+                        ),
+                        CodeGenError,
+                    ))
+                }
             } else {
-                return Err(LangError::new(
+                Err(LangError::new(
                     format!("No basic block in func: {}", &func.name),
                     CodeGenError,
-                ));
+                ))
             }
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     pub(super) fn compile_func_proto(
@@ -215,16 +228,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 AnyTypeEnum::VectorType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
                 AnyTypeEnum::VoidType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
             }
-        /*
-        match basic_type {
-            BasicTypeEnum::IntType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
-            BasicTypeEnum::FloatType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
-            BasicTypeEnum::PointerType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
-            BasicTypeEnum::ArrayType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
-            BasicTypeEnum::StructType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
-            BasicTypeEnum::VectorType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
-        }
-        */
         } else {
             self.context
                 .void_type()

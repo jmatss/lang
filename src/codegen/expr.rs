@@ -59,7 +59,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         .build_global_string(str_lit, "str.lit")
                         .as_pointer_value()
                 };
-                let address_space = AddressSpace::Global;
+                let address_space = AddressSpace::Generic;
                 let i8_ptr_type = self.context.i8_type().ptr_type(address_space);
                 Ok(lit_ptr.const_cast(i8_ptr_type).into())
             }

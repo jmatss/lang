@@ -6,6 +6,8 @@ use crate::parse::token::{BlockId, Enum, Function, Interface, ParseToken, Struct
 use crate::CustomResult;
 use std::collections::HashMap;
 
+// TODO: Error if a function that doesn't have a return type has a return in it.
+
 /// Updates the AST with information about function prototypes and declarations
 /// of structures.
 /// The TypeAnalyzer depends on the DeclAnalyzer to figure out types for

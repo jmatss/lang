@@ -7,9 +7,9 @@ use crate::{
 use inkwell::{
     types::{AnyTypeEnum, BasicTypeEnum},
     values::{AnyValueEnum, BasicValueEnum},
-    AddressSpace, FloatPredicate, IntPredicate,
+    FloatPredicate, IntPredicate,
 };
-use token::{BinaryOperator, UnaryOperation, UnaryOperator};
+use token::{BinaryOperator, UnaryOperation, UnaryOperator, Variable};
 
 // TODO: Check constness for operators. Ex. adding two consts should use a
 //       const add instruction so that the result also is const.
@@ -160,7 +160,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.compile_un_op_decrement(ret_type, un_op.is_const, value)?
             }
             UnaryOperator::Deref => self.compile_un_op_deref(ret_type, value)?,
-            UnaryOperator::Address => self.compile_un_op_address(ret_type, value)?,
+            UnaryOperator::Address => {
+                if let token::Expression::Variable(ref var) = *un_op.value {
+                    self.compile_un_op_address(var)?
+                } else {
+                    return Err(LangError::new(
+                        format!("Trying to dereference invalid type: {:?}", &un_op.value),
+                        CodeGenError,
+                    ));
+                }
+            }
             UnaryOperator::Positive => {
                 // Do nothing.
                 value.into()
@@ -914,35 +923,26 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
-    fn compile_un_op_address(
-        &mut self,
-        ret_type: AnyTypeEnum<'ctx>,
-        value: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
-        Ok(match value.get_type() {
-            // TODO: Is this correct? Do you wan't to take the address of a
-            //       pointer or should it be a value?
-            BasicTypeEnum::PointerType(_) => {
-                let target_data = &self.target_machine.get_target_data();
-                let address_space = Some(AddressSpace::Global);
-                let ptr_type = self.context.ptr_sized_int_type(target_data, address_space);
+    fn compile_un_op_address(&mut self, var: &Variable) -> CustomResult<AnyValueEnum<'ctx>> {
+        // Get the pointer to the variable from `variables` that contains
+        // pointers to all variables allocated during code generation.
+        let block_id = self.state.cur_block_id;
+        let decl_block_id = self
+            .analyze_context
+            .get_var_decl_scope(&var.name, block_id)?;
+        let key = (var.name.clone(), decl_block_id);
 
-                let ptr = self.builder.build_alloca(ptr_type, "address.alloc");
-                self.builder.build_store(ptr, value);
-                self.builder.build_load(ptr, "address.load").into()
-            }
-
-            BasicTypeEnum::FloatType(_)
-            | BasicTypeEnum::IntType(_)
-            | BasicTypeEnum::ArrayType(_)
-            | BasicTypeEnum::StructType(_)
-            | BasicTypeEnum::VectorType(_) => {
-                return Err(LangError::new(
-                    format!("Invalid type for UnaryOperator::Deref: {:?}", ret_type),
-                    CodeGenError,
-                ))
-            }
-        })
+        if let Some(var_ptr) = self.variables.get(&key) {
+            Ok(var_ptr.clone().into())
+        } else {
+            Err(LangError::new(
+                format!(
+                    "Unable to find var \"{}\" in decl block id {}.",
+                    &var.name, decl_block_id
+                ),
+                CodeGenError,
+            ))
+        }
     }
 
     fn compile_un_op_negative(
