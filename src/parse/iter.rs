@@ -205,10 +205,10 @@ impl ParseTokenIter {
             // wrapped in Some. Otherwise it will be set to None to indicate
             // that this identifier is part of a expression.
             Ok(match next_lex_token.kind {
-                LexTokenKind::Symbol(Symbol::Colon) => Some(self.parse_var(ident)?),
+                LexTokenKind::Symbol(Symbol::Colon) => Some(self.parse_var_type(ident)?),
                 LexTokenKind::Symbol(_) => {
                     if let Some(_assign_op) = ParseToken::get_if_stmt_op(&next_lex_token) {
-                        Some(self.parse_var(ident)?)
+                        Some(self.parse_var_type(ident)?)
                     } else {
                         None
                     }
@@ -239,7 +239,7 @@ impl ParseTokenIter {
 
     /// Parses a variable and any type that it might have specified after which
     /// would indicate a declaration.
-    pub fn parse_var(&mut self, ident: &str) -> CustomResult<Variable> {
+    pub fn parse_var_type(&mut self, ident: &str) -> CustomResult<Variable> {
         // If the next token is a colon, a type is specified after this variable.
         // Parse it and set the `var_type` inside the variable.
         let var_type = if let Some(next_token) = self.peek_skip_space() {
@@ -256,25 +256,46 @@ impl ParseTokenIter {
         Ok(Variable::new(ident.into(), var_type, None, false))
     }
 
-    /// Parses a list of argument.
-    ///   "( [ [<ident> =] <expr> [,]] ... )"
-    pub fn parse_arg_list(&mut self) -> CustomResult<Vec<Argument>> {
+    /// Parses a list of arguments. This can be used on generic list containing
+    /// arguments ex, function calls and struct initialization.
+    ///   "<start_symbol> [ [<ident> =] <expr> [,]] ... <end_symbol>"
+    pub fn parse_arg_list(
+        &mut self,
+        start_symbol: Symbol,
+        end_symbol: Symbol,
+    ) -> CustomResult<Vec<Argument>> {
         let mut arguments = Vec::new();
 
-        // Skip the start parenthesis of the argument list.
-        self.iter.skip(1);
+        // Skip the first symbol and ensure that it is the `start_symbol`.
+        if let Some(start_token) = self.next_skip_space_line() {
+            match start_token.kind {
+                LexTokenKind::Symbol(s) if s == start_symbol => (),
+                _ => {
+                    return Err(self.err(format!(
+                        "Bad start symbol when parsing arg list. Expected: {:?}, got: {:?}",
+                        start_symbol, start_token
+                    )))
+                }
+            }
+        } else {
+            return Err(self.err("Received None when parsing `start_token` in arg list.".into()));
+        }
 
-        // Edge case if this argument list contains no items, do early return
-        // with empty vector.
-        if let Some(next) = self.peek_skip_space() {
-            if let LexTokenKind::Symbol(Symbol::ParenthesisEnd) = next.kind {
-                self.next_skip_space_line(); // Consume end parenthesis.
-                return Ok(arguments);
+        // Edge case if this arg list contains no items, do early return with
+        // empty vector.
+        if let Some(next) = self.peek_skip_space_line() {
+            match next.kind {
+                LexTokenKind::Symbol(s) if s == end_symbol => {
+                    // Consume the `end_symbol` of the list and return.
+                    self.next_skip_space_line();
+                    return Ok(arguments);
+                }
+                _ => (),
             }
         }
 
         loop {
-            // TODO: This assumes that function arguments can NOT set a variable
+            // TODO: This assumes that arguments can NOT set a variable
             //       at the start of a expression, is this OK?
             // Parse the next identifier and then the token after that.
             // Depending on if this is a named argument or not, there are two
@@ -299,7 +320,7 @@ impl ParseTokenIter {
                     }
                 }
 
-                let stop_conds = [Symbol::Comma, Symbol::ParenthesisEnd];
+                let stop_conds = [Symbol::Comma, end_symbol.clone()];
                 let arg = Argument::new(name, self.parse_expr(&stop_conds)?);
 
                 arguments.push(arg);
@@ -308,54 +329,91 @@ impl ParseTokenIter {
             }
 
             // A argument has just been parsed above. The next character should
-            // either be a comma indicating more arguments or a end parenthesis
-            // indicating that the argument list have been parsed fully.
+            // either be a comma indicating more arguments or `end_symbol`
+            // indicating that the list have been parsed fully. To allow
+            // for trailing commas, also end parsing if this is a comma and the
+            // next token is a `end_symbol`.
             if let Some(lex_token) = self.next_skip_space_line() {
-                if let LexTokenKind::Symbol(Symbol::Comma) = lex_token.kind {
-                    continue;
-                } else if let LexTokenKind::Symbol(Symbol::ParenthesisEnd) = lex_token.kind {
-                    return Ok(arguments);
-                } else {
-                    return Err(self.err(format!(
-                        "Received invalid LexToken at end of argument in arg list: {:?}",
-                        lex_token
-                    )));
+                match lex_token.kind {
+                    LexTokenKind::Symbol(Symbol::Comma) => {
+                        // Makes a extra check to allow for trailing commas.
+                        if let Some(next) = self.peek_skip_space_line() {
+                            match next.kind {
+                                LexTokenKind::Symbol(s) if s == end_symbol => {
+                                    self.next_skip_space_line();
+                                    return Ok(arguments);
+                                }
+                                _ => (),
+                            }
+                        }
+                        continue;
+                    }
+                    LexTokenKind::Symbol(s) if s == end_symbol => {
+                        return Ok(arguments);
+                    }
+                    _ => {
+                        return Err(self.err(format!(
+                            "Received invalid LexToken at end of argument in list: {:?}",
+                            lex_token
+                        )))
+                    }
                 }
             } else {
-                return Err(self.err("Received None at end of argument in arg list.".into()));
+                return Err(self.err("Received None at end of argument in list.".into()));
             }
         }
     }
 
-    /// Parses a list of parameters.
-    ///   "( [ <ident> : <type> [,]] [...] )"
+    /// Parses a list of parameters. This can be used for a generic lists
+    /// contanining variables and their types, ex. function params and structs.
+    ///   "<start_symbol> [ <ident> : <type> [,]] [...] <end_symbol>"
     /// Using a "..." as a argument indicates that this function support
     /// var_args/is variadic.
-    /// The returned bool in the tuple indicates if this is a variadic func.
-    pub fn parse_par_list(&mut self) -> CustomResult<(Vec<Variable>, bool)> {
+    /// The returned bool in the tuple indicates if this list contains a
+    /// "variadic symbol".
+    pub fn parse_par_list(
+        &mut self,
+        start_symbol: Symbol,
+        end_symbol: Symbol,
+    ) -> CustomResult<(Vec<Variable>, bool)> {
         let mut parameters = Vec::new();
         let mut is_var_arg = false;
 
-        // Skip the start parenthesis of the parameter list.
-        self.next_skip_space_line();
+        // Skip the first symbol and ensure that it is the `start_symbol`.
+        if let Some(start_token) = self.next_skip_space_line() {
+            match start_token.kind {
+                LexTokenKind::Symbol(s) if s == start_symbol => (),
+                _ => {
+                    return Err(self.err(format!(
+                        "Bad start symbol when parsing param list. Expected: {:?}, got: {:?}",
+                        start_symbol, start_token
+                    )))
+                }
+            }
+        } else {
+            return Err(self.err("Received None when parsing `start_token` in param list.".into()));
+        }
 
-        // Edge case if this parameter list contains no items, do early return
-        // with empty vector.
+        // Edge case if this param list contains no items, do early return with
+        // empty vector.
         if let Some(next) = self.peek_skip_space_line() {
-            if let LexTokenKind::Symbol(Symbol::ParenthesisEnd) = next.kind {
-                // Consume the end parenthesis of the parameter list.
-                self.next_skip_space_line();
-                return Ok((parameters, is_var_arg));
+            match next.kind {
+                LexTokenKind::Symbol(s) if s == end_symbol => {
+                    // Consume the `end_symbol` of the list and return.
+                    self.next_skip_space_line();
+                    return Ok((parameters, is_var_arg));
+                }
+                _ => (),
             }
         }
 
         loop {
             if let Some(lex_token) = self.next_skip_space_line() {
-                // Parses either a identifier followed by a type or a "TipleDot"
+                // Parses either a identifier followed by a type or a "TripleDot"
                 // which is the indicator for a variadic function.
                 match lex_token.kind {
                     LexTokenKind::Identifier(ident) => {
-                        let var_type = self.parse_par_list_type()?;
+                        let var_type = self.parse_colon_type()?;
                         let const_ = false;
                         let parameter = Variable::new(ident, Some(var_type), None, const_);
 
@@ -366,50 +424,64 @@ impl ParseTokenIter {
 
                     _ => {
                         return Err(self.err(format!(
-                            "Invalid token when parsing ident in par list: {:?}",
+                            "Invalid token when parsing ident in param list: {:?}",
                             lex_token
                         )));
                     }
                 }
             } else {
-                return Err(self.err("Received None when parsing ident in par list.".into()));
+                return Err(self.err("Received None when parsing ident in param list.".into()));
             };
 
             // A parameter has just been parsed above. The next character should
-            // either be a comma indicating more parameters or a end parenthesis
-            // indicating that the parameter list have been parsed fully.
+            // either be a comma indicating more parameters or `end_symbol`
+            // indicating that the list have been parsed fully. To allow
+            // for trailing commas, also end parsing if this is a comma and the
+            // next token is a `end_symbol`.
             if let Some(lex_token) = self.next_skip_space_line() {
-                if let LexTokenKind::Symbol(Symbol::Comma) = lex_token.kind {
-                    continue;
-                } else if let LexTokenKind::Symbol(Symbol::ParenthesisEnd) = lex_token.kind {
-                    return Ok((parameters, is_var_arg));
-                } else {
-                    return Err(self.err(format!(
-                        "Received invalid LexToken at end of parameter in par list: {:?}",
-                        lex_token
-                    )));
+                match lex_token.kind {
+                    LexTokenKind::Symbol(Symbol::Comma) => {
+                        // Makes a extra check to allow for trailing commas.
+                        if let Some(next) = self.peek_skip_space_line() {
+                            match next.kind {
+                                LexTokenKind::Symbol(s) if s == end_symbol => {
+                                    self.next_skip_space_line();
+                                    return Ok((parameters, is_var_arg));
+                                }
+                                _ => (),
+                            }
+                        }
+                        continue;
+                    }
+                    LexTokenKind::Symbol(s) if s == end_symbol => {
+                        return Ok((parameters, is_var_arg));
+                    }
+                    _ => {
+                        return Err(self.err(format!(
+                            "Received invalid LexToken at end of parameter in list: {:?}",
+                            lex_token
+                        )))
+                    }
                 }
             } else {
-                return Err(self.err("Received None at end of parameter in par list.".into()));
+                return Err(self.err("Received None at end of parameter in list.".into()));
             }
         }
     }
 
-    /// Parses the "type" part of a parameter in a parameter list. The next
-    /// token should be a "Colon", consume it or return error if it isn't a
-    /// "Colon".
-    fn parse_par_list_type(&mut self) -> CustomResult<TypeStruct> {
+    /// Parses a type including the starting colon.
+    fn parse_colon_type(&mut self) -> CustomResult<TypeStruct> {
         if let Some(lex_token) = self.next_skip_space() {
             if let LexTokenKind::Symbol(Symbol::Colon) = lex_token.kind {
                 self.parse_type()
             } else {
                 Err(self.err(format!(
-                    "Invalid token when parsing colon in par list: {:?}",
+                    "Invalid token when parsing colon before type: {:?}",
                     lex_token
                 )))
             }
         } else {
-            Err(self.err("Received None expecting colon in par list.".into()))
+            Err(self.err("Received None expecting colon at start of type.".into()))
         }
     }
 

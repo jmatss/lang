@@ -78,6 +78,7 @@ pub enum Expression {
     Variable(Variable),
     //ArrayAccess(Option<ArrayAccess>),
     FunctionCall(FunctionCall),
+    StructInit(StructInit),
     //MacroCall(Option<MacroCall>),
     Operation(Operation),
 }
@@ -174,6 +175,7 @@ pub enum Modifier {
 pub struct BinaryOperation {
     pub operator: BinaryOperator,
     pub ret_type: Option<TypeStruct>,
+    pub is_const: bool,
     pub left: Box<Expression>,
     pub right: Box<Expression>,
 }
@@ -183,6 +185,7 @@ impl BinaryOperation {
         BinaryOperation {
             operator,
             ret_type: None,
+            is_const: false,
             left,
             right,
         }
@@ -193,6 +196,7 @@ impl BinaryOperation {
 pub struct UnaryOperation {
     pub operator: UnaryOperator,
     pub ret_type: Option<TypeStruct>,
+    pub is_const: bool,
     pub value: Box<Expression>,
 }
 
@@ -201,6 +205,7 @@ impl UnaryOperation {
         UnaryOperation {
             operator,
             ret_type: None,
+            is_const: false,
             value,
         }
     }
@@ -209,17 +214,23 @@ impl UnaryOperation {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
     pub name: String,
-    pub generics: Vec<TypeStruct>,
-    pub implements: Vec<TypeStruct>,
-    // TODO: extends: Vec<Type>
+    pub generics: Option<Vec<TypeStruct>>,
+    pub implements: Option<Vec<TypeStruct>>,
+    pub members: Option<Vec<Variable>>, // TODO: extends: Vec<Type>
 }
 
 impl Struct {
-    pub fn new(name: String, generics: Vec<TypeStruct>, implements: Vec<TypeStruct>) -> Self {
-        Struct {
+    pub fn new(
+        name: String,
+        generics: Option<Vec<TypeStruct>>,
+        implements: Option<Vec<TypeStruct>>,
+        members: Option<Vec<Variable>>,
+    ) -> Self {
+        Self {
             name,
             generics,
             implements,
+            members,
         }
     }
 }
@@ -283,7 +294,19 @@ pub struct FunctionCall {
 
 impl FunctionCall {
     pub fn new(name: String, arguments: Vec<Argument>) -> Self {
-        FunctionCall { name, arguments }
+        Self { name, arguments }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructInit {
+    pub name: String,
+    pub arguments: Vec<Argument>,
+}
+
+impl StructInit {
+    pub fn new(name: String, arguments: Vec<Argument>) -> Self {
+        Self { name, arguments }
     }
 }
 
@@ -306,6 +329,14 @@ pub struct Variable {
     pub ret_type: Option<TypeStruct>,
     pub modifiers: Option<Vec<Modifier>>,
     pub is_const: bool,
+
+    /// Indicates if this is a struct member or not. If this is a struct member,
+    /// `member_index` will be set to the index that this variable/member
+    /// has in the struct.
+    /// The `struct_name` is the name of the struct that this variable is a member of.
+    pub is_struct_member: bool,
+    pub member_index: u32,
+    pub struct_name: Option<String>,
 }
 
 impl Variable {
@@ -320,6 +351,10 @@ impl Variable {
             ret_type,
             modifiers,
             is_const,
+
+            is_struct_member: false,
+            member_index: 0,
+            struct_name: None,
         }
     }
 }
@@ -335,321 +370,6 @@ impl TypeStruct {
     pub fn new(t: Type, generics: Option<Vec<TypeStruct>>) -> Self {
         TypeStruct { t, generics }
     }
-
-    pub fn compare(&self, other: &TypeStruct) -> Option<TypeChoice> {
-        // TODO: Generics?
-        // TODO: Implement for more types.
-        match self.t {
-            Type::Pointer(_) => None,
-            Type::Array(_, _) => None,
-            Type::Void => None,
-            Type::Character => None,
-            Type::String => None,
-            Type::Boolean => None,
-            Type::Int => match other.t {
-                Type::Int
-                | Type::Uint
-                | Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32 => Some(TypeChoice::This),
-
-                Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64
-                | Type::F64
-                | Type::I128
-                | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::Uint => match other.t {
-                Type::Uint
-                | Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32 => Some(TypeChoice::This),
-
-                Type::Int
-                | Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64
-                | Type::F64
-                | Type::I128
-                | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::Float => match other.t {
-                Type::Int
-                | Type::Uint
-                | Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32 => Some(TypeChoice::This),
-
-                Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64
-                | Type::F64
-                | Type::I128
-                | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::I8 => match other.t {
-                Type::I8 | Type::U8 => Some(TypeChoice::This),
-
-                Type::Int
-                | Type::Uint
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64
-                | Type::F64
-                | Type::I128
-                | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::U8 => match other.t {
-                Type::U8 => Some(TypeChoice::This),
-
-                Type::I8
-                | Type::Int
-                | Type::Uint
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64
-                | Type::F64
-                | Type::I128
-                | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::I16 => match other.t {
-                Type::I8 | Type::U8 => Some(TypeChoice::This),
-
-                Type::Int
-                | Type::Uint
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64
-                | Type::F64
-                | Type::I128
-                | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::U16 => match other.t {
-                Type::I8 | Type::U8 => Some(TypeChoice::This),
-
-                Type::Int
-                | Type::Uint
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64
-                | Type::F64
-                | Type::I128
-                | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::I32 => match other.t {
-                Type::Int | Type::Uint | Type::I8 | Type::U8 | Type::I16 | Type::U16 => {
-                    Some(TypeChoice::This)
-                }
-
-                Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64
-                | Type::F64
-                | Type::I128
-                | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::U32 => match other.t {
-                Type::Int | Type::Uint | Type::I8 | Type::U8 | Type::I16 | Type::U16 => {
-                    Some(TypeChoice::This)
-                }
-
-                Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64
-                | Type::F64
-                | Type::I128
-                | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::F32 => match other.t {
-                Type::Int
-                | Type::Uint
-                | Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32 => Some(TypeChoice::This),
-
-                Type::I64 | Type::U64 | Type::F64 | Type::I128 | Type::U128 => {
-                    Some(TypeChoice::Other)
-                }
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::I64 => match other.t {
-                Type::Int
-                | Type::Uint
-                | Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32 => Some(TypeChoice::This),
-
-                Type::I64 | Type::U64 | Type::F64 | Type::I128 | Type::U128 => {
-                    Some(TypeChoice::Other)
-                }
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::U64 => match other.t {
-                Type::Int
-                | Type::Uint
-                | Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32 => Some(TypeChoice::This),
-
-                Type::I64 | Type::U64 | Type::F64 | Type::I128 | Type::U128 => {
-                    Some(TypeChoice::Other)
-                }
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::F64 => match other.t {
-                Type::Int
-                | Type::Uint
-                | Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64 => Some(TypeChoice::This),
-
-                Type::F64 | Type::I128 | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::I128 => match other.t {
-                Type::Int
-                | Type::Uint
-                | Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64
-                | Type::F64 => Some(TypeChoice::This),
-
-                Type::I128 | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::U128 => match other.t {
-                Type::Int
-                | Type::Uint
-                | Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::Float
-                | Type::F32
-                | Type::I64
-                | Type::U64
-                | Type::F64 => Some(TypeChoice::This),
-
-                Type::I128 | Type::U128 => Some(TypeChoice::Other),
-
-                Type::Unknown(_) => None,
-                _ => None,
-            },
-            Type::Unknown(_) => None,
-        }
-    }
-}
-
-pub enum TypeChoice {
-    This,
-    Other,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -731,10 +451,10 @@ impl Operator {
     /*
         Precedence:
             0   ( )      (precedence for parenthesis always highest)
-            1   +x -x
-            2   x++ x--  (only postfix)
-            3   ~ !
-            4   . .* .&  (function calls, deref, address etc.)
+            1   . .* .&  (function calls, deref, address etc.)
+            2   +x -x
+            3   x++ x--  (only postfix)
+            4   ~ !
             5   as
             6   **       (power)
             7   * / %
@@ -761,15 +481,15 @@ impl Operator {
             Some((true, 0, Fix::Dummy))
         } else if let Operator::UnaryOperator(unary_op) = self {
             Some(match unary_op {
-                UnaryOperator::Positive => (true, 1, Fix::Prefix),
-                UnaryOperator::Negative => (true, 1, Fix::Prefix),
-                UnaryOperator::Increment => (true, 2, Fix::Postfix),
-                UnaryOperator::Decrement => (true, 2, Fix::Postfix),
+                UnaryOperator::Positive => (true, 2, Fix::Prefix),
+                UnaryOperator::Negative => (true, 2, Fix::Prefix),
+                UnaryOperator::Increment => (true, 3, Fix::Postfix),
+                UnaryOperator::Decrement => (true, 3, Fix::Postfix),
 
-                UnaryOperator::BitComplement => (true, 3, Fix::Prefix),
-                UnaryOperator::BoolNot => (true, 3, Fix::Prefix),
-                UnaryOperator::Deref => (true, 4, Fix::Postfix),
-                UnaryOperator::Address => (true, 4, Fix::Postfix),
+                UnaryOperator::BitComplement => (true, 4, Fix::Prefix),
+                UnaryOperator::BoolNot => (true, 4, Fix::Prefix),
+                UnaryOperator::Deref => (true, 1, Fix::Postfix),
+                UnaryOperator::Address => (true, 1, Fix::Postfix),
             })
         } else if let Operator::BinaryOperator(binary_op) = self {
             Some(match binary_op {
@@ -779,7 +499,7 @@ impl Operator {
                 BinaryOperator::Of => (true, 10, Fix::Dummy),
                 BinaryOperator::Range => (true, 17, Fix::Dummy),
                 BinaryOperator::RangeInclusive => (true, 17, Fix::Dummy),
-                BinaryOperator::Dot => (true, 4, Fix::Dummy),
+                BinaryOperator::Dot => (true, 1, Fix::Dummy),
 
                 BinaryOperator::Equals => (true, 11, Fix::Dummy),
                 BinaryOperator::NotEquals => (true, 11, Fix::Dummy),

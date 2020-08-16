@@ -1,6 +1,6 @@
 use super::{
     iter::{ParseTokenIter, DEFAULT_STOP_CONDS},
-    token::{BlockHeader, Function, ParseToken, ParseTokenKind, Path, Statement, Variable},
+    token::{BlockHeader, Function, ParseToken, ParseTokenKind, Path, Statement, Struct, Variable},
 };
 use crate::{
     lex::token::{Keyword, LexTokenKind, Symbol},
@@ -56,7 +56,7 @@ impl<'a> KeyworkParser<'a> {
             Keyword::Public => Err(self.iter.err("\"Public\" keyword not implemented.".into())),
 
             Keyword::Function => self.parse_func(),
-            Keyword::Struct => Err(self.iter.err("\"Struct\" keyword not implemented.".into())),
+            Keyword::Struct => self.parse_struct(),
             Keyword::Enum => Err(self.iter.err("\"Enum\" keyword not implemented.".into())),
             Keyword::Interface => Err(self
                 .iter
@@ -163,7 +163,7 @@ impl<'a> KeyworkParser<'a> {
         } else {
             return Err(self.iter.err("None when parsing \"for\" variable.".into()));
         };
-        let var = self.iter.parse_var(&ident)?;
+        let var = self.iter.parse_var_type(&ident)?;
 
         // Ensure that the next token is a "In".
         if let Some(lex_token) = self.iter.next_skip_space() {
@@ -433,7 +433,8 @@ impl<'a> KeyworkParser<'a> {
 
         // If `expr` is Some (i.e. this is initialization), a assignment needs
         // to be added into the ParseToken and returned as well.
-        let variable = Variable::new(ident, var_type, None, false);
+        let is_const = false;
+        let variable = Variable::new(ident, var_type, None, is_const);
         let var_decl = Statement::VariableDecl(variable, expr_opt);
         let kind = ParseTokenKind::Statement(var_decl);
         Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
@@ -492,7 +493,8 @@ impl<'a> KeyworkParser<'a> {
                 .err("Received None when looking at \"const\" assigned value.".into()));
         };
 
-        let variable = Variable::new(ident, Some(var_type), None, true);
+        let is_const = true;
+        let variable = Variable::new(ident, Some(var_type), None, is_const);
         let var_decl = Statement::VariableDecl(variable, Some(expr));
         let kind = ParseTokenKind::Statement(var_decl);
         Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
@@ -528,7 +530,9 @@ impl<'a> KeyworkParser<'a> {
                 .err("Received None when looking at token after \"function\".".into()));
         };
 
-        let (params, is_var_arg) = self.iter.parse_par_list()?;
+        let start_symbol = Symbol::ParenthesisBegin;
+        let end_symbol = Symbol::ParenthesisEnd;
+        let (params, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol)?;
 
         // If the next token is a "Arrow" ("->"), assume that the return type
         // of the function is specified afterwards. If there are no arrow,
@@ -561,5 +565,59 @@ impl<'a> KeyworkParser<'a> {
             return_type,
             is_var_arg,
         ))
+    }
+
+    // TODO: Generics
+    /// Parses a struct header.
+    ///   "struct <ident> { [<ident>: <type>] [[,] ...]  }"
+    /// The "struct" keyword has already been consumed when this function is called.
+    fn parse_struct(&mut self) -> CustomResult<ParseToken> {
+        // Start by parsing the identifier
+        let line_nr;
+        let column_nr;
+        let ident = if let Some(lex_token) = self.iter.next_skip_space() {
+            line_nr = lex_token.line_nr;
+            column_nr = lex_token.column_nr;
+
+            if let LexTokenKind::Identifier(ident) = lex_token.kind {
+                ident
+            } else {
+                return Err(self.iter.err(format!(
+                    "Expected ident when parsing \"struct\", got: {:?}",
+                    lex_token
+                )));
+            }
+        } else {
+            return Err(self
+                .iter
+                .err("Received None when looking at token after \"struct\".".into()));
+        };
+
+        // Parse the members of the struct.
+        let start_symbol = Symbol::CurlyBracketBegin;
+        let end_symbol = Symbol::CurlyBracketEnd;
+        let (members, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol)?;
+        if is_var_arg {
+            return Err(self.iter.err(format!(
+                "Found invalid var_arg symbol in struct with name: {}",
+                &ident
+            )));
+        }
+
+        let members_opt = if !members.is_empty() {
+            Some(members)
+        } else {
+            None
+        };
+        // TODO: Generics & implements (?).
+        let generics = None;
+        let implements = None;
+        let header = BlockHeader::Struct(Struct::new(ident, generics, implements, members_opt));
+
+        let block_id = self.iter.reserve_block_id();
+        let body = Vec::with_capacity(0);
+
+        let kind = ParseTokenKind::Block(header, block_id, body);
+        Ok(ParseToken::new(kind, line_nr, column_nr))
     }
 }

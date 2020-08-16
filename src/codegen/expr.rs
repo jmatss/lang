@@ -3,26 +3,30 @@ use crate::error::{LangError, LangErrorKind::CodeGenError};
 use crate::{
     common::variable_type::Type,
     lex::token::Literal,
-    parse::token::{Expression, FunctionCall, TypeStruct},
+    parse::token::{Expression, FunctionCall, StructInit, TypeStruct},
     CustomResult,
 };
 use inkwell::{
-    types::AnyTypeEnum,
-    values::{AnyValueEnum, BasicValueEnum, FloatValue, IntValue},
+    types::{AnyTypeEnum, BasicTypeEnum},
+    values::{AnyValueEnum, FloatValue, IntValue},
     AddressSpace,
 };
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    pub(super) fn compile_expr(&mut self, expr: &Expression) -> CustomResult<AnyValueEnum<'ctx>> {
+    pub(super) fn compile_expr(
+        &mut self,
+        expr: &mut Expression,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
         match expr {
             Expression::Literal(lit, ty_opt) => self.compile_lit(lit, ty_opt),
             Expression::Variable(var) => Ok(self.compile_var_load(var)?.into()),
             Expression::FunctionCall(func_call) => self.compile_func_call(func_call),
             Expression::Operation(op) => self.compile_op(op),
+            Expression::StructInit(struct_init) => self.compile_struct_init(struct_init),
             Expression::Type(ty) => {
                 // TODO: Does something need to be done here? Does a proper value
                 //       need to be returned? For now just return a dummy value.
-                Ok(match ty.t.to_codegen(&self.context)? {
+                Ok(match self.compile_type(&ty.t)? {
                     AnyTypeEnum::ArrayType(ty) => ty.const_zero().into(),
                     AnyTypeEnum::FloatType(ty) => ty.const_zero().into(),
                     AnyTypeEnum::IntType(ty) => ty.const_zero().into(),
@@ -204,7 +208,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     //       Should make a custom value ex rusts "()" instead.
     /// Generates a function call. Returns the return value of the compiled
     /// function.
-    fn compile_func_call(&mut self, func_call: &FunctionCall) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_func_call(
+        &mut self,
+        func_call: &mut FunctionCall,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
         if let Some(func_ptr) = self.module.get_function(&func_call.name) {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
@@ -222,8 +229,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
 
             let mut args = Vec::with_capacity(func_call.arguments.len());
-            for arg in &func_call.arguments {
-                let any_value = self.compile_expr(&arg.value)?;
+            for arg in &mut func_call.arguments {
+                let any_value = self.compile_expr(&mut arg.value)?;
                 let basic_value = CodeGen::any_into_basic_value(any_value)?;
                 args.push(basic_value);
             }
@@ -233,7 +240,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     // Checks to see if the types of the parameter and the
                     // argument are the same. If they are different, see if the
                     // type of the argument can be casted to the same type.
-                    self.infer_arg_type(i, &func_call.name, &param, arg)?;
+                    self.infer_arg_type(i, &func_call.name, &param.get_type(), &arg.get_type())?;
                 } else {
                     unreachable!("None when comparing arg and par in func call compile.");
                 }
@@ -259,16 +266,108 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
+    /// Generates a struct creation/initialization.
+    fn compile_struct_init(
+        &mut self,
+        struct_init: &mut StructInit,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
+        let struct_type = if let Some(inner) = self.module.get_struct_type(&struct_init.name) {
+            inner
+        } else {
+            return Err(LangError::new(
+                format!("Unable to get struct: {}", &struct_init.name),
+                CodeGenError,
+            ));
+        };
+
+        // Checks to see if the amount of arguments are different from the
+        // amount of members.
+        if struct_init.arguments.len() != struct_type.count_fields() as usize {
+            return Err(LangError::new(
+                format!(
+                    "Wrong amount of args given when init struct: {}. Expected: {}, got: {}",
+                    &struct_init.name,
+                    struct_type.count_fields(),
+                    struct_init.arguments.len()
+                ),
+                CodeGenError,
+            ));
+        }
+
+        // Compiles all arguments to "codegen".
+        let mut args = Vec::with_capacity(struct_init.arguments.len());
+        for arg in &mut struct_init.arguments {
+            let any_value = self.compile_expr(&mut arg.value)?;
+            let basic_value = CodeGen::any_into_basic_value(any_value)?;
+            args.push(basic_value);
+        }
+
+        for (i, param) in struct_type.get_field_types().iter().enumerate() {
+            if let Some(arg) = args.get_mut(i) {
+                // Checks to see if the types of the parameter and the
+                // argument are the same. If they are different, see if the
+                // type of the argument can be casted to the same type.
+                self.infer_arg_type(i, &struct_init.name, &param, &arg.get_type())?;
+            } else {
+                unreachable!("None when comparing arg and par in struct init compile.");
+            }
+        }
+
+        // TODO: This is const. Is it OK to return the values as consts? Should
+        //       probably not be, but do it for other. Might be best to just
+        //       internal rewrite:
+        //         var x = Type { 1, 2 }
+        //       to:
+        //         var x: Type
+        //         x.0 = 1; x.1 = 2
+        //       before code gen so that the values can be handled as all other
+        //       expressions.
+        // TODO: How should the init of a struct work? Currently the var decl
+        //       will create a store for the struct. But in this, to access the
+        //       members, one has to get a pointer from somewhere. So for now
+        //       this function will also make a store so that it can get a pointer
+        //       to it so that the values can be inserted.
+        // TODO: If this is a const, create it with "const_named_struct".
+        //       Otherwise, create const empty one, and then insert the values
+        //       one at a time.
+        // if is_const {
+        //     let struct_value = struct_type.const_named_struct(args.as_ref());
+        // } else {
+
+        // Create a tmp storage for the struct so that the init values can be set.
+        // Iterate through all members of the struct and initialize them.
+        let struct_ptr = self.builder.build_alloca(struct_type, "struct.init");
+        for (i, arg_value) in args.iter().enumerate() {
+            let member_ptr = self
+                .builder
+                .build_struct_gep(struct_ptr, i as u32, "struct.init.gep")
+                .map_err(|_| {
+                    LangError::new(
+                        format!(
+                            "Unable to GEP struct \"{}\" member {}.",
+                            &struct_init.name, i
+                        ),
+                        CodeGenError,
+                    )
+                })?;
+
+            self.builder.build_store(member_ptr, *arg_value);
+        }
+
+        Ok(self
+            .builder
+            .build_load(struct_ptr, "struct.init.load")
+            .into())
+    }
+
     fn infer_arg_type(
         &mut self,
         i: usize,
         func_name: &str,
-        param: &BasicValueEnum,
-        arg: &mut BasicValueEnum,
+        param_type: &BasicTypeEnum,
+        arg_type: &BasicTypeEnum,
     ) -> CustomResult<()> {
         return Ok(());
-        let arg_type = arg.get_type();
-        let param_type = param.get_type();
         if arg_type != param_type {
             // TODO: Should be able to convert a {[u8: N]} to a {u8}. This is
             //       useful when working with for example string literals.
@@ -281,8 +380,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     "Arg type at index {} wrong type when calling func: {}. Expected: {:?}, got: {:?}",
                 i,
                 func_name,
-                param.get_type(),
-                arg.get_type()
+                param_type,
+                arg_type,
                 ),
                 CodeGenError,
             ))

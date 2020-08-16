@@ -7,7 +7,7 @@ use crate::{
 use inkwell::{module::Linkage, types::AnyTypeEnum};
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    pub(super) fn compile_stmt(&mut self, stmt: &Statement) -> CustomResult<()> {
+    pub(super) fn compile_stmt(&mut self, stmt: &mut Statement) -> CustomResult<()> {
         match stmt {
             Statement::Return(expr_opt) => self.compile_return(expr_opt),
             Statement::Yield(expr) => self.compile_yield(expr),
@@ -43,7 +43,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_return(&mut self, expr_opt: &Option<Expression>) -> CustomResult<()> {
+    fn compile_return(&mut self, expr_opt: &mut Option<Expression>) -> CustomResult<()> {
         if let Some(expr) = expr_opt {
             let any_value = self.compile_expr(expr)?;
             let basic_value = CodeGen::any_into_basic_value(any_value)?;
@@ -102,11 +102,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         assign_op: &AssignOperator,
         var: &Variable,
-        expr: &Expression,
+        expr: &mut Expression,
     ) -> CustomResult<()> {
         // TODO: Can one always assume that the `ret_type` will be set at this point?
         let ret_type = if let Some(ref ret_type) = var.ret_type {
-            ret_type.t.to_codegen(&self.context)?
+            self.compile_type(&ret_type.t)?
         } else {
             return Err(LangError::new(
                 format!(

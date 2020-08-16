@@ -1,9 +1,14 @@
+use super::type_inference::TypeChoice;
 use crate::analyze::analyzer::AnalyzeContext;
 use crate::common::variable_type::Type;
+use crate::error::LangError;
+use crate::error::LangErrorKind::AnalyzeError;
 use crate::parse::token::{
     BinaryOperation, Operation, ParseToken, TypeStruct, UnaryOperation, Variable,
 };
-use crate::parse::token::{BinaryOperator, BlockHeader, Expression, ParseTokenKind, Statement};
+use crate::parse::token::{
+    BinaryOperator, BlockHeader, Expression, FunctionCall, ParseTokenKind, Statement, StructInit,
+};
 use crate::{lex::token::Literal, CustomResult};
 
 pub struct TypeAnalyzer<'a> {
@@ -73,33 +78,237 @@ impl<'a> TypeAnalyzer<'a> {
                 // The "analyze_var_type" will just go one function call deep,
                 // so there is no need to update the "prev_type_opt", it will
                 // stop being used after this call.
-                if let Some(prev_type) = prev_type_opt {
-                    var.ret_type = Some(prev_type);
+                if let Some(prev_type) = &prev_type_opt {
+                    var.ret_type = Some(prev_type.clone());
                 }
-                self.analyze_var_type(var)
+
+                // If this is a struct member, it will be at the right hand side
+                // of a "Dot" binary operation. It that case the `prev_type_opt`
+                // will come from the left hand side and it will be the type of
+                // the struct. Look up the struct and see what type this struct
+                // member has.
+                if var.is_struct_member {
+                    if let Some(struct_type) = prev_type_opt {
+                        self.analyze_struct_member(var, struct_type)
+                    } else {
+                        Err(LangError::new(
+                            format!(
+                                "prev_type was None when looking at struct member: {}",
+                                &var.name
+                            ),
+                            AnalyzeError,
+                        ))
+                    }
+                } else {
+                    self.analyze_var_type(var)
+                }
             }
             Expression::Operation(op) => self.analyze_op_type(op, prev_type_opt),
-            Expression::FunctionCall(func_call) => {
-                let cur_block_id = self.context.cur_block_id;
-                let func_block_id = self
-                    .context
-                    .get_func_parent_id(func_call.name.clone(), cur_block_id)?;
+            Expression::FunctionCall(func_call) => self.analyze_func_call(func_call),
+            Expression::StructInit(struct_init) => self.analyze_struct_init(struct_init),
+        }
+    }
 
-                // Analyze all arguments of the function call.
-                for arg in &mut func_call.arguments {
-                    self.analyze_expr_type(&mut arg.value, None)?;
-                }
+    fn analyze_func_call(
+        &mut self,
+        func_call: &mut FunctionCall,
+    ) -> CustomResult<Option<TypeStruct>> {
+        let cur_block_id = self.context.cur_block_id;
+        let func_block_id = self
+            .context
+            .get_func_parent_id(func_call.name.clone(), cur_block_id)?;
 
-                // Always use the type from the function, it doesn't matter
-                // if it is None since there is no way to get a type from a
-                // function call.
-                let key = (func_call.name.clone(), func_block_id);
-                if let Some(a) = self.context.functions.get(&key) {
-                    Ok(a.ret_type.clone())
-                } else {
-                    Ok(None)
+        // Get the function from the map parsed during "decl analyzing".
+        let key = (func_call.name.clone(), func_block_id);
+        let func = if let Some(func) = self.context.functions.get(&key) {
+            func.clone()
+        } else {
+            return Err(LangError::new(
+                format!("Unable to find func decl for: {}", &func_call.name),
+                AnalyzeError,
+            ));
+        };
+
+        // Analyze all arguments of the function call and make sure that
+        // the amount of types of the args/params are the same. They can
+        // differ if this function is variadic.
+        if let Some(func_params) = func.parameters {
+            if (func_call.arguments.len() == func_params.len() && !func.is_var_arg)
+                || (func_call.arguments.len() >= func_params.len() && func.is_var_arg)
+            {
+                for (i, arg) in func_call.arguments.iter_mut().enumerate() {
+                    let prev_type_opt = if i < func_params.len() {
+                        func_params
+                            .get(i)
+                            .expect("More args than params.")
+                            .ret_type
+                            .clone()
+                    } else {
+                        None
+                    };
+                    self.analyze_expr_type(&mut arg.value, prev_type_opt)?;
                 }
+            } else {
+                return Err(LangError::new(
+                            format!(
+                                "Func/call to {}, incorrect amount of param/arg (vararg={}). Actual func #: {}, got: {}.",
+                                &func_call.name,
+                                func.is_var_arg,
+                                func_params.len(),
+                                func_call.arguments.len()
+                            ),
+                            AnalyzeError,
+                        ));
             }
+        } else if !func_call.arguments.is_empty() {
+            return Err(LangError::new(
+                format!(
+                    "Func {} has no params, but func_call had {} args.",
+                    &func_call.name,
+                    func_call.arguments.len()
+                ),
+                AnalyzeError,
+            ));
+        }
+
+        // Always return the type of the actual function.
+        Ok(func.ret_type.clone())
+    }
+
+    fn analyze_struct_init(
+        &mut self,
+        struct_init: &mut StructInit,
+    ) -> CustomResult<Option<TypeStruct>> {
+        let cur_block_id = self.context.cur_block_id;
+        let struct_block_id = self
+            .context
+            .get_struct_parent_id(struct_init.name.clone(), cur_block_id)?;
+
+        // Get the struct from the map parsed during "decl analyzing".
+        let key = (struct_init.name.clone(), struct_block_id);
+        let struct_ = if let Some(struct_) = self.context.structs.get(&key) {
+            struct_.clone()
+        } else {
+            return Err(LangError::new(
+                format!("Unable to find struct decl for: {}", &struct_init.name),
+                AnalyzeError,
+            ));
+        };
+
+        // Analyze all arguments of the struct init and make sure that
+        // the amount of types of the args/members are the same.
+        // This is done by using the members type as the `prev_type_opt`.
+        if let Some(struct_members) = struct_.members {
+            if struct_init.arguments.len() == struct_members.len() {
+                for (i, arg) in struct_init.arguments.iter_mut().enumerate() {
+                    let member = struct_members.get(i).expect("member/arg len diff.");
+                    self.analyze_expr_type(&mut arg.value, member.ret_type.clone())?;
+                }
+            } else {
+                return Err(LangError::new(
+                    format!(
+                        "Struct/init to {}, members/args amount differs. Expected: {}, got: {}.",
+                        &struct_init.name,
+                        struct_members.len(),
+                        struct_init.arguments.len()
+                    ),
+                    AnalyzeError,
+                ));
+            }
+        } else if !struct_init.arguments.is_empty() {
+            return Err(LangError::new(
+                format!(
+                    "Struct {} has no params, but struct_init had {} args.",
+                    &struct_init.name,
+                    struct_init.arguments.len()
+                ),
+                AnalyzeError,
+            ));
+        }
+
+        // Return the type of the  struct.
+        let ty = Type::Custom(struct_init.name.clone());
+        let generics = None;
+        Ok(Some(TypeStruct::new(ty, generics)))
+    }
+
+    // TODO: This function also sets the `member_index` and `parent_key `for the
+    //       member. This should be idealy be moved to "indexing_analyzer" if
+    //       possible, it is unrelated to "type analyzing" but this was the
+    //       easiest place to implement it in.
+    /// This function is called when a "Dot" binary operator has been found
+    /// with a "Variable" at the right hand side. This means that this is a
+    /// indexing of a struct. Try to figure out the type of the member
+    /// by looking up the struct, and then finding the type of the member
+    /// in the struct definition.
+    fn analyze_struct_member(
+        &mut self,
+        var: &mut Variable,
+        prev_type: TypeStruct,
+    ) -> CustomResult<Option<TypeStruct>> {
+        if let Type::Custom(ref ident) = prev_type.t {
+            let struct_block_id = self.context.cur_block_id;
+            let parent_block_id = self
+                .context
+                .get_struct_parent_id(ident.clone(), struct_block_id)?;
+
+            let key = (ident.clone(), parent_block_id);
+            let struct_ = self.context.structs.get(&key).ok_or_else(|| {
+                LangError::new(
+                    format!(
+                        "Unable to find struct with name {} with block ID {}.",
+                        &ident, struct_block_id
+                    ),
+                    AnalyzeError,
+                )
+            })?;
+
+            // Loop through the struct members and see if a member with the same
+            // name can be found. If a member with the same name is found, this
+            // is a instance of that member. Set to the same type and set the
+            // member index.
+            if let Some(members) = &struct_.members {
+                let mut found = false;
+                for (i, member) in members.iter().enumerate() {
+                    if member.name == var.name {
+                        var.member_index = i as u32;
+                        var.ret_type = member.ret_type.clone();
+                        var.struct_name = Some(ident.clone());
+                        var.modifiers = member.modifiers.clone();
+                        var.is_const = member.is_const;
+                        found = true;
+                        break;
+                    }
+                }
+
+                if found {
+                    Ok(var.ret_type.clone())
+                } else {
+                    Err(LangError::new(
+                        format!(
+                            "Unable to find member with name {} in struct with name {} with block ID {}.",
+                            &var.name, &ident, struct_block_id
+                        ),
+                        AnalyzeError,
+                    ))
+                }
+            } else {
+                Err(LangError::new(
+                    format!(
+                        "Unable to find struct with name {} with block ID {}.",
+                        &ident, struct_block_id
+                    ),
+                    AnalyzeError,
+                ))
+            }
+        } else {
+            Err(LangError::new(
+                format!(
+                    "prev_type was not custom when looking at struct member: {}",
+                    &var.name
+                ),
+                AnalyzeError,
+            ))
         }
     }
 
@@ -144,6 +353,10 @@ impl<'a> TypeAnalyzer<'a> {
             } else {
                 e.ret_type = var.ret_type.clone();
             }
+
+            // Update the fields that are set during declaration.
+            var.modifiers = e.modifiers.clone();
+            var.is_const = e.is_const;
         });
 
         if var.ret_type.is_none() {
@@ -185,8 +398,15 @@ impl<'a> TypeAnalyzer<'a> {
         //       to the declaration of the variable so that it can be seen during
         //       codegen (since codegen will only look at the declaration of
         //       a variable).
+        // If the left has a type set, use that as the "prev_type" when looking
+        // at the type for the right side.
         let left_type = self.analyze_expr_type(&mut bin_op.left, prev_type_opt.clone())?;
-        let right_type = self.analyze_expr_type(&mut bin_op.right, prev_type_opt)?;
+        let left_prev_type_opt = if left_type.is_some() {
+            left_type.clone()
+        } else {
+            prev_type_opt
+        };
+        let right_type = self.analyze_expr_type(&mut bin_op.right, left_prev_type_opt)?;
 
         let inferred_type = self.infer_type(bin_op, &left_type, &right_type);
         bin_op.ret_type = inferred_type.clone();
@@ -370,13 +590,13 @@ impl<'a> TypeAnalyzer<'a> {
                     // The "compare" function will try and promote values and take the
                     // one with the "higesht priority". Returns None if unable to compare
                     // the types.
-                    if let Some(type_choice) = left_type.compare(&right_type) {
+                    if let Some(type_choice) = self.compare_type(&left_type, &right_type) {
                         match type_choice {
-                            crate::parse::token::TypeChoice::This => {
+                            TypeChoice::First => {
                                 self.set_type(bin_op.right.as_mut(), left_type_opt.clone());
                                 left_type
                             }
-                            crate::parse::token::TypeChoice::Other => {
+                            TypeChoice::Second => {
                                 self.set_type(bin_op.left.as_mut(), right_type_opt.clone());
                                 right_type
                             }
@@ -403,8 +623,8 @@ impl<'a> TypeAnalyzer<'a> {
                 Operation::UnaryOperation(un_op) => un_op.ret_type = new_ty,
             },
 
-            // Can't set type for function call.
-            Expression::FunctionCall(_) => (),
+            // Can't set type for function call or struct init.
+            Expression::FunctionCall(_) | Expression::StructInit(_) => (),
             Expression::Type(_) => panic!("set_type for Type: {:?}", new_ty),
         }
     }

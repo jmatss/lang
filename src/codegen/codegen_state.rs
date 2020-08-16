@@ -1,5 +1,8 @@
 use crate::parse::token::BlockId;
-use inkwell::{basic_block::BasicBlock, values::FunctionValue};
+use inkwell::{
+    basic_block::BasicBlock,
+    values::{FunctionValue, PointerValue},
+};
 use std::collections::HashMap;
 
 /// Contains the state of the generation at a point in time.
@@ -17,6 +20,18 @@ pub struct CodeGenState<'ctx> {
     /// Contains a pointer to the current function that is being generated.
     pub cur_func: Option<FunctionValue<'ctx>>,
 
+    /// Contains the previously seen pointer value. This will be updated for
+    /// every variable load/store. This variable will be used for example
+    /// during indexing into variables.
+    ///
+    /// Example:
+    ///   "var y = abc.x"
+    /// first the "y" variable would be saved in this var since it does a store,
+    /// then "abc" would be saved since it does a load and then "x" would be saved.
+    /// This gives "x" a easy way to get the pointer for "abc" that is supposed
+    /// to index into.
+    pub prev_ptr_value: Option<PointerValue<'ctx>>,
+
     /// Merge blocks created for different if and match statements.
     /// Is stored in this struct so that it can be accessable from everywhere
     /// and statements etc. can figure out where to branch.
@@ -29,6 +44,7 @@ impl<'ctx> CodeGenState<'ctx> {
             cur_block_id: 0,
             cur_block: None,
             cur_func: None,
+            prev_ptr_value: None,
             merge_blocks: HashMap::default(),
         }
     }

@@ -21,7 +21,6 @@ use log::Level;
 
 pub type CustomResult<T> = Result<T, LangError>;
 
-const MODULE_NAME: &str = "MODULE_NAME";
 const OUTPUT_PATH: &str = "a.o";
 
 fn main() -> CustomResult<()> {
@@ -74,8 +73,8 @@ fn main() -> CustomResult<()> {
 
     let context = Context::create();
     let builder = context.create_builder();
-    let module = context.create_module(MODULE_NAME);
-    generator::generate(&ast_root, &analyze_context, &context, &builder, &module)?;
+    let module = context.create_module(module_name);
+    generator::generate(&mut ast_root, &analyze_context, &context, &builder, &module)?;
     println!("Generating complete.");
 
     if log_enabled!(Level::Debug) {

@@ -2,7 +2,7 @@ use super::generator::CodeGen;
 use crate::error::{LangError, LangErrorKind::CodeGenError};
 use crate::{
     parse::token::{
-        BlockHeader, BlockId, Expression, Function, ParseToken, ParseTokenKind, Variable,
+        BlockHeader, BlockId, Expression, Function, ParseToken, ParseTokenKind, Struct, Variable,
     },
     CustomResult,
 };
@@ -58,7 +58,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         header: &'ctx BlockHeader,
         id: BlockId,
-        body: &'ctx [ParseToken],
+        body: &'ctx mut [ParseToken],
     ) -> CustomResult<()> {
         match header {
             BlockHeader::Default => {
@@ -80,6 +80,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     "Unexpected IfCase in compile_block".into(),
                     CodeGenError,
                 ));
+            }
+            BlockHeader::Struct(struct_) => {
+                self.compile_struct(struct_)?;
             }
             //BlockHeader::Match(expr) => self.compile_match(expr),
             //BlockHeader::MatchCase(expr) => self.compile_match_case(expr),
@@ -119,7 +122,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         func: &'ctx Function,
         id: BlockId,
-        body: &'ctx [ParseToken],
+        body: &'ctx mut [ParseToken],
     ) -> CustomResult<()> {
         self.state.cur_block_id = id;
 
@@ -182,7 +185,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let mut v = Vec::with_capacity(params.len());
             for param in params {
                 if let Some(param_type_struct) = &param.ret_type {
-                    let any_type = param_type_struct.t.to_codegen(self.context)?;
+                    let any_type = self.compile_type(&param_type_struct.t)?;
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
                     v.push(basic_type);
                 } else {
@@ -201,7 +204,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let fn_type = if let Some(ret_type) = &func.ret_type {
-            let any_type = ret_type.t.to_codegen(self.context)?;
+            let any_type = self.compile_type(&ret_type.t)?;
             match any_type {
                 AnyTypeEnum::ArrayType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
                 AnyTypeEnum::FloatType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
@@ -253,7 +256,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     /// All the "ParseToken" in the body should be "IfCase"s.
-    fn compile_if(&mut self, id: BlockId, body: &'ctx [ParseToken]) -> CustomResult<()> {
+    fn compile_if(&mut self, id: BlockId, body: &'ctx mut [ParseToken]) -> CustomResult<()> {
         self.state.cur_block_id = id;
 
         let cur_func = self
@@ -299,24 +302,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.state.merge_blocks.insert(id, merge_block);
 
         // Iterate through all "if cases" in this if-statement and compile them.
-        for (index, if_case) in body.iter().enumerate() {
-            if let ParseTokenKind::Block(BlockHeader::IfCase(expr_opt), inner_id, inner_body) =
-                &if_case.kind
+        for (index, if_case) in body.iter_mut().enumerate() {
+            if let ParseTokenKind::Block(
+                BlockHeader::IfCase(ref mut expr_opt),
+                inner_id,
+                ref mut inner_body,
+            ) = &mut if_case.kind
             {
                 self.state.cur_block = Some(cur_block);
                 self.compile_if_case(
-                    &expr_opt,
+                    expr_opt,
                     *inner_id,
                     index,
-                    inner_body.as_slice(),
+                    inner_body.as_mut_slice(),
                     &branch_info,
                 )?;
             } else {
                 return Err(LangError::new(
-                    format!(
-                        "Token in \"If\" block wasn't a \"IfCase\": {:?}",
-                        if_case.kind
-                    ),
+                    "Token in \"If\" block wasn't a \"IfCase\".".into(),
                     CodeGenError,
                 ));
             }
@@ -329,10 +332,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_if_case(
         &mut self,
-        expr_opt: &Option<Expression>,
+        expr_opt: &mut Option<Expression>,
         id: BlockId,
         index: usize,
-        body: &'ctx [ParseToken],
+        body: &'ctx mut [ParseToken],
         branch_info: &BranchInfo<'ctx>,
     ) -> CustomResult<()> {
         let cur_block = branch_info.get_if_case(index)?;
@@ -382,6 +385,38 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if cur_block.get_terminator().is_none() {
             self.builder.build_unconditional_branch(merge_block);
         }
+        Ok(())
+    }
+
+    pub(super) fn compile_struct(&mut self, struct_: &Struct) -> CustomResult<()> {
+        // Go trough all members of the struct and create a vector containing
+        // all their types.
+        let member_types = if let Some(members) = &struct_.members {
+            let mut v = Vec::with_capacity(members.len());
+            for member in members {
+                if let Some(member_type_struct) = &member.ret_type {
+                    let any_type = self.compile_type(&member_type_struct.t)?;
+                    let basic_type = CodeGen::any_into_basic_type(any_type)?;
+                    v.push(basic_type);
+                } else {
+                    return Err(LangError::new(
+                        format!(
+                            "Bad type for struct \"{}\" member \"{}\".",
+                            &struct_.name, &member.name
+                        ),
+                        CodeGenError,
+                    ));
+                }
+            }
+            v
+        } else {
+            Vec::default()
+        };
+
+        let packed = false;
+        let struct_type = self.context.opaque_struct_type(&struct_.name);
+        struct_type.set_body(member_types.as_ref(), packed);
+
         Ok(())
     }
 }

@@ -48,8 +48,14 @@ impl<'a> DeclAnalyzer<'a> {
             BlockHeader::Enum(enum_) => self.analyze_enum_header(enum_, cur_id),
             BlockHeader::Interface(interface) => self.analyze_interface_header(interface, cur_id),
 
-            BlockHeader::Default => Ok(()),
-            _ => Ok(()),
+            BlockHeader::Default
+            | BlockHeader::If
+            | BlockHeader::IfCase(_)
+            | BlockHeader::Match(_)
+            | BlockHeader::MatchCase(_)
+            | BlockHeader::For(_, _)
+            | BlockHeader::While(_)
+            | BlockHeader::Test(_) => Ok(()),
         }
     }
 
@@ -121,6 +127,10 @@ impl<'a> DeclAnalyzer<'a> {
         let root_parent_id = self.context.get_root_parent(struct_id)?;
         let key = (struct_.name.clone(), root_parent_id);
         if let Some(prev_struct) = self.context.structs.get(&key) {
+            // TODO: Should this be done in the same way as function, that
+            //       one just checks that the declarations are equals and doesn't
+            //       throw a exception? This would allow for "extern" declarations
+            //       but might be problematic if it two defines.
             Err(LangError::new(
                 format!(
                     "A struct with name \"{}\" already defined.",

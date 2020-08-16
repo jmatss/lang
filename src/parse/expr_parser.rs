@@ -2,7 +2,7 @@ use super::{
     iter::ParseTokenIter,
     token::{
         BinaryOperation, BinaryOperator, Expression, Fix, FunctionCall, Operation, Operator,
-        Output, ParseToken, UnaryOperation, UnaryOperator,
+        Output, ParseToken, StructInit, UnaryOperation, UnaryOperator,
     },
 };
 use crate::{
@@ -323,17 +323,30 @@ impl<'a> ExprParser<'a> {
         old_lex_token: LexToken,
         ident: &str,
     ) -> CustomResult<Expression> {
+        // TODO: The peek doesn't skip line break, so can't ex. do a struct
+        //       init wit ha line break.
         // The identifier will be either a function call or a reference to
         // a variable.
         if let Some(lex_token) = self.iter.peek_skip_space() {
             match lex_token.kind {
                 // Function call.
                 LexTokenKind::Symbol(Symbol::ParenthesisBegin) => {
-                    let func_call = self.parse_expr_call(&ident)?;
+                    let start_symbol = Symbol::ParenthesisBegin;
+                    let end_symbol = Symbol::ParenthesisEnd;
+                    let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
+                    let func_call = FunctionCall::new(ident.into(), arguments);
                     Ok(Expression::FunctionCall(func_call))
                 }
 
-                // Variables or types (most likely, will add more stuff here.)
+                // Struct construction.
+                LexTokenKind::Symbol(Symbol::CurlyBracketBegin) => {
+                    let start_symbol = Symbol::CurlyBracketBegin;
+                    let end_symbol = Symbol::CurlyBracketEnd;
+                    let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
+                    let struct_init = StructInit::new(ident.into(), arguments);
+                    Ok(Expression::StructInit(struct_init))
+                }
+
                 _ => {
                     // See if this is a type. It is a type if the previous
                     // operator was a binary operator that takes a type
@@ -353,20 +366,14 @@ impl<'a> ExprParser<'a> {
                         }
                     }
 
-                    let var = self.iter.parse_var(ident)?;
+                    let var = self.iter.parse_var_type(ident)?;
                     Ok(Expression::Variable(var))
                 }
             }
         } else {
             // TODO: Merge with logic above, same stuff.
-            let var = self.iter.parse_var(ident)?;
+            let var = self.iter.parse_var_type(ident)?;
             Ok(Expression::Variable(var))
         }
-    }
-
-    /// Parses a function call.
-    fn parse_expr_call(&mut self, ident: &str) -> CustomResult<FunctionCall> {
-        let arguments = self.iter.parse_arg_list()?;
-        Ok(FunctionCall::new(ident.into(), arguments))
     }
 }

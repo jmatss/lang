@@ -1,10 +1,28 @@
-use super::block_analyzer::BlockAnalyzer;
+use super::{block_analyzer::BlockAnalyzer, indexing_analyzer::IndexingAnalyzer};
 use crate::analyze::decl_analyzer::DeclAnalyzer;
 use crate::analyze::type_analyzer::TypeAnalyzer;
 use crate::error::{LangError, LangErrorKind::AnalyzeError};
 use crate::parse::token::{BlockId, Enum, Function, Interface, ParseToken, Struct, Variable};
 use crate::CustomResult;
 use std::collections::HashMap;
+
+/// Updates the AST with information about function prototypes and declarations
+/// of structures.
+/// The TypeAnalyzer depends on the DeclAnalyzer to figure out types for
+/// function calls and function parameters used in expressions, so the DeclAnalyzer
+/// needs to be ran TypeAnalyzer.
+/// The TypeAnalyzer will also set the var types in "AnalyzeContext.variables".
+/// The DeclAnalyzer depends on the running first IndexingAnalyzer.
+pub fn analyze(ast_root: &mut ParseToken) -> CustomResult<AnalyzeContext> {
+    let mut context = AnalyzeContext::new();
+
+    BlockAnalyzer::analyze(&mut context, ast_root)?;
+    IndexingAnalyzer::analyze(&mut context, ast_root);
+    DeclAnalyzer::analyze(&mut context, ast_root)?;
+    TypeAnalyzer::analyze(&mut context, ast_root)?;
+
+    Ok(context)
+}
 
 #[derive(Debug, Clone)]
 pub struct BlockInfo {
@@ -153,6 +171,28 @@ impl AnalyzeContext {
         ))
     }
 
+    /// Finds root parent BlockId containing the struct with name `ident` in a
+    /// scope containing the block with BlockId `id`.
+    pub fn get_struct_parent_id(&self, ident: String, id: BlockId) -> CustomResult<BlockId> {
+        let mut cur_id = id;
+
+        while let Some(block_info) = self.block_info.get(&cur_id) {
+            let key = (ident.clone(), cur_id);
+            if self.structs.contains_key(&key) {
+                return Ok(cur_id);
+            }
+            cur_id = block_info.parent_id;
+        }
+
+        Err(LangError::new(
+            format!(
+                "Unable to get struct \"{}\" block info for block with id: {}, ended at ID: {}.",
+                &ident, &id, &cur_id
+            ),
+            AnalyzeError,
+        ))
+    }
+
     /// Given a block id `id`, returns the ID for the first root block
     /// "surounding" the `id` block. Example: For a if-statement, the root block
     /// will be the function containing the if-statement.
@@ -186,20 +226,4 @@ impl AnalyzeContext {
             AnalyzeError,
         ))
     }
-}
-
-/// Updates the AST with information about function prototypes and declarations
-/// of structures.
-/// The TypeAnalyzer depends on the DeclAnalyzer to figure out types for
-/// function calls and function parameters used in expressions, so the DeclAnalyzer
-/// needs to be ran TypeAnalyzer.
-/// The TypeAnalyzer will also set the var types in "AnalyzeContext.variables".
-pub fn analyze(ast_root: &mut ParseToken) -> CustomResult<AnalyzeContext> {
-    let mut context = AnalyzeContext::new();
-
-    BlockAnalyzer::analyze(&mut context, ast_root)?;
-    DeclAnalyzer::analyze(&mut context, ast_root)?;
-    TypeAnalyzer::analyze(&mut context, ast_root)?;
-
-    Ok(context)
 }
