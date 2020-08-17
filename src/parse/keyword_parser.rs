@@ -431,8 +431,6 @@ impl<'a> KeyworkParser<'a> {
             ));
         };
 
-        // If `expr` is Some (i.e. this is initialization), a assignment needs
-        // to be added into the ParseToken and returned as well.
         let is_const = false;
         let variable = Variable::new(ident, var_type, None, is_const);
         let var_decl = Statement::VariableDecl(variable, expr_opt);

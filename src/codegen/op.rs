@@ -9,7 +9,7 @@ use inkwell::{
     values::{AnyValueEnum, BasicValueEnum},
     FloatPredicate, IntPredicate,
 };
-use token::{BinaryOperator, UnaryOperation, UnaryOperator, Variable};
+use token::{BinaryOperator, Expression, UnaryOperation, UnaryOperator, Variable};
 
 // TODO: Check constness for operators. Ex. adding two consts should use a
 //       const add instruction so that the result also is const.
@@ -159,13 +159,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             UnaryOperator::Decrement => {
                 self.compile_un_op_decrement(ret_type, un_op.is_const, value)?
             }
-            UnaryOperator::Deref => self.compile_un_op_deref(ret_type, value)?,
+            UnaryOperator::Deref => self.compile_un_op_deref(value)?,
             UnaryOperator::Address => {
-                if let token::Expression::Variable(ref var) = *un_op.value {
+                if let Some(var) = un_op.value.eval_to_var() {
                     self.compile_un_op_address(var)?
                 } else {
                     return Err(LangError::new(
                         format!("Trying to dereference invalid type: {:?}", &un_op.value),
+                        CodeGenError,
+                    ));
+                }
+            }
+            UnaryOperator::ArrayAccess(ref mut dim) => {
+                if let Some(var) = un_op.value.eval_to_var() {
+                    self.compile_un_op_array_access(var, dim)?
+                } else {
+                    return Err(LangError::new(
+                        format!("Trying to index invalid type: {:?}", &un_op.value),
                         CodeGenError,
                     ));
                 }
@@ -901,7 +911,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_un_op_deref(
         &mut self,
-        ret_type: AnyTypeEnum<'ctx>,
         value: BasicValueEnum<'ctx>,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         Ok(match value.get_type() {
@@ -916,7 +925,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | BasicTypeEnum::StructType(_)
             | BasicTypeEnum::VectorType(_) => {
                 return Err(LangError::new(
-                    format!("Invalid type for UnaryOperator::Deref: {:?}", ret_type),
+                    format!(
+                        "Invalid type for UnaryOperator::Deref: {:?}",
+                        value.get_type()
+                    ),
                     CodeGenError,
                 ))
             }
@@ -934,6 +946,43 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         if let Some(var_ptr) = self.variables.get(&key) {
             Ok(var_ptr.clone().into())
+        } else {
+            Err(LangError::new(
+                format!(
+                    "Unable to find var \"{}\" in decl block id {}.",
+                    &var.name, decl_block_id
+                ),
+                CodeGenError,
+            ))
+        }
+    }
+
+    fn compile_un_op_array_access(
+        &mut self,
+        var: &Variable,
+        dim: &mut Expression,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
+        let block_id = self.state.cur_block_id;
+        let decl_block_id = self
+            .analyze_context
+            .get_var_decl_scope(&var.name, block_id)?;
+        let key = (var.name.clone(), decl_block_id);
+
+        let compiled_dim = self.compile_expr(dim)?;
+        if !compiled_dim.is_int_value() {
+            return Err(LangError::new(
+                format!("Dim in array didn't compile to int: {:?}", &dim),
+                CodeGenError,
+            ));
+        }
+
+        if let Some(var_ptr) = self.variables.get(&key) {
+            unsafe {
+                Ok(self
+                    .builder
+                    .build_gep(*var_ptr, &[compiled_dim.into_int_value()], "array.gep")
+                    .into())
+            }
         } else {
             Err(LangError::new(
                 format!(

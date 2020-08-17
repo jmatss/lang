@@ -113,8 +113,8 @@ impl<'a> BlockAnalyzer<'a> {
 
             Statement::Use(_)
             | Statement::Package(_)
-            | Statement::Assignment(_, _, _)
-            | Statement::VariableDecl(_, _)
+            | Statement::Assignment(..)
+            | Statement::VariableDecl(..)
             | Statement::ExternalDecl(_)
             | Statement::Modifier(_) => (),
         }

@@ -75,6 +75,8 @@ impl<'a> TypeAnalyzer<'a> {
             }
             Expression::Type(type_struct) => Ok(Some(type_struct.clone())),
             Expression::Variable(var) => {
+                debug!("ANALYZING VAR: {:#?}", var);
+
                 // If this is a struct member, it will be at the right hand side
                 // of a "Dot" binary operation. It that case the `prev_type_opt`
                 // will come from the left hand side and it will be the type of
@@ -143,15 +145,15 @@ impl<'a> TypeAnalyzer<'a> {
                 }
             } else {
                 return Err(LangError::new(
-                            format!(
-                                "Func/call to {}, incorrect amount of param/arg (vararg={}). Actual func #: {}, got: {}.",
-                                &func_call.name,
-                                func.is_var_arg,
-                                func_params.len(),
-                                func_call.arguments.len()
-                            ),
-                            AnalyzeError,
-                        ));
+                    format!(
+                        "Func/call to {}, incorrect amount of param/arg (vararg={}). Actual func #: {}, got: {}.",
+                        &func_call.name,
+                        func.is_var_arg,
+                        func_params.len(),
+                        func_call.arguments.len()
+                    ),
+                    AnalyzeError,
+                ));
             }
         } else if !func_call.arguments.is_empty() {
             return Err(LangError::new(
@@ -264,9 +266,10 @@ impl<'a> TypeAnalyzer<'a> {
                 let mut found = false;
                 for (i, member) in members.iter().enumerate() {
                     if member.name == var.name {
+                        // The name of the struct `var.struct_name` is set
+                        // during "IdenAnalyzing".
                         var.member_index = i as u32;
                         var.ret_type = member.ret_type.clone();
-                        var.struct_name = Some(ident.clone());
                         var.modifiers = member.modifiers.clone();
                         var.is_const = member.is_const;
                         found = true;
@@ -450,6 +453,27 @@ impl<'a> TypeAnalyzer<'a> {
                     ));
                 }
             }
+            UnaryOperator::ArrayAccess(_) => {
+                // Analyze the "outer" value that should be a array. Then deref
+                // the result to get the value that is inside the pointer.
+                if let Some(type_struct) =
+                    self.analyze_expr_type(&mut un_op.value, prev_type_opt)?
+                {
+                    if let Type::Array(inner, _) = type_struct.t {
+                        Some(*inner)
+                    } else {
+                        return Err(LangError::new(
+                            format!("Trying to index non array type: {:?}", type_struct),
+                            AnalyzeError,
+                        ));
+                    }
+                } else {
+                    return Err(LangError::new(
+                        "Type set to None when indexing.".into(),
+                        AnalyzeError,
+                    ));
+                }
+            }
 
             UnaryOperator::Increment
             | UnaryOperator::Decrement
@@ -469,28 +493,35 @@ impl<'a> TypeAnalyzer<'a> {
             | Statement::Use(_)
             | Statement::Package(_)
             | Statement::Modifier(_)
-            | Statement::ExternalDecl(_) => Ok(()),
+            | Statement::ExternalDecl(_) => (),
 
             Statement::With(expr) => {
                 self.analyze_expr_type(expr, None)?;
-                Ok(())
             }
             Statement::Defer(expr) => {
                 self.analyze_expr_type(expr, None)?;
-                Ok(())
             }
             Statement::Return(expr_opt) => {
                 self.analyze_expr_type_opt(expr_opt, None)?;
-                Ok(())
             }
             Statement::Yield(expr) => {
                 self.analyze_expr_type(expr, None)?;
-                Ok(())
             }
-            Statement::Assignment(_, var, expr) => {
+            Statement::Assignment(_, lhs, rhs) => {
                 // TODO: Should this check so that the left and right hand side
                 //       have the same type (or just are compatible?).
-                let expr_type = self.analyze_expr_type(expr, var.ret_type.clone())?;
+                let lhs_type = self.analyze_expr_type(lhs, None)?;
+                let expr_type = self.analyze_expr_type(rhs, lhs_type)?;
+
+                // "Dereference" and get the variable from the lhs expr.
+                let var = if let Some(var) = lhs.eval_to_var() {
+                    var
+                } else {
+                    return Err(LangError::new(
+                        format!("lhs of assignment not evaluated to var: {:?}", lhs),
+                        AnalyzeError,
+                    ));
+                };
 
                 // Update the variable type if it is None.
                 if var.ret_type.is_none() {
@@ -498,17 +529,18 @@ impl<'a> TypeAnalyzer<'a> {
                 }
 
                 // Update the type of the variable in the "AnalyzeContext"
-                // if the type is None.
-                let cur_block_id = self.context.cur_block_id;
-                let var_decl_id = self.context.get_var_decl_scope(&var.name, cur_block_id)?;
-                let key = (var.name.clone(), var_decl_id);
-                self.context.variables.entry(key).and_modify(|e| {
-                    if e.ret_type.is_none() {
-                        e.ret_type = expr_type.clone()
-                    }
-                });
-
-                Ok(())
+                // if the type is None. Don't do this forstruct members (since
+                // their types will always be hardcoded in the source code).
+                if !var.is_struct_member {
+                    let cur_block_id = self.context.cur_block_id;
+                    let var_decl_id = self.context.get_var_decl_scope(&var.name, cur_block_id)?;
+                    let key = (var.name.clone(), var_decl_id);
+                    self.context.variables.entry(key).and_modify(|e| {
+                        if e.ret_type.is_none() {
+                            e.ret_type = expr_type.clone()
+                        }
+                    });
+                }
             }
             Statement::VariableDecl(var, expr_opt) => {
                 // TODO: Should this check so that the left and right hand side
@@ -533,10 +565,9 @@ impl<'a> TypeAnalyzer<'a> {
                         e.ret_type = expr_type.clone()
                     }
                 });
-
-                Ok(())
             }
         }
+        Ok(())
     }
 
     fn analyze_header_type(&mut self, block_header: &mut BlockHeader) -> CustomResult<()> {

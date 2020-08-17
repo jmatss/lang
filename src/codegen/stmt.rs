@@ -1,7 +1,7 @@
 use super::generator::CodeGen;
 use crate::error::{LangError, LangErrorKind::CodeGenError};
 use crate::{
-    parse::token::{AssignOperator, Expression, Modifier, Path, Statement, Variable},
+    parse::token::{AssignOperator, Expression, Modifier, Path, Statement},
     CustomResult,
 };
 use inkwell::{module::Linkage, types::AnyTypeEnum};
@@ -37,9 +37,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Ok(())
             }
             Statement::Modifier(modifier) => self.compile_modifier(modifier),
-            Statement::Assignment(assign_op, var, expr) => {
-                self.compile_assign(assign_op, var, expr)
-            }
+            Statement::Assignment(assign_op, lhs, rhs) => self.compile_assign(assign_op, lhs, rhs),
         }
     }
 
@@ -97,13 +95,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ))
     }
 
-    // TODO: Only "int"s atm.
     fn compile_assign(
         &mut self,
         assign_op: &AssignOperator,
-        var: &Variable,
-        expr: &mut Expression,
+        lhs: &mut Expression,
+        rhs: &mut Expression,
     ) -> CustomResult<()> {
+        let var = if let Some(var) = lhs.eval_to_var() {
+            var
+        } else {
+            return Err(LangError::new(
+                format!(
+                    "lhs of expr in compile_assign doesn't eval to var: {:?}",
+                    lhs
+                ),
+                CodeGenError,
+            ));
+        };
+
         // TODO: Can one always assume that the `ret_type` will be set at this point?
         let ret_type = if let Some(ref ret_type) = var.ret_type {
             self.compile_type(&ret_type)?
@@ -117,7 +126,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             ));
         };
 
-        let right_any_value = self.compile_expr(expr)?;
+        let right_any_value = self.compile_expr(rhs)?;
         let right = CodeGen::any_into_basic_value(right_any_value)?;
 
         let left = self.compile_var_load(var)?;

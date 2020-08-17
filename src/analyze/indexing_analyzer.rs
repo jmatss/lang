@@ -47,15 +47,18 @@ impl<'a> IndexingAnalyzer<'a> {
             Statement::Yield(expr) => self.analyze_expr(expr),
             Statement::With(expr) => self.analyze_expr(expr),
             Statement::Defer(expr) => self.analyze_expr(expr),
-            Statement::Assignment(_, _, expr) => self.analyze_expr(expr),
+            Statement::Assignment(_, lhs, rhs) => {
+                self.analyze_expr(lhs);
+                self.analyze_expr(rhs);
+            }
             Statement::Return(expr_opt) => {
                 if let Some(expr) = expr_opt {
-                    self.analyze_expr(expr)
+                    self.analyze_expr(expr);
                 }
             }
             Statement::VariableDecl(_, expr_opt) => {
                 if let Some(expr) = expr_opt {
-                    self.analyze_expr(expr)
+                    self.analyze_expr(expr);
                 }
             }
 
@@ -74,7 +77,7 @@ impl<'a> IndexingAnalyzer<'a> {
             Expression::StructInit(struct_init) => self.analyze_struct_init(struct_init),
             Expression::Operation(op) => self.analyze_op(op),
 
-            Expression::Literal(_, _) | Expression::Type(_) | Expression::Variable(_) => (),
+            Expression::Literal(..) | Expression::Type(_) | Expression::Variable(_) => (),
         }
     }
 
@@ -97,17 +100,24 @@ impl<'a> IndexingAnalyzer<'a> {
         }
     }
 
-    /// Set any variables that are used to index as struct members.
+    /// Set any variables that are used as lhs in a "Dot" bin op as a struct
+    /// and all variables used in rhs of a "Dot" as a struct member.
+    /// The vars will be found recursively.
     fn analyze_bin_op(&mut self, bin_op: &mut BinaryOperation) {
         self.analyze_expr(&mut bin_op.left);
         self.analyze_expr(&mut bin_op.right);
-        match bin_op.operator {
-            BinaryOperator::Dot => {
-                if let Expression::Variable(ref mut var) = *bin_op.right {
-                    var.is_struct_member = true;
+        if let BinaryOperator::Dot = bin_op.operator {
+            if let Expression::Variable(ref mut struct_member_var) = *bin_op.right {
+                if let Some(parent_struct) = bin_op.left.eval_to_var() {
+                    struct_member_var.is_struct_member = true;
+                    struct_member_var.struct_name = Some(parent_struct.name.clone());
+                } else {
+                    panic!(
+                        "lhs of dot not var. left: {:?}, right: {:?}",
+                        bin_op.left, bin_op.right
+                    );
                 }
             }
-            _ => (),
         }
     }
 }

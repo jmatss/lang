@@ -76,7 +76,14 @@ fn main() -> CustomResult<()> {
     let context = Context::create();
     let builder = context.create_builder();
     let module = context.create_module(module_name);
-    generator::generate(&mut ast_root, &analyze_context, &context, &builder, &module, &target_machine)?;
+    generator::generate(
+        &mut ast_root,
+        &analyze_context,
+        &context,
+        &builder,
+        &module,
+        &target_machine,
+    )?;
     println!("Generating complete.");
 
     if log_enabled!(Level::Debug) {

@@ -279,33 +279,90 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         var: &Variable,
         basic_value: BasicValueEnum<'ctx>,
     ) -> CustomResult<()> {
-        // Get the block ID of the block in which this variable was declared.
-        let block_id = self.state.cur_block_id;
-        let decl_block_id = self
-            .analyze_context
-            .get_var_decl_scope(&var.name, block_id)?;
-        let key = (var.name.clone(), decl_block_id);
-        debug!("Compile var_store, key: {:?}", &key);
-
-        // If this is constant variable, just insert the value into the
-        // varirable in the `constants` map. Otherwise, if this is a "regular"
-        // variable, create a load instruction of that variable.
-        if var.is_const {
-            self.constants.insert(key, basic_value);
-        } else if let Some(ptr) = self.variables.get(&key) {
-            self.state.prev_ptr_value = Some(*ptr);
-            self.builder.build_store(*ptr, basic_value);
+        if var.is_struct_member {
+            // TODO: Need to check for const in this func as well.
+            self.compile_var_store_struct_member(var, basic_value)?;
         } else {
-            return Err(LangError::new(
-                format!(
-                    "No decl for var `{}` in decl block {} when building store.",
-                    &var.name, decl_block_id
-                ),
-                CodeGenError,
-            ));
+            // Get the block ID of the block in which this variable was declared.
+            let block_id = self.state.cur_block_id;
+            let decl_block_id = self
+                .analyze_context
+                .get_var_decl_scope(&var.name, block_id)?;
+            let key = (var.name.clone(), decl_block_id);
+            debug!("Compile var_store, key: {:?}", &key);
+
+            // If this is constant variable, just insert the value into the
+            // varirable in the `constants` map. Otherwise, if this is a "regular"
+            // variable, create a load instruction of that variable.
+            if var.is_const {
+                self.constants.insert(key, basic_value);
+            } else if let Some(ptr) = self.variables.get(&key) {
+                self.state.prev_ptr_value = Some(*ptr);
+                self.builder.build_store(*ptr, basic_value);
+            } else {
+                return Err(LangError::new(
+                    format!(
+                        "No decl for var `{}` in decl block {} when building store.",
+                        &var.name, decl_block_id
+                    ),
+                    CodeGenError,
+                ));
+            }
         }
 
         Ok(())
+    }
+
+    // TODO: Need to check for const in this func as well.
+    fn compile_var_store_struct_member(
+        &mut self,
+        var: &Variable,
+        basic_value: BasicValueEnum<'ctx>,
+    ) -> CustomResult<()> {
+        let struct_var_name = if let Some(ref struct_name) = var.struct_name {
+            struct_name
+        } else {
+            return Err(LangError::new(
+                format!("No struct name set for member var \"{}\".", &var.name),
+                CodeGenError,
+            ));
+        };
+
+        let block_id = self.state.cur_block_id;
+        let decl_block_id = self
+            .analyze_context
+            .get_var_decl_scope(struct_var_name, block_id)?;
+        let key = (struct_var_name.clone(), decl_block_id);
+        debug!("Compiling var struct member load. Key: {:?}", &key);
+
+        if let Some(struct_ptr) = self.variables.get(&key) {
+            // Get a pointer to the member in the struct. This pointer can
+            // then be used to load the value with a regular "load" instruction.
+            let member_ptr = self
+                .builder
+                .build_struct_gep(*struct_ptr, var.member_index, "struct.gep")
+                .map_err(|_| {
+                    LangError::new(
+                        format!(
+                            "Unable to gep member in struct {:?}, index {}.",
+                            &var.struct_name, var.member_index
+                        ),
+                        CodeGenError,
+                    )
+                })?;
+
+            self.state.prev_ptr_value = Some(member_ptr);
+            self.builder.build_store(member_ptr, basic_value);
+            Ok(())
+        } else {
+            Err(LangError::new(
+                format!(
+                    "Unable to find ptr to struct \"{}\" in decl block ID {}.",
+                    &struct_var_name, decl_block_id
+                ),
+                CodeGenError,
+            ))
+        }
     }
 
     pub(super) fn compile_var_load(
@@ -355,12 +412,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         var: &Variable,
     ) -> CustomResult<BasicValueEnum<'ctx>> {
-        if let Some(prev_ptr_value) = self.state.prev_ptr_value {
+        let struct_var_name = if let Some(ref struct_name) = var.struct_name {
+            struct_name
+        } else {
+            return Err(LangError::new(
+                format!("No struct name set for member var \"{}\".", &var.name),
+                CodeGenError,
+            ));
+        };
+
+        let block_id = self.state.cur_block_id;
+        let decl_block_id = self
+            .analyze_context
+            .get_var_decl_scope(struct_var_name, block_id)?;
+        let key = (struct_var_name.clone(), decl_block_id);
+        debug!("Compiling var struct member load. Key: {:?}", &key);
+
+        if let Some(struct_ptr) = self.variables.get(&key) {
             // Get a pointer to the member in the struct. This pointer can
             // then be used to load the value with a regular "load" instruction.
             let member_ptr = self
                 .builder
-                .build_struct_gep(prev_ptr_value, var.member_index, "struct.gep")
+                .build_struct_gep(*struct_ptr, var.member_index, "struct.gep")
                 .map_err(|_| {
                     LangError::new(
                         format!(
@@ -375,7 +448,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Ok(self.builder.build_load(member_ptr, "struct.member.load"))
         } else {
             Err(LangError::new(
-                "No prev_basic_value set when compiling struct member load".into(),
+                format!(
+                    "Unable to find ptr to struct \"{}\" in decl block ID {}.",
+                    &struct_var_name, decl_block_id
+                ),
                 CodeGenError,
             ))
         }

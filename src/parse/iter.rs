@@ -23,6 +23,31 @@ pub const DEFAULT_STOP_CONDS: [Symbol; 5] = [
     Symbol::CurlyBracketEnd,
 ];
 
+/// The stop conditions used when one wants to parse either a "regular"
+/// expressions or a expression that is the lhs of a assignment.
+/// Other that the `DEFAULT_STOP_CONDS` this array will contains all assignment
+/// symbols plus the Colon symbol to stop on types.
+pub const DEFAULT_ASSIGN_STOP_CONDS: [Symbol; 18] = [
+    Symbol::LineBreak,
+    Symbol::SemiColon,
+    Symbol::Comma,
+    Symbol::CurlyBracketBegin,
+    Symbol::CurlyBracketEnd,
+    Symbol::Colon,
+    Symbol::Equals,
+    Symbol::AssignAddition,
+    Symbol::AssignSubtraction,
+    Symbol::AssignMultiplication,
+    Symbol::AssignDivision,
+    Symbol::AssignModulus,
+    Symbol::AssignPower,
+    Symbol::AssignBitAnd,
+    Symbol::AssignBitOr,
+    Symbol::AssignBitXor,
+    Symbol::AssignShiftLeft,
+    Symbol::AssignShiftRight,
+];
+
 // TODO: Clean up logic for storing line_nr and column_nr for parser.
 
 pub struct ParseTokenIter {
@@ -89,32 +114,31 @@ impl ParseTokenIter {
                 }
 
                 // If a "line" starts with a identifier this can either be a
-                // assignment to this identifier (assignment aren't treated as
+                // assignment to a variable (assignment aren't treated as
                 // expression atm) or it will be an expression.
-                LexTokenKind::Identifier(ref ident) => {
-                    // If true: This is a assignment, the left hand side will
-                    //          already have been parsed. Just need to parse the
-                    //          right hand side (and also consume assign symbol).
-                    // Else: This is a expression, put back the identifier and
-                    //       then parse it as if it is a start of a expression.
-                    if let Some(var) = self.parse_ident(ident)? {
-                        if let Some(next_lex_token) = self.next_skip_space() {
-                            if let Some(assign_op) = ParseToken::get_if_stmt_op(&next_lex_token) {
-                                let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                                let stmt = Statement::Assignment(assign_op, var, expr);
-                                ParseTokenKind::Statement(stmt)
-                            } else {
-                                return Err(self.err(format!(
-                                    "Expected assign operator when parsing ident, got: {:?}",
-                                    &lex_token
-                                )));
-                            }
+                LexTokenKind::Identifier(_) => {
+                    // Put back the ident, it is a part of a expression.
+                    self.put_back(lex_token)?;
+
+                    // The first parsed expr can either be the lhs or the rhs.
+                    // This will be figure out later in this block.
+                    let stop_conds = DEFAULT_ASSIGN_STOP_CONDS;
+                    let expr = self.parse_expr(&stop_conds)?;
+
+                    // If the next token after the expr is a assign operator,
+                    // this is a assignment. Otherwise, this is just a "regular" expr.
+                    if let Some(next) = self.peek_skip_space() {
+                        if let Some(assign_op) = ParseToken::get_if_stmt_op(&next) {
+                            self.next_skip_space(); // Consume the assign op.
+                            let rhs = self.parse_expr(&DEFAULT_STOP_CONDS)?;
+                            let stmt = Statement::Assignment(assign_op, expr, rhs);
+                            ParseTokenKind::Statement(stmt)
                         } else {
-                            unreachable!("No operator after ident.");
+                            ParseTokenKind::Expression(expr)
                         }
                     } else {
-                        self.put_back(lex_token)?;
-                        let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
+                        // If there are no more tokens after this expr has been
+                        // parsed, there can be no rhs, this is NOT a assignment.
                         ParseTokenKind::Expression(expr)
                     }
                 }

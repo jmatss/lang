@@ -47,10 +47,21 @@ pub enum Statement {
     // Defer -> Run this expression at the end of the current block.
     Defer(Expression),
 
-    Assignment(AssignOperator, Variable, Expression),
+    // The lhs can't be a "Variable" directly since it needs to support
+    // ex. array indexing and dereferencing. But evaluationg the lhs expressions
+    // MUST evaluate to a variable.
+    // The valid lhs expressions are (Variable or wrapping a Variable):
+    //   Variable
+    //   bin op:
+    //     Dot (both lhs and rhs as Variables)
+    //   un op:
+    //     Deref
+    //     Address
+    // The "middle expr" is the lhs and the "right expr" is the rhs of the assignment.
+    Assignment(AssignOperator, Expression, Expression),
 
-    // The expr will contain the assigned value if this is a initialization.
-    // Used both for "var" and "const" variables.
+    // Used both for "var" and "const" variables. The expr options will be Some
+    // if this var decl also has han initializer.
     VariableDecl(Variable, Option<Expression>),
 
     // TODO: Implement extern for variables as well.
@@ -81,6 +92,76 @@ pub enum Expression {
     StructInit(StructInit),
     //MacroCall(Option<MacroCall>),
     Operation(Operation),
+}
+
+impl Expression {
+    pub fn is_var(&self) -> bool {
+        match self {
+            Expression::Variable(_) => true,
+            Expression::Operation(op) => match op {
+                Operation::BinaryOperation(bin_op) => match bin_op.operator {
+                    BinaryOperator::Dot => bin_op.left.is_var() && bin_op.right.is_var(),
+                    _ => false,
+                },
+                Operation::UnaryOperation(un_op) => match un_op.operator {
+                    UnaryOperator::Deref
+                    | UnaryOperator::Address
+                    | UnaryOperator::ArrayAccess(_) => true,
+                    _ => false,
+                },
+            },
+            _ => false,
+        }
+    }
+
+    /// If this is a Dot operation, this function will return the variable from
+    /// the rhs.
+    pub fn eval_to_var(&mut self) -> Option<&mut Variable> {
+        match self {
+            Expression::Variable(var) => Some(var),
+            Expression::Operation(op) => match op {
+                Operation::BinaryOperation(bin_op) => match bin_op.operator {
+                    BinaryOperator::Dot => {
+                        if bin_op.left.is_var() && bin_op.right.is_var() {
+                            bin_op.right.eval_to_var()
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                },
+                Operation::UnaryOperation(un_op) => match un_op.operator {
+                    // TODO: This returns the variable that this un op is applied
+                    // on and not the variable resulting from the addr/deref op.
+                    UnaryOperator::Deref
+                    | UnaryOperator::Address
+                    | UnaryOperator::ArrayAccess(_) => un_op.value.eval_to_var(),
+                    _ => None,
+                },
+            },
+            _ => None,
+        }
+    }
+
+    pub fn eval_to_struct_access(&mut self) -> Option<(&Variable, u32)> {
+        match self {
+            Expression::Operation(op) => match op {
+                Operation::BinaryOperation(bin_op) => match bin_op.operator {
+                    BinaryOperator::Dot => {
+                        if let Some(left_var) = bin_op.left.eval_to_var() {
+                            if let Some(right_var) = bin_op.right.eval_to_var() {
+                                return Some((left_var, right_var.member_index));
+                            }
+                        }
+                        None
+                    }
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -451,24 +532,25 @@ impl Operator {
     /*
         Precedence:
             0   ( )      (precedence for parenthesis always highest)
-            1   . .* .&  (function calls, deref, address etc.)
-            2   +x -x
-            3   x++ x--  (only postfix)
-            4   ~ !
-            5   as
-            6   **       (power)
-            7   * / %
-            8   + -
-            9   << >>
-            10   < > <= >= is of
-            11  == !=
-            12  &
-            13  ^
-            14  |
-            15  and (bool)
-            16  or (bool)
-            17  .. ..=
-            18  in
+            1   []       (indexing)
+            2   . .* .&  (function calls, deref, address etc.)
+            3   +x -x
+            4   x++ x--  (only postfix)
+            5   ~ !
+            6   as
+            7   **       (power)
+            8   * / %
+            9   + -
+            10  << >>
+            11  < > <= >= is of
+            12  == !=
+            13  &
+            14  ^
+            15  |
+            16  and (bool)
+            17  or (bool)
+            18  .. ..=
+            19  in
 
             (Currently assignments aren't counted as expression, but they would
             have the lowest precedence if they were)
@@ -481,48 +563,49 @@ impl Operator {
             Some((true, 0, Fix::Dummy))
         } else if let Operator::UnaryOperator(unary_op) = self {
             Some(match unary_op {
-                UnaryOperator::Positive => (true, 2, Fix::Prefix),
-                UnaryOperator::Negative => (true, 2, Fix::Prefix),
-                UnaryOperator::Increment => (true, 3, Fix::Postfix),
-                UnaryOperator::Decrement => (true, 3, Fix::Postfix),
+                UnaryOperator::Positive => (true, 3, Fix::Prefix),
+                UnaryOperator::Negative => (true, 3, Fix::Prefix),
+                UnaryOperator::Increment => (true, 4, Fix::Postfix),
+                UnaryOperator::Decrement => (true, 4, Fix::Postfix),
 
-                UnaryOperator::BitComplement => (true, 4, Fix::Prefix),
-                UnaryOperator::BoolNot => (true, 4, Fix::Prefix),
-                UnaryOperator::Deref => (true, 1, Fix::Postfix),
-                UnaryOperator::Address => (true, 1, Fix::Postfix),
+                UnaryOperator::BitComplement => (true, 5, Fix::Prefix),
+                UnaryOperator::BoolNot => (true, 5, Fix::Prefix),
+                UnaryOperator::Deref => (true, 2, Fix::Postfix),
+                UnaryOperator::Address => (true, 2, Fix::Postfix),
+                UnaryOperator::ArrayAccess(_) => (true, 1, Fix::Postfix),
             })
         } else if let Operator::BinaryOperator(binary_op) = self {
             Some(match binary_op {
-                BinaryOperator::In => (false, 18, Fix::Dummy),
-                BinaryOperator::Is => (true, 10, Fix::Dummy),
-                BinaryOperator::As => (true, 5, Fix::Dummy),
-                BinaryOperator::Of => (true, 10, Fix::Dummy),
-                BinaryOperator::Range => (true, 17, Fix::Dummy),
-                BinaryOperator::RangeInclusive => (true, 17, Fix::Dummy),
-                BinaryOperator::Dot => (true, 1, Fix::Dummy),
+                BinaryOperator::In => (false, 19, Fix::Dummy),
+                BinaryOperator::Is => (true, 11, Fix::Dummy),
+                BinaryOperator::As => (true, 6, Fix::Dummy),
+                BinaryOperator::Of => (true, 11, Fix::Dummy),
+                BinaryOperator::Range => (true, 18, Fix::Dummy),
+                BinaryOperator::RangeInclusive => (true, 18, Fix::Dummy),
+                BinaryOperator::Dot => (true, 2, Fix::Dummy),
 
-                BinaryOperator::Equals => (true, 11, Fix::Dummy),
-                BinaryOperator::NotEquals => (true, 11, Fix::Dummy),
-                BinaryOperator::LessThan => (true, 10, Fix::Dummy),
-                BinaryOperator::GreaterThan => (true, 10, Fix::Dummy),
-                BinaryOperator::LessThanOrEquals => (true, 10, Fix::Dummy),
-                BinaryOperator::GreaterThanOrEquals => (true, 10, Fix::Dummy),
+                BinaryOperator::Equals => (true, 12, Fix::Dummy),
+                BinaryOperator::NotEquals => (true, 12, Fix::Dummy),
+                BinaryOperator::LessThan => (true, 11, Fix::Dummy),
+                BinaryOperator::GreaterThan => (true, 11, Fix::Dummy),
+                BinaryOperator::LessThanOrEquals => (true, 11, Fix::Dummy),
+                BinaryOperator::GreaterThanOrEquals => (true, 11, Fix::Dummy),
 
-                BinaryOperator::Addition => (true, 8, Fix::Dummy),
-                BinaryOperator::Subtraction => (true, 8, Fix::Dummy),
-                BinaryOperator::Multiplication => (true, 7, Fix::Dummy),
-                BinaryOperator::Division => (true, 7, Fix::Dummy),
-                BinaryOperator::Modulus => (true, 7, Fix::Dummy),
-                BinaryOperator::Power => (false, 6, Fix::Dummy),
+                BinaryOperator::Addition => (true, 9, Fix::Dummy),
+                BinaryOperator::Subtraction => (true, 9, Fix::Dummy),
+                BinaryOperator::Multiplication => (true, 8, Fix::Dummy),
+                BinaryOperator::Division => (true, 8, Fix::Dummy),
+                BinaryOperator::Modulus => (true, 8, Fix::Dummy),
+                BinaryOperator::Power => (false, 7, Fix::Dummy),
 
-                BinaryOperator::BitAnd => (true, 12, Fix::Dummy),
-                BinaryOperator::BitOr => (true, 14, Fix::Dummy),
-                BinaryOperator::BitXor => (true, 13, Fix::Dummy),
-                BinaryOperator::ShiftLeft => (true, 9, Fix::Dummy),
-                BinaryOperator::ShiftRight => (true, 9, Fix::Dummy),
+                BinaryOperator::BitAnd => (true, 13, Fix::Dummy),
+                BinaryOperator::BitOr => (true, 15, Fix::Dummy),
+                BinaryOperator::BitXor => (true, 14, Fix::Dummy),
+                BinaryOperator::ShiftLeft => (true, 10, Fix::Dummy),
+                BinaryOperator::ShiftRight => (true, 10, Fix::Dummy),
 
-                BinaryOperator::BoolAnd => (true, 15, Fix::Dummy),
-                BinaryOperator::BoolOr => (true, 16, Fix::Dummy),
+                BinaryOperator::BoolAnd => (true, 16, Fix::Dummy),
+                BinaryOperator::BoolOr => (true, 17, Fix::Dummy),
 
                 _ => return None,
             })
@@ -631,6 +714,10 @@ pub enum UnaryOperator {
     // ex: (+a + -b)  =>  { Positive(a) + Negative(b) }
     Positive,
     Negative,
+
+    // TODO: Slice/slicing.
+    // The expression is the dimension.
+    ArrayAccess(Box<Expression>),
 
     /* NUMBERS (BIT) */
     BitComplement,
