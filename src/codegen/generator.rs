@@ -63,37 +63,21 @@ pub fn generate<'a, 'ctx>(
     code_gen.compile_recursive(ast_root)?;
 
     // TODO: Temporary solution, loop through all merge blocks and look for all
-    //       merge blocks with no instructions. If the merge block has a "wrapping"
-    //       if-statement (a nested if-statement), the merge block should branch
-    //       to the wrapping merge block.
-    //       If there are no wrapping if-statement, just remove the empty merge
-    //       block since it (probably) isn't used. This makes the assumption that
-    //       the code has no logical flaw, which one shouldn't do.
+    //       merge blocks with no terminator instruction. If the merge block has
+    //       a "wrapping" block, the merge block should branch to the wrapping
+    //       blocks merge block. Otherwise something has gone wrong.
     for (block_id, merge_block) in &code_gen.merge_blocks {
-        if merge_block.get_first_instruction().is_none() {
+        if merge_block.get_terminator().is_none() {
             if let Some(wrapping_merge_block) = code_gen.get_parent_merge_block(*block_id)? {
-                if let Some(block_info) = code_gen.analyze_context.block_info.get(block_id) {
-                    if block_info.all_children_contains_returns {
-                        merge_block.remove_from_function().map_err(|_| {
-                            code_gen.err(format!(
-                                "Unable to remove empty merge block with block ID: {}",
-                                block_id
-                            ))
-                        })?;
-                    } else {
-                        code_gen.builder.position_at_end(*merge_block);
-                        code_gen
-                            .builder
-                            .build_unconditional_branch(wrapping_merge_block);
-                    }
-                }
+                code_gen.builder.position_at_end(*merge_block);
+                code_gen
+                    .builder
+                    .build_unconditional_branch(wrapping_merge_block);
             } else {
-                merge_block.remove_from_function().map_err(|_| {
-                    code_gen.err(format!(
-                        "Unable to remove empty merge block with block ID: {}",
-                        block_id
-                    ))
-                })?;
+                return Err(code_gen.err(format!(
+                    "MergeBlock for block with ID {} has no terminator and no wrapping block.",
+                    block_id
+                )));
             }
         }
     }
