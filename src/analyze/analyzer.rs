@@ -15,10 +15,10 @@ use std::collections::HashMap;
 /// needs to be ran TypeAnalyzer.
 /// The TypeAnalyzer will also set the var types in "AnalyzeContext.variables".
 /// The DeclAnalyzer depends on the running first IndexingAnalyzer.
-pub fn analyze(ast_root: &mut ParseToken) -> CustomResult<AnalyzeContext> {
+pub fn analyze(ast_root: &mut ParseToken) -> Result<AnalyzeContext, Vec<LangError>> {
     let mut context = AnalyzeContext::new();
 
-    BlockAnalyzer::analyze(&mut context, ast_root)?;
+    BlockAnalyzer::analyze(&mut context, ast_root);
     IndexingAnalyzer::analyze(&mut context, ast_root);
     DeclAnalyzer::analyze(&mut context, ast_root)?;
     TypeAnalyzer::analyze(&mut context, ast_root)?;

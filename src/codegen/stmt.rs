@@ -1,7 +1,7 @@
 use super::generator::CodeGen;
 use crate::error::{LangError, LangErrorKind::CodeGenError};
 use crate::{
-    parse::token::{AssignOperator, Expression, Modifier, Path, Statement},
+    parse::token::{AccessType, AssignOperator, Expression, Modifier, Path, Statement},
     CustomResult,
 };
 use inkwell::{module::Linkage, types::AnyTypeEnum};
@@ -22,7 +22,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if let Some(expr) = expr_opt {
                     let any_value = self.compile_expr(expr)?;
                     let basic_value = CodeGen::any_into_basic_value(any_value)?;
-                    self.compile_var_store(var, basic_value)?;
+                    // TODO: Will this always be regular?
+                    self.compile_var_store(var, basic_value, &AccessType::Regular)?;
                 } else if var.is_const {
                     return Err(LangError::new(
                         format!("const var decl of \"{}\" has no value set", &var.name),
@@ -61,7 +62,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_break(&mut self) -> CustomResult<()> {
         // TODO: Is it always OK to use `self.state.cur_block_id` here?
-        let id = self.state.cur_block_id;
+        let id = self.cur_block_id;
         let merge_block = self.get_merge_block(id)?;
         self.builder.build_unconditional_branch(merge_block);
         Ok(())
@@ -101,6 +102,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         lhs: &mut Expression,
         rhs: &mut Expression,
     ) -> CustomResult<()> {
+        let access_type = if lhs.is_deref() {
+            AccessType::Deref
+        } else if lhs.is_address() {
+            AccessType::Address
+        } else if lhs.is_struct_access() {
+            AccessType::StructAccess
+        } else if lhs.is_array_access() {
+            AccessType::ArrayAccess
+        } else {
+            AccessType::Regular
+        };
+
         let var = if let Some(var) = lhs.eval_to_var() {
             var
         } else {
@@ -129,7 +142,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let right_any_value = self.compile_expr(rhs)?;
         let right = CodeGen::any_into_basic_value(right_any_value)?;
 
-        let left = self.compile_var_load(var)?;
+        let left = self.compile_var_load(var, &access_type)?;
 
         // TODO: Need to check the size(8,16,32...) and also signness for the
         //       left and right to choose the correct instruction.
@@ -397,6 +410,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
         };
 
-        self.compile_var_store(var, value)
+        self.compile_var_store(var, value, &access_type)?;
+        Ok(())
     }
 }

@@ -3,42 +3,51 @@ use crate::error::{LangError, LangErrorKind::AnalyzeError};
 use crate::parse::token::{
     BlockHeader, BlockId, Enum, Function, Interface, ParseToken, ParseTokenKind, Statement, Struct,
 };
-use crate::CustomResult;
 
 pub struct DeclAnalyzer<'a> {
     context: &'a mut AnalyzeContext,
+    errors: Vec<LangError>,
 }
 
 impl<'a> DeclAnalyzer<'a> {
     /// Takes in a the root of the AST and walks the whole tree to find all
     /// declarations/prototypes and adds them to the `AnalyzeContext` so that
     /// they can quickly be looked up during LLVM code generation.
-    pub fn analyze(context: &'a mut AnalyzeContext, ast_root: &mut ParseToken) -> CustomResult<()> {
+    pub fn analyze(
+        context: &'a mut AnalyzeContext,
+        ast_root: &mut ParseToken,
+    ) -> Result<(), Vec<LangError>> {
         let mut decl_analyzer = DeclAnalyzer::new(context);
-        decl_analyzer.analyze_token(ast_root)
+        decl_analyzer.analyze_token(ast_root);
+        if decl_analyzer.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(std::mem::take(&mut decl_analyzer.errors))
+        }
     }
 
     fn new(context: &'a mut AnalyzeContext) -> Self {
-        Self { context }
+        Self {
+            context,
+            errors: Vec::default(),
+        }
     }
 
-    fn analyze_token(&mut self, token: &mut ParseToken) -> CustomResult<()> {
+    fn analyze_token(&mut self, token: &mut ParseToken) {
         match &mut token.kind {
             ParseTokenKind::Block(header, id, body) => {
                 self.context.cur_block_id = *id;
-                self.analyze_header(header)?;
+                self.analyze_header(header);
                 for token in body {
-                    self.analyze_token(token)?;
+                    self.analyze_token(token);
                 }
             }
-            ParseTokenKind::Statement(stmt) => self.analyze_stmt(&stmt)?,
+            ParseTokenKind::Statement(stmt) => self.analyze_stmt(&stmt),
             ParseTokenKind::Expression(_) | ParseTokenKind::EndOfFile => (),
         }
-
-        Ok(())
     }
 
-    fn analyze_header(&mut self, header: &BlockHeader) -> CustomResult<()> {
+    fn analyze_header(&mut self, header: &BlockHeader) {
         let cur_id = self.context.cur_block_id;
         match header {
             // TODO: Better error messages. For example print which params are
@@ -55,19 +64,25 @@ impl<'a> DeclAnalyzer<'a> {
             | BlockHeader::MatchCase(_)
             | BlockHeader::For(_, _)
             | BlockHeader::While(_)
-            | BlockHeader::Test(_) => Ok(()),
+            | BlockHeader::Test(_) => (),
         }
     }
 
-    fn analyze_func_header(&mut self, func: &Function, func_id: BlockId) -> CustomResult<()> {
+    fn analyze_func_header(&mut self, func: &Function, func_id: BlockId) {
         // Add the function in the scope of its root parent (`root_parent_id`).
-        let root_parent_id = self.context.get_root_parent(func_id)?;
+        let root_parent_id = match self.context.get_root_parent(func_id) {
+            Ok(id) => id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
         let key = (func.name.clone(), root_parent_id);
         if let Some(prev_func) = self.context.functions.get_mut(&key) {
             // Function already declared somewhere, make sure that the
             // current declaration and the previous one matches.
             let empty_vec = Vec::new();
-            let func_params = if let Some(ref params) = func.parameters {
+            let cur_func_params = if let Some(ref params) = func.parameters {
                 params
             } else {
                 &empty_vec
@@ -80,32 +95,44 @@ impl<'a> DeclAnalyzer<'a> {
 
             // Check that they have the same amount of parameters and
             // their types are equal.
-            let mut err_msg = String::new();
-            if func_params.len() != prev_func_params.len() {
-                err_msg.push_str(&format!(
-                    " Len of params differ: {} and {}.",
-                    func_params.len(),
-                    prev_func_params.len()
-                ));
+            if cur_func_params.len() != prev_func_params.len() {
+                let err_msg = format!(
+                    "Two declarations of function \"{}\" have different amount of parameters. \
+                    Prev amount: {}, current amount: {}",
+                    &func.name,
+                    cur_func_params.len(),
+                    prev_func_params.len(),
+                );
+                self.errors.push(LangError::new(err_msg, AnalyzeError));
             } else {
-                for cur_params in func_params.iter().zip(prev_func_params.iter()) {
-                    if cur_params.0.ret_type != cur_params.1.ret_type {
-                        err_msg.push_str(&format!(
-                            " Param differ: {:?} and {:?}.",
-                            cur_params.0.ret_type, cur_params.1.ret_type
-                        ));
+                for (i, (cur_param, prev_param)) in cur_func_params
+                    .iter()
+                    .zip(prev_func_params.iter())
+                    .enumerate()
+                {
+                    if cur_param.name != prev_param.name {
+                        let err_msg = format!(
+                            "Two declarations of function \"{}\" have parameters with different names. \
+                            Parameter at position {}. Prev name: {:?}, current name: {:?}.",
+                            &func.name, i, &cur_param.name, &prev_param.name
+                        );
+                        self.errors.push(LangError::new(err_msg, AnalyzeError));
+                    }
+                    if cur_param.ret_type != prev_param.ret_type {
+                        let param_name = if cur_param.name == prev_param.name {
+                            cur_param.name.clone()
+                        } else {
+                            format!("{}/{}", &prev_param.name, &cur_param.name)
+                        };
+                        let err_msg = format!(
+                            "Two declarations of function \"{}\" have parameters with different types. \
+                            Parameter at position {} with name \"{}\". \
+                            Prev type: {:?}, current type: {:?}",
+                            &func.name, i, &param_name, cur_param.ret_type, prev_param.ret_type
+                        );
+                        self.errors.push(LangError::new(err_msg, AnalyzeError));
                     }
                 }
-            }
-
-            if err_msg.is_empty() {
-                Ok(())
-            } else {
-                err_msg.push_str(&format!(
-                    "Function \"{}\" has two unequal declarations: ",
-                    &func.name
-                ));
-                Err(LangError::new(err_msg, AnalyzeError))
             }
         } else {
             self.context.functions.insert(key, func.clone());
@@ -117,73 +144,81 @@ impl<'a> DeclAnalyzer<'a> {
                     self.context.variables.insert(param_key, param.clone());
                 }
             }
-
-            Ok(())
         }
     }
 
-    fn analyze_struct_header(&mut self, struct_: &Struct, struct_id: BlockId) -> CustomResult<()> {
+    fn analyze_struct_header(&mut self, struct_: &Struct, struct_id: BlockId) {
         // Add the struct in the scope of its root parent (`root_parent_id`).
-        let root_parent_id = self.context.get_root_parent(struct_id)?;
+        let root_parent_id = match self.context.get_root_parent(struct_id) {
+            Ok(id) => id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
         let key = (struct_.name.clone(), root_parent_id);
         if let Some(prev_struct) = self.context.structs.get(&key) {
             // TODO: Should this be done in the same way as function, that
             //       one just checks that the declarations are equals and doesn't
             //       throw a exception? This would allow for "extern" declarations
             //       but might be problematic if it two defines.
-            Err(LangError::new(
-                format!(
-                    "A struct with name \"{}\" already defined.",
-                    prev_struct.name
-                ),
-                AnalyzeError,
-            ))
+            panic!(
+                "A struct with name \"{}\" already defined.",
+                prev_struct.name,
+            );
         } else {
             self.context.structs.insert(key, struct_.clone());
-            Ok(())
         }
     }
 
-    fn analyze_enum_header(&mut self, enum_: &Enum, enum_id: BlockId) -> CustomResult<()> {
+    fn analyze_enum_header(&mut self, enum_: &Enum, enum_id: BlockId) {
         // Add the enum in the scope of its root parent (`root_parent_id`).
-        let root_parent_id = self.context.get_root_parent(enum_id)?;
+        let root_parent_id = match self.context.get_root_parent(enum_id) {
+            Ok(id) => id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
         let key = (enum_.name.clone(), root_parent_id);
         if let Some(prev_enum) = self.context.enums.get(&key) {
-            Err(LangError::new(
-                format!("A enum with name \"{}\" already defined.", prev_enum.name),
-                AnalyzeError,
-            ))
+            // TODO: Should this be done in the same way as function, that
+            //       one just checks that the declarations are equals and doesn't
+            //       throw a exception? This would allow for "extern" declarations
+            //       but might be problematic if it two defines.
+            panic!("A enum with name \"{}\" already defined.", prev_enum.name);
         } else {
             self.context.enums.insert(key, enum_.clone());
-            Ok(())
         }
     }
 
-    fn analyze_interface_header(
-        &mut self,
-        interface: &Interface,
-        interface_id: BlockId,
-    ) -> CustomResult<()> {
+    fn analyze_interface_header(&mut self, interface: &Interface, interface_id: BlockId) {
         // Add the interface in the scope of its root parent (`root_parent_id`).
-        let root_parent_id = self.context.get_root_parent(interface_id)?;
+        let root_parent_id = match self.context.get_root_parent(interface_id) {
+            Ok(id) => id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
         let key = (interface.name.clone(), root_parent_id);
         if let Some(prev_interface) = self.context.interfaces.get(&key) {
-            Err(LangError::new(
-                format!(
-                    "A interface with name \"{}\" already defined.",
-                    prev_interface.name
-                ),
-                AnalyzeError,
-            ))
+            // TODO: Should this be done in the same way as function, that
+            //       one just checks that the declarations are equals and doesn't
+            //       throw a exception? This would allow for "extern" declarations
+            //       but might be problematic if it two defines.
+            panic!(
+                "A interface with name \"{}\" already defined.",
+                prev_interface.name
+            );
         } else {
             self.context.interfaces.insert(key, interface.clone());
-            Ok(())
         }
     }
 
     /// Need to add declaration of variable if this stmt is a variable decl
     /// and a function if this stmt is a external declaration.
-    fn analyze_stmt(&mut self, stmt: &Statement) -> CustomResult<()> {
+    fn analyze_stmt(&mut self, stmt: &Statement) {
         let id = self.context.cur_block_id;
 
         match stmt {
@@ -200,7 +235,5 @@ impl<'a> DeclAnalyzer<'a> {
 
             _ => (),
         }
-
-        Ok(())
     }
 }

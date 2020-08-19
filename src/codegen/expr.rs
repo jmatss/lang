@@ -3,7 +3,7 @@ use crate::error::{LangError, LangErrorKind::CodeGenError};
 use crate::{
     common::variable_type::Type,
     lex::token::Literal,
-    parse::token::{Expression, FunctionCall, StructInit, TypeStruct},
+    parse::token::{AccessType, Expression, FunctionCall, StructInit, TypeStruct},
     CustomResult,
 };
 use inkwell::{
@@ -19,7 +19,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         match expr {
             Expression::Literal(lit, ty_opt) => self.compile_lit(lit, ty_opt),
-            Expression::Variable(var) => Ok(self.compile_var_load(var)?.into()),
+            Expression::Variable(var) => {
+                // TODO: Will this always be regular?
+                Ok(self.compile_var_load(var, &AccessType::Regular)?.into())
+            }
             Expression::FunctionCall(func_call) => self.compile_func_call(func_call),
             Expression::Operation(op) => self.compile_op(op),
             Expression::StructInit(struct_init) => self.compile_struct_init(struct_init),

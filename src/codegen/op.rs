@@ -9,7 +9,7 @@ use inkwell::{
     values::{AnyValueEnum, BasicValueEnum},
     FloatPredicate, IntPredicate,
 };
-use token::{BinaryOperator, Expression, UnaryOperation, UnaryOperator, Variable};
+use token::{AccessType, BinaryOperator, Expression, UnaryOperation, UnaryOperator, Variable};
 
 // TODO: Check constness for operators. Ex. adding two consts should use a
 //       const add instruction so that the result also is const.
@@ -148,18 +148,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let any_value = self.compile_expr(&mut un_op.value)?;
-        let value = CodeGen::any_into_basic_value(any_value)?;
+        let basic_value = CodeGen::any_into_basic_value(any_value)?;
 
-        un_op.is_const = self.is_const(&[&value]);
+        un_op.is_const = self.is_const(&[&basic_value]);
 
         Ok(match un_op.operator {
             UnaryOperator::Increment => {
-                self.compile_un_op_increment(ret_type, un_op.is_const, value)?
+                self.compile_un_op_increment(ret_type, un_op.is_const, basic_value)?
             }
             UnaryOperator::Decrement => {
-                self.compile_un_op_decrement(ret_type, un_op.is_const, value)?
+                self.compile_un_op_decrement(ret_type, un_op.is_const, basic_value)?
             }
-            UnaryOperator::Deref => self.compile_un_op_deref(value)?,
+            UnaryOperator::Deref => self.compile_un_op_deref(&mut un_op.value, basic_value)?,
             UnaryOperator::Address => {
                 if let Some(var) = un_op.value.eval_to_var() {
                     self.compile_un_op_address(var)?
@@ -182,14 +182,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
             UnaryOperator::Positive => {
                 // Do nothing.
-                value.into()
+                basic_value.into()
             }
             UnaryOperator::Negative => {
-                self.compile_un_op_negative(ret_type, un_op.is_const, value)?
+                self.compile_un_op_negative(ret_type, un_op.is_const, basic_value)?
             }
             UnaryOperator::BitComplement => panic!("TODO: Bit complement"),
             UnaryOperator::BoolNot => {
-                self.compile_un_op_bool_not(ret_type, un_op.is_const, value)?
+                self.compile_un_op_bool_not(ret_type, un_op.is_const, basic_value)?
             }
         })
     }
@@ -911,34 +911,48 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_un_op_deref(
         &mut self,
-        value: BasicValueEnum<'ctx>,
+        value: &mut Expression,
+        basic_value: BasicValueEnum<'ctx>,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        Ok(match value.get_type() {
-            BasicTypeEnum::PointerType(_) => self
-                .builder
-                .build_load(value.into_pointer_value(), "deref")
-                .into(),
-
-            BasicTypeEnum::FloatType(_)
-            | BasicTypeEnum::IntType(_)
-            | BasicTypeEnum::ArrayType(_)
-            | BasicTypeEnum::StructType(_)
-            | BasicTypeEnum::VectorType(_) => {
-                return Err(LangError::new(
-                    format!(
-                        "Invalid type for UnaryOperator::Deref: {:?}",
-                        value.get_type()
-                    ),
-                    CodeGenError,
-                ))
+        match value {
+            Expression::Variable(var) => {
+                // TODO: Might be a struct access as well.
+                Ok(self.compile_var_load(var, &AccessType::Regular)?.into())
             }
-        })
+            Expression::Operation(Operation::BinaryOperation(bin_op)) => match bin_op.operator {
+                BinaryOperator::Dot => {
+                    if let Some(var) = bin_op.right.eval_to_var() {
+                        self.compile_var_load(var, &AccessType::Address);
+                        return Err(LangError::new("todo".into(), CodeGenError));
+                    } else {
+                        todo!("")
+                    }
+                }
+                _ => Err(LangError::new(
+                    format!("Invalid op in UnaryOperator::Deref: {:?}", bin_op.operator),
+                    CodeGenError,
+                )),
+            },
+
+            Expression::Operation(Operation::UnaryOperation(un_op)) => todo!(),
+
+            Expression::Literal(..)
+            | Expression::Type(_)
+            | Expression::FunctionCall(_)
+            | Expression::StructInit(_) => Err(LangError::new(
+                format!(
+                    "Invalid type for UnaryOperator::Deref: {:?}",
+                    basic_value.get_type()
+                ),
+                CodeGenError,
+            )),
+        }
     }
 
     fn compile_un_op_address(&mut self, var: &Variable) -> CustomResult<AnyValueEnum<'ctx>> {
         // Get the pointer to the variable from `variables` that contains
         // pointers to all variables allocated during code generation.
-        let block_id = self.state.cur_block_id;
+        let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
             .get_var_decl_scope(&var.name, block_id)?;
@@ -962,7 +976,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         var: &Variable,
         dim: &mut Expression,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        let block_id = self.state.cur_block_id;
+        let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
             .get_var_decl_scope(&var.name, block_id)?;

@@ -1,4 +1,3 @@
-use super::codegen_state::CodeGenState;
 use crate::analyze::analyzer::AnalyzeContext;
 use crate::error::{LangError, LangErrorKind::CodeGenError};
 use crate::parse::token;
@@ -7,7 +6,7 @@ use crate::{common::variable_type::Type, CustomResult};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{AnyValueEnum, BasicValueEnum, PointerValue};
+use inkwell::values::{AnyValueEnum, BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::{
     basic_block::BasicBlock,
     targets::TargetMachine,
@@ -16,16 +15,31 @@ use inkwell::{
 };
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use token::{BlockId, ParseTokenKind, TypeStruct};
+use token::{AccessType, BlockId, ParseTokenKind, TypeStruct};
 
 pub(super) struct CodeGen<'a, 'ctx> {
     pub context: &'ctx Context,
     pub builder: &'a Builder<'ctx>,
     pub module: &'a Module<'ctx>,
-
-    pub analyze_context: &'ctx AnalyzeContext,
-    pub state: CodeGenState<'ctx>,
     pub target_machine: &'a TargetMachine,
+
+    /// Information parsed during the "Analyzing" stage. This contains ex.
+    /// defintions (var, struct, func etc.) and information about the AST blocks.
+    pub analyze_context: &'ctx AnalyzeContext,
+
+    /// The ID of the current block that is being compiled.
+    pub cur_block_id: BlockId,
+
+    /// Contains the current basic block that instructions are inserted into.
+    pub cur_basic_block: Option<BasicBlock<'ctx>>,
+
+    /// Contains a pointer to the current function that is being generated.
+    pub cur_func: Option<FunctionValue<'ctx>>,
+
+    /// Merge blocks created for different if and match statements.
+    /// Is stored in this struct so that it can be accessable from everywhere
+    /// and statements etc. can figure out where to branch.
+    pub merge_blocks: HashMap<BlockId, BasicBlock<'ctx>>,
 
     /// Contains pointers to mutable variables that have been compiled.
     pub variables: HashMap<(String, BlockId), PointerValue<'ctx>>,
@@ -54,7 +68,7 @@ pub fn generate<'a, 'ctx>(
     //       If there are no wrapping if-statement, just remove the empty merge
     //       block since it (probably) isn't used. This makes the assumption that
     //       the code has no logical flaw, which one shouldn't do.
-    for (block_id, merge_block) in &code_gen.state.merge_blocks {
+    for (block_id, merge_block) in &code_gen.merge_blocks {
         if merge_block.get_first_instruction().is_none() {
             if let Some(wrapping_merge_block) = code_gen.get_parent_merge_block(*block_id)? {
                 if let Some(block_info) = code_gen.analyze_context.block_info.get(block_id) {
@@ -101,13 +115,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> Self {
         Self {
             context,
-            analyze_context,
-            state: CodeGenState::new(),
-
             builder,
             module,
             target_machine,
 
+            analyze_context,
+
+            cur_block_id: 0,
+            cur_basic_block: None,
+            cur_func: None,
+
+            merge_blocks: HashMap::default(),
             variables: HashMap::default(),
             constants: HashMap::default(),
         }
@@ -167,7 +185,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// with the block id `id` or the parent scope of the if-case with
     /// block id `id`.
     pub(super) fn get_merge_block(&self, id: BlockId) -> CustomResult<BasicBlock<'ctx>> {
-        if let Some(merge_block) = self.state.merge_blocks.get(&id) {
+        if let Some(merge_block) = self.merge_blocks.get(&id) {
             Ok(*merge_block)
         } else {
             // Get from the parent scope if possible.
@@ -183,7 +201,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 })?
                 .parent_id;
 
-            if let Some(merge_block) = self.state.merge_blocks.get(&parent_id) {
+            if let Some(merge_block) = self.merge_blocks.get(&parent_id) {
                 Ok(*merge_block)
             } else {
                 Err(LangError::new(
@@ -203,7 +221,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &self,
         id: BlockId,
     ) -> CustomResult<Option<BasicBlock<'ctx>>> {
-        if self.state.merge_blocks.get(&id).is_some() {
+        if self.merge_blocks.get(&id).is_some() {
             let parent_id = self
                 .analyze_context
                 .block_info
@@ -251,7 +269,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     // TODO: How should a declaration of a "constant" be enforced?
     pub(super) fn compile_var_decl(&mut self, var: &Variable) -> CustomResult<()> {
-        let id = self.state.cur_block_id;
+        let id = self.cur_block_id;
         let key = (var.name.clone(), id);
 
         if let Some(var_decl) = self.analyze_context.variables.get(&key) {
@@ -262,7 +280,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             if !var.is_const {
                 let ptr = self.compile_alloca(var_decl)?;
                 self.variables.insert(key, ptr);
-                self.state.prev_ptr_value = Some(ptr);
             }
 
             Ok(())
@@ -278,13 +295,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         var: &Variable,
         basic_value: BasicValueEnum<'ctx>,
+        access_type: &AccessType,
     ) -> CustomResult<()> {
         if var.is_struct_member {
             // TODO: Need to check for const in this func as well.
             self.compile_var_store_struct_member(var, basic_value)?;
         } else {
             // Get the block ID of the block in which this variable was declared.
-            let block_id = self.state.cur_block_id;
+            let block_id = self.cur_block_id;
             let decl_block_id = self
                 .analyze_context
                 .get_var_decl_scope(&var.name, block_id)?;
@@ -297,8 +315,30 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             if var.is_const {
                 self.constants.insert(key, basic_value);
             } else if let Some(ptr) = self.variables.get(&key) {
-                self.state.prev_ptr_value = Some(*ptr);
-                self.builder.build_store(*ptr, basic_value);
+                debug!(
+                    "\nvar: {:#?}\nptr: {:#?}\nval: {:#?}",
+                    &var, &ptr, &basic_value
+                );
+                match access_type {
+                    AccessType::Regular => {
+                        self.builder.build_store(*ptr, basic_value);
+                    }
+                    AccessType::Deref => {
+                        let def_ptr = self.builder.build_load(*ptr, "store.deref");
+                        if def_ptr.is_pointer_value() {
+                            self.builder
+                                .build_store(def_ptr.into_pointer_value(), basic_value);
+                        } else {
+                            return Err(LangError::new(
+                                format!("Tried to deref non pointer type: {:?}", &var),
+                                CodeGenError,
+                            ));
+                        }
+                    }
+                    AccessType::Address => panic!("Invalid, tried to store into address (&)."),
+                    AccessType::StructAccess => panic!("TODO: Struct access"),
+                    AccessType::ArrayAccess => panic!("TODO: Array access"),
+                }
             } else {
                 return Err(LangError::new(
                     format!(
@@ -328,7 +368,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             ));
         };
 
-        let block_id = self.state.cur_block_id;
+        let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
             .get_var_decl_scope(struct_var_name, block_id)?;
@@ -351,7 +391,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                 })?;
 
-            self.state.prev_ptr_value = Some(member_ptr);
             self.builder.build_store(member_ptr, basic_value);
             Ok(())
         } else {
@@ -368,8 +407,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_var_load(
         &mut self,
         var: &Variable,
+        access_type: &AccessType,
     ) -> CustomResult<BasicValueEnum<'ctx>> {
-        let block_id = self.state.cur_block_id;
+        let block_id = self.cur_block_id;
 
         if var.is_struct_member {
             // TODO: Need to check for const in this func as well.
@@ -396,8 +436,25 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     ))
                 }
             } else if let Some(ptr) = self.variables.get(&key) {
-                self.state.prev_ptr_value = Some(*ptr);
-                Ok(self.builder.build_load(*ptr, "load"))
+                match access_type {
+                    AccessType::Regular => Ok(self.builder.build_load(*ptr, "load")),
+                    AccessType::Deref => {
+                        let def_ptr = self.builder.build_load(*ptr, "load.deref");
+                        if def_ptr.is_pointer_value() {
+                            Ok(self
+                                .builder
+                                .build_load(def_ptr.into_pointer_value(), "load"))
+                        } else {
+                            Err(LangError::new(
+                                format!("Tried to deref non pointer type: {:?}", &var),
+                                CodeGenError,
+                            ))
+                        }
+                    }
+                    AccessType::Address => Ok(BasicValueEnum::PointerValue(*ptr)),
+                    AccessType::StructAccess => panic!("TODO: Struct access"),
+                    AccessType::ArrayAccess => panic!("TODO: Array access"),
+                }
             } else {
                 Err(LangError::new(
                     format!("No decl for var `{}` when building load.", &var.name),
@@ -421,7 +478,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             ));
         };
 
-        let block_id = self.state.cur_block_id;
+        let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
             .get_var_decl_scope(struct_var_name, block_id)?;
@@ -444,7 +501,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                 })?;
 
-            self.state.prev_ptr_value = Some(member_ptr);
             Ok(self.builder.build_load(member_ptr, "struct.member.load"))
         } else {
             Err(LangError::new(

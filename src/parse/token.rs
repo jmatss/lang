@@ -94,6 +94,14 @@ pub enum Expression {
     Operation(Operation),
 }
 
+pub enum AccessType {
+    Regular,
+    Deref,
+    Address,
+    StructAccess,
+    ArrayAccess,
+}
+
 impl Expression {
     pub fn is_var(&self) -> bool {
         match self {
@@ -112,6 +120,42 @@ impl Expression {
             },
             _ => false,
         }
+    }
+
+    pub fn is_deref(&self) -> bool {
+        if let Expression::Operation(Operation::UnaryOperation(un_op)) = self {
+            if let UnaryOperator::Deref = un_op.operator {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn is_address(&self) -> bool {
+        if let Expression::Operation(Operation::UnaryOperation(un_op)) = self {
+            if let UnaryOperator::Address = un_op.operator {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn is_array_access(&self) -> bool {
+        if let Expression::Operation(Operation::UnaryOperation(un_op)) = self {
+            if let UnaryOperator::ArrayAccess(_) = un_op.operator {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn is_struct_access(&self) -> bool {
+        if let Expression::Operation(Operation::BinaryOperation(bin_op)) = self {
+            if let BinaryOperator::Dot = bin_op.operator {
+                return bin_op.left.is_var() && bin_op.right.is_var();
+            }
+        }
+        false
     }
 
     /// If this is a Dot operation, this function will return the variable from
@@ -138,26 +182,6 @@ impl Expression {
                     | UnaryOperator::ArrayAccess(_) => un_op.value.eval_to_var(),
                     _ => None,
                 },
-            },
-            _ => None,
-        }
-    }
-
-    pub fn eval_to_struct_access(&mut self) -> Option<(&Variable, u32)> {
-        match self {
-            Expression::Operation(op) => match op {
-                Operation::BinaryOperation(bin_op) => match bin_op.operator {
-                    BinaryOperator::Dot => {
-                        if let Some(left_var) = bin_op.left.eval_to_var() {
-                            if let Some(right_var) = bin_op.right.eval_to_var() {
-                                return Some((left_var, right_var.member_index));
-                            }
-                        }
-                        None
-                    }
-                    _ => None,
-                },
-                _ => None,
             },
             _ => None,
         }

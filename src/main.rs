@@ -67,8 +67,18 @@ fn main() -> CustomResult<()> {
     debug!("\nAST after parsing:\n{:#?}", ast_root);
     println!("Parsing complete.");
 
-    let analyze_context = analyzer::analyze(&mut ast_root)?;
+    let analyze_context = match analyzer::analyze(&mut ast_root) {
+        Ok(analyze_context) => analyze_context,
+        Err(errs) => {
+            for e in errs {
+                error!("{}", e);
+            }
+            std::process::exit(1);
+        }
+    };
     debug!("\nAST after analyze:\n{:#?}", ast_root);
+    debug!("Variables: {:#?}", &analyze_context.variables);
+    debug!("Functions: {:#?}", &analyze_context.functions);
     println!("Analyzing complete.");
 
     let target_machine = compiler::setup_target()?;

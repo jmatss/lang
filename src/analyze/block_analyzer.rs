@@ -1,7 +1,6 @@
 use super::analyzer::BlockInfo;
 use crate::analyze::analyzer::AnalyzeContext;
 use crate::parse::token::{BlockHeader, ParseToken, ParseTokenKind, Statement};
-use crate::CustomResult;
 
 pub struct BlockAnalyzer<'a> {
     context: &'a mut AnalyzeContext,
@@ -11,10 +10,9 @@ impl<'a> BlockAnalyzer<'a> {
     /// Takes in a the root of the AST and walks the whole tree to find information
     /// related to blocks and their scopes. It gets the parent for all blocks,
     /// if they contain any instructions related to control flow (return, branch etc.).
-    pub fn analyze(context: &'a mut AnalyzeContext, ast_root: &mut ParseToken) -> CustomResult<()> {
+    pub fn analyze(context: &'a mut AnalyzeContext, ast_root: &mut ParseToken) {
         let mut block_analyzer = BlockAnalyzer::new(context);
-        block_analyzer.analyze_block(ast_root)?;
-        Ok(())
+        block_analyzer.analyze_block(ast_root);
     }
 
     fn new(context: &'a mut AnalyzeContext) -> Self {
@@ -23,7 +21,7 @@ impl<'a> BlockAnalyzer<'a> {
         Self { context }
     }
 
-    fn analyze_block(&mut self, token: &mut ParseToken) -> CustomResult<Option<BlockInfo>> {
+    fn analyze_block(&mut self, token: &mut ParseToken) -> Option<BlockInfo> {
         if let ParseTokenKind::Block(ref header, id, ref mut body) = token.kind {
             let is_root_block = self.analyze_is_root(header);
             let mut block_info = BlockInfo::new(id, is_root_block);
@@ -53,7 +51,7 @@ impl<'a> BlockAnalyzer<'a> {
                     | ParseTokenKind::Block(BlockHeader::For(..), ..)
                     | ParseTokenKind::Block(BlockHeader::While(..), ..)
                     | ParseTokenKind::Block(BlockHeader::Test(_), ..) => {
-                        if let Some(child_block_info) = self.analyze_block(token)? {
+                        if let Some(child_block_info) = self.analyze_block(token) {
                             child_count += 1;
                             if !child_block_info.all_children_contains_branches {
                                 all_children_contains_branches = false;
@@ -61,7 +59,7 @@ impl<'a> BlockAnalyzer<'a> {
                         }
                     }
                     ParseTokenKind::Block(..) => {
-                        self.analyze_block(token)?;
+                        self.analyze_block(token);
                     }
                     ParseTokenKind::Expression(_) | ParseTokenKind::EndOfFile => (),
                 }
@@ -81,9 +79,9 @@ impl<'a> BlockAnalyzer<'a> {
             };
 
             self.context.block_info.insert(id, block_info.clone());
-            Ok(Some(block_info))
+            Some(block_info)
         } else {
-            Ok(None)
+            None
         }
     }
 

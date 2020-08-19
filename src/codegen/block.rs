@@ -100,7 +100,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn create_entry_block_alloca(&self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
-        if let Some(func) = self.state.cur_func {
+        if let Some(func) = self.cur_func {
             let entry = func
                 .get_first_basic_block()
                 .expect("Unable to unwrap first basic block in func.");
@@ -124,14 +124,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         id: BlockId,
         body: &'ctx mut [ParseToken],
     ) -> CustomResult<()> {
-        self.state.cur_block_id = id;
+        self.cur_block_id = id;
 
         let linkage = Linkage::External;
         let fn_val = self.compile_func_proto(func, Some(linkage))?;
         let entry = self.context.append_basic_block(fn_val, "entry");
 
-        self.state.cur_block = Some(entry);
-        self.state.cur_func = Some(fn_val);
+        self.cur_basic_block = Some(entry);
+        self.cur_func = Some(fn_val);
         self.builder.position_at_end(entry);
 
         // TODO: How does this work with variadic parameters?
@@ -151,7 +151,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let ptr = self.create_entry_block_alloca(param)?;
             self.builder.build_store(ptr, arg);
 
-            let key = (param.name.clone(), self.state.cur_block_id);
+            let key = (param.name.clone(), self.cur_block_id);
             self.variables.insert(key, ptr);
         }
 
@@ -260,16 +260,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     /// All the "ParseToken" in the body should be "IfCase"s.
     fn compile_if(&mut self, id: BlockId, body: &'ctx mut [ParseToken]) -> CustomResult<()> {
-        self.state.cur_block_id = id;
+        self.cur_block_id = id;
 
         let cur_func = self
-            .state
             .cur_func
             .ok_or_else(|| LangError::new("cur_func is None for \"If\".".into(), CodeGenError))?;
 
         let cur_block = self
-            .state
-            .cur_block
+            .cur_basic_block
             .ok_or_else(|| LangError::new("cur_block is None for \"If\".".into(), CodeGenError))?;
 
         // Create and store the "body" blocks of this if-statement.
@@ -302,7 +300,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         let merge_block = self.context.append_basic_block(cur_func, "if.merge");
-        self.state.merge_blocks.insert(id, merge_block);
+        self.merge_blocks.insert(id, merge_block);
 
         // Iterate through all "if cases" in this if-statement and compile them.
         for (index, if_case) in body.iter_mut().enumerate() {
@@ -312,7 +310,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 ref mut inner_body,
             ) = &mut if_case.kind
             {
-                self.state.cur_block = Some(cur_block);
+                self.cur_basic_block = Some(cur_block);
                 self.compile_if_case(
                     expr_opt,
                     *inner_id,
@@ -328,7 +326,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
 
-        self.state.cur_block = Some(merge_block);
+        self.cur_basic_block = Some(merge_block);
         self.builder.position_at_end(merge_block);
         Ok(())
     }
@@ -344,7 +342,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let cur_block = branch_info.get_if_case(index)?;
         let merge_block = self.get_merge_block(id)?;
 
-        self.state.cur_block = Some(cur_block);
+        self.cur_basic_block = Some(cur_block);
 
         // If this is a if case with a expression, the branch condition should
         // be evaluated and branched from the branch block.
@@ -375,12 +373,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // Compile all tokens inside this if-case.
         for token in body {
             // Need to reset `cur_block` at every iteration because of recursion.
-            self.state.cur_block = Some(cur_block);
+            self.cur_basic_block = Some(cur_block);
             self.builder.position_at_end(cur_block);
             self.compile_recursive(token)?;
         }
 
-        self.state.cur_block = Some(cur_block);
+        self.cur_basic_block = Some(cur_block);
         self.builder.position_at_end(cur_block);
 
         // Add a branch to the merge block if the current basic block
