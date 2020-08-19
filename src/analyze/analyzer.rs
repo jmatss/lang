@@ -45,7 +45,7 @@ pub struct BlockInfo {
     /// contains a branch instruction, this block doesn't not need to add a
     /// implicit "terminator" at the end of the basic block, since there is no
     /// logical path that leads to the end of this block.
-    pub all_children_contains_branches: bool,
+    pub all_children_contains_returns: bool,
 
     /// A "block root" is a block that starts a new scope that contains blocks that
     /// only have access to items inside this scope.
@@ -74,7 +74,7 @@ impl BlockInfo {
             contains_continue: false,
             contains_defer: false,
             contains_with: false,
-            all_children_contains_branches: false,
+            all_children_contains_returns: false,
             is_root_block,
         }
     }

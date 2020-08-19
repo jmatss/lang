@@ -6,7 +6,7 @@ use crate::{common::variable_type::Type, CustomResult};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{AnyValueEnum, BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::{
     basic_block::BasicBlock,
     targets::TargetMachine,
@@ -14,7 +14,6 @@ use inkwell::{
     AddressSpace,
 };
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use token::{AccessType, BlockId, ParseTokenKind, TypeStruct};
 
 pub(super) struct CodeGen<'a, 'ctx> {
@@ -74,7 +73,7 @@ pub fn generate<'a, 'ctx>(
         if merge_block.get_first_instruction().is_none() {
             if let Some(wrapping_merge_block) = code_gen.get_parent_merge_block(*block_id)? {
                 if let Some(block_info) = code_gen.analyze_context.block_info.get(block_id) {
-                    if block_info.all_children_contains_branches {
+                    if block_info.all_children_contains_returns {
                         merge_block.remove_from_function().map_err(|_| {
                             code_gen.err(format!(
                                 "Unable to remove empty merge block with block ID: {}",
@@ -171,69 +170,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             })
         } else {
             Err(self.err(format!("type None when allocating var: {:?}", &var.name)))
-        }
-    }
-
-    /// Returns the BasicBlock representing the merge block for the if-statement
-    /// with the block id `id` or the parent scope of the if-case with
-    /// block id `id`.
-    pub(super) fn get_merge_block(&self, id: BlockId) -> CustomResult<BasicBlock<'ctx>> {
-        if let Some(merge_block) = self.merge_blocks.get(&id) {
-            Ok(*merge_block)
-        } else {
-            // Get from the parent scope if possible.
-            let parent_id = self
-                .analyze_context
-                .block_info
-                .get(&id)
-                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
-                .parent_id;
-
-            if let Some(merge_block) = self.merge_blocks.get(&parent_id) {
-                Ok(*merge_block)
-            } else {
-                Err(self.err(format!(
-                    "Unable to find merge block in blocks with id {} and parent {}.",
-                    id, parent_id
-                )))
-            }
-        }
-    }
-
-    // TODO: Clean up.
-    /// Returns the BasicBlock representing a "outer" if block if one exists.
-    pub(super) fn get_parent_merge_block(
-        &self,
-        id: BlockId,
-    ) -> CustomResult<Option<BasicBlock<'ctx>>> {
-        if self.merge_blocks.get(&id).is_some() {
-            let parent_id = self
-                .analyze_context
-                .block_info
-                .get(&id)
-                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
-                .parent_id;
-
-            Ok(self.get_merge_block(parent_id).ok())
-        } else {
-            // The given `id` was the block ID of a if case. First get the ID
-            // if the wrapping "If" block. Then get the parent ID of that block
-            // to get the sought after merge block.
-            let if_id = self
-                .analyze_context
-                .block_info
-                .get(&id)
-                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
-                .parent_id;
-
-            let parent_id = self
-                .analyze_context
-                .block_info
-                .get(&if_id)
-                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
-                .parent_id;
-
-            Ok(self.get_merge_block(parent_id).ok())
         }
     }
 
@@ -540,36 +476,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             || left_type.is_pointer_type() && right_type.is_pointer_type()
             || left_type.is_struct_type() && right_type.is_struct_type()
             || left_type.is_vector_type() && right_type.is_vector_type()
-    }
-
-    pub(super) fn any_into_basic_value(any_value: AnyValueEnum) -> CustomResult<BasicValueEnum> {
-        BasicValueEnum::try_from(any_value).map_err(|_| {
-            LangError::new(
-                format!(
-                    "Unable to convert AnyValueEnum: {:#?} into BasicValueEnum.",
-                    &any_value
-                ),
-                CodeGenError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            )
-        })
-    }
-
-    pub(super) fn any_into_basic_type(any_type: AnyTypeEnum) -> CustomResult<BasicTypeEnum> {
-        BasicTypeEnum::try_from(any_type).map_err(|_| {
-            LangError::new(
-                format!(
-                    "Unable to convert AnyTypeEnum: {:#?} into BasicTypeEnum.",
-                    &any_type
-                ),
-                CodeGenError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            )
-        })
     }
 
     /// Used when returing errors to include current line/column number.

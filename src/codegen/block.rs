@@ -32,30 +32,38 @@ impl<'ctx> BranchInfo<'ctx> {
         }
     }
 
-    pub fn get_if_case(&self, index: usize) -> CustomResult<BasicBlock<'ctx>> {
+    // TODO: Takes linenr/column_nr to be able to add them to error message.
+    //       Find a better way to do this.
+    pub fn get_if_case(
+        &self,
+        index: usize,
+        line_nr: u64,
+        column_nr: u64,
+    ) -> CustomResult<BasicBlock<'ctx>> {
         if let Some(basic_block) = self.if_cases.get(index) {
             Ok(*basic_block)
         } else {
             Err(LangError::new(
                 format!("Unable to get if_case with index: {}", index),
-                CodeGenError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
+                CodeGenError { line_nr, column_nr },
             ))
         }
     }
 
-    pub fn get_if_branch(&self, index: usize) -> CustomResult<BasicBlock<'ctx>> {
+    // TODO: Takes linenr/column_nr to be able to add them to error message.
+    //       Find a better way to do this.
+    pub fn get_if_branch(
+        &self,
+        index: usize,
+        line_nr: u64,
+        column_nr: u64,
+    ) -> CustomResult<BasicBlock<'ctx>> {
         if let Some(basic_block) = self.if_branches.get(index) {
             Ok(*basic_block)
         } else {
             Err(LangError::new(
                 format!("Unable to get if_branch with index: {}", index),
-                CodeGenError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
+                CodeGenError { line_nr, column_nr },
             ))
         }
     }
@@ -141,19 +149,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.cur_func = Some(fn_val);
         self.builder.position_at_end(entry);
 
+        let empty_vec = Vec::default();
+        let params = if let Some(params) = &func.parameters {
+            params
+        } else {
+            &empty_vec
+        };
+
         // TODO: How does this work with variadic parameters?
         // Get names for the parameters and alloc space in the functions stack.
         for (i, arg) in fn_val.get_param_iter().enumerate() {
-            let param = if let Some(params) = &func.parameters {
-                params
-                    .get(i)
-                    .ok_or_else(|| self.err(format!("Bad param at index: {}", i)))?
-            } else {
-                return Err(self.err(format!(
-                    "Got None param when compiling func: {:?}",
-                    &func.name
-                )));
-            };
+            let param = params.get(i).ok_or_else(|| {
+                self.err(format!(
+                    "No param at index {} for function {}",
+                    i, &func.name
+                ))
+            })?;
 
             let ptr = self.create_entry_block_alloca(param)?;
             self.builder.build_store(ptr, arg);
@@ -171,7 +182,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         // Add a "invisible" return at the end of the last block if this is a
         // function with no return type. Also check to see if this block
-        // conntains a return stmt even though it should return anything.
+        // contains a return stmt even though it should NOT return anything.
         if func.ret_type.is_none() {
             if let Some(last_block) = fn_val.get_last_basic_block() {
                 if last_block.get_terminator().is_none() {
@@ -197,44 +208,46 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         func: &Function,
         linkage_opt: Option<Linkage>,
     ) -> CustomResult<FunctionValue<'ctx>> {
-        let par_types = if let Some(params) = &func.parameters {
-            let mut v = Vec::with_capacity(params.len());
+        let param_types = if let Some(params) = &func.parameters {
+            let mut inner_types = Vec::with_capacity(params.len());
             for param in params {
                 if let Some(param_type_struct) = &param.ret_type {
                     let any_type = self.compile_type(&param_type_struct)?;
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
-                    v.push(basic_type);
+                    inner_types.push(basic_type);
                 } else {
                     return Err(self.err(format!(
-                        "Bad type for fn \"{}\" param \"{}\".",
-                        &func.name, &param.name
+                        "Bad type for parameter with name\"{}\" in function \"{}\".",
+                        &param.name, &func.name
                     )));
                 }
             }
-            v
+            inner_types
         } else {
             Vec::default()
         };
 
+        // Get the return type of the function and create a "codegen" function
+        // with a return type of this type. If no `ret_type` is set, this is
+        // a function that returns void, create a void function.
         let fn_type = if let Some(ret_type) = &func.ret_type {
-            let any_type = self.compile_type(&ret_type)?;
-            match any_type {
-                AnyTypeEnum::ArrayType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
-                AnyTypeEnum::FloatType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
+            match self.compile_type(&ret_type)? {
+                AnyTypeEnum::ArrayType(ty) => ty.fn_type(param_types.as_slice(), func.is_var_arg),
+                AnyTypeEnum::FloatType(ty) => ty.fn_type(param_types.as_slice(), func.is_var_arg),
                 AnyTypeEnum::FunctionType(ty) => ty,
-                AnyTypeEnum::IntType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
-                AnyTypeEnum::PointerType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
-                AnyTypeEnum::StructType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
-                AnyTypeEnum::VectorType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
-                AnyTypeEnum::VoidType(ty) => ty.fn_type(par_types.as_slice(), func.is_var_arg),
+                AnyTypeEnum::IntType(ty) => ty.fn_type(param_types.as_slice(), func.is_var_arg),
+                AnyTypeEnum::PointerType(ty) => ty.fn_type(param_types.as_slice(), func.is_var_arg),
+                AnyTypeEnum::StructType(ty) => ty.fn_type(param_types.as_slice(), func.is_var_arg),
+                AnyTypeEnum::VectorType(ty) => ty.fn_type(param_types.as_slice(), func.is_var_arg),
+                AnyTypeEnum::VoidType(ty) => ty.fn_type(param_types.as_slice(), func.is_var_arg),
             }
         } else {
             self.context
                 .void_type()
-                .fn_type(par_types.as_slice(), func.is_var_arg)
+                .fn_type(param_types.as_slice(), func.is_var_arg)
         };
 
-        let fn_val = self.module.add_function(&func.name, fn_type, linkage_opt);
+        Ok(self.module.add_function(&func.name, fn_type, linkage_opt))
 
         // TODO: Set names?
         /*
@@ -254,8 +267,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             arg.as_basic_value_enum().set_name(&param.name);
         }
         */
-
-        Ok(fn_val)
     }
 
     /// All the "ParseToken" in the body should be "IfCase"s.
@@ -296,8 +307,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
 
-        let merge_block = self.context.append_basic_block(cur_func, "if.merge");
-        self.merge_blocks.insert(id, merge_block);
+        // Add a "merge block" that the if-cases will merge to if they don't
+        // branch away. The merge block will NOT be created if all if-cases
+        // contains a return instruction. This is because there is no possiblity
+        // to end up in the merge block in that case, so it would just be empty.
+        let merge_block_opt = if let Some(block_info) = self.analyze_context.block_info.get(&id) {
+            if !block_info.all_children_contains_returns {
+                let merge_block = self.context.append_basic_block(cur_func, "if.merge");
+                self.merge_blocks.insert(id, merge_block);
+                Some(merge_block)
+            } else {
+                None
+            }
+        } else {
+            return Err(self.err(format!(
+                "Unable to find block info for block with ID: {}",
+                id
+            )));
+        };
 
         // Iterate through all "if cases" in this if-statement and compile them.
         for (index, if_case) in body.iter_mut().enumerate() {
@@ -323,45 +350,51 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
 
-        self.cur_basic_block = Some(merge_block);
-        self.builder.position_at_end(merge_block);
+        // The if statement has been compiled complete. If a merge block was
+        // created, set it as the current block. Otherwise set the current block
+        // to None. The reason being that all branches in this if-statements
+        // contains a return, so the function will(should) end after this statement.
+        self.cur_basic_block = merge_block_opt;
+        if let Some(merge_block) = merge_block_opt {
+            self.builder.position_at_end(merge_block);
+        }
         Ok(())
     }
 
     fn compile_if_case(
         &mut self,
-        expr_opt: &mut Option<Expression>,
+        br_expr_opt: &mut Option<Expression>,
         id: BlockId,
         index: usize,
         body: &'ctx mut [ParseToken],
         branch_info: &BranchInfo<'ctx>,
     ) -> CustomResult<()> {
-        let cur_block = branch_info.get_if_case(index)?;
-        let merge_block = self.get_merge_block(id)?;
+        let cur_block = branch_info.get_if_case(index, self.cur_line_nr, self.cur_column_nr)?;
 
         self.cur_basic_block = Some(cur_block);
 
         // If this is a if case with a expression, the branch condition should
         // be evaluated and branched from the branch block.
-        if let Some(expr) = expr_opt {
-            let branch_block = branch_info.get_if_branch(index)?;
+        if let Some(br_expr) = br_expr_opt {
+            let branch_block =
+                branch_info.get_if_branch(index, self.cur_line_nr, self.cur_column_nr)?;
 
             // If there are no more branch blocks, set the next branch block to
             // the merge block if there are no more if_cases or set it to the
             // last if_case if there is still one left.
             let next_branch_block = if index + 1 >= branch_info.if_branches.len() {
                 if index + 1 >= branch_info.if_cases.len() {
-                    merge_block
+                    self.get_merge_block(id)?
                 } else {
-                    branch_info.get_if_case(index + 1)?
+                    branch_info.get_if_case(index + 1, self.cur_line_nr, self.cur_column_nr)?
                 }
             } else {
-                branch_info.get_if_branch(index + 1)?
+                branch_info.get_if_branch(index + 1, self.cur_line_nr, self.cur_column_nr)?
             };
 
             // TODO: Return error instead of panicing inside the
             //       "into_int_value()" function.
-            let expr = self.compile_expr(expr)?.into_int_value();
+            let expr = self.compile_expr(br_expr)?.into_int_value();
             self.builder.position_at_end(branch_block);
             self.builder
                 .build_conditional_branch(expr, cur_block, next_branch_block);
@@ -371,6 +404,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for token in body {
             // Need to reset `cur_block` at every iteration because of recursion.
             self.cur_basic_block = Some(cur_block);
+            self.cur_line_nr = token.line_nr;
+            self.cur_column_nr = token.column_nr;
+
             self.builder.position_at_end(cur_block);
             self.compile_recursive(token)?;
         }
@@ -381,13 +417,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // Add a branch to the merge block if the current basic block
         // doesn't have a terminator yet.
         if cur_block.get_terminator().is_none() {
+            let merge_block = self.get_merge_block(id)?;
             self.builder.build_unconditional_branch(merge_block);
         }
         Ok(())
     }
 
     pub(super) fn compile_struct(&mut self, struct_: &Struct) -> CustomResult<()> {
-        // Go trough all members of the struct and create a vector containing
+        // Go through all members of the struct and create a vector containing
         // all their types.
         let member_types = if let Some(members) = &struct_.members {
             let mut v = Vec::with_capacity(members.len());

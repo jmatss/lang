@@ -34,8 +34,7 @@ impl<'a> BlockAnalyzer<'a> {
 
             // When iterating through all tokens, look at the If and Ifcases
             // and keep track if all their children contains return statements.
-            let mut all_children_contains_branches = true;
-            let mut child_count = 0;
+            let mut all_children_contains_returns = true;
             for token in body {
                 // Since `analyze_token` recurses, need to re-set the current
                 // block to the be the "parent" (`self.context.cur_block_id`).
@@ -52,9 +51,10 @@ impl<'a> BlockAnalyzer<'a> {
                     | ParseTokenKind::Block(BlockHeader::While(..), ..)
                     | ParseTokenKind::Block(BlockHeader::Test(_), ..) => {
                         if let Some(child_block_info) = self.analyze_block(token) {
-                            child_count += 1;
-                            if !child_block_info.all_children_contains_branches {
-                                all_children_contains_branches = false;
+                            if !child_block_info.all_children_contains_returns
+                                || !child_block_info.contains_return
+                            {
+                                all_children_contains_returns = false;
                             }
                         }
                     }
@@ -66,17 +66,9 @@ impl<'a> BlockAnalyzer<'a> {
             }
 
             // Set the flag to indicate if all children contains return statements
-            // for the current block ONLY if this block contains at least
-            // one If or IfCase. It it has no If or IfCase children, only
-            // look if this block has a return statement.
-            block_info.all_children_contains_branches = if child_count == 0 {
-                block_info.contains_return
-                    || block_info.contains_break
-                    || block_info.contains_continue
-                    || block_info.contains_yield
-            } else {
-                all_children_contains_branches
-            };
+            // for the current block. If this block doesn't have any children,
+            // this value will be set to true.
+            block_info.all_children_contains_returns = all_children_contains_returns;
 
             self.context.block_info.insert(id, block_info.clone());
             Some(block_info)
