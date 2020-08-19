@@ -22,7 +22,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    // TODO: Currently only ints, make for floats and other types.
     fn compile_bin_op(&mut self, bin_op: &mut BinaryOperation) -> CustomResult<AnyValueEnum<'ctx>> {
         // TODO: Can one always assume that the `ret_type` will be set at this point?
         let ret_type = if let Some(ref ret_type) = bin_op.ret_type {
@@ -917,12 +916,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         match value {
             Expression::Variable(var) => {
                 // TODO: Might be a struct access as well.
-                Ok(self.compile_var_load(var, &AccessType::Regular)?.into())
+                Ok(self.compile_var_load(var, &AccessType::Deref)?.into())
             }
             Expression::Operation(Operation::BinaryOperation(bin_op)) => match bin_op.operator {
                 BinaryOperator::Dot => {
                     if let Some(var) = bin_op.right.eval_to_var() {
-                        self.compile_var_load(var, &AccessType::Address)?;
                         Err(self.err("todo".into()))
                     } else {
                         todo!("")

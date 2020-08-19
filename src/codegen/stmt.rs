@@ -1,6 +1,9 @@
 use super::generator::CodeGen;
 use crate::{
-    parse::token::{AccessType, AssignOperator, Expression, Modifier, Path, Statement},
+    common::variable_type::Type,
+    parse::token::{
+        AccessType, AssignOperator, Expression, Modifier, Operation, Path, Statement, TypeStruct,
+    },
     CustomResult,
 };
 use inkwell::{module::Linkage, types::AnyTypeEnum};
@@ -14,8 +17,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Statement::Continue => self.compile_continue(),
             Statement::Use(path) => self.compile_use(path),
             Statement::Package(path) => self.compile_package(path),
-            Statement::With(expr) => panic!("TODO: compile \"with\"."),
-            Statement::Defer(expr) => panic!("TODO: compile \"defer\"."),
+            Statement::Modifier(modifier) => self.compile_modifier(modifier),
+            Statement::With(expr) => self.compile_with(expr),
+            Statement::Defer(expr) => self.compile_defer(expr),
             Statement::VariableDecl(var, expr_opt) => {
                 self.compile_var_decl(var)?;
                 if let Some(expr) = expr_opt {
@@ -31,12 +35,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
                 Ok(())
             }
+            // TODO: Add other external declares other than func (var, struct etc.)
             Statement::ExternalDecl(func) => {
                 let linkage = Linkage::External;
                 self.compile_func_proto(func, Some(linkage))?;
                 Ok(())
             }
-            Statement::Modifier(modifier) => self.compile_modifier(modifier),
             Statement::Assignment(assign_op, lhs, rhs) => self.compile_assign(assign_op, lhs, rhs),
         }
     }
@@ -53,7 +57,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_yield(&mut self, expr: &Expression) -> CustomResult<()> {
-        Err(self.err("TODO: Implement yield statement.".into()))
+        Err(self.err("TODO: Implement \"yield\" statement.".into()))
     }
 
     fn compile_break(&mut self) -> CustomResult<()> {
@@ -65,19 +69,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_continue(&mut self) -> CustomResult<()> {
-        Err(self.err("TODO: Implement continue statement.".into()))
+        Err(self.err("TODO: Implement \"continue\" statement.".into()))
     }
 
     fn compile_use(&mut self, path: &Path) -> CustomResult<()> {
-        Err(self.err("TODO: Implement use statement.".into()))
+        Err(self.err("TODO: Implement \"use\" statement.".into()))
     }
 
     fn compile_package(&mut self, path: &Path) -> CustomResult<()> {
-        Err(self.err("TODO: Implement package statement.".into()))
+        Err(self.err("TODO: Implement \"package\" statement.".into()))
     }
 
     fn compile_modifier(&mut self, modifier: &Modifier) -> CustomResult<()> {
-        Err(self.err("TODO: Implement modifier statement.".into()))
+        Err(self.err("TODO: Implement \"modifier\" statement.".into()))
+    }
+
+    fn compile_with(&mut self, expr: &Expression) -> CustomResult<()> {
+        Err(self.err("TODO: Implement \"with\" statement.".into()))
+    }
+
+    fn compile_defer(&mut self, expr: &Expression) -> CustomResult<()> {
+        Err(self.err("TODO: Implement \"defer\" statement.".into()))
     }
 
     fn compile_assign(
@@ -86,35 +98,57 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         lhs: &mut Expression,
         rhs: &mut Expression,
     ) -> CustomResult<()> {
-        let access_type = if lhs.is_deref() {
-            AccessType::Deref
-        } else if lhs.is_address() {
-            AccessType::Address
-        } else if lhs.is_struct_access() {
-            AccessType::StructAccess
-        } else if lhs.is_array_access() {
-            AccessType::ArrayAccess
+        let access_type = if let Some(access_type) = lhs.get_access_type() {
+            access_type
         } else {
-            AccessType::Regular
+            return Err(self.err(format!(
+                "Left hand side in assignment not a valid type lhs: {:?}.",
+                lhs
+            )));
         };
 
         let var = if let Some(var) = lhs.eval_to_var() {
             var
         } else {
             return Err(self.err(format!(
-                "lhs of expr in compile_assign doesn't eval to var: {:?}",
+                "Left hand side in assignment doesn't expand to a variable: {:?}",
                 lhs
             )));
         };
 
-        // TODO: Can one always assume that the `ret_type` will be set at this point?
-        let ret_type = if let Some(ref ret_type) = var.ret_type {
-            self.compile_type(&ret_type)?
+        // The return type of the evaluated variable. This might not be the actual
+        // return type since it might ex. be dereferenced or indexed. Use this
+        // `ret_type` and then figure out the actual correct return type by
+        // looking at the AccessType.
+        let var_ret_type = if let Some(ref ret_type) = var.ret_type {
+            ret_type
         } else {
             return Err(self.err(format!(
-                "Type of var \"{}\" not know when compiling assignment.",
+                "Type of variable \"{}\" not know when compiling assignment.",
                 &var.name
             )));
+        };
+
+        // TODO: Probably move this logic into "Expression" together with the
+        //       other functions like "is_var", "eval_to_var" etc.
+        // Figure out the actual return type.
+        let ret_type = match access_type {
+            AccessType::Regular => self.compile_type(var_ret_type)?,
+            AccessType::Deref => match &var_ret_type.t {
+                Type::Pointer(inner) => self.compile_type(&inner)?,
+                _ => {
+                    return Err(self.err(format!(
+                        "Tried to dereference variable \"{}\" that isn't a pointer. Is: {:?}.",
+                        &var.name, var_ret_type.t
+                    )))
+                }
+            },
+            AccessType::Address => self.compile_type(&TypeStruct::new(
+                Type::Pointer(Box::new(var_ret_type.clone())),
+                None,
+            ))?,
+            AccessType::StructAccess => self.compile_type(var_ret_type)?,
+            AccessType::ArrayAccess => panic!("TODO: ArrayAccess in compile_assign."),
         };
 
         let right_any_value = self.compile_expr(rhs)?;
@@ -366,7 +400,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
         };
 
-        self.compile_var_store(var, value, &access_type)?;
-        Ok(())
+        self.compile_var_store(var, value, &access_type)
     }
 }

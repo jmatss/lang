@@ -67,19 +67,19 @@ impl<'a> TypeAnalyzer<'a> {
         }
     }
 
-    /// The `prev_type` is a type that might have been found from a parent and
+    /// The `type_hitn` is a type that might have been found from a parent and
     /// should be cascaded down the expression and be set for them as well.
     fn analyze_expr_type(
         &mut self,
         expr: &mut Expression,
-        prev_type_opt: Option<TypeStruct>,
+        type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         match expr {
             Expression::Literal(lit, old_type_opt) => {
                 // If a type is already set and has been given as a argument to
                 // this function, use that instead of the default for literals.
-                if let Some(prev_type) = prev_type_opt {
-                    *old_type_opt = Some(prev_type);
+                if let Some(type_hint) = type_hint_opt {
+                    *old_type_opt = Some(type_hint);
                     old_type_opt.clone()
                 } else {
                     let new_type_opt = Some(self.analyze_literal_type(lit));
@@ -92,12 +92,12 @@ impl<'a> TypeAnalyzer<'a> {
                 debug!("ANALYZING VAR: {:#?}", var);
 
                 // If this is a struct member, it will be at the right hand side
-                // of a "Dot" binary operation. It that case the `prev_type_opt`
+                // of a "Dot" binary operation. It that case the `type_hint_opt`
                 // will come from the left hand side and it will be the type of
                 // the struct. Look up the struct and see what type this struct
                 // member has.
                 if var.is_struct_member {
-                    if let Some(struct_type) = prev_type_opt.clone() {
+                    if let Some(struct_type) = type_hint_opt.clone() {
                         self.analyze_struct_member(var, struct_type)
                     } else {
                         let err_msg = format!(
@@ -112,7 +112,7 @@ impl<'a> TypeAnalyzer<'a> {
                     self.analyze_var_type(var)
                 }
             }
-            Expression::Operation(op) => self.analyze_op_type(op, prev_type_opt),
+            Expression::Operation(op) => self.analyze_op_type(op, type_hint_opt),
             Expression::FunctionCall(func_call) => self.analyze_func_call(func_call),
             Expression::StructInit(struct_init) => self.analyze_struct_init(struct_init),
         }
@@ -261,9 +261,9 @@ impl<'a> TypeAnalyzer<'a> {
     fn analyze_struct_member(
         &mut self,
         var: &mut Variable,
-        prev_type: TypeStruct,
+        struct_type: TypeStruct,
     ) -> Option<TypeStruct> {
-        if let Type::Custom(ref ident) = prev_type.t {
+        if let Type::Custom(ref ident) = struct_type.t {
             let struct_block_id = self.context.cur_block_id;
             let parent_block_id = match self
                 .context
@@ -284,8 +284,7 @@ impl<'a> TypeAnalyzer<'a> {
                     "Unable to find struct with name {} with block ID {}.",
                     &ident, struct_block_id
                 );
-                let err = self.context.err(err_msg);
-                self.errors.push(err);
+                self.errors.push(self.context.err(err_msg));
                 return None;
             };
 
@@ -315,8 +314,7 @@ impl<'a> TypeAnalyzer<'a> {
                         "Unable to find member with name {} in struct with name {} with block ID {}.",
                         &var.name, &ident, struct_block_id
                     );
-                    let err = self.context.err(err_msg);
-                    self.errors.push(err);
+                    self.errors.push(self.context.err(err_msg));
                     None
                 }
             } else {
@@ -324,17 +322,15 @@ impl<'a> TypeAnalyzer<'a> {
                     "Unable to find struct with name {} with block ID {}.",
                     &ident, struct_block_id
                 );
-                let err = self.context.err(err_msg);
-                self.errors.push(err);
+                self.errors.push(self.context.err(err_msg));
                 None
             }
         } else {
             let err_msg = format!(
-                "prev_type was not custom when looking at struct member: {}",
+                "`struct_type` was not custom when looking at struct member: {}",
                 &var.name
             );
-            let err = self.context.err(err_msg);
-            self.errors.push(err);
+            self.errors.push(self.context.err(err_msg));
             None
         }
     }
@@ -342,10 +338,10 @@ impl<'a> TypeAnalyzer<'a> {
     fn analyze_expr_type_opt(
         &mut self,
         expr_opt: &mut Option<Expression>,
-        prev_type_opt: Option<TypeStruct>,
+        type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         if let Some(expr) = expr_opt {
-            self.analyze_expr_type(expr, prev_type_opt)
+            self.analyze_expr_type(expr, type_hint_opt)
         } else {
             None
         }
@@ -406,14 +402,14 @@ impl<'a> TypeAnalyzer<'a> {
     fn analyze_op_type(
         &mut self,
         op: &mut Operation,
-        prev_type_opt: Option<TypeStruct>,
+        type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         match op {
             Operation::BinaryOperation(ref mut bin_op) => {
-                self.analyze_bin_op_type(bin_op, prev_type_opt)
+                self.analyze_bin_op_type(bin_op, type_hint_opt)
             }
             Operation::UnaryOperation(ref mut un_op) => {
-                self.analyze_un_op_type(un_op, prev_type_opt)
+                self.analyze_un_op_type(un_op, type_hint_opt)
             }
         }
     }
@@ -423,7 +419,7 @@ impl<'a> TypeAnalyzer<'a> {
     fn analyze_bin_op_type(
         &mut self,
         bin_op: &mut BinaryOperation,
-        prev_type_opt: Option<TypeStruct>,
+        type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         // TODO: If this is a assignment, the type of the right hand side should
         //       be compared to the type of the variable. If the variable doesn't
@@ -431,15 +427,15 @@ impl<'a> TypeAnalyzer<'a> {
         //       to the declaration of the variable so that it can be seen during
         //       codegen (since codegen will only look at the declaration of
         //       a variable).
-        // If the left has a type set, use that as the "prev_type" when looking
+        // If the left has a type set, use that as the "type_hint" when looking
         // at the type for the right side.
-        let left_type = self.analyze_expr_type(&mut bin_op.left, prev_type_opt.clone());
-        let left_prev_type_opt = if left_type.is_some() {
+        let left_type = self.analyze_expr_type(&mut bin_op.left, type_hint_opt.clone());
+        let left_type_hint_opt = if left_type.is_some() {
             left_type.clone()
         } else {
-            prev_type_opt
+            type_hint_opt
         };
-        let right_type = self.analyze_expr_type(&mut bin_op.right, left_prev_type_opt);
+        let right_type = self.analyze_expr_type(&mut bin_op.right, left_type_hint_opt);
 
         let inferred_type = self.infer_type(bin_op, &left_type, &right_type);
         bin_op.ret_type = inferred_type.clone();
@@ -449,26 +445,24 @@ impl<'a> TypeAnalyzer<'a> {
     fn analyze_un_op_type(
         &mut self,
         un_op: &mut UnaryOperation,
-        prev_type_opt: Option<TypeStruct>,
+        type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         let ret_type = match un_op.operator {
             UnaryOperator::Deref => {
                 // Analyze the "outer" value that should be a pointer. Then deref
                 // the result to get the value that is inside the pointer.
-                if let Some(type_struct) = self.analyze_expr_type(&mut un_op.value, prev_type_opt) {
+                if let Some(type_struct) = self.analyze_expr_type(&mut un_op.value, type_hint_opt) {
                     if let Type::Pointer(inner) = type_struct.t {
                         Some(*inner)
                     } else {
                         let err_msg =
                             format!("Trying to dereference non pointer type: {:?}", type_struct);
-                        let err = self.context.err(err_msg);
-                        self.errors.push(err);
+                        self.errors.push(self.context.err(err_msg));
                         return None;
                     }
                 } else {
                     let err_msg = "Type set to None when dereferencing.".into();
-                    let err = self.context.err(err_msg);
-                    self.errors.push(err);
+                    self.errors.push(self.context.err(err_msg));
                     return None;
                 }
             }
@@ -476,33 +470,30 @@ impl<'a> TypeAnalyzer<'a> {
             UnaryOperator::Address => {
                 // Analyze the "inner" value. Then take the address of that
                 // which will give us the address.
-                if let Some(type_struct) = self.analyze_expr_type(&mut un_op.value, prev_type_opt) {
+                if let Some(type_struct) = self.analyze_expr_type(&mut un_op.value, type_hint_opt) {
                     let new_ptr = Type::Pointer(Box::new(type_struct));
                     let generics = None;
                     Some(TypeStruct::new(new_ptr, generics))
                 } else {
                     let err_msg = "Type set to None when taking address.".into();
-                    let err = self.context.err(err_msg);
-                    self.errors.push(err);
+                    self.errors.push(self.context.err(err_msg));
                     return None;
                 }
             }
             UnaryOperator::ArrayAccess(_) => {
                 // Analyze the "outer" value that should be a array. Then deref
                 // the result to get the value that is inside the pointer.
-                if let Some(type_struct) = self.analyze_expr_type(&mut un_op.value, prev_type_opt) {
+                if let Some(type_struct) = self.analyze_expr_type(&mut un_op.value, type_hint_opt) {
                     if let Type::Array(inner, _) = type_struct.t {
                         Some(*inner)
                     } else {
                         let err_msg = format!("Trying to index non array type: {:?}", type_struct);
-                        let err = self.context.err(err_msg);
-                        self.errors.push(err);
+                        self.errors.push(self.context.err(err_msg));
                         return None;
                     }
                 } else {
                     let err_msg = "Type set to None when indexing.".into();
-                    let err = self.context.err(err_msg);
-                    self.errors.push(err);
+                    self.errors.push(self.context.err(err_msg));
                     return None;
                 }
             }
@@ -512,7 +503,7 @@ impl<'a> TypeAnalyzer<'a> {
             | UnaryOperator::Positive
             | UnaryOperator::Negative
             | UnaryOperator::BitComplement
-            | UnaryOperator::BoolNot => self.analyze_expr_type(&mut un_op.value, prev_type_opt),
+            | UnaryOperator::BoolNot => self.analyze_expr_type(&mut un_op.value, type_hint_opt),
         };
         un_op.ret_type = ret_type.clone();
         ret_type
@@ -550,8 +541,7 @@ impl<'a> TypeAnalyzer<'a> {
                     var
                 } else {
                     let err_msg = format!("lhs of assignment not evaluated to var: {:?}", lhs);
-                    let err = self.context.err(err_msg);
-                    self.errors.push(err);
+                    self.errors.push(self.context.err(err_msg));
                     return;
                 };
 

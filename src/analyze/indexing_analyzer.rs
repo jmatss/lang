@@ -107,13 +107,14 @@ impl<'a> IndexingAnalyzer<'a> {
         self.analyze_expr(&mut bin_op.left);
         self.analyze_expr(&mut bin_op.right);
         if let BinaryOperator::Dot = bin_op.operator {
-            if let Expression::Variable(ref mut struct_member_var) = *bin_op.right {
-                if let Some(parent_struct) = bin_op.left.eval_to_var() {
-                    struct_member_var.is_struct_member = true;
-                    struct_member_var.struct_name = Some(parent_struct.name.clone());
+            if let Some(rhs) = bin_op.right.eval_to_var() {
+                if let Some(lhs) = bin_op.left.eval_to_var() {
+                    rhs.is_struct_member = true;
+                    rhs.struct_name = Some(lhs.name.clone());
                 } else {
                     panic!(
-                        "lhs of dot not var. left: {:?}, right: {:?}",
+                        "Left hand side of Dot symbol didn't eval to variable. \
+                        Left: {:?}, right: {:?}",
                         bin_op.left, bin_op.right
                     );
                 }

@@ -157,7 +157,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    // TODO: How should a declaration of a "constant" be enforced?
     pub(super) fn compile_var_decl(&mut self, var: &Variable) -> CustomResult<()> {
         let id = self.cur_block_id;
         let key = (var.name.clone(), id);
@@ -175,7 +174,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Ok(())
         } else {
             Err(self.err(format!(
-                "No decl for var when compiling var decl: {}",
+                "No decl for variable \"{}\" when compiling var decl.",
                 &var.name
             )))
         }
@@ -187,101 +186,60 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         basic_value: BasicValueEnum<'ctx>,
         access_type: &AccessType,
     ) -> CustomResult<()> {
-        if var.is_struct_member {
-            // TODO: Need to check for const in this func as well.
-            self.compile_var_store_struct_member(var, basic_value)?;
-        } else {
-            // Get the block ID of the block in which this variable was declared.
+        debug!(
+            "Compile var_store, var name: {:?}, basic_value: {:?}, access_type: {:?}",
+            &var.name, &basic_value, access_type
+        );
+
+        // TODO: Const isn't working atm. Need to treat const struct member and
+        //       regular variables differently.
+        if var.is_const {
             let block_id = self.cur_block_id;
             let decl_block_id = self
                 .analyze_context
                 .get_var_decl_scope(&var.name, block_id)?;
             let key = (var.name.clone(), decl_block_id);
-            debug!("Compile var_store, key: {:?}", &key);
 
-            // If this is constant variable, just insert the value into the
-            // varirable in the `constants` map. Otherwise, if this is a "regular"
-            // variable, create a load instruction of that variable.
-            if var.is_const {
-                self.constants.insert(key, basic_value);
-            } else if let Some(ptr) = self.variables.get(&key) {
-                debug!(
-                    "\nvar: {:#?}\nptr: {:#?}\nval: {:#?}",
-                    &var, &ptr, &basic_value
-                );
-                match access_type {
-                    AccessType::Regular => {
-                        self.builder.build_store(*ptr, basic_value);
-                    }
-                    AccessType::Deref => {
-                        let def_ptr = self.builder.build_load(*ptr, "store.deref");
-                        if def_ptr.is_pointer_value() {
-                            self.builder
-                                .build_store(def_ptr.into_pointer_value(), basic_value);
-                        } else {
-                            return Err(
-                                self.err(format!("Tried to deref non pointer type: {:?}", &var))
-                            );
-                        }
-                    }
-                    AccessType::Address => panic!("Invalid, tried to store into address (&)."),
-                    AccessType::StructAccess => panic!("TODO: Struct access"),
-                    AccessType::ArrayAccess => panic!("TODO: Array access"),
-                }
-            } else {
-                return Err(self.err(format!(
-                    "No decl for var `{}` in decl block {} when building store.",
-                    &var.name, decl_block_id
-                )));
-            }
+            self.constants.insert(key, basic_value);
         }
 
-        Ok(())
-    }
-
-    // TODO: Need to check for const in this func as well.
-    fn compile_var_store_struct_member(
-        &mut self,
-        var: &Variable,
-        basic_value: BasicValueEnum<'ctx>,
-    ) -> CustomResult<()> {
-        let struct_var_name = if let Some(ref struct_name) = var.struct_name {
-            struct_name
+        let ptr = if var.is_struct_member {
+            self.get_struct_member_ptr(var)?
         } else {
-            return Err(self.err(format!(
-                "No struct name set for member var \"{}\".",
-                &var.name
-            )));
+            self.get_var_ptr(var)?
         };
 
-        let block_id = self.cur_block_id;
-        let decl_block_id = self
-            .analyze_context
-            .get_var_decl_scope(struct_var_name, block_id)?;
-        let key = (struct_var_name.clone(), decl_block_id);
-        debug!("Compiling var struct member load. Key: {:?}", &key);
+        info!(
+            "VAR_LOAD -- var: {:#?}\nptr: {:#?}\naccess_type: {:?}",
+            &var, &ptr, &access_type
+        );
 
-        if let Some(struct_ptr) = self.variables.get(&key) {
-            // Get a pointer to the member in the struct. This pointer can
-            // then be used to load the value with a regular "load" instruction.
-            let member_ptr = self
-                .builder
-                .build_struct_gep(*struct_ptr, var.member_index, "struct.gep")
-                .map_err(|_| {
-                    self.err(format!(
-                        "Unable to gep member in struct {:?}, index {}.",
-                        &var.struct_name, var.member_index
-                    ))
-                })?;
-
-            self.builder.build_store(member_ptr, basic_value);
-            Ok(())
-        } else {
-            Err(self.err(format!(
-                "Unable to find ptr to struct \"{}\" in decl block ID {}.",
-                &struct_var_name, decl_block_id
-            )))
+        match access_type {
+            AccessType::Regular => {
+                self.builder.build_store(ptr, basic_value);
+            }
+            AccessType::Deref => {
+                let def_ptr = self.builder.build_load(ptr, "store.deref");
+                if def_ptr.is_pointer_value() {
+                    self.builder
+                        .build_store(def_ptr.into_pointer_value(), basic_value);
+                } else {
+                    return Err(self.err(format!(
+                        "Tried to deref non pointer type before store: {:?}",
+                        &var
+                    )));
+                }
+            }
+            AccessType::Address => {
+                return Err(self.err(format!(
+                    "Tried to store into address of var: {}.",
+                    &var.name
+                )))
+            }
+            AccessType::StructAccess => panic!("Unreachable struct access in `compile_var_store`"),
+            AccessType::ArrayAccess => panic!("TODO: Array access"),
         }
+        Ok(())
     }
 
     pub(super) fn compile_var_load(
@@ -289,63 +247,78 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         var: &Variable,
         access_type: &AccessType,
     ) -> CustomResult<BasicValueEnum<'ctx>> {
-        let block_id = self.cur_block_id;
+        if var.is_const {
+            return self.get_const_value(var);
+        }
 
-        if var.is_struct_member {
-            // TODO: Need to check for const in this func as well.
-            self.compile_var_load_struct_member(var)
+        let ptr = if var.is_struct_member {
+            self.get_struct_member_ptr(var)?
         } else {
-            // Get the block ID of the block in which this variable was declared.
-            let decl_block_id = self
-                .analyze_context
-                .get_var_decl_scope(&var.name, block_id)?;
-            let key = (var.name.clone(), decl_block_id);
-            debug!("Compiling var load. Key: {:?}", &key);
+            self.get_var_ptr(var)?
+        };
 
-            // If the variable to load is a constant, get the value from the
-            // internal `constants` hashmap. Otherwise, if it is a "regular"
-            // variable, get the pointer created by a "alloca" pointing
-            // to the variable on the stack and load that value.
-            if var.is_const {
-                if let Some(const_value) = self.constants.get(&key) {
-                    Ok(*const_value)
+        match access_type {
+            AccessType::Regular => Ok(self.builder.build_load(ptr, "load")),
+            AccessType::Deref => {
+                let def_ptr = self.builder.build_load(ptr, "load.deref");
+                if def_ptr.is_pointer_value() {
+                    Ok(self
+                        .builder
+                        .build_load(def_ptr.into_pointer_value(), "load"))
                 } else {
                     Err(self.err(format!(
-                        "No decl for constant `{}` when building load.",
-                        &var.name
+                        "Tried to deref non pointer type before load: {:?}",
+                        &var
                     )))
                 }
-            } else if let Some(ptr) = self.variables.get(&key) {
-                match access_type {
-                    AccessType::Regular => Ok(self.builder.build_load(*ptr, "load")),
-                    AccessType::Deref => {
-                        let def_ptr = self.builder.build_load(*ptr, "load.deref");
-                        if def_ptr.is_pointer_value() {
-                            Ok(self
-                                .builder
-                                .build_load(def_ptr.into_pointer_value(), "load"))
-                        } else {
-                            Err(self.err(format!("Tried to deref non pointer type: {:?}", &var)))
-                        }
-                    }
-                    AccessType::Address => Ok(BasicValueEnum::PointerValue(*ptr)),
-                    AccessType::StructAccess => panic!("TODO: Struct access"),
-                    AccessType::ArrayAccess => panic!("TODO: Array access"),
-                }
-            } else {
-                Err(self.err(format!(
-                    "No decl for var `{}` when building load.",
-                    &var.name
-                )))
             }
+            AccessType::Address => Ok(BasicValueEnum::PointerValue(ptr)),
+            AccessType::StructAccess => panic!("Unreachable struct access in `compile_var_load`"),
+            AccessType::ArrayAccess => panic!("TODO: Array access"),
         }
     }
 
-    // TODO: Need to check for const in this func as well.
-    fn compile_var_load_struct_member(
-        &mut self,
-        var: &Variable,
-    ) -> CustomResult<BasicValueEnum<'ctx>> {
+    fn get_var_ptr(&mut self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
+        let block_id = self.cur_block_id;
+        let decl_block_id = self
+            .analyze_context
+            .get_var_decl_scope(&var.name, block_id)?;
+        let key = (var.name.clone(), decl_block_id);
+        debug!("Loading variable pointer. Key: {:?}", &key);
+
+        if let Some(var_ptr) = self.variables.get(&key) {
+            Ok(*var_ptr)
+        } else {
+            Err(self.err(format!(
+                "Unable to find ptr for variable \"{}\" in decl block ID {}.",
+                &var.name, decl_block_id
+            )))
+        }
+    }
+
+    // TODO: Implement logic to load both regular variables and struct members
+    //       if they are const.
+    fn get_const_value(&mut self, var: &Variable) -> CustomResult<BasicValueEnum<'ctx>> {
+        let block_id = self.cur_block_id;
+        let decl_block_id = self
+            .analyze_context
+            .get_var_decl_scope(&var.name, block_id)?;
+        let key = (var.name.clone(), decl_block_id);
+        debug!("Loading constant pointer. Key: {:?}", &key);
+
+        if let Some(const_value) = self.constants.get(&key) {
+            Ok(*const_value)
+        } else {
+            Err(self.err(format!(
+                "Unable to find value for constant \"{}\" in decl block ID {}.",
+                &var.name, decl_block_id
+            )))
+        }
+    }
+
+    /// This function assumes that the caller have made sure that the given `var`
+    /// is a struct member with `var.is_struct_member`.
+    fn get_struct_member_ptr(&mut self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
         let struct_var_name = if let Some(ref struct_name) = var.struct_name {
             struct_name
         } else {
@@ -360,11 +333,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .analyze_context
             .get_var_decl_scope(struct_var_name, block_id)?;
         let key = (struct_var_name.clone(), decl_block_id);
-        debug!("Compiling var struct member load. Key: {:?}", &key);
+        debug!(
+            "Loading struct member pointer for member \"{}\". Key: {:?}",
+            &var.name, &key
+        );
 
         if let Some(struct_ptr) = self.variables.get(&key) {
-            // Get a pointer to the member in the struct. This pointer can
-            // then be used to load the value with a regular "load" instruction.
             let member_ptr = self
                 .builder
                 .build_struct_gep(*struct_ptr, var.member_index, "struct.gep")
@@ -374,8 +348,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         &var.struct_name, var.member_index
                     ))
                 })?;
-
-            Ok(self.builder.build_load(member_ptr, "struct.member.load"))
+            Ok(member_ptr)
         } else {
             Err(self.err(format!(
                 "Unable to find ptr to struct \"{}\" in decl block ID {}.",

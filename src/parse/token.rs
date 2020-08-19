@@ -94,6 +94,7 @@ pub enum Expression {
     Operation(Operation),
 }
 
+#[derive(Debug)]
 pub enum AccessType {
     Regular,
     Deref,
@@ -119,6 +120,37 @@ impl Expression {
                 },
             },
             _ => false,
+        }
+    }
+
+    pub fn get_access_type(&self) -> Option<AccessType> {
+        match self {
+            Expression::Variable(_) => Some(AccessType::Regular),
+            Expression::Operation(op) => match op {
+                Operation::BinaryOperation(bin_op) => match bin_op.operator {
+                    BinaryOperator::Dot => {
+                        if bin_op.right.is_deref() {
+                            Some(AccessType::Deref)
+                        } else if bin_op.right.is_address() {
+                            Some(AccessType::Address)
+                        } else if bin_op.right.is_array_access() {
+                            Some(AccessType::ArrayAccess)
+                        } else if bin_op.left.is_var() && bin_op.right.is_var() {
+                            Some(AccessType::StructAccess)
+                        } else {
+                            panic!("TODO: lhs & rhs isn't both var, might be func call.");
+                        }
+                    }
+                    _ => None,
+                },
+                Operation::UnaryOperation(un_op) => match un_op.operator {
+                    UnaryOperator::Deref => Some(AccessType::Deref),
+                    UnaryOperator::Address => Some(AccessType::Address),
+                    UnaryOperator::ArrayAccess(_) => Some(AccessType::ArrayAccess),
+                    _ => None,
+                },
+            },
+            _ => None,
         }
     }
 

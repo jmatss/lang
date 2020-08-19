@@ -201,7 +201,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if let Some(func_ptr) = self.module.get_function(&func_call.name) {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
-            // functions are supported.
+            // functions are supported to be compatible with C code.
             if func_call.arguments.len() < func_ptr.count_params() as usize {
                 return Err(self.err(format!(
                     "Wrong amount of args given when calling func: {}. Expected: {}, got: {}",
@@ -268,7 +268,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             )));
         }
 
-        // Compiles all arguments to "codegen".
+        // Compile all arguments(all values that will be set to initialize the
+        // struct members).
         let mut args = Vec::with_capacity(struct_init.arguments.len());
         for arg in &mut struct_init.arguments {
             let any_value = self.compile_expr(&mut arg.value)?;
