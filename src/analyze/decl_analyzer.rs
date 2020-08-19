@@ -1,5 +1,5 @@
 use crate::analyze::analyzer::AnalyzeContext;
-use crate::error::{LangError, LangErrorKind::AnalyzeError};
+use crate::error::LangError;
 use crate::parse::token::{
     BlockHeader, BlockId, Enum, Function, Interface, ParseToken, ParseTokenKind, Statement, Struct,
 };
@@ -34,11 +34,16 @@ impl<'a> DeclAnalyzer<'a> {
     }
 
     fn analyze_token(&mut self, token: &mut ParseToken) {
+        self.context.cur_line_nr = token.line_nr;
+        self.context.cur_column_nr = token.column_nr;
+
         match &mut token.kind {
             ParseTokenKind::Block(header, id, body) => {
                 self.context.cur_block_id = *id;
                 self.analyze_header(header);
                 for token in body {
+                    self.context.cur_line_nr = token.line_nr;
+                    self.context.cur_column_nr = token.column_nr;
                     self.analyze_token(token);
                 }
             }
@@ -50,8 +55,6 @@ impl<'a> DeclAnalyzer<'a> {
     fn analyze_header(&mut self, header: &BlockHeader) {
         let cur_id = self.context.cur_block_id;
         match header {
-            // TODO: Better error messages. For example print which params are
-            //       different and line/column nr etc.
             BlockHeader::Function(func) => self.analyze_func_header(func, cur_id),
             BlockHeader::Struct(struct_) => self.analyze_struct_header(struct_, cur_id),
             BlockHeader::Enum(enum_) => self.analyze_enum_header(enum_, cur_id),
@@ -78,7 +81,7 @@ impl<'a> DeclAnalyzer<'a> {
             }
         };
         let key = (func.name.clone(), root_parent_id);
-        if let Some(prev_func) = self.context.functions.get_mut(&key) {
+        if let Some(prev_func) = self.context.functions.get(&key) {
             // Function already declared somewhere, make sure that the
             // current declaration and the previous one matches.
             let empty_vec = Vec::new();
@@ -103,7 +106,8 @@ impl<'a> DeclAnalyzer<'a> {
                     cur_func_params.len(),
                     prev_func_params.len(),
                 );
-                self.errors.push(LangError::new(err_msg, AnalyzeError));
+                let err = self.context.err(err_msg);
+                self.errors.push(err);
             } else {
                 for (i, (cur_param, prev_param)) in cur_func_params
                     .iter()
@@ -116,7 +120,8 @@ impl<'a> DeclAnalyzer<'a> {
                             Parameter at position {}. Prev name: {:?}, current name: {:?}.",
                             &func.name, i, &cur_param.name, &prev_param.name
                         );
-                        self.errors.push(LangError::new(err_msg, AnalyzeError));
+                        let err = self.context.err(err_msg);
+                        self.errors.push(err);
                     }
                     if cur_param.ret_type != prev_param.ret_type {
                         let param_name = if cur_param.name == prev_param.name {
@@ -130,7 +135,8 @@ impl<'a> DeclAnalyzer<'a> {
                             Prev type: {:?}, current type: {:?}",
                             &func.name, i, &param_name, cur_param.ret_type, prev_param.ret_type
                         );
-                        self.errors.push(LangError::new(err_msg, AnalyzeError));
+                        let err = self.context.err(err_msg);
+                        self.errors.push(err);
                     }
                 }
             }

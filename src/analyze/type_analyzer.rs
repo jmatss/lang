@@ -2,7 +2,6 @@ use super::type_inference::TypeChoice;
 use crate::analyze::analyzer::AnalyzeContext;
 use crate::common::variable_type::Type;
 use crate::error::LangError;
-use crate::error::LangErrorKind::AnalyzeError;
 use crate::lex::token::Literal;
 use crate::parse::token::{
     BinaryOperation, Operation, ParseToken, TypeStruct, UnaryOperation, Variable,
@@ -45,11 +44,16 @@ impl<'a> TypeAnalyzer<'a> {
     }
 
     fn analyze_type(&mut self, token: &mut ParseToken) {
+        self.context.cur_line_nr = token.line_nr;
+        self.context.cur_column_nr = token.column_nr;
+
         match token.kind {
             ParseTokenKind::Block(ref mut header, id, ref mut body) => {
                 self.context.cur_block_id = id;
                 self.analyze_header_type(header);
                 for token in body {
+                    self.context.cur_line_nr = token.line_nr;
+                    self.context.cur_column_nr = token.column_nr;
                     self.analyze_type(token);
                 }
             }
@@ -96,13 +100,11 @@ impl<'a> TypeAnalyzer<'a> {
                     if let Some(struct_type) = prev_type_opt.clone() {
                         self.analyze_struct_member(var, struct_type)
                     } else {
-                        let err = LangError::new(
-                            format!(
-                                "prev_type was None when looking at struct member: {}",
-                                &var.name
-                            ),
-                            AnalyzeError,
+                        let err_msg = format!(
+                            "prev_type was None when looking at struct member: {}",
+                            &var.name
                         );
+                        let err = self.context.err(err_msg);
                         self.errors.push(err);
                         None
                     }
@@ -134,10 +136,8 @@ impl<'a> TypeAnalyzer<'a> {
         let func = if let Some(func) = self.context.functions.get(&key) {
             func.clone()
         } else {
-            let err = LangError::new(
-                format!("Unable to find func decl for: {}", &func_call.name),
-                AnalyzeError,
-            );
+            let err_msg = format!("Unable to find func decl for: {}", &func_call.name);
+            let err = self.context.err(err_msg);
             self.errors.push(err);
             return None;
         };
@@ -162,28 +162,24 @@ impl<'a> TypeAnalyzer<'a> {
                     self.analyze_expr_type(&mut arg.value, prev_type_opt)?;
                 }
             } else {
-                let err = LangError::new(
-                    format!(
-                        "Func/call to {}, incorrect amount of param/arg (vararg={}). Actual func #: {}, got: {}.",
-                        &func_call.name,
-                        func.is_var_arg,
-                        func_params.len(),
-                        func_call.arguments.len()
-                    ),
-                    AnalyzeError,
+                let err_msg = format!(
+                    "Func call to {}, incorrect amount of param/arg (vararg={}). Actual func #: {}, got: {}.",
+                    &func_call.name,
+                    func.is_var_arg,
+                    func_params.len(),
+                    func_call.arguments.len()
                 );
+                let err = self.context.err(err_msg);
                 self.errors.push(err);
                 return None;
             }
         } else if !func_call.arguments.is_empty() {
-            let err = LangError::new(
-                format!(
-                    "Func {} has no params, but func_call had {} args.",
-                    &func_call.name,
-                    func_call.arguments.len()
-                ),
-                AnalyzeError,
+            let err_msg = format!(
+                "Func {} has no params, but func_call had {} args.",
+                &func_call.name,
+                func_call.arguments.len()
             );
+            let err = self.context.err(err_msg);
             self.errors.push(err);
             return None;
         }
@@ -210,10 +206,8 @@ impl<'a> TypeAnalyzer<'a> {
         let struct_ = if let Some(struct_) = self.context.structs.get(&key) {
             struct_.clone()
         } else {
-            let err = LangError::new(
-                format!("Unable to find struct decl for: {}", &struct_init.name),
-                AnalyzeError,
-            );
+            let err_msg = format!("Unable to find struct decl for: {}", &struct_init.name);
+            let err = self.context.err(err_msg);
             self.errors.push(err);
             return None;
         };
@@ -228,27 +222,23 @@ impl<'a> TypeAnalyzer<'a> {
                     self.analyze_expr_type(&mut arg.value, member.ret_type.clone())?;
                 }
             } else {
-                let err = LangError::new(
-                    format!(
-                        "Struct/init to {}, members/args amount differs. Expected: {}, got: {}.",
-                        &struct_init.name,
-                        struct_members.len(),
-                        struct_init.arguments.len()
-                    ),
-                    AnalyzeError,
+                let err_msg = format!(
+                    "Struct/init to {}, members/args amount differs. Expected: {}, got: {}.",
+                    &struct_init.name,
+                    struct_members.len(),
+                    struct_init.arguments.len()
                 );
+                let err = self.context.err(err_msg);
                 self.errors.push(err);
                 return None;
             }
         } else if !struct_init.arguments.is_empty() {
-            let err = LangError::new(
-                format!(
-                    "Struct {} has no params, but struct_init had {} args.",
-                    &struct_init.name,
-                    struct_init.arguments.len()
-                ),
-                AnalyzeError,
+            let err_msg = format!(
+                "Struct {} has no params, but struct_init had {} args.",
+                &struct_init.name,
+                struct_init.arguments.len()
             );
+            let err = self.context.err(err_msg);
             self.errors.push(err);
             return None;
         }
@@ -290,13 +280,11 @@ impl<'a> TypeAnalyzer<'a> {
             let struct_ = if let Some(struct_) = self.context.structs.get(&key) {
                 struct_
             } else {
-                let err = LangError::new(
-                    format!(
-                        "Unable to find struct with name {} with block ID {}.",
-                        &ident, struct_block_id
-                    ),
-                    AnalyzeError,
+                let err_msg = format!(
+                    "Unable to find struct with name {} with block ID {}.",
+                    &ident, struct_block_id
                 );
+                let err = self.context.err(err_msg);
                 self.errors.push(err);
                 return None;
             };
@@ -323,35 +311,29 @@ impl<'a> TypeAnalyzer<'a> {
                 if found {
                     var.ret_type.clone()
                 } else {
-                    let err  = LangError::new(
-                        format!(
-                            "Unable to find member with name {} in struct with name {} with block ID {}.",
-                            &var.name, &ident, struct_block_id
-                        ),
-                        AnalyzeError,
+                    let err_msg = format!(
+                        "Unable to find member with name {} in struct with name {} with block ID {}.",
+                        &var.name, &ident, struct_block_id
                     );
+                    let err = self.context.err(err_msg);
                     self.errors.push(err);
                     None
                 }
             } else {
-                let err = LangError::new(
-                    format!(
-                        "Unable to find struct with name {} with block ID {}.",
-                        &ident, struct_block_id
-                    ),
-                    AnalyzeError,
+                let err_msg = format!(
+                    "Unable to find struct with name {} with block ID {}.",
+                    &ident, struct_block_id
                 );
+                let err = self.context.err(err_msg);
                 self.errors.push(err);
                 None
             }
         } else {
-            let err = LangError::new(
-                format!(
-                    "prev_type was not custom when looking at struct member: {}",
-                    &var.name
-                ),
-                AnalyzeError,
+            let err_msg = format!(
+                "prev_type was not custom when looking at struct member: {}",
+                &var.name
             );
+            let err = self.context.err(err_msg);
             self.errors.push(err);
             None
         }
@@ -477,16 +459,15 @@ impl<'a> TypeAnalyzer<'a> {
                     if let Type::Pointer(inner) = type_struct.t {
                         Some(*inner)
                     } else {
-                        let err = LangError::new(
-                            format!("Trying to dereference non pointer type: {:?}", type_struct),
-                            AnalyzeError,
-                        );
+                        let err_msg =
+                            format!("Trying to dereference non pointer type: {:?}", type_struct);
+                        let err = self.context.err(err_msg);
                         self.errors.push(err);
                         return None;
                     }
                 } else {
-                    let err =
-                        LangError::new("Type set to None when dereferencing.".into(), AnalyzeError);
+                    let err_msg = "Type set to None when dereferencing.".into();
+                    let err = self.context.err(err_msg);
                     self.errors.push(err);
                     return None;
                 }
@@ -500,10 +481,8 @@ impl<'a> TypeAnalyzer<'a> {
                     let generics = None;
                     Some(TypeStruct::new(new_ptr, generics))
                 } else {
-                    let err = LangError::new(
-                        "Type set to None when taking address.".into(),
-                        AnalyzeError,
-                    );
+                    let err_msg = "Type set to None when taking address.".into();
+                    let err = self.context.err(err_msg);
                     self.errors.push(err);
                     return None;
                 }
@@ -515,16 +494,14 @@ impl<'a> TypeAnalyzer<'a> {
                     if let Type::Array(inner, _) = type_struct.t {
                         Some(*inner)
                     } else {
-                        let err = LangError::new(
-                            format!("Trying to index non array type: {:?}", type_struct),
-                            AnalyzeError,
-                        );
+                        let err_msg = format!("Trying to index non array type: {:?}", type_struct);
+                        let err = self.context.err(err_msg);
                         self.errors.push(err);
                         return None;
                     }
                 } else {
-                    let err =
-                        LangError::new("Type set to None when indexing.".into(), AnalyzeError);
+                    let err_msg = "Type set to None when indexing.".into();
+                    let err = self.context.err(err_msg);
                     self.errors.push(err);
                     return None;
                 }
@@ -572,10 +549,8 @@ impl<'a> TypeAnalyzer<'a> {
                 let var = if let Some(var) = lhs.eval_to_var() {
                     var
                 } else {
-                    let err = LangError::new(
-                        format!("lhs of assignment not evaluated to var: {:?}", lhs),
-                        AnalyzeError,
-                    );
+                    let err_msg = format!("lhs of assignment not evaluated to var: {:?}", lhs);
+                    let err = self.context.err(err_msg);
                     self.errors.push(err);
                     return;
                 };
@@ -741,10 +716,8 @@ impl<'a> TypeAnalyzer<'a> {
 
             // Can't set type for function call or struct init.
             Expression::FunctionCall(_) | Expression::StructInit(_) | Expression::Type(_) => {
-                let err = LangError::new(
-                    format!("Tried to set type for unexpected expr: {:?}", &expr),
-                    AnalyzeError,
-                );
+                let err_msg = format!("Tried to set type for unexpected expr: {:?}", &expr);
+                let err = self.context.err(err_msg);
                 self.errors.push(err);
             }
         }

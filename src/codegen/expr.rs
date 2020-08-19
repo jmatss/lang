@@ -1,5 +1,4 @@
 use super::generator::CodeGen;
-use crate::error::{LangError, LangErrorKind::CodeGenError};
 use crate::{
     common::variable_type::Type,
     lex::token::Literal,
@@ -74,16 +73,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             self.context.i32_type().const_int(ch as u64, false),
                         ))
                     } else {
-                        Err(LangError::new(
-                            "Unable to get char literal.".into(),
-                            CodeGenError,
-                        ))
+                        Err(self.err("Unable to get char literal.".into()))
                     }
                 } else {
-                    Err(LangError::new(
-                        "Char literal isn't a single character.".into(),
-                        CodeGenError,
-                    ))
+                    Err(self.err("Char literal isn't a single character.".into()))
                 }
             }
 
@@ -165,12 +158,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let val = u32::from_str_radix(lit, radix)? as u64;
                     self.context.i32_type().const_int(val, false)
                 }
-                _ => {
-                    return Err(LangError::new(
-                        format!("Invalid integer type: {:?}", type_struct.t),
-                        CodeGenError,
-                    ))
-                }
+                _ => return Err(self.err(format!("Invalid integer type: {:?}", type_struct.t))),
             },
             // TODO: What should the default int size be? Signed 32 atm.
             None => {
@@ -193,12 +181,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Type::F64 => self.context.f64_type().const_float(lit.parse()?),
                 // TODO: What should the default float size be?
                 Type::Float => self.context.f32_type().const_float(lit.parse()?),
-                _ => {
-                    return Err(LangError::new(
-                        format!("Invalid float type: {:?}", type_struct.t),
-                        CodeGenError,
-                    ))
-                }
+                _ => return Err(self.err(format!("Invalid float type: {:?}", type_struct.t))),
             },
             // TODO: What should the default float size be? F32 atm.
             None => self.context.f32_type().const_float(lit.parse()?),
@@ -220,15 +203,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // arguments are allowed to be greater than parameters since variadic
             // functions are supported.
             if func_call.arguments.len() < func_ptr.count_params() as usize {
-                return Err(LangError::new(
-                    format!(
-                        "Wrong amount of args given when calling func: {}. Expected: {}, got: {}",
-                        &func_call.name,
-                        func_ptr.count_params(),
-                        func_call.arguments.len()
-                    ),
-                    CodeGenError,
-                ));
+                return Err(self.err(format!(
+                    "Wrong amount of args given when calling func: {}. Expected: {}, got: {}",
+                    &func_call.name,
+                    func_ptr.count_params(),
+                    func_call.arguments.len()
+                )));
             }
 
             let mut args = Vec::with_capacity(func_call.arguments.len());
@@ -259,13 +239,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.context.i32_type().const_zero().into()
             })
         } else {
-            Err(LangError::new(
-                format!(
-                    "Unable to find function with name {} to call.",
-                    &func_call.name
-                ),
-                CodeGenError,
-            ))
+            Err(self.err(format!(
+                "Unable to find function with name {} to call.",
+                &func_call.name
+            )))
         }
     }
 
@@ -277,24 +254,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let struct_type = if let Some(inner) = self.module.get_struct_type(&struct_init.name) {
             inner
         } else {
-            return Err(LangError::new(
-                format!("Unable to get struct: {}", &struct_init.name),
-                CodeGenError,
-            ));
+            return Err(self.err(format!("Unable to get struct: {}", &struct_init.name)));
         };
 
         // Checks to see if the amount of arguments are different from the
         // amount of members.
         if struct_init.arguments.len() != struct_type.count_fields() as usize {
-            return Err(LangError::new(
-                format!(
-                    "Wrong amount of args given when init struct: {}. Expected: {}, got: {}",
-                    &struct_init.name,
-                    struct_type.count_fields(),
-                    struct_init.arguments.len()
-                ),
-                CodeGenError,
-            ));
+            return Err(self.err(format!(
+                "Wrong amount of args given when init struct: {}. Expected: {}, got: {}",
+                &struct_init.name,
+                struct_type.count_fields(),
+                struct_init.arguments.len()
+            )));
         }
 
         // Compiles all arguments to "codegen".
@@ -336,13 +307,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .builder
                 .build_struct_gep(struct_ptr, i as u32, "struct.init.gep")
                 .map_err(|_| {
-                    LangError::new(
-                        format!(
-                            "Unable to GEP struct \"{}\" member {}.",
-                            &struct_init.name, i
-                        ),
-                        CodeGenError,
-                    )
+                    self.err(format!(
+                        "Unable to GEP struct \"{}\" member {}.",
+                        &struct_init.name, i
+                    ))
                 })?;
 
             self.builder.build_store(member_ptr, *arg_value);
@@ -369,16 +337,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             //       at through the inkwell API?
             // TODO: Add logic/edge cases where the type of the argument can
             //       be converted to the type of the parameter with no issues.
-            Err(LangError::new(
-                format!(
-                    "Arg type at index {} wrong type when calling func: {}. Expected: {:?}, got: {:?}",
-                i,
-                func_name,
-                param_type,
-                arg_type,
-                ),
-                CodeGenError,
-            ))
+            Err(self.err(format!(
+                "Arg type at index {} wrong type when calling func: {}. Expected: {:?}, got: {:?}",
+                i, func_name, param_type, arg_type,
+            )))
         } else {
             Ok(())
         }

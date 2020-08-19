@@ -1,5 +1,5 @@
 use super::generator::CodeGen;
-use crate::error::{LangError, LangErrorKind::CodeGenError};
+
 use crate::{
     parse::token::{self, BinaryOperation, Operation},
     CustomResult,
@@ -28,12 +28,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let ret_type = if let Some(ref ret_type) = bin_op.ret_type {
             self.compile_type(&ret_type)?
         } else {
-            return Err(LangError::new(
+            return Err(self.err(
                 format!(
                     "Type of bin_op \"{:?}\" not know when compiling assignment.",
                     &bin_op
                 ),
-                CodeGenError,
+                
             ));
         };
 
@@ -60,13 +60,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             _ => {
                 if !self.is_same_base_type(left_type, right_type) {
-                    return Err(LangError::new(
+                    return Err(self.err(
                     format!(
                         "Left & right type different base types during bin op. left_type: {:?}, right_type: {:?}",
                         left_type,
                         right_type,
                     ),
-                    CodeGenError,
+                    
                 ));
                 }
             }
@@ -138,12 +138,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let ret_type = if let Some(ref ret_type) = un_op.ret_type {
             self.compile_type(&ret_type)?
         } else {
-            return Err(LangError::new(
+            return Err(self.err(
                 format!(
                     "Type of un_op \"{:?}\" not know when compiling assignment.",
                     &un_op
                 ),
-                CodeGenError,
+                
             ));
         };
 
@@ -164,9 +164,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if let Some(var) = un_op.value.eval_to_var() {
                     self.compile_un_op_address(var)?
                 } else {
-                    return Err(LangError::new(
+                    return Err(self.err(
                         format!("Trying to dereference invalid type: {:?}", &un_op.value),
-                        CodeGenError,
+                        
                     ));
                 }
             }
@@ -174,9 +174,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if let Some(var) = un_op.value.eval_to_var() {
                     self.compile_un_op_array_access(var, dim)?
                 } else {
-                    return Err(LangError::new(
+                    return Err(self.err(
                         format!("Trying to index invalid type: {:?}", &un_op.value),
-                        CodeGenError,
+                        
                     ));
                 }
             }
@@ -219,9 +219,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     } else if left_type.is_int_type() {
                         left.into_int_value().const_signed_to_float(ty).into()
                     } else {
-                        return Err(LangError::new(
+                        return Err(self.err(
                             format!("Invalid type when casting \"as\" float: {:?}", left_type),
-                            CodeGenError,
+                            
                         ));
                     }
                 }
@@ -232,9 +232,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let is_signed = true;
                         left.into_int_value().const_cast(ty, is_signed).into()
                     } else {
-                        return Err(LangError::new(
+                        return Err(self.err(
                             format!("Invalid type when casting \"as\" int: {:?}", left_type),
-                            CodeGenError,
+                            
                         ));
                     }
                 }
@@ -307,9 +307,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | BasicTypeEnum::VectorType(_)
             | BasicTypeEnum::FloatType(_)
             | BasicTypeEnum::IntType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Bad left type in Dot bin op: {:?}", left_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -338,9 +338,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     BinaryOperator::LessThanOrEquals => FloatPredicate::OLE,
                     BinaryOperator::GreaterThanOrEquals => FloatPredicate::OGE,
                     _ => {
-                        return Err(LangError::new(
+                        return Err(self.err(
                             format!("Invalid operator in bin_op compare: {:?}", op),
-                            CodeGenError,
+                            
                         ))
                     }
                 };
@@ -371,9 +371,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     BinaryOperator::LessThanOrEquals => IntPredicate::SLE,
                     BinaryOperator::GreaterThanOrEquals => IntPredicate::SGE,
                     _ => {
-                        return Err(LangError::new(
+                        return Err(self.err(
                             format!("Invalid operator in bin_op compare: {:?}", op),
-                            CodeGenError,
+                            
                         ))
                     }
                 };
@@ -400,9 +400,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for BinaryOperator::Equals: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -448,9 +448,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for BinaryOperator::Addition: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -496,12 +496,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!(
                         "Invalid type for BinaryOperator::Subtraction: {:?}",
                         ret_type
                     ),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -547,12 +547,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!(
                         "Invalid type for BinaryOperator::Multiplication: {:?}",
                         ret_type
                     ),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -602,9 +602,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for BinaryOperator::Division: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -654,9 +654,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for BinaryOperator::Modulus: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -688,9 +688,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for BinaryOperator::BitAnd: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -722,9 +722,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for BinaryOperator::BitOr: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -756,9 +756,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for BinaryOperator::BitXor: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -790,9 +790,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for BinaryOperator::ShiftLeft: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -832,12 +832,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!(
                         "Invalid type for BinaryOperator::ShiftRight: {:?}",
                         ret_type
                     ),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -868,9 +868,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for UnaryOperator::Increment: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -901,9 +901,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for UnaryOperator::Decrement: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -922,15 +922,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Expression::Operation(Operation::BinaryOperation(bin_op)) => match bin_op.operator {
                 BinaryOperator::Dot => {
                     if let Some(var) = bin_op.right.eval_to_var() {
-                        self.compile_var_load(var, &AccessType::Address);
-                        return Err(LangError::new("todo".into(), CodeGenError));
+                        self.compile_var_load(var, &AccessType::Address)?;
+                        Err(self.err("todo".into()))
                     } else {
                         todo!("")
                     }
                 }
-                _ => Err(LangError::new(
+                _ => Err(self.err(
                     format!("Invalid op in UnaryOperator::Deref: {:?}", bin_op.operator),
-                    CodeGenError,
+                    
                 )),
             },
 
@@ -939,12 +939,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Expression::Literal(..)
             | Expression::Type(_)
             | Expression::FunctionCall(_)
-            | Expression::StructInit(_) => Err(LangError::new(
+            | Expression::StructInit(_) => Err(self.err(
                 format!(
                     "Invalid type for UnaryOperator::Deref: {:?}",
                     basic_value.get_type()
                 ),
-                CodeGenError,
+                
             )),
         }
     }
@@ -961,12 +961,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if let Some(var_ptr) = self.variables.get(&key) {
             Ok(var_ptr.clone().into())
         } else {
-            Err(LangError::new(
+            Err(self.err(
                 format!(
                     "Unable to find var \"{}\" in decl block id {}.",
                     &var.name, decl_block_id
                 ),
-                CodeGenError,
+                
             ))
         }
     }
@@ -984,9 +984,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let compiled_dim = self.compile_expr(dim)?;
         if !compiled_dim.is_int_value() {
-            return Err(LangError::new(
+            return Err(self.err(
                 format!("Dim in array didn't compile to int: {:?}", &dim),
-                CodeGenError,
+                
             ));
         }
 
@@ -998,12 +998,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     .into())
             }
         } else {
-            Err(LangError::new(
+            Err(self.err(
                 format!(
                     "Unable to find var \"{}\" in decl block id {}.",
                     &var.name, decl_block_id
                 ),
-                CodeGenError,
+                
             ))
         }
     }
@@ -1039,9 +1039,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for UnaryOperator::Negative: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })
@@ -1068,9 +1068,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::StructType(_)
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
-                return Err(LangError::new(
+                return Err(self.err(
                     format!("Invalid type for UnaryOperator::BoolNot: {:?}", ret_type),
-                    CodeGenError,
+                    
                 ))
             }
         })

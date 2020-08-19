@@ -623,7 +623,7 @@ impl ParseTokenIter {
                 line_nr: self.cur_line_nr,
                 column_nr: self.cur_column_nr,
             },
-            false,
+            true,
         )
     }
 }

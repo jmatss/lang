@@ -94,9 +94,11 @@ pub struct AnalyzeContext {
 
     pub block_info: HashMap<BlockId, BlockInfo>,
 
-    /// The block ID that the `analyzer` currently is in. When the analyzing is
-    /// done, this variable will not be used and will be invalid.
+    /// The block and line/column where the `analyzer` currently is. When the
+    /// analyzing is done, these variable will not be used and will be invalid.
     pub cur_block_id: BlockId,
+    pub cur_line_nr: u64,
+    pub cur_column_nr: u64,
 }
 
 impl AnalyzeContext {
@@ -107,8 +109,12 @@ impl AnalyzeContext {
             structs: HashMap::default(),
             enums: HashMap::default(),
             interfaces: HashMap::default(),
+
             block_info: HashMap::default(),
+
             cur_block_id: 0,
+            cur_line_nr: 0,
+            cur_column_nr: 0,
         }
     }
 
@@ -126,7 +132,10 @@ impl AnalyzeContext {
                 if id == block_info.parent_id {
                     Err(LangError::new(
                         format!("Block with id {} is its own parent in block info.", id),
-                        AnalyzeError,
+                        AnalyzeError {
+                            line_nr: self.cur_line_nr,
+                            column_nr: self.cur_column_nr,
+                        },
                     ))
                 } else if !block_info.is_root_block {
                     self.get_var_decl_scope(ident, block_info.parent_id)
@@ -136,7 +145,10 @@ impl AnalyzeContext {
                             "Unable to find var decl for \"{}\" in scope of root block {}.",
                             ident, id
                         ),
-                        AnalyzeError,
+                        AnalyzeError {
+                            line_nr: self.cur_line_nr,
+                            column_nr: self.cur_column_nr,
+                        },
                     ))
                 }
             } else {
@@ -145,7 +157,10 @@ impl AnalyzeContext {
                         "Unable to get var decl block info for block with id: {}",
                         id
                     ),
-                    AnalyzeError,
+                    AnalyzeError {
+                        line_nr: self.cur_line_nr,
+                        column_nr: self.cur_column_nr,
+                    },
                 ))
             }
         }
@@ -169,7 +184,10 @@ impl AnalyzeContext {
                 "Unable to get func \"{}\" block info for block with id: {}, ended at ID: {}.",
                 &ident, &id, &cur_id
             ),
-            AnalyzeError,
+            AnalyzeError {
+                line_nr: self.cur_line_nr,
+                column_nr: self.cur_column_nr,
+            },
         ))
     }
 
@@ -191,7 +209,10 @@ impl AnalyzeContext {
                 "Unable to get struct \"{}\" block info for block with id: {}, ended at ID: {}.",
                 &ident, &id, &cur_id
             ),
-            AnalyzeError,
+            AnalyzeError {
+                line_nr: self.cur_line_nr,
+                column_nr: self.cur_column_nr,
+            },
         ))
     }
 
@@ -207,7 +228,10 @@ impl AnalyzeContext {
         } else {
             return Err(LangError::new(
                 format!("The given block id doesn't have a parent: {}", id),
-                AnalyzeError,
+                AnalyzeError {
+                    line_nr: self.cur_line_nr,
+                    column_nr: self.cur_column_nr,
+                },
             ));
         };
 
@@ -225,7 +249,22 @@ impl AnalyzeContext {
                 "Unable to get root block info for block with id {}, ended at block ID: {}.",
                 &id, &cur_id
             ),
-            AnalyzeError,
+            AnalyzeError {
+                line_nr: self.cur_line_nr,
+                column_nr: self.cur_column_nr,
+            },
         ))
+    }
+
+    /// Used when returing errors to include current line/column number.
+    pub fn err(&self, msg: String) -> LangError {
+        LangError::new_backtrace(
+            msg,
+            AnalyzeError {
+                line_nr: self.cur_line_nr,
+                column_nr: self.cur_column_nr,
+            },
+            true,
+        )
     }
 }

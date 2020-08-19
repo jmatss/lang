@@ -7,9 +7,9 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub struct LangError {
-    msg: String,
-    kind: LangErrorKind,
-    backtrace: Option<Backtrace>,
+    pub msg: String,
+    pub kind: LangErrorKind,
+    pub backtrace: Option<Backtrace>,
 }
 
 #[derive(Debug)]
@@ -17,8 +17,8 @@ pub enum LangErrorKind {
     GeneralError,
     LexError { line_nr: u64, column_nr: u64 },
     ParseError { line_nr: u64, column_nr: u64 },
-    AnalyzeError,
-    CodeGenError,
+    AnalyzeError { line_nr: u64, column_nr: u64 },
+    CodeGenError { line_nr: u64, column_nr: u64 },
     CompileError,
 }
 
@@ -52,13 +52,25 @@ impl Display for LangError {
 
 impl From<std::num::ParseIntError> for LangError {
     fn from(e: std::num::ParseIntError) -> Self {
-        LangError::new(e.to_string(), LangErrorKind::CodeGenError)
+        LangError::new(
+            e.to_string(),
+            LangErrorKind::CodeGenError {
+                line_nr: 0,
+                column_nr: 0,
+            },
+        )
     }
 }
 
 impl From<std::num::ParseFloatError> for LangError {
     fn from(e: std::num::ParseFloatError) -> Self {
-        LangError::new(e.to_string(), LangErrorKind::CodeGenError)
+        LangError::new(
+            e.to_string(),
+            LangErrorKind::CodeGenError {
+                line_nr: 0,
+                column_nr: 0,
+            },
+        )
     }
 }
 
@@ -76,6 +88,12 @@ impl From<std::io::Error> for LangError {
 
 impl From<LLVMString> for LangError {
     fn from(e: LLVMString) -> Self {
-        LangError::new(e.to_string(), LangErrorKind::CodeGenError)
+        LangError::new(
+            e.to_string(),
+            LangErrorKind::CodeGenError {
+                line_nr: 0,
+                column_nr: 0,
+            },
+        )
     }
 }

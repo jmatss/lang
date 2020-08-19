@@ -1,5 +1,4 @@
 use super::generator::CodeGen;
-use crate::error::{LangError, LangErrorKind::CodeGenError};
 use crate::{
     parse::token::{AccessType, AssignOperator, Expression, Modifier, Path, Statement},
     CustomResult,
@@ -25,10 +24,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     // TODO: Will this always be regular?
                     self.compile_var_store(var, basic_value, &AccessType::Regular)?;
                 } else if var.is_const {
-                    return Err(LangError::new(
-                        format!("const var decl of \"{}\" has no value set", &var.name),
-                        CodeGenError,
-                    ));
+                    return Err(self.err(format!(
+                        "const var decl of \"{}\" has no value set",
+                        &var.name
+                    )));
                 }
                 Ok(())
             }
@@ -54,10 +53,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_yield(&mut self, expr: &Expression) -> CustomResult<()> {
-        Err(LangError::new(
-            "TODO: Implement yield statement.".into(),
-            CodeGenError,
-        ))
+        Err(self.err("TODO: Implement yield statement.".into()))
     }
 
     fn compile_break(&mut self) -> CustomResult<()> {
@@ -69,31 +65,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_continue(&mut self) -> CustomResult<()> {
-        Err(LangError::new(
-            "TODO: Implement continue statement.".into(),
-            CodeGenError,
-        ))
+        Err(self.err("TODO: Implement continue statement.".into()))
     }
 
     fn compile_use(&mut self, path: &Path) -> CustomResult<()> {
-        Err(LangError::new(
-            "TODO: Implement use statement.".into(),
-            CodeGenError,
-        ))
+        Err(self.err("TODO: Implement use statement.".into()))
     }
 
     fn compile_package(&mut self, path: &Path) -> CustomResult<()> {
-        Err(LangError::new(
-            "TODO: Implement package statement.".into(),
-            CodeGenError,
-        ))
+        Err(self.err("TODO: Implement package statement.".into()))
     }
 
     fn compile_modifier(&mut self, modifier: &Modifier) -> CustomResult<()> {
-        Err(LangError::new(
-            "TODO: Implement modifier statement.".into(),
-            CodeGenError,
-        ))
+        Err(self.err("TODO: Implement modifier statement.".into()))
     }
 
     fn compile_assign(
@@ -117,26 +101,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let var = if let Some(var) = lhs.eval_to_var() {
             var
         } else {
-            return Err(LangError::new(
-                format!(
-                    "lhs of expr in compile_assign doesn't eval to var: {:?}",
-                    lhs
-                ),
-                CodeGenError,
-            ));
+            return Err(self.err(format!(
+                "lhs of expr in compile_assign doesn't eval to var: {:?}",
+                lhs
+            )));
         };
 
         // TODO: Can one always assume that the `ret_type` will be set at this point?
         let ret_type = if let Some(ref ret_type) = var.ret_type {
             self.compile_type(&ret_type)?
         } else {
-            return Err(LangError::new(
-                format!(
-                    "Type of var \"{}\" not know when compiling assignment.",
-                    &var.name
-                ),
-                CodeGenError,
-            ));
+            return Err(self.err(format!(
+                "Type of var \"{}\" not know when compiling assignment.",
+                &var.name
+            )));
         };
 
         let right_any_value = self.compile_expr(rhs)?;
@@ -173,10 +151,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 | AnyTypeEnum::VoidType(_)
                 | AnyTypeEnum::ArrayType(_)
                 | AnyTypeEnum::FunctionType(_) => {
-                    return Err(LangError::new(
-                        format!("Invalid type for AssignAddition: {:?}", ret_type),
-                        CodeGenError,
-                    ))
+                    return Err(self.err(format!("Invalid type for AssignAddition: {:?}", ret_type)))
                 }
             },
 
@@ -203,10 +178,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 | AnyTypeEnum::VoidType(_)
                 | AnyTypeEnum::ArrayType(_)
                 | AnyTypeEnum::FunctionType(_) => {
-                    return Err(LangError::new(
-                        format!("Invalid type for AssignSubtraction: {:?}", ret_type),
-                        CodeGenError,
-                    ))
+                    return Err(self.err(format!(
+                        "Invalid type for AssignSubtraction: {:?}",
+                        ret_type
+                    )))
                 }
             },
 
@@ -233,10 +208,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 | AnyTypeEnum::VoidType(_)
                 | AnyTypeEnum::ArrayType(_)
                 | AnyTypeEnum::FunctionType(_) => {
-                    return Err(LangError::new(
-                        format!("Invalid type for AssignMultiplication: {:?}", ret_type),
-                        CodeGenError,
-                    ))
+                    return Err(self.err(format!(
+                        "Invalid type for AssignMultiplication: {:?}",
+                        ret_type
+                    )))
                 }
             },
 
@@ -263,10 +238,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 | AnyTypeEnum::VoidType(_)
                 | AnyTypeEnum::ArrayType(_)
                 | AnyTypeEnum::FunctionType(_) => {
-                    return Err(LangError::new(
-                        format!("Invalid type for AssignDivision: {:?}", ret_type),
-                        CodeGenError,
-                    ))
+                    return Err(self.err(format!("Invalid type for AssignDivision: {:?}", ret_type)))
                 }
             },
 
@@ -293,16 +265,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 | AnyTypeEnum::VoidType(_)
                 | AnyTypeEnum::ArrayType(_)
                 | AnyTypeEnum::FunctionType(_) => {
-                    return Err(LangError::new(
-                        format!("Invalid type for AssignModulus: {:?}", ret_type),
-                        CodeGenError,
-                    ))
+                    return Err(self.err(format!("Invalid type for AssignModulus: {:?}", ret_type)))
                 }
             },
 
-            AssignOperator::AssignPower => {
-                return Err(LangError::new("TODO: AssignPower.".into(), CodeGenError))
-            }
+            AssignOperator::AssignPower => return Err(self.err("TODO: AssignPower.".into())),
             AssignOperator::AssignBitAnd => match ret_type {
                 AnyTypeEnum::IntType(_) => self
                     .builder
@@ -315,10 +282,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 | AnyTypeEnum::VoidType(_)
                 | AnyTypeEnum::ArrayType(_)
                 | AnyTypeEnum::FunctionType(_) => {
-                    return Err(LangError::new(
-                        format!("Invalid type for AssignBitAnd: {:?}", ret_type),
-                        CodeGenError,
-                    ))
+                    return Err(self.err(format!("Invalid type for AssignBitAnd: {:?}", ret_type)))
                 }
             },
 
@@ -334,10 +298,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 | AnyTypeEnum::VoidType(_)
                 | AnyTypeEnum::ArrayType(_)
                 | AnyTypeEnum::FunctionType(_) => {
-                    return Err(LangError::new(
-                        format!("Invalid type for AssignBitOr: {:?}", ret_type),
-                        CodeGenError,
-                    ))
+                    return Err(self.err(format!("Invalid type for AssignBitOr: {:?}", ret_type)))
                 }
             },
 
@@ -353,10 +314,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 | AnyTypeEnum::VoidType(_)
                 | AnyTypeEnum::ArrayType(_)
                 | AnyTypeEnum::FunctionType(_) => {
-                    return Err(LangError::new(
-                        format!("Invalid type for AssignBitXor: {:?}", ret_type),
-                        CodeGenError,
-                    ))
+                    return Err(self.err(format!("Invalid type for AssignBitXor: {:?}", ret_type)))
                 }
             },
 
@@ -376,10 +334,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 | AnyTypeEnum::VoidType(_)
                 | AnyTypeEnum::ArrayType(_)
                 | AnyTypeEnum::FunctionType(_) => {
-                    return Err(LangError::new(
-                        format!("Invalid type for AssignShiftLeft: {:?}", ret_type),
-                        CodeGenError,
-                    ))
+                    return Err(
+                        self.err(format!("Invalid type for AssignShiftLeft: {:?}", ret_type))
+                    )
                 }
             },
 
@@ -402,10 +359,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 | AnyTypeEnum::VoidType(_)
                 | AnyTypeEnum::ArrayType(_)
                 | AnyTypeEnum::FunctionType(_) => {
-                    return Err(LangError::new(
-                        format!("Invalid type for AssignShiftRight: {:?}", ret_type),
-                        CodeGenError,
-                    ))
+                    return Err(
+                        self.err(format!("Invalid type for AssignShiftRight: {:?}", ret_type))
+                    )
                 }
             },
         };

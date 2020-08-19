@@ -29,6 +29,8 @@ pub(super) struct CodeGen<'a, 'ctx> {
 
     /// The ID of the current block that is being compiled.
     pub cur_block_id: BlockId,
+    pub cur_line_nr: u64,
+    pub cur_column_nr: u64,
 
     /// Contains the current basic block that instructions are inserted into.
     pub cur_basic_block: Option<BasicBlock<'ctx>>,
@@ -74,13 +76,10 @@ pub fn generate<'a, 'ctx>(
                 if let Some(block_info) = code_gen.analyze_context.block_info.get(block_id) {
                     if block_info.all_children_contains_branches {
                         merge_block.remove_from_function().map_err(|_| {
-                            LangError::new(
-                                format!(
-                                    "Unable to remove empty merge block with block ID: {}",
-                                    block_id
-                                ),
-                                CodeGenError,
-                            )
+                            code_gen.err(format!(
+                                "Unable to remove empty merge block with block ID: {}",
+                                block_id
+                            ))
                         })?;
                     } else {
                         code_gen.builder.position_at_end(*merge_block);
@@ -91,13 +90,10 @@ pub fn generate<'a, 'ctx>(
                 }
             } else {
                 merge_block.remove_from_function().map_err(|_| {
-                    LangError::new(
-                        format!(
-                            "Unable to remove empty merge block with block ID: {}",
-                            block_id
-                        ),
-                        CodeGenError,
-                    )
+                    code_gen.err(format!(
+                        "Unable to remove empty merge block with block ID: {}",
+                        block_id
+                    ))
                 })?;
             }
         }
@@ -120,6 +116,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             target_machine,
 
             analyze_context,
+
+            cur_line_nr: 0,
+            cur_column_nr: 0,
 
             cur_block_id: 0,
             cur_basic_block: None,
@@ -153,7 +152,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 AnyTypeEnum::ArrayType(ty) => {
                     // TODO: Alloca array, need to figure out constant size first.
                     //self.builder.build_array_alloca(ty, &var.name)
-                    return Err(LangError::new("TODO: Alloca array.".into(), CodeGenError));
+                    return Err(self.err("TODO: Alloca array.".into()));
                 }
                 AnyTypeEnum::FloatType(ty) => self.builder.build_alloca(ty, &var.name),
                 AnyTypeEnum::IntType(ty) => self.builder.build_alloca(ty, &var.name),
@@ -161,23 +160,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 AnyTypeEnum::StructType(ty) => self.builder.build_alloca(ty, &var.name),
                 AnyTypeEnum::VectorType(ty) => self.builder.build_alloca(ty, &var.name),
                 AnyTypeEnum::FunctionType(_) => {
-                    return Err(LangError::new(
-                        "Tried to alloca function.".into(),
-                        CodeGenError,
-                    ));
+                    return Err(self.err("Tried to alloca function.".into()));
                 }
                 AnyTypeEnum::VoidType(_) => {
-                    return Err(LangError::new(
-                        "Tried to alloca void type.".into(),
-                        CodeGenError,
-                    ));
+                    return Err(self.err("Tried to alloca void type.".into()));
                 }
             })
         } else {
-            Err(LangError::new(
-                format!("type None when allocating var: {:?}", &var.name),
-                CodeGenError,
-            ))
+            Err(self.err(format!("type None when allocating var: {:?}", &var.name)))
         }
     }
 
@@ -193,24 +183,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .analyze_context
                 .block_info
                 .get(&id)
-                .ok_or_else(|| {
-                    LangError::new(
-                        format!("Unable to find parent block with id {}", id),
-                        CodeGenError,
-                    )
-                })?
+                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
                 .parent_id;
 
             if let Some(merge_block) = self.merge_blocks.get(&parent_id) {
                 Ok(*merge_block)
             } else {
-                Err(LangError::new(
-                    format!(
-                        "Unable to find merge block in blocks with id {} and parent {}.",
-                        id, parent_id
-                    ),
-                    CodeGenError,
-                ))
+                Err(self.err(format!(
+                    "Unable to find merge block in blocks with id {} and parent {}.",
+                    id, parent_id
+                )))
             }
         }
     }
@@ -226,12 +208,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .analyze_context
                 .block_info
                 .get(&id)
-                .ok_or_else(|| {
-                    LangError::new(
-                        format!("Unable to find parent block with id {}", id),
-                        CodeGenError,
-                    )
-                })?
+                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
                 .parent_id;
 
             Ok(self.get_merge_block(parent_id).ok())
@@ -243,24 +220,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .analyze_context
                 .block_info
                 .get(&id)
-                .ok_or_else(|| {
-                    LangError::new(
-                        format!("Unable to find parent block with id {}", id),
-                        CodeGenError,
-                    )
-                })?
+                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
                 .parent_id;
 
             let parent_id = self
                 .analyze_context
                 .block_info
                 .get(&if_id)
-                .ok_or_else(|| {
-                    LangError::new(
-                        format!("Unable to find parent block with id {}", id),
-                        CodeGenError,
-                    )
-                })?
+                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
                 .parent_id;
 
             Ok(self.get_merge_block(parent_id).ok())
@@ -284,10 +251,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             Ok(())
         } else {
-            Err(LangError::new(
-                format!("No decl for var when compiling var decl: {}", &var.name),
-                CodeGenError,
-            ))
+            Err(self.err(format!(
+                "No decl for var when compiling var decl: {}",
+                &var.name
+            )))
         }
     }
 
@@ -329,10 +296,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             self.builder
                                 .build_store(def_ptr.into_pointer_value(), basic_value);
                         } else {
-                            return Err(LangError::new(
-                                format!("Tried to deref non pointer type: {:?}", &var),
-                                CodeGenError,
-                            ));
+                            return Err(
+                                self.err(format!("Tried to deref non pointer type: {:?}", &var))
+                            );
                         }
                     }
                     AccessType::Address => panic!("Invalid, tried to store into address (&)."),
@@ -340,13 +306,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     AccessType::ArrayAccess => panic!("TODO: Array access"),
                 }
             } else {
-                return Err(LangError::new(
-                    format!(
-                        "No decl for var `{}` in decl block {} when building store.",
-                        &var.name, decl_block_id
-                    ),
-                    CodeGenError,
-                ));
+                return Err(self.err(format!(
+                    "No decl for var `{}` in decl block {} when building store.",
+                    &var.name, decl_block_id
+                )));
             }
         }
 
@@ -362,10 +325,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let struct_var_name = if let Some(ref struct_name) = var.struct_name {
             struct_name
         } else {
-            return Err(LangError::new(
-                format!("No struct name set for member var \"{}\".", &var.name),
-                CodeGenError,
-            ));
+            return Err(self.err(format!(
+                "No struct name set for member var \"{}\".",
+                &var.name
+            )));
         };
 
         let block_id = self.cur_block_id;
@@ -382,25 +345,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .builder
                 .build_struct_gep(*struct_ptr, var.member_index, "struct.gep")
                 .map_err(|_| {
-                    LangError::new(
-                        format!(
-                            "Unable to gep member in struct {:?}, index {}.",
-                            &var.struct_name, var.member_index
-                        ),
-                        CodeGenError,
-                    )
+                    self.err(format!(
+                        "Unable to gep member in struct {:?}, index {}.",
+                        &var.struct_name, var.member_index
+                    ))
                 })?;
 
             self.builder.build_store(member_ptr, basic_value);
             Ok(())
         } else {
-            Err(LangError::new(
-                format!(
-                    "Unable to find ptr to struct \"{}\" in decl block ID {}.",
-                    &struct_var_name, decl_block_id
-                ),
-                CodeGenError,
-            ))
+            Err(self.err(format!(
+                "Unable to find ptr to struct \"{}\" in decl block ID {}.",
+                &struct_var_name, decl_block_id
+            )))
         }
     }
 
@@ -430,10 +387,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if let Some(const_value) = self.constants.get(&key) {
                     Ok(*const_value)
                 } else {
-                    Err(LangError::new(
-                        format!("No decl for constant `{}` when building load.", &var.name),
-                        CodeGenError,
-                    ))
+                    Err(self.err(format!(
+                        "No decl for constant `{}` when building load.",
+                        &var.name
+                    )))
                 }
             } else if let Some(ptr) = self.variables.get(&key) {
                 match access_type {
@@ -445,10 +402,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                                 .builder
                                 .build_load(def_ptr.into_pointer_value(), "load"))
                         } else {
-                            Err(LangError::new(
-                                format!("Tried to deref non pointer type: {:?}", &var),
-                                CodeGenError,
-                            ))
+                            Err(self.err(format!("Tried to deref non pointer type: {:?}", &var)))
                         }
                     }
                     AccessType::Address => Ok(BasicValueEnum::PointerValue(*ptr)),
@@ -456,10 +410,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     AccessType::ArrayAccess => panic!("TODO: Array access"),
                 }
             } else {
-                Err(LangError::new(
-                    format!("No decl for var `{}` when building load.", &var.name),
-                    CodeGenError,
-                ))
+                Err(self.err(format!(
+                    "No decl for var `{}` when building load.",
+                    &var.name
+                )))
             }
         }
     }
@@ -472,10 +426,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let struct_var_name = if let Some(ref struct_name) = var.struct_name {
             struct_name
         } else {
-            return Err(LangError::new(
-                format!("No struct name set for member var \"{}\".", &var.name),
-                CodeGenError,
-            ));
+            return Err(self.err(format!(
+                "No struct name set for member var \"{}\".",
+                &var.name
+            )));
         };
 
         let block_id = self.cur_block_id;
@@ -492,24 +446,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .builder
                 .build_struct_gep(*struct_ptr, var.member_index, "struct.gep")
                 .map_err(|_| {
-                    LangError::new(
-                        format!(
-                            "Unable to gep member in struct {:?}, index {}.",
-                            &var.struct_name, var.member_index
-                        ),
-                        CodeGenError,
-                    )
+                    self.err(format!(
+                        "Unable to gep member in struct {:?}, index {}.",
+                        &var.struct_name, var.member_index
+                    ))
                 })?;
 
             Ok(self.builder.build_load(member_ptr, "struct.member.load"))
         } else {
-            Err(LangError::new(
-                format!(
-                    "Unable to find ptr to struct \"{}\" in decl block ID {}.",
-                    &struct_var_name, decl_block_id
-                ),
-                CodeGenError,
-            ))
+            Err(self.err(format!(
+                "Unable to find ptr to struct \"{}\" in decl block ID {}.",
+                &struct_var_name, decl_block_id
+            )))
         }
     }
 
@@ -539,10 +487,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 // TODO: Can fetch the inner type and call "array_type()" on it,
                 //       but the function takes a "u32" as argument, so need to
                 //       convert the "dim_opt" Expression into a u32 if possible.
-                return Err(LangError::new(
+                return Err(self.err(
                     "TODO: Array. Need to calculate dimension and the return a \"ArrayType\""
                         .into(),
-                    CodeGenError,
                 ));
             }
             Type::Void => AnyTypeEnum::VoidType(self.context.void_type()),
@@ -571,10 +518,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if let Some(struct_type) = self.module.get_struct_type(ident) {
                     struct_type.clone().into()
                 } else {
-                    return Err(LangError::new(
-                        format!("Unable to find custom type: {}", ident),
-                        CodeGenError,
-                    ));
+                    return Err(self.err(format!("Unable to find custom type: {}", ident)));
                 }
             }
         })
@@ -600,9 +544,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             LangError::new(
                 format!(
                     "Unable to convert AnyValueEnum: {:#?} into BasicValueEnum.",
-                    any_value
+                    &any_value
                 ),
-                CodeGenError,
+                CodeGenError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
             )
         })
     }
@@ -612,10 +559,25 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             LangError::new(
                 format!(
                     "Unable to convert AnyTypeEnum: {:#?} into BasicTypeEnum.",
-                    any_type
+                    &any_type
                 ),
-                CodeGenError,
+                CodeGenError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
             )
         })
+    }
+
+    /// Used when returing errors to include current line/column number.
+    pub fn err(&self, msg: String) -> LangError {
+        LangError::new_backtrace(
+            msg,
+            CodeGenError {
+                line_nr: self.cur_line_nr,
+                column_nr: self.cur_column_nr,
+            },
+            true,
+        )
     }
 }

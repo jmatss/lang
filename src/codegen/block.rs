@@ -22,6 +22,8 @@ struct BranchInfo<'ctx> {
     pub if_branches: Vec<BasicBlock<'ctx>>,
 }
 
+// TODO: What to do about line/column for errors in "BranchInfo"? Currently it
+//       has no way of knowing that information.
 impl<'ctx> BranchInfo<'ctx> {
     pub fn new() -> Self {
         Self {
@@ -36,7 +38,10 @@ impl<'ctx> BranchInfo<'ctx> {
         } else {
             Err(LangError::new(
                 format!("Unable to get if_case with index: {}", index),
-                CodeGenError,
+                CodeGenError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
             ))
         }
     }
@@ -47,7 +52,10 @@ impl<'ctx> BranchInfo<'ctx> {
         } else {
             Err(LangError::new(
                 format!("Unable to get if_branch with index: {}", index),
-                CodeGenError,
+                CodeGenError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
             ))
         }
     }
@@ -76,10 +84,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.compile_if(id, body)?;
             }
             BlockHeader::IfCase(_) => {
-                return Err(LangError::new(
-                    "Unexpected IfCase in compile_block".into(),
-                    CodeGenError,
-                ));
+                return Err(self.err("Unexpected IfCase in compile_block".into()));
             }
             BlockHeader::Struct(struct_) => {
                 self.compile_struct(struct_)?;
@@ -111,10 +116,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.position_at_end(entry);
             self.compile_alloca(var)
         } else {
-            Err(LangError::new(
-                format!("No active cur func when creating var: {}", &var.name),
-                CodeGenError,
-            ))
+            Err(self.err(format!(
+                "No active cur func when creating var: {}",
+                &var.name
+            )))
         }
     }
 
@@ -138,14 +143,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // Get names for the parameters and alloc space in the functions stack.
         for (i, arg) in fn_val.get_param_iter().enumerate() {
             let param = if let Some(params) = &func.parameters {
-                params.get(i).ok_or_else(|| {
-                    LangError::new(format!("Bad param at index: {}", i), CodeGenError)
-                })?
+                params
+                    .get(i)
+                    .ok_or_else(|| self.err(format!("Bad param at index: {}", i)))?
             } else {
-                return Err(LangError::new(
-                    format!("Got None param when compiling func: {:?}", &func.name),
-                    CodeGenError,
-                ));
+                return Err(self.err(format!(
+                    "Got None param when compiling func: {:?}",
+                    &func.name
+                )));
             };
 
             let ptr = self.create_entry_block_alloca(param)?;
@@ -170,19 +175,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     self.builder.build_return(None);
                     Ok(())
                 } else {
-                    Err(LangError::new(
-                        format!(
-                            "Found return stmt in func \"{}\", but it has no return type.",
-                            &func.name
-                        ),
-                        CodeGenError,
-                    ))
+                    Err(self.err(format!(
+                        "Found return stmt in func \"{}\", but it has no return type.",
+                        &func.name
+                    )))
                 }
             } else {
-                Err(LangError::new(
-                    format!("No basic block in func: {}", &func.name),
-                    CodeGenError,
-                ))
+                Err(self.err(format!("No basic block in func: {}", &func.name)))
             }
         } else {
             Ok(())
@@ -202,13 +201,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
                     v.push(basic_type);
                 } else {
-                    return Err(LangError::new(
-                        format!(
-                            "Bad type for fn \"{}\" param \"{}\".",
-                            &func.name, &param.name
-                        ),
-                        CodeGenError,
-                    ));
+                    return Err(self.err(format!(
+                        "Bad type for fn \"{}\" param \"{}\".",
+                        &func.name, &param.name
+                    )));
                 }
             }
             v
@@ -264,11 +260,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let cur_func = self
             .cur_func
-            .ok_or_else(|| LangError::new("cur_func is None for \"If\".".into(), CodeGenError))?;
+            .ok_or_else(|| self.err("cur_func is None for \"If\".".into()))?;
 
         let cur_block = self
             .cur_basic_block
-            .ok_or_else(|| LangError::new("cur_block is None for \"If\".".into(), CodeGenError))?;
+            .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
 
         // Create and store the "body" blocks of this if-statement.
         // For every if-case that has a expression (if/elif) a extra block
@@ -289,13 +285,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let if_block = self.context.append_basic_block(cur_func, "if.case");
                 branch_info.if_cases.push(if_block);
             } else {
-                return Err(LangError::new(
-                    format!(
-                        "Token in \"If\" block wasn't a \"IfCase\": {:?}",
-                        if_case.kind
-                    ),
-                    CodeGenError,
-                ));
+                return Err(self.err(format!(
+                    "Token in \"If\" block wasn't a \"IfCase\": {:?}",
+                    if_case.kind
+                )));
             }
         }
 
@@ -319,10 +312,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     &branch_info,
                 )?;
             } else {
-                return Err(LangError::new(
-                    "Token in \"If\" block wasn't a \"IfCase\".".into(),
-                    CodeGenError,
-                ));
+                return Err(self.err("Token in \"If\" block wasn't a \"IfCase\".".into()));
             }
         }
 
@@ -400,13 +390,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
                     v.push(basic_type);
                 } else {
-                    return Err(LangError::new(
-                        format!(
-                            "Bad type for struct \"{}\" member \"{}\".",
-                            &struct_.name, &member.name
-                        ),
-                        CodeGenError,
-                    ));
+                    return Err(self.err(format!(
+                        "Bad type for struct \"{}\" member \"{}\".",
+                        &struct_.name, &member.name
+                    )));
                 }
             }
             v
