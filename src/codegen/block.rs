@@ -71,6 +71,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         match header {
             BlockHeader::Default => {
                 for token in body {
+                    self.cur_line_nr = token.line_nr;
+                    self.cur_column_nr = token.column_nr;
                     self.compile_recursive(token)?
                 }
             }
@@ -162,6 +164,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         // Compile the tokens in the body of the function.
         for token in body {
+            self.cur_line_nr = token.line_nr;
+            self.cur_column_nr = token.column_nr;
             self.compile_recursive(token)?;
         }
 
@@ -297,6 +301,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         // Iterate through all "if cases" in this if-statement and compile them.
         for (index, if_case) in body.iter_mut().enumerate() {
+            self.cur_line_nr = if_case.line_nr;
+            self.cur_column_nr = if_case.column_nr;
+
             if let ParseTokenKind::Block(
                 BlockHeader::IfCase(ref mut expr_opt),
                 inner_id,

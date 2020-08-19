@@ -131,6 +131,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub(super) fn compile_recursive(&mut self, token: &'ctx mut ParseToken) -> CustomResult<()> {
+        self.cur_line_nr = token.line_nr;
+        self.cur_column_nr = token.column_nr;
+
         match &mut token.kind {
             ParseTokenKind::Block(header, id, ref mut body) => {
                 self.compile_block(header, *id, body)?;
