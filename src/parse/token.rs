@@ -461,19 +461,50 @@ impl Argument {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct StructInfo {
+    /// The name of variable of this struct instance.
+    pub root_var_name: String,
+
+    /// The struct members that are accessed under this struct variable.
+    pub members: Vec<StructInfoMember>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructInfoMember {
+    pub struct_name: Option<String>,
+    pub member_name: String,
+    pub member_index: Option<u32>,
+}
+
+impl StructInfoMember {
+    pub fn new(member_name: String) -> Self {
+        Self {
+            struct_name: None,
+            member_name,
+            member_index: None,
+        }
+    }
+}
+
+impl StructInfo {
+    pub fn new(root_var_name: String, member_name: String) -> Self {
+        Self {
+            root_var_name,
+            members: vec![StructInfoMember::new(member_name)],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
     pub name: String,
     pub ret_type: Option<TypeStruct>,
     pub modifiers: Option<Vec<Modifier>>,
     pub is_const: bool,
 
-    /// Indicates if this is a struct member or not. If this is a struct member,
-    /// `member_index` will be set to the index that this variable/member
-    /// has in the struct.
-    /// The `struct_name` is the name of the struct that this variable is a member of.
-    pub is_struct_member: bool,
-    pub member_index: u32,
-    pub struct_name: Option<String>,
+    /// If `struct_info` is set, this is a struct member. It will contain the
+    /// struct members in all nested struct up to this member.
+    pub struct_info: Option<StructInfo>,
 }
 
 impl Variable {
@@ -488,10 +519,7 @@ impl Variable {
             ret_type,
             modifiers,
             is_const,
-
-            is_struct_member: false,
-            member_index: 0,
-            struct_name: None,
+            struct_info: None,
         }
     }
 }

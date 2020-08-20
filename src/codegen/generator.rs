@@ -203,16 +203,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.constants.insert(key, basic_value);
         }
 
-        let ptr = if var.is_struct_member {
+        let ptr = if var.struct_info.is_some() {
             self.get_struct_member_ptr(var)?
         } else {
             self.get_var_ptr(var)?
         };
-
-        info!(
-            "VAR_LOAD -- var: {:#?}\nptr: {:#?}\naccess_type: {:?}",
-            &var, &ptr, &access_type
-        );
 
         match access_type {
             AccessType::Regular => {
@@ -251,7 +246,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return self.get_const_value(var);
         }
 
-        let ptr = if var.is_struct_member {
+        let ptr = if var.struct_info.is_some() {
             self.get_struct_member_ptr(var)?
         } else {
             self.get_var_ptr(var)?
@@ -319,40 +314,56 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// This function assumes that the caller have made sure that the given `var`
     /// is a struct member with `var.is_struct_member`.
     fn get_struct_member_ptr(&mut self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
-        let struct_var_name = if let Some(ref struct_name) = var.struct_name {
-            struct_name
+        let struct_info = if let Some(ref struct_info) = var.struct_info {
+            struct_info
         } else {
             return Err(self.err(format!(
-                "No struct name set for member var \"{}\".",
+                "No struct info found for member var \"{}\".",
                 &var.name
             )));
         };
 
+        debug!(
+            "Loading struct member pointer for member \"{}\" in struct_info: {:?}",
+            &var.name, &struct_info
+        );
+
         let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
-            .get_var_decl_scope(struct_var_name, block_id)?;
-        let key = (struct_var_name.clone(), decl_block_id);
-        debug!(
-            "Loading struct member pointer for member \"{}\". Key: {:?}",
-            &var.name, &key
-        );
+            .get_var_decl_scope(&struct_info.root_var_name, block_id)?;
+        let key = (struct_info.root_var_name.clone(), decl_block_id);
 
         if let Some(struct_ptr) = self.variables.get(&key) {
-            let member_ptr = self
-                .builder
-                .build_struct_gep(*struct_ptr, var.member_index, "struct.gep")
-                .map_err(|_| {
-                    self.err(format!(
-                        "Unable to gep member in struct {:?}, index {}.",
-                        &var.struct_name, var.member_index
-                    ))
-                })?;
-            Ok(member_ptr)
+            // "Recursively" gep the struct(s) and get the pointer desired pointer
+            // to the struct member.
+            let mut current_ptr = *struct_ptr;
+            for member in &struct_info.members {
+                let member_name = &member.member_name;
+                let member_index = if let Some(member_index) = member.member_index {
+                    member_index
+                } else {
+                    return Err(self.err(format!(
+                        "Member index not set for member \"{}\" in struct_info: {:?}.",
+                        member_name, &struct_info
+                    )));
+                };
+
+                current_ptr = self
+                    .builder
+                    .build_struct_gep(current_ptr, member_index, "struct.gep")
+                    .map_err(|_| {
+                        self.err(format!(
+                            "Unable to gep from struct struct {:?}. Member name: {}, index {}.",
+                            &var.struct_info, member_name, member_index
+                        ))
+                    })?;
+            }
+            Ok(current_ptr)
         } else {
             Err(self.err(format!(
-                "Unable to find ptr to struct \"{}\" in decl block ID {}.",
-                &struct_var_name, decl_block_id
+                "Unable to find ptr to struct info {:?} in decl block ID {}.",
+                &struct_info, decl_block_id
             )))
         }
     }

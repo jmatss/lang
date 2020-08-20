@@ -1,7 +1,7 @@
 use crate::analyze::analyzer::AnalyzeContext;
 use crate::parse::token::{
     BinaryOperation, BinaryOperator, Expression, FunctionCall, Operation, ParseToken,
-    ParseTokenKind, Statement, StructInit,
+    ParseTokenKind, Statement, StructInfo, StructInfoMember, StructInit,
 };
 
 // TODO: Add array indexing here.
@@ -109,8 +109,18 @@ impl<'a> IndexingAnalyzer<'a> {
         if let BinaryOperator::Dot = bin_op.operator {
             if let Some(rhs) = bin_op.right.eval_to_var() {
                 if let Some(lhs) = bin_op.left.eval_to_var() {
-                    rhs.is_struct_member = true;
-                    rhs.struct_name = Some(lhs.name.clone());
+                    // If true: Nested struct, else: just a basic struct member.
+                    // The index isn't set here, it will be set during TypeAnalyzing
+                    // when the struct declarations are analyzed.
+                    if let Some(ref struct_info) = lhs.struct_info {
+                        let mut new_struct_info = struct_info.clone();
+                        let member = StructInfoMember::new(rhs.name.clone());
+                        new_struct_info.members.push(member);
+                        rhs.struct_info = Some(new_struct_info);
+                    } else {
+                        let struct_info = StructInfo::new(lhs.name.clone(), rhs.name.clone());
+                        rhs.struct_info = Some(struct_info);
+                    }
                 } else {
                     panic!(
                         "Left hand side of Dot symbol didn't eval to variable. \

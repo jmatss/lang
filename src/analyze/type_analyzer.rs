@@ -7,8 +7,8 @@ use crate::parse::token::{
     BinaryOperation, Operation, ParseToken, TypeStruct, UnaryOperation, Variable,
 };
 use crate::parse::token::{
-    BinaryOperator, BlockHeader, Expression, FunctionCall, ParseTokenKind, Statement, StructInit,
-    UnaryOperator,
+    BinaryOperator, BlockHeader, Expression, FunctionCall, ParseTokenKind, Statement, Struct,
+    StructInit, UnaryOperator,
 };
 
 pub struct TypeAnalyzer<'a> {
@@ -91,23 +91,8 @@ impl<'a> TypeAnalyzer<'a> {
             Expression::Variable(var) => {
                 debug!("ANALYZING VAR: {:#?}", var);
 
-                // If this is a struct member, it will be at the right hand side
-                // of a "Dot" binary operation. It that case the `type_hint_opt`
-                // will come from the left hand side and it will be the type of
-                // the struct. Look up the struct and see what type this struct
-                // member has.
-                if var.is_struct_member {
-                    if let Some(struct_type) = type_hint_opt.clone() {
-                        self.analyze_struct_member(var, struct_type)
-                    } else {
-                        let err_msg = format!(
-                            "prev_type was None when looking at struct member: {}",
-                            &var.name
-                        );
-                        let err = self.context.err(err_msg);
-                        self.errors.push(err);
-                        None
-                    }
+                if var.struct_info.is_some() {
+                    self.analyze_struct_member(var)
                 } else {
                     self.analyze_var_type(var)
                 }
@@ -249,86 +234,146 @@ impl<'a> TypeAnalyzer<'a> {
         Some(TypeStruct::new(ty, generics))
     }
 
-    // TODO: This function also sets the `member_index` and `parent_key `for the
-    //       member. This should be idealy be moved to "indexing_analyzer" if
-    //       possible, it is unrelated to "type analyzing" but this was the
-    //       easiest place to implement it in.
+    // TODO: This function also sets the `block_info` (info about struct root
+    //       and index in struct) for the member. This should be idealy be moved
+    //       to "indexing_analyzer" if possible, it is unrelated to
+    //       "type analyzing" but this was the easiest place to implement it in.
     /// This function is called when a "Dot" binary operator has been found
     /// with a "Variable" at the right hand side. This means that this is a
     /// indexing of a struct. Try to figure out the type of the member
     /// by looking up the struct, and then finding the type of the member
     /// in the struct definition.
-    fn analyze_struct_member(
-        &mut self,
-        var: &mut Variable,
-        struct_type: TypeStruct,
-    ) -> Option<TypeStruct> {
-        if let Type::Custom(ref ident) = struct_type.t {
-            let struct_block_id = self.context.cur_block_id;
-            let parent_block_id = match self
-                .context
-                .get_struct_parent_id(ident.clone(), struct_block_id)
-            {
-                Ok(id) => id,
+    fn analyze_struct_member(&mut self, var: &mut Variable) -> Option<TypeStruct> {
+        let block_id = self.context.cur_block_id;
+
+        if let Some(ref mut struct_info) = var.struct_info {
+            // Get the name of the "root variable".'
+            let struct_var_name = &struct_info.root_var_name;
+
+            let decl_block_id = match self.context.get_var_decl_scope(&struct_var_name, block_id) {
+                Ok(decl_block_id) => decl_block_id,
                 Err(e) => {
                     self.errors.push(e);
                     return None;
                 }
             };
+            let key = (struct_var_name.clone(), decl_block_id);
 
-            let key = (ident.clone(), parent_block_id);
-            let struct_ = if let Some(struct_) = self.context.structs.get(&key) {
-                struct_
+            // Get the variable of the struct and then get the actual struct type.
+            let mut struct_name = if let Some(struct_var) = self.context.variables.get(&key) {
+                if let Some(ref struct_type) = struct_var.ret_type {
+                    match &struct_type.t {
+                        Type::Custom(struct_type_ident) => struct_type_ident.clone(),
+                        _ => {
+                            let err_msg = format!(
+                            "Variable {} in decl block id {} expected to be struct was NOT: {:?}",
+                            &var.name, decl_block_id, &struct_type.t
+                        );
+                            let err = self.context.err(err_msg);
+                            self.errors.push(err);
+                            return None;
+                        }
+                    }
+                } else {
+                    let err_msg = format!(
+                        "Struct type not set for variable {} in decl block id {}.",
+                        &var.name, decl_block_id
+                    );
+                    let err = self.context.err(err_msg);
+                    self.errors.push(err);
+                    return None;
+                }
             } else {
                 let err_msg = format!(
-                    "Unable to find struct with name {} with block ID {}.",
-                    &ident, struct_block_id
+                    "Unable to find variable {} in decl block id {}.",
+                    &var.name, decl_block_id
                 );
-                self.errors.push(self.context.err(err_msg));
+                let err = self.context.err(err_msg);
+                self.errors.push(err);
                 return None;
             };
 
-            // Loop through the struct members and see if a member with the same
-            // name can be found. If a member with the same name is found, this
-            // is a instance of that member. Set to the same type and set the
-            // member index.
-            if let Some(members) = &struct_.members {
-                let mut found = false;
-                for (i, member) in members.iter().enumerate() {
-                    if member.name == var.name {
-                        // The name of the struct `var.struct_name` is set
-                        // during "IdenAnalyzing".
-                        var.member_index = i as u32;
-                        var.ret_type = member.ret_type.clone();
-                        var.modifiers = member.modifiers.clone();
-                        var.is_const = member.is_const;
-                        found = true;
-                        break;
-                    }
-                }
+            let mut struct_ = self.get_struct(&struct_name);
 
-                if found {
-                    var.ret_type.clone()
+            for struct_info_member in &mut struct_info.members {
+                let info_member_name = &struct_info_member.member_name;
+
+                if let Some(members) = &struct_?.members {
+                    for (i, member) in members.iter().enumerate() {
+                        info!(
+                            "i: {}\ninfo_member: {:#?}\nmember: {:#?}",
+                            i, &struct_info_member, &member
+                        );
+
+                        if info_member_name == &member.name {
+                            struct_info_member.member_index = Some(i as u32);
+                            struct_info_member.struct_name = Some(struct_name.clone());
+
+                            // These values might be update in multiple iterations,
+                            // it is only the last iteration that actualy counts
+                            // and it should also be the correct values.
+                            var.ret_type = member.ret_type.clone();
+                            var.modifiers = member.modifiers.clone();
+                            var.is_const = member.is_const;
+
+                            // If this member is a struct, store the nested
+                            // struct into `struct_`. This will be needed
+                            // since in the next loop iteration, it is the new
+                            // struct that will be indexed. Otherwise we have
+                            // recursed to the end of nesting, set the information
+                            // from this member to the var.
+                            struct_ = match member.ret_type.clone()?.t {
+                                Type::Custom(ref inner_struct_name) => {
+                                    info!("FIRST");
+                                    struct_name = inner_struct_name.clone();
+                                    self.get_struct(inner_struct_name)
+                                }
+                                _ => {
+                                    info!("SECOND");
+                                    None
+                                }
+                            };
+
+                            break;
+                        }
+                    }
                 } else {
                     let err_msg = format!(
-                        "Unable to find member with name {} in struct with name {} with block ID {}.",
-                        &var.name, &ident, struct_block_id
+                        "No members of struct {}, expected member with name {}.",
+                        &struct_name, &info_member_name
                     );
                     self.errors.push(self.context.err(err_msg));
-                    None
+                    return None;
                 }
-            } else {
-                let err_msg = format!(
-                    "Unable to find struct with name {} with block ID {}.",
-                    &ident, struct_block_id
-                );
-                self.errors.push(self.context.err(err_msg));
-                None
             }
+
+            var.ret_type.clone()
+        } else {
+            let err_msg = format!("`struct_info` in variable \"{}\" set to None.", &var.name);
+            self.errors.push(self.context.err(err_msg));
+            None
+        }
+    }
+
+    fn get_struct(&mut self, struct_name: &str) -> Option<&Struct> {
+        let parent_block_id = match self
+            .context
+            .get_struct_parent_id(struct_name.into(), self.context.cur_block_id)
+        {
+            Ok(id) => id,
+            Err(e) => {
+                self.errors.push(e);
+                return None;
+            }
+        };
+        let key = (struct_name.into(), parent_block_id);
+
+        if let Some(struct_) = self.context.structs.get(&key) {
+            Some(struct_)
         } else {
             let err_msg = format!(
-                "`struct_type` was not custom when looking at struct member: {}",
-                &var.name
+                "Unable to find struct with name {} with block ID {}.",
+                &struct_name, self.context.cur_block_id
             );
             self.errors.push(self.context.err(err_msg));
             None
@@ -551,9 +596,9 @@ impl<'a> TypeAnalyzer<'a> {
                 }
 
                 // Update the type of the variable in the "AnalyzeContext"
-                // if the type is None. Don't do this forstruct members (since
+                // if the type is None. Don't do this for struct members (since
                 // their types will always be hardcoded in the source code).
-                if !var.is_struct_member {
+                if var.struct_info.is_none() {
                     let cur_block_id = self.context.cur_block_id;
                     let var_decl_id = match self.context.get_var_decl_scope(&var.name, cur_block_id)
                     {
