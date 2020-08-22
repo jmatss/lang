@@ -35,13 +35,13 @@ impl<'a> BlockAnalyzer<'a> {
             // When iterating through all tokens, look at the If and Ifcases
             // and keep track if all their children contains return statements.
             let mut all_children_contains_returns = true;
+            let mut child_count = 0;
             for token in body {
                 // Since `analyze_token` recurses, need to re-set the current
                 // block to the be the "parent" (`self.context.cur_block_id`).
                 self.context.cur_block_id = id;
 
                 match token.kind {
-                    ParseTokenKind::Statement(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
                     ParseTokenKind::Block(BlockHeader::If, ..)
                     | ParseTokenKind::Block(BlockHeader::IfCase(_), ..)
                     | ParseTokenKind::Block(BlockHeader::Function(_), ..)
@@ -51,24 +51,34 @@ impl<'a> BlockAnalyzer<'a> {
                     | ParseTokenKind::Block(BlockHeader::While(..), ..)
                     | ParseTokenKind::Block(BlockHeader::Test(_), ..) => {
                         if let Some(child_block_info) = self.analyze_block(token) {
-                            if !child_block_info.all_children_contains_returns
-                                || !child_block_info.contains_return
-                            {
+                            if !child_block_info.all_children_contains_returns {
                                 all_children_contains_returns = false;
                             }
                         }
+                        child_count += 1;
                     }
-                    ParseTokenKind::Block(..) => {
-                        self.analyze_block(token);
+
+                    ParseTokenKind::Block(BlockHeader::Default, ..)
+                    | ParseTokenKind::Block(BlockHeader::Struct(_), ..)
+                    | ParseTokenKind::Block(BlockHeader::Enum(_), ..)
+                    | ParseTokenKind::Block(BlockHeader::Interface(_), ..) => {
+                        self.analyze_block(token)?;
                     }
+
+                    ParseTokenKind::Statement(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
+
                     ParseTokenKind::Expression(_) | ParseTokenKind::EndOfFile => (),
                 }
             }
 
             // Set the flag to indicate if all children contains return statements
             // for the current block. If this block doesn't have any children,
-            // this value will be set to true.
-            block_info.all_children_contains_returns = all_children_contains_returns;
+            // the value will be set to true if this block itself contains a return.
+            block_info.all_children_contains_returns = if child_count > 0 {
+                all_children_contains_returns
+            } else {
+                block_info.contains_return
+            };
 
             self.context.block_info.insert(id, block_info.clone());
             Some(block_info)

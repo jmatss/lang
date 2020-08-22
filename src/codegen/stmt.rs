@@ -6,7 +6,7 @@ use crate::{
     },
     CustomResult,
 };
-use inkwell::{module::Linkage, types::AnyTypeEnum};
+use inkwell::{module::Linkage, types::AnyTypeEnum, values::InstructionValue};
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_stmt(&mut self, stmt: &mut Statement) -> CustomResult<()> {
@@ -26,7 +26,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let any_value = self.compile_expr(expr)?;
                     let basic_value = CodeGen::any_into_basic_value(any_value)?;
                     // TODO: Will this always be regular?
-                    self.compile_var_store(var, basic_value, &AccessType::Regular)?;
+                    self.compile_var_store(var, basic_value)?;
                 } else if var.is_const {
                     return Err(self.err(format!(
                         "const var decl of \"{}\" has no value set",
@@ -41,7 +41,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.compile_func_proto(func, Some(linkage))?;
                 Ok(())
             }
-            Statement::Assignment(assign_op, lhs, rhs) => self.compile_assign(assign_op, lhs, rhs),
+            Statement::Assignment(assign_op, lhs, rhs) => {
+                self.compile_assign(assign_op, lhs, rhs)?;
+                Ok(())
+            }
         }
     }
 
@@ -97,7 +100,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         assign_op: &AssignOperator,
         lhs: &mut Expression,
         rhs: &mut Expression,
-    ) -> CustomResult<()> {
+    ) -> CustomResult<InstructionValue<'ctx>> {
         let access_type = if let Some(access_type) = lhs.get_access_type() {
             access_type
         } else {
@@ -153,7 +156,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let right_any_value = self.compile_expr(rhs)?;
         let right = CodeGen::any_into_basic_value(right_any_value)?;
 
-        let left = self.compile_var_load(var, &access_type)?;
+        let left = self.compile_var_load(var)?;
 
         // TODO: Need to check the size(8,16,32...) and also signness for the
         //       left and right to choose the correct instruction.
@@ -399,6 +402,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
         };
 
-        self.compile_var_store(var, value, &access_type)
+        self.compile_var_store(var, value)
     }
 }

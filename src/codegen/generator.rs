@@ -6,7 +6,7 @@ use crate::{common::variable_type::Type, CustomResult};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, InstructionValue, PointerValue};
 use inkwell::{
     basic_block::BasicBlock,
     targets::TargetMachine,
@@ -14,7 +14,7 @@ use inkwell::{
     AddressSpace,
 };
 use std::collections::HashMap;
-use token::{AccessType, BlockId, ParseTokenKind, TypeStruct};
+use token::{AccessInstruction, BlockId, ParseTokenKind, TypeStruct};
 
 pub(super) struct CodeGen<'a, 'ctx> {
     pub context: &'ctx Context,
@@ -187,11 +187,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         var: &Variable,
         basic_value: BasicValueEnum<'ctx>,
-        access_type: &AccessType,
-    ) -> CustomResult<()> {
+    ) -> CustomResult<InstructionValue<'ctx>> {
         debug!(
-            "Compile var_store, var name: {:?}, basic_value: {:?}, access_type: {:?}",
-            &var.name, &basic_value, access_type
+            "Compile var_store, var name: {:?}, basic_value: {:?}.",
+            &var.name, &basic_value
         );
 
         // TODO: Const isn't working atm. Need to treat const struct member and
@@ -206,72 +205,30 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.constants.insert(key, basic_value);
         }
 
-        let ptr = if var.struct_info.is_some() {
-            self.get_struct_member_ptr(var)?
+        let ptr = if var.access_instrs.is_some() {
+            self.get_var_ptr_access_instrs(var)?
         } else {
             self.get_var_ptr(var)?
         };
 
-        match access_type {
-            AccessType::Regular => {
-                self.builder.build_store(ptr, basic_value);
-            }
-            AccessType::Deref => {
-                let def_ptr = self.builder.build_load(ptr, "store.deref");
-                if def_ptr.is_pointer_value() {
-                    self.builder
-                        .build_store(def_ptr.into_pointer_value(), basic_value);
-                } else {
-                    return Err(self.err(format!(
-                        "Tried to deref non pointer type before store: {:?}",
-                        &var
-                    )));
-                }
-            }
-            AccessType::Address => {
-                return Err(self.err(format!(
-                    "Tried to store into address of var: {}.",
-                    &var.name
-                )))
-            }
-            AccessType::ArrayAccess => panic!("TODO: Array access"),
-        }
-        Ok(())
+        Ok(self.builder.build_store(ptr, basic_value))
     }
 
     pub(super) fn compile_var_load(
         &mut self,
         var: &Variable,
-        access_type: &AccessType,
     ) -> CustomResult<BasicValueEnum<'ctx>> {
         if var.is_const {
             return self.get_const_value(var);
         }
 
-        let ptr = if var.struct_info.is_some() {
-            self.get_struct_member_ptr(var)?
+        let ptr = if var.access_instrs.is_some() {
+            self.get_var_ptr_access_instrs(var)?
         } else {
             self.get_var_ptr(var)?
         };
 
-        match access_type {
-            AccessType::Regular => Ok(self.builder.build_load(ptr, "load")),
-            AccessType::Deref => {
-                let def_ptr = self.builder.build_load(ptr, "load.deref");
-                if def_ptr.is_pointer_value() {
-                    Ok(self
-                        .builder
-                        .build_load(def_ptr.into_pointer_value(), "load"))
-                } else {
-                    Err(self.err(format!(
-                        "Tried to deref non pointer type before load: {:?}",
-                        &var
-                    )))
-                }
-            }
-            AccessType::Address => Ok(BasicValueEnum::PointerValue(ptr)),
-            AccessType::ArrayAccess => panic!("TODO: Array access"),
-        }
+        Ok(self.builder.build_load(ptr, "load"))
     }
 
     fn get_var_ptr(&mut self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
@@ -292,6 +249,107 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
+    /// This function assumes that the caller have made sure that the given `var`
+    /// contains "AccessInstruction"s.
+    fn get_var_ptr_access_instrs(&mut self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
+        let access_instrs = if let Some(ref access_instrs) = var.access_instrs {
+            access_instrs
+        } else {
+            return Err(self.err(format!(
+                "No access access instructions found for child var \"{}\".",
+                &var.name
+            )));
+        };
+
+        let struct_name = if let Some((root_var_name, decl_id)) = &var.root_struct_var {
+            if let Some(struct_name) = self
+                .analyze_context
+                .get_struct_name(root_var_name.into(), *decl_id)?
+            {
+                struct_name
+            } else {
+                return Err(self.err(format!(
+                    "Unable to get struct name for struct var {} in decl id {}.",
+                    &root_var_name, decl_id
+                )));
+            }
+        } else {
+            // Set an empty string if this isn't a struct.
+            String::new()
+        };
+
+        debug!(
+            "Loading pointer for child var \"{}\" in `access_instrs`: {:?}",
+            &var.name, &access_instrs
+        );
+
+        // Get the key containg the variable and the var declare block id.
+        // It will be the "root" struct variable if this is a struct or it will
+        // be "this" `var` if it isnät a struct.
+        let key = if !struct_name.is_empty() {
+            var.root_struct_var
+                .clone()
+                .expect("The existence of this val has already been proven.")
+        } else {
+            let block_id = self.cur_block_id;
+            let decl_block_id = self
+                .analyze_context
+                .get_var_decl_scope(&var.name, block_id)?;
+            (var.name.clone(), decl_block_id)
+        };
+
+        if let Some(base_ptr) = self.variables.get(&key) {
+            let mut current_ptr = *base_ptr;
+
+            // Iterate throw the hierachy of AccessInstruction to end up with
+            // a pointer to the sought after variable.
+            for access_instr in access_instrs.iter() {
+                current_ptr = match access_instr {
+                    AccessInstruction::StructMember(_, member_name, member_index_opt) => {
+                        let member_index = if let Some(member_index) = member_index_opt {
+                            member_index
+                        } else {
+                            return Err(self.err(format!(
+                                "Member index not set for member \"{:?}\" in access_instr: {:?}.",
+                                member_name, &access_instrs
+                            )));
+                        };
+
+                        self.builder
+                            .build_struct_gep(current_ptr, *member_index, "struct.gep")
+                            .map_err(|_| {
+                                self.err(format!(
+                                    "Unable to gep from struct {:?}. Member name: {}, index {}.",
+                                    &var.access_instrs, member_name, member_index
+                                ))
+                            })?
+                    }
+                    AccessInstruction::Deref => {
+                        let tmp = self.builder.build_load(current_ptr, "access.instr.load");
+                        if !tmp.is_pointer_value() {
+                            return Err(self.err(format!(
+                                "Deref of member {:#?} in struct_info {:#?} didn't return pointer.",
+                                &access_instr, access_instrs
+                            )));
+                        }
+                        tmp.into_pointer_value()
+                    }
+                    AccessInstruction::Address => current_ptr,
+                    AccessInstruction::ArrayAccess(_) => {
+                        panic!("TODO: ArrayAccess in struct member ptr load.")
+                    }
+                };
+            }
+
+            Ok(current_ptr)
+        } else {
+            Err(self.err(format!(
+                "Unable to find ptr to variable with key: {:?}",
+                &key
+            )))
+        }
+    }
+
     // TODO: Implement logic to load both regular variables and struct members
     //       if they are const.
     fn get_const_value(&mut self, var: &Variable) -> CustomResult<BasicValueEnum<'ctx>> {
@@ -308,90 +366,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Err(self.err(format!(
                 "Unable to find value for constant \"{}\" in decl block ID {}.",
                 &var.name, decl_block_id
-            )))
-        }
-    }
-
-    /// This function assumes that the caller have made sure that the given `var`
-    /// is a struct member with `var.is_struct_member`.
-    fn get_struct_member_ptr(&mut self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
-        let struct_info = if let Some(ref struct_info) = var.struct_info {
-            struct_info
-        } else {
-            return Err(self.err(format!(
-                "No struct info found for member var \"{}\".",
-                &var.name
-            )));
-        };
-
-        debug!(
-            "Loading struct member pointer for member \"{}\" in struct_info: {:?}",
-            &var.name, &struct_info
-        );
-
-        let block_id = self.cur_block_id;
-        let decl_block_id = self
-            .analyze_context
-            .get_var_decl_scope(&struct_info.root_var_name, block_id)?;
-        let key = (struct_info.root_var_name.clone(), decl_block_id);
-
-        if let Some(struct_ptr) = self.variables.get(&key) {
-            let mut current_ptr = *struct_ptr;
-            for member in &struct_info.members {
-                if let Some(access_instrs) = &member.access_instrs {
-                    for access_inst in access_instrs {
-                        current_ptr = match access_inst {
-                            token::UnaryOperator::Deref => {
-                                let tmp = self.builder.build_load(current_ptr, "access.instr.load");
-                                if !tmp.is_pointer_value() {
-                                    return Err(self.err(format!(
-                                        "Deref of member {:#?} in struct_info {:#?} didn't return pointer.",
-                                        &member, struct_info
-                                    )));
-                                }
-                                tmp.into_pointer_value()
-                            }
-                            token::UnaryOperator::Address => {
-                                panic!("TODO: Address in struct member ptr load.")
-                            }
-                            token::UnaryOperator::ArrayAccess(_) => {
-                                panic!("TODO: ArrayAccess in struct member ptr load.")
-                            }
-                            _ => {
-                                return Err(self.err(format!(
-                                    "Invalid access instruction in struct member ptr load: {:?}",
-                                    access_inst
-                                )))
-                            }
-                        }
-                    }
-                }
-
-                let member_name = &member.member_name;
-                let member_index = if let Some(member_index) = member.member_index {
-                    member_index
-                } else {
-                    return Err(self.err(format!(
-                        "Member index not set for member \"{:?}\" in struct_info: {:?}.",
-                        member_name, &struct_info
-                    )));
-                };
-
-                current_ptr = self
-                    .builder
-                    .build_struct_gep(current_ptr, member_index, "struct.gep")
-                    .map_err(|_| {
-                        self.err(format!(
-                            "Unable to gep from struct {:?}. Member name: {}, index {}.",
-                            &var.struct_info, member_name, member_index
-                        ))
-                    })?;
-            }
-            Ok(current_ptr)
-        } else {
-            Err(self.err(format!(
-                "Unable to find ptr to struct info {:?} in decl block ID {}.",
-                &struct_info, decl_block_id
             )))
         }
     }

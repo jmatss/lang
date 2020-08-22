@@ -2,7 +2,7 @@ use super::generator::CodeGen;
 use crate::{
     common::variable_type::Type,
     lex::token::Literal,
-    parse::token::{AccessType, Expression, FunctionCall, StructInit, TypeStruct},
+    parse::token::{Expression, FunctionCall, StructInit, TypeStruct},
     CustomResult,
 };
 use inkwell::{
@@ -20,7 +20,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Expression::Literal(lit, ty_opt) => self.compile_lit(lit, ty_opt),
             Expression::Variable(var) => {
                 // TODO: Will this always be regular?
-                Ok(self.compile_var_load(var, &AccessType::Regular)?.into())
+                Ok(self.compile_var_load(var)?.into())
             }
             Expression::FunctionCall(func_call) => self.compile_func_call(func_call),
             Expression::Operation(op) => self.compile_op(op),

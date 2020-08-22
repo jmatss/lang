@@ -9,7 +9,7 @@ use inkwell::{
     values::{AnyValueEnum, BasicValueEnum},
     FloatPredicate, IntPredicate,
 };
-use token::{AccessType, BinaryOperator, Expression, UnaryOperation, UnaryOperator, Variable};
+use token::{BinaryOperator, Expression, UnaryOperation, UnaryOperator, Variable};
 
 // TODO: Check constness for operators. Ex. adding two consts should use a
 //       const add instruction so that the result also is const.
@@ -957,10 +957,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         .build_int_add(value.into_int_value(), one, "inc")
                         .into()
                 };
-                // TODO: What AccessType? Should probably stop using this
-                //       AccessType technique and just store everything in the
-                //       Variable object.
-                self.compile_var_store(var, new_value, &AccessType::Regular)?;
+
+                self.compile_var_store(var, new_value)?;
                 new_value.into()
             }
             AnyTypeEnum::FloatType(_)
@@ -995,10 +993,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         .build_int_sub(value.into_int_value(), one, "dec")
                         .into()
                 };
-                // TODO: What AccessType? Should probably stop using this
-                //       AccessType technique and just store everything in the
-                //       Variable object.
-                self.compile_var_store(var, new_value, &AccessType::Regular)?;
+
+                self.compile_var_store(var, new_value)?;
                 new_value.into()
             }
             AnyTypeEnum::FloatType(_)
@@ -1023,13 +1019,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         match value {
             Expression::Variable(var) => {
-                // TODO: Might be a struct access as well.
-                Ok(self.compile_var_load(var, &AccessType::Deref)?.into())
+                Ok(self.compile_var_load(var)?.into())
             }
             Expression::Operation(Operation::BinaryOperation(bin_op)) => match bin_op.operator {
                 BinaryOperator::Dot => {
                     if let Some(var) = bin_op.right.eval_to_var() {
-                        Ok(self.compile_var_load(var, &AccessType::Deref)?.into())
+                        Ok(self.compile_var_load(var)?.into())
                     } else {
                         panic!("HERE 67123")
                     }

@@ -1,7 +1,11 @@
 use crate::analyze::analyzer::AnalyzeContext;
-use crate::parse::token::{
-    BinaryOperation, BinaryOperator, BlockHeader, Expression, FunctionCall, Operation, ParseToken,
-    ParseTokenKind, Statement, StructInfo, StructInfoMember, StructInit,
+use crate::{
+    error::LangError,
+    parse::token::{
+        AccessInstruction, BinaryOperation, BinaryOperator, BlockHeader, Expression, FunctionCall,
+        Operation, ParseToken, ParseTokenKind, Statement, StructInit, UnaryOperation,
+        UnaryOperator,
+    },
 };
 
 // TODO: Add array indexing here.
@@ -12,26 +16,43 @@ use crate::parse::token::{
 
 pub struct IndexingAnalyzer<'a> {
     context: &'a mut AnalyzeContext,
+    errors: Vec<LangError>,
 }
 
 impl<'a> IndexingAnalyzer<'a> {
     /// Takes in a the root of the AST and walks the whole tree to find information
     /// related to indexing of variables. This includes array indexing and also
     /// struct indexing.
-    pub fn analyze(context: &'a mut AnalyzeContext, ast_root: &mut ParseToken) {
+    pub fn analyze(
+        context: &'a mut AnalyzeContext,
+        ast_root: &mut ParseToken,
+    ) -> Result<(), Vec<LangError>> {
         let mut block_analyzer = IndexingAnalyzer::new(context);
         block_analyzer.analyze_indexing(ast_root);
+        if block_analyzer.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(std::mem::take(&mut block_analyzer.errors))
+        }
     }
 
     fn new(context: &'a mut AnalyzeContext) -> Self {
         // Reset the `cur_block_id` to the default block (== 0).
         context.cur_block_id = 0;
-        Self { context }
+        Self {
+            context,
+            errors: Vec::default(),
+        }
     }
 
     fn analyze_indexing(&mut self, token: &mut ParseToken) {
+        self.context.cur_line_nr = token.line_nr;
+        self.context.cur_column_nr = token.column_nr;
+
         match token.kind {
-            ParseTokenKind::Block(ref mut block_header, _, ref mut body) => {
+            ParseTokenKind::Block(ref mut block_header, id, ref mut body) => {
+                self.context.cur_block_id = id;
+
                 match block_header {
                     BlockHeader::IfCase(expr_opt) => {
                         if let Some(expr) = expr_opt {
@@ -119,7 +140,7 @@ impl<'a> IndexingAnalyzer<'a> {
     fn analyze_op(&mut self, op: &mut Operation) {
         match op {
             Operation::BinaryOperation(bin_op) => self.analyze_bin_op(bin_op),
-            Operation::UnaryOperation(un_op) => self.analyze_expr(&mut un_op.value),
+            Operation::UnaryOperation(un_op) => self.analyze_un_op(un_op),
         }
     }
 
@@ -127,22 +148,41 @@ impl<'a> IndexingAnalyzer<'a> {
     /// and all variables used in rhs of a "Dot" as a struct member.
     /// The vars will be found recursively.
     fn analyze_bin_op(&mut self, bin_op: &mut BinaryOperation) {
+        let block_id = self.context.cur_block_id;
+
         self.analyze_expr(&mut bin_op.left);
         self.analyze_expr(&mut bin_op.right);
+
         if let BinaryOperator::Dot = bin_op.operator {
             if let Some(rhs) = bin_op.right.eval_to_var() {
                 if let Some(lhs) = bin_op.left.eval_to_var() {
+                    let struct_var_name = lhs.name.clone();
+                    let member_name = rhs.name.clone();
+
+                    let access_instr =
+                        AccessInstruction::StructMember(struct_var_name.clone(), member_name, None);
+
                     // If true: Nested struct, else: just a basic struct member.
                     // The index isn't set here, it will be set during TypeAnalyzing
                     // when the struct declarations are analyzed.
-                    if let Some(ref struct_info) = lhs.struct_info {
-                        let mut new_struct_info = struct_info.clone();
-                        let member = StructInfoMember::new(rhs.name.clone());
-                        new_struct_info.members.push(member);
-                        rhs.struct_info = Some(new_struct_info);
+                    if let Some(ref struct_access_instrs) = lhs.access_instrs {
+                        let mut member_access_instrs = struct_access_instrs.clone();
+                        member_access_instrs.push(access_instr);
+
+                        rhs.root_struct_var = lhs.root_struct_var.clone();
+                        rhs.access_instrs = Some(member_access_instrs);
                     } else {
-                        let struct_info = StructInfo::new(lhs.name.clone(), rhs.name.clone());
-                        rhs.struct_info = Some(struct_info);
+                        let var_decl_id =
+                            match self.context.get_var_decl_scope(&struct_var_name, block_id) {
+                                Ok(var_decl_id) => var_decl_id,
+                                Err(e) => {
+                                    self.errors.push(e);
+                                    return;
+                                }
+                            };
+
+                        rhs.root_struct_var = Some((struct_var_name, var_decl_id));
+                        rhs.access_instrs = Some(vec![access_instr]);
                     }
                 } else {
                     panic!(
@@ -152,6 +192,40 @@ impl<'a> IndexingAnalyzer<'a> {
                     );
                 }
             }
+        }
+    }
+
+    /// Analyzes a unary operation. If it is a deref/address/array access it also
+    /// adds a "AccessInstruction" to the Variable contain in the `un_op.value`.
+    fn analyze_un_op(&mut self, un_op: &mut UnaryOperation) {
+        self.analyze_expr(&mut un_op.value);
+
+        if let Some(var) = un_op.value.eval_to_var() {
+            let access_instr_opt = match &un_op.operator {
+                UnaryOperator::Deref => Some(AccessInstruction::Deref),
+                UnaryOperator::Address => Some(AccessInstruction::Address),
+                UnaryOperator::ArrayAccess(dim) => {
+                    Some(AccessInstruction::ArrayAccess(*dim.clone()))
+                }
+                _ => None,
+            };
+
+            if let Some(access_instr) = access_instr_opt {
+                if let Some(ref old_access_instrs) = var.access_instrs {
+                    let mut new_access_instrs = old_access_instrs.clone();
+                    new_access_instrs.push(access_instr);
+                    var.access_instrs = Some(new_access_instrs);
+                } else {
+                    var.access_instrs = Some(vec![access_instr]);
+                }
+            }
+        } else {
+            let err_msg = format!(
+                "Value in un op does not eval to variable, value: {:?}.",
+                &un_op.value
+            );
+            let err = self.context.err(err_msg);
+            self.errors.push(err);
         }
     }
 }

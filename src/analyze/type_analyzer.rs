@@ -4,11 +4,11 @@ use crate::common::variable_type::Type;
 use crate::error::LangError;
 use crate::lex::token::Literal;
 use crate::parse::token::{
-    BinaryOperation, Operation, ParseToken, TypeStruct, UnaryOperation, Variable,
+    AccessInstruction, BinaryOperator, BlockHeader, Expression, FunctionCall, ParseTokenKind,
+    Statement, StructInit, UnaryOperator,
 };
 use crate::parse::token::{
-    BinaryOperator, BlockHeader, Expression, FunctionCall, ParseTokenKind, Statement, Struct,
-    StructInit, UnaryOperator,
+    BinaryOperation, Operation, ParseToken, TypeStruct, UnaryOperation, Variable,
 };
 
 pub struct TypeAnalyzer<'a> {
@@ -91,7 +91,7 @@ impl<'a> TypeAnalyzer<'a> {
             Expression::Variable(var) => {
                 debug!("ANALYZING VAR: {:#?}", var);
 
-                if var.struct_info.is_some() {
+                if var.access_instrs.is_some() && var.root_struct_var.is_some() {
                     self.analyze_struct_member(var)
                 } else {
                     self.analyze_var_type(var)
@@ -244,180 +244,121 @@ impl<'a> TypeAnalyzer<'a> {
     /// by looking up the struct, and then finding the type of the member
     /// in the struct definition.
     fn analyze_struct_member(&mut self, var: &mut Variable) -> Option<TypeStruct> {
-        let block_id = self.context.cur_block_id;
-
-        if let Some(ref mut struct_info) = var.struct_info {
-            // Get the name of the "root variable".'
-            let struct_var_name = &struct_info.root_var_name;
-
-            let decl_block_id = match self.context.get_var_decl_scope(&struct_var_name, block_id) {
-                Ok(decl_block_id) => decl_block_id,
-                Err(e) => {
-                    self.errors.push(e);
-                    return None;
-                }
-            };
-            let key = (struct_var_name.clone(), decl_block_id);
-
-            // Get the variable of the struct and then get the actual struct type.
-            let mut struct_name = if let Some(struct_var) = self.context.variables.get(&key) {
-                if let Some(ref struct_type) = struct_var.ret_type {
-                    match &struct_type.t {
-                        Type::Custom(struct_type_ident) => struct_type_ident.clone(),
-                        _ => {
-                            let err_msg = format!(
-                                "Variable {} in decl block id {} expected to be struct was NOT: {:?}",
-                                &struct_var_name, decl_block_id, &struct_type.t
-                            );
-                            let err = self.context.err(err_msg);
-                            self.errors.push(err);
-                            return None;
-                        }
-                    }
-                } else {
-                    let err_msg = format!(
-                        "Struct type not set for variable {} in decl block id {}.",
-                        &var.name, decl_block_id
-                    );
-                    let err = self.context.err(err_msg);
-                    self.errors.push(err);
-                    return None;
-                }
+        if let Some(ref mut access_instrs) = var.access_instrs {
+            let (root_var_name, decl_id) = if let Some(key) = &var.root_struct_var {
+                key.clone()
             } else {
-                let err_msg = format!(
-                    "Unable to find variable {} in decl block id {}.",
-                    &var.name, decl_block_id
-                );
+                let err_msg = format!("No root_var set for var: {:?}", &var);
                 let err = self.context.err(err_msg);
                 self.errors.push(err);
                 return None;
             };
 
-            let mut struct_ = self.get_struct(&struct_name);
-            let mut access_instrs = None;
-
-            for struct_info_member in &mut struct_info.members {
-                let info_member_name = &struct_info_member.member_name;
-
-                if let Some(members) = &struct_?.clone().members {
-                    for (i, member) in members.iter().enumerate() {
-                        info!(
-                            "i: {}\ninfo_member: {:#?}\nmember: {:#?}",
-                            i, &struct_info_member, &member
-                        );
-
-                        if info_member_name == &member.name {
-                            struct_info_member.member_index = Some(i as u32);
-                            struct_info_member.struct_name = Some(struct_name.clone());
-                            struct_info_member.access_instrs = access_instrs;
-
-                            // These values might be update in multiple iterations,
-                            // it is only the last iteration that actualy counts
-                            // and it should also be the correct values.
-                            var.ret_type = member.ret_type.clone();
-                            var.modifiers = member.modifiers.clone();
-                            var.is_const = member.is_const;
-
-                            // If this member is a struct, store the nested
-                            // struct into `struct_`. This will be needed
-                            // since in the next loop iteration, it is the new
-                            // struct that will be indexed. Otherwise we have
-                            // recursed to the end of nesting, set the information
-                            // from this member to the var.
-                            let mut cur_type = member.ret_type.clone()?.t;
-                            let mut access_instrs_vec = Vec::new();
-                            struct_ = loop {
-                                match cur_type {
-                                    // Structs might be nested inside ptr/array,
-                                    // get the inner (possible struct) type
-                                    // and loop until a struct is found which
-                                    // would set `struct_` to Some, otherwise
-                                    // just set it to None.
-                                    // For every ptr/array, one has to add a
-                                    // UnaryOperator to `access_instrs` containing
-                                    // information about how to access this member
-                                    // of a struct.
-                                    Type::Pointer(ty) => {
-                                        cur_type = ty.t;
-                                        access_instrs_vec.push(UnaryOperator::Deref);
-                                    }
-                                    Type::Array(ty, dim_opt) => {
-                                        // TODO: Is this logic valid for array,
-                                        //       will the array indexing affect
-                                        //       the "hierarchy" of indexing
-                                        //       into it?
-                                        cur_type = ty.t;
-                                        if let Some(dim) = dim_opt {
-                                            access_instrs_vec.push(UnaryOperator::ArrayAccess(dim));
-                                        } else {
-                                            let err_msg = format!(
-                                                "Array indexing into recursive member of {} \
-                                                doesn't have a dimension set.",
-                                                &struct_name
-                                            );
-                                            self.errors.push(self.context.err(err_msg));
-                                            return None;
-                                        }
-                                    }
-                                    Type::Custom(ref inner_struct_name) => {
-                                        info!("FIRST");
-                                        struct_name = inner_struct_name.clone();
-                                        break self.get_struct(inner_struct_name);
-                                    }
-                                    _ => {
-                                        info!("SECOND");
-                                        break None;
-                                    }
-                                }
-                            };
-
-                            access_instrs = if access_instrs_vec.is_empty() {
-                                None
-                            } else {
-                                Some(access_instrs_vec)
-                            }
-                        }
-                    }
-                } else {
+            // If the first AccessInstruction is a StructMember, this variable is
+            // located in a struct and it needs to get fetched recrusively inside
+            // the struct. Get the name of the "root" struct that then will be
+            // "gep"ed into.
+            let mut struct_name = match self.context.get_struct_name(root_var_name.clone(), decl_id)
+            {
+                Ok(Some(struct_name)) => struct_name,
+                Ok(None) => {
                     let err_msg = format!(
-                        "No members of struct {}, expected member with name {}.",
-                        &struct_name, &info_member_name
+                        "Got none when geting struct name for var {} in decl id: {}",
+                        &root_var_name, decl_id
                     );
-                    self.errors.push(self.context.err(err_msg));
+                    let err = self.context.err(err_msg);
+                    self.errors.push(err);
                     return None;
                 }
+                Err(e) => {
+                    self.errors.push(e);
+                    return None;
+                }
+            };
+
+            for access_instr in &mut access_instrs.iter_mut() {
+                match access_instr {
+                    AccessInstruction::StructMember(
+                        ref mut access_struct_var_name,
+                        ref mut access_member_name,
+                        ref mut access_index,
+                    ) => {
+                        let struct_ = match self.context.get_struct(&struct_name) {
+                            Ok(Some(struct_)) => struct_,
+                            Ok(None) => {
+                                let err_msg =
+                                    format!("Unable to get struct with name: {:?}", &struct_name);
+                                let err = self.context.err(err_msg);
+                                self.errors.push(err);
+                                return None;
+                            }
+                            Err(e) => {
+                                self.errors.push(e);
+                                return None;
+                            }
+                        };
+
+                        if let Some(members) = &struct_.members {
+                            for (i, member) in members.iter().enumerate() {
+                                if access_member_name == &member.name {
+                                    *access_index = Some(i as u32);
+                                    *access_struct_var_name = struct_name.clone();
+
+                                    // These values might be update in multiple iterations,
+                                    // it is only the last iteration that actualy counts
+                                    // and it should also be the correct values.
+                                    var.ret_type = member.ret_type.clone();
+                                    var.modifiers = member.modifiers.clone();
+                                    var.is_const = member.is_const;
+
+                                    // If this member is a struct, store the nested
+                                    // struct into `struct_`. This will be needed
+                                    // since in the next loop iteration, it is the new
+                                    // struct that will be indexed. Otherwise we have
+                                    // recursed to the end of nesting, set the information
+                                    // from this member to the var.
+                                    let mut cur_type = member.ret_type.clone()?.t;
+                                    loop {
+                                        match cur_type {
+                                            Type::Pointer(ty) => {
+                                                cur_type = ty.t;
+                                            }
+                                            Type::Array(ty, dim_opt) => {
+                                                // TODO: Is this logic valid for array,
+                                                //       will the array indexing affect
+                                                //       the "hierarchy" of indexing
+                                                //       into it?
+                                                cur_type = ty.t;
+                                            }
+                                            Type::Custom(ref inner_struct_name) => {
+                                                struct_name = inner_struct_name.clone();
+                                                break;
+                                            }
+                                            _ => {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            let err_msg = format!(
+                                "No members of struct {}, expected member with name {}.",
+                                &struct_name, &access_member_name
+                            );
+                            self.errors.push(self.context.err(err_msg));
+                            return None;
+                        }
+                    }
+                    AccessInstruction::Deref
+                    | AccessInstruction::Address
+                    | AccessInstruction::ArrayAccess(_) => continue,
+                };
             }
 
             var.ret_type.clone()
         } else {
-            let err_msg = format!("`struct_info` in variable \"{}\" set to None.", &var.name);
-            self.errors.push(self.context.err(err_msg));
-            None
-        }
-    }
-
-    fn get_struct(&mut self, struct_name: &str) -> Option<&Struct> {
-        let parent_block_id = match self
-            .context
-            .get_struct_parent_id(struct_name.into(), self.context.cur_block_id)
-        {
-            Ok(id) => id,
-            Err(e) => {
-                self.errors.push(e);
-                return None;
-            }
-        };
-        let key = (struct_name.into(), parent_block_id);
-
-        if let Some(struct_) = self.context.structs.get(&key) {
-            Some(struct_)
-        } else {
-            let err_msg = format!(
-                "Unable to find struct with name {} with block ID {}.",
-                &struct_name, self.context.cur_block_id
-            );
-            self.errors.push(self.context.err(err_msg));
-            None
+            unreachable!("AccessInstructions not set in `analyze_struct_member`.");
         }
     }
 
@@ -641,7 +582,7 @@ impl<'a> TypeAnalyzer<'a> {
                 // Update the type of the variable in the "AnalyzeContext"
                 // if the type is None. Don't do this for struct members (since
                 // their types will always be hardcoded in the source code).
-                if var.struct_info.is_none() {
+                if var.access_instrs.is_none() {
                     let cur_block_id = self.context.cur_block_id;
                     let var_decl_id = match self.context.get_var_decl_scope(&var.name, cur_block_id)
                     {

@@ -17,7 +17,7 @@ function fac(n: i32) -> i32
 
 function main() -> i32
 {   
-    const n: i32 = 7
+    var n: i32 = 7
     printf("n: %d, result: %d", n, fac(n))
     
     var buf: {u8} = malloc(20)

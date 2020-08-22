@@ -1,3 +1,4 @@
+external function printf(format: {u8}, ...) -> i32
 
 struct TestStruct
 {
@@ -8,10 +9,10 @@ struct TestStruct
 function main() -> int
 {
     var integer = 123
-    var test_struct = TestStruct { integer , 456 }
-    var adr = test_struct.&
+    var ptr = integer.&
     
-    var ret = adr.*.i
+    var ret = ptr.* + ptr.*
+    printf("Result: %d", ret)
     
     return ret
 }

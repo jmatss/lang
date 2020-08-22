@@ -58,7 +58,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Ok(*merge_block)
             } else {
                 Err(self.err(format!(
-                    "Unable to find merge block in blocks with id {} and parent {}.",
+                    "Unable to find merge block in block with id {} and parent {}.",
                     id, parent_id
                 )))
             }

@@ -79,6 +79,7 @@ fn main() -> CustomResult<()> {
     debug!("\nAST after analyze:\n{:#?}", ast_root);
     debug!("Variables: {:#?}", &analyze_context.variables);
     debug!("Functions: {:#?}", &analyze_context.functions);
+    debug!("Structs: {:#?}", &analyze_context.structs);
     println!("Analyzing complete.");
 
     let target_machine = compiler::setup_target()?;

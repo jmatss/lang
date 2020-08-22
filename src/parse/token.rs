@@ -464,46 +464,17 @@ impl Argument {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StructInfo {
-    /// The name of variable of this struct instance.
-    pub root_var_name: String,
+pub enum AccessInstruction {
+    /// The first string is the name of the struct that this var is a member of.
+    /// The second string is the name of this member/variable and the u32 is the
+    /// position/index of this var in the struct.
+    StructMember(String, String, Option<u32>),
 
-    /// The struct members that are accessed under this struct variable.
-    pub members: Vec<StructInfoMember>,
-}
+    Deref,
+    Address,
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct StructInfoMember {
-    pub struct_name: Option<String>,
-    pub member_name: String,
-    pub member_index: Option<u32>,
-    /// A list of the "access instructions" that are needed to access this
-    /// struct member. Example:
-    ///   x.y.*.&
-    /// would result in a None access list for "y".
-    ///  x.*.y.&
-    /// would result in a access list containing [Deref] for "y".
-    pub access_instrs: Option<Vec<UnaryOperator>>,
-}
-
-impl StructInfoMember {
-    pub fn new(member_name: String) -> Self {
-        Self {
-            struct_name: None,
-            member_name,
-            member_index: None,
-            access_instrs: None,
-        }
-    }
-}
-
-impl StructInfo {
-    pub fn new(root_var_name: String, member_name: String) -> Self {
-        Self {
-            root_var_name,
-            members: vec![StructInfoMember::new(member_name)],
-        }
-    }
+    /// The expression if the index of the array to access.
+    ArrayAccess(Expression),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -513,9 +484,18 @@ pub struct Variable {
     pub modifiers: Option<Vec<Modifier>>,
     pub is_const: bool,
 
-    /// If `struct_info` is set, this is a struct member. It will contain the
-    /// struct members in all nested struct up to this member.
-    pub struct_info: Option<StructInfo>,
+    /// If `access_instrs` is set, access this Variable is NOT a "basic" variable
+    /// that can be accessed directly. It will either be a struct member,
+    /// some sort of deref/address/array access or a combination of them. This
+    /// will require extra instructions when accessing the contents of the variable
+    /// that will be "reproduced" when generating the code to access this var.
+    pub access_instrs: Option<Vec<AccessInstruction>>,
+
+    /// If set contains the "root" struct var name that is to be indexed. If
+    /// this is anything other than a struct member, this will not be set.
+    /// The string is the name of the "root" variable and the block id is the
+    /// block id where the struct was declared.
+    pub root_struct_var: Option<(String, BlockId)>,
 }
 
 impl Variable {
@@ -530,7 +510,8 @@ impl Variable {
             ret_type,
             modifiers,
             is_const,
-            struct_info: None,
+            access_instrs: None,
+            root_struct_var: None,
         }
     }
 }
