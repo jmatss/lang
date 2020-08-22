@@ -1,0 +1,17 @@
+
+struct TestStruct
+{
+    i: i32,
+    msg: i32,
+}
+
+function main() -> int
+{
+    var integer = 123
+    var test_struct = TestStruct { integer , 456 }
+    var adr = test_struct.&
+    
+    var ret = adr.*.i
+    
+    return ret
+}

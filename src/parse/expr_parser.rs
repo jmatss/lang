@@ -209,19 +209,24 @@ impl<'a> ExprParser<'a> {
 
         self.prev_was_operand = false;
 
+
         // Unary operators are treated differently than binary operators,
         // they just get added directly to one of the stacks depending on
         // if it prefix or postfix. Early return.
         if let Operator::UnaryOperator(_) = op {
             if let Fix::Prefix = op_info.fix {
-                self.operators.push(op);
+                //self.operators.push(op.clone());
             } else {
-                self.outputs.push(Output::Operator(op));
+                // TODO: Is it ok to treat PostFix the same way as PreFix
+                //       to try and get them to care about precedence?
+                //self.outputs.push(Output::Operator(op));
+                //self.operators.push(op.clone());
+
                 // If the operator is postfix, it is assumed to be a part of
                 // the previous operand.
                 self.prev_was_operand = true;
             }
-            return Ok(());
+            //return Ok(());
         }
 
         // OBS!. The precedence is in reverse i.e. the higher the value of the
@@ -231,8 +236,7 @@ impl<'a> ExprParser<'a> {
 
             // Edge case for "ParenthesisBegin" since it is special and doesn't
             // follow the regular rules. If it is found here, the "popping loop"
-            // should end as in "1.5.1.2" & "1.5.2.2". Will be able to merge
-            // the if blocks when "let_chains" get added to rust.
+            // should end as in "1.5.1.2" & "1.5.2.2".
             if let Operator::ParenthesisBegin = pop_op {
                 self.operators.push(pop_op); // Put back popped operator.
                 break;

@@ -147,7 +147,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Type::Pointer(Box::new(var_ret_type.clone())),
                 None,
             ))?,
-            AccessType::StructAccess => self.compile_type(var_ret_type)?,
             AccessType::ArrayAccess => panic!("TODO: ArrayAccess in compile_assign."),
         };
 

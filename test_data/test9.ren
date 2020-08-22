@@ -1,0 +1,41 @@
+external function printf(format: {u8}, ...) -> i32
+//external function malloc(size: i32) -> {void}     // TODO: How should a "void*" be represented?
+//external function free(ptr: {void})
+//external function itoa(value: i32, buf: {u8}, radix: i32) -> {u8}
+
+struct NestedStruct
+{
+    z: i32,
+    b: {i32},
+}
+
+struct TestStruct
+{
+    x: i32,
+    y: {NestedStruct},
+}
+
+function double(n: {i32})
+{
+    n.* *= 2
+}
+
+function main() -> int
+{
+    //var buf: {u8} = malloc(16)
+    //itoa(123, buf, 10)
+    
+    //var test_struct: NestedStruct = NestedStruct { 1, 2 }
+    //var x = test_struct.z
+    //test_struct.z = test_struct.b
+    //printf("output: %d", test_struct.z * test_struct.b)
+    
+    var i = 3
+    var s = NestedStruct { 123, i.& }
+    var k = TestStruct { 456, s.& }
+    double(k.y.*.b)
+    k.y.*.b.* += 2
+    printf("Output: %d", i)
+    
+    return 0
+}

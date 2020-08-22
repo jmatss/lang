@@ -94,12 +94,15 @@ pub enum Expression {
     Operation(Operation),
 }
 
+// TODO: Rethink this approach of using "AccessType"s, should not do it.
+//       This is because sometimes it is just ignored, as for example with
+//       "StructAccess" since that is handled in another way.
 #[derive(Debug)]
 pub enum AccessType {
     Regular,
     Deref,
     Address,
-    StructAccess,
+    // StructAccess, Struct access is currently handled in other ways
     ArrayAccess,
 }
 
@@ -136,7 +139,7 @@ impl Expression {
                         } else if bin_op.right.is_array_access() {
                             Some(AccessType::ArrayAccess)
                         } else if bin_op.left.is_var() && bin_op.right.is_var() {
-                            Some(AccessType::StructAccess)
+                            Some(AccessType::Regular)
                         } else {
                             panic!("TODO: lhs & rhs isn't both var, might be func call.");
                         }
@@ -474,6 +477,13 @@ pub struct StructInfoMember {
     pub struct_name: Option<String>,
     pub member_name: String,
     pub member_index: Option<u32>,
+    /// A list of the "access instructions" that are needed to access this
+    /// struct member. Example:
+    ///   x.y.*.&
+    /// would result in a None access list for "y".
+    ///  x.*.y.&
+    /// would result in a access list containing [Deref] for "y".
+    pub access_instrs: Option<Vec<UnaryOperator>>,
 }
 
 impl StructInfoMember {
@@ -482,6 +492,7 @@ impl StructInfoMember {
             struct_name: None,
             member_name,
             member_index: None,
+            access_instrs: None,
         }
     }
 }
@@ -612,6 +623,8 @@ impl Operator {
     //      https://www.mathcs.emory.edu/~valerie/courses/fall10/155/resources/op_precedence.html
     // and old rust docs:
     //      https://web.archive.org/web/20160304121349/https://doc.rust-lang.org/reference.html#unary-operator-expressions
+    // and c:
+    //      https://en.cppreference.com/w/c/language/operator_precedence
 
     /*
         Precedence:
@@ -638,7 +651,7 @@ impl Operator {
 
             (Currently assignments aren't counted as expression, but they would
             have the lowest precedence if they were)
-            19  = += -= *= /= %= **= &= |= ^= <<= >>=
+            20  = += -= *= /= %= **= &= |= ^= <<= >>=
     */
     fn lookup(&self) -> Option<(bool, usize, Fix)> {
         if let Operator::ParenthesisBegin = self {

@@ -72,7 +72,7 @@ impl<'ctx> BranchInfo<'ctx> {
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_block(
         &mut self,
-        header: &'ctx BlockHeader,
+        header: &'ctx mut BlockHeader,
         id: BlockId,
         body: &'ctx mut [ParseToken],
     ) -> CustomResult<()> {
@@ -81,7 +81,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 for token in body {
                     self.cur_line_nr = token.line_nr;
                     self.cur_column_nr = token.column_nr;
-                    self.compile_recursive(token)?
+                    self.compile(token)?
                 }
             }
             BlockHeader::Function(func) => {
@@ -103,7 +103,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             //BlockHeader::MatchCase(expr) => self.compile_match_case(expr),
 
             //BlockHeader::For(var, expr) => self.compile_for(var, expr),
-            //BlockHeader::While(expr_opt) => self.compile_while(expr_opt),
+            BlockHeader::While(expr_opt) => self.compile_while(expr_opt, id, body)?,
 
             //BlockHeader::With(expr) => self.compile_with(expr),
             //BlockHeader::Defer(expr) => self.compile_defer(expr),
@@ -177,7 +177,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for token in body {
             self.cur_line_nr = token.line_nr;
             self.cur_column_nr = token.column_nr;
-            self.compile_recursive(token)?;
+            self.compile(token)?;
         }
 
         // Add a "invisible" return at the end of the last block if this is a
@@ -408,7 +408,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.cur_column_nr = token.column_nr;
 
             self.builder.position_at_end(cur_block);
-            self.compile_recursive(token)?;
+            self.compile(token)?;
         }
 
         self.cur_basic_block = Some(cur_block);
@@ -449,6 +449,75 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let struct_type = self.context.opaque_struct_type(&struct_.name);
         struct_type.set_body(member_types.as_ref(), packed);
 
+        Ok(())
+    }
+
+    /// All the "ParseToken" in the body should be "IfCase"s.
+    fn compile_while(
+        &mut self,
+        expr_opt: &mut Option<Expression>,
+        id: BlockId,
+        body: &'ctx mut [ParseToken],
+    ) -> CustomResult<()> {
+        self.cur_block_id = id;
+
+        let cur_func = self
+            .cur_func
+            .ok_or_else(|| self.err("cur_func is None for \"If\".".into()))?;
+
+        let cur_block = self
+            .cur_basic_block
+            .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
+
+        let while_branch_block = self.context.append_basic_block(cur_func, "while.branch");
+        let while_body_block = self.context.append_basic_block(cur_func, "while.body");
+        let merge_block = self.context.append_basic_block(cur_func, "while.merge");
+        self.merge_blocks.insert(id, merge_block);
+
+        self.builder.position_at_end(cur_block);
+        self.builder.build_unconditional_branch(while_branch_block);
+
+        // If expression is NOT set, treat this as a infinite while loop.
+        self.builder.position_at_end(while_branch_block);
+        if let Some(ref mut expr) = expr_opt {
+            let value = self.compile_expr(expr)?;
+            if value.is_int_value() {
+                self.builder.build_conditional_branch(
+                    value.into_int_value(),
+                    while_body_block,
+                    merge_block,
+                );
+            } else {
+                return Err(self.err(format!(
+                    "Expression in while loop didn't evaluate to int: {:?}",
+                    value
+                )));
+            }
+        } else {
+            self.builder.build_unconditional_branch(while_body_block);
+        }
+
+        // Iterate through all "tokens" in this while-loop and compile them.
+        for token in body.iter_mut() {
+            self.cur_line_nr = token.line_nr;
+            self.cur_column_nr = token.column_nr;
+
+            self.cur_basic_block = Some(while_body_block);
+            self.builder.position_at_end(while_body_block);
+
+            self.compile(token)?;
+        }
+
+        // If the block does NOT contain a terminator instruction inside it
+        // (return, yield etc.), add a uncoditional branch back up to the
+        // "while.branch" block.
+        if while_body_block.get_terminator().is_none() {
+            self.builder.position_at_end(while_body_block);
+            self.builder.build_unconditional_branch(while_branch_block);
+        }
+
+        self.cur_basic_block = Some(merge_block);
+        self.builder.position_at_end(merge_block);
         Ok(())
     }
 }

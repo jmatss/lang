@@ -126,8 +126,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BinaryOperator::ShiftRight => {
                 self.compile_bin_op_shift_right(ret_type, bin_op.is_const, left, right)?
             }
-            BinaryOperator::BoolAnd => panic!("TODO: BoolAnd"),
-            BinaryOperator::BoolOr => panic!("TODO: BooldOr"),
+            BinaryOperator::BoolAnd => {
+                self.compile_bin_op_bool_and(ret_type, bin_op.is_const, left, right)?
+            }
+            BinaryOperator::BoolOr => {
+                self.compile_bin_op_bool_or(ret_type, bin_op.is_const, left, right)?
+            }
             BinaryOperator::ExpressionAnd => panic!("TODO: ExpressionAnd"),
         })
     }
@@ -153,10 +157,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         Ok(match un_op.operator {
             UnaryOperator::Increment => {
-                self.compile_un_op_increment(ret_type, un_op.is_const, basic_value)?
+                if let Some(var) = un_op.value.eval_to_var() {
+                    self.compile_un_op_increment(ret_type, un_op.is_const, basic_value, var)?
+                } else {
+                    return Err(self.err(
+                        format!("Trying to increment something that is a variable: {:?}", &un_op.value),
+                    ));
+                }
             }
             UnaryOperator::Decrement => {
-                self.compile_un_op_decrement(ret_type, un_op.is_const, basic_value)?
+                if let Some(var) = un_op.value.eval_to_var() {
+                    self.compile_un_op_decrement(ret_type, un_op.is_const, basic_value, var)?
+                } else {
+                    return Err(self.err(
+                        format!("Trying to decrement something that is a variable: {:?}", &un_op.value),
+                    ));
+                }
             }
             UnaryOperator::Deref => self.compile_un_op_deref(&mut un_op.value, basic_value)?,
             UnaryOperator::Address => {
@@ -165,7 +181,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 } else {
                     return Err(self.err(
                         format!("Trying to dereference invalid type: {:?}", &un_op.value),
-                        
                     ));
                 }
             }
@@ -842,21 +857,26 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
-    fn compile_un_op_increment(
+    fn compile_bin_op_bool_and(
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
         is_const: bool,
-        value: BasicValueEnum<'ctx>,
+        left: BasicValueEnum<'ctx>,
+        right: BasicValueEnum<'ctx>,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
-                let sign_extend = false;
-                let one = ret_type.into_int_type().const_int(1, sign_extend);
                 if is_const {
-                    value.into_int_value().const_add(one).into()
+                    left.into_int_value()
+                        .const_and(right.into_int_value())
+                        .into()
                 } else {
                     self.builder
-                        .build_int_add(value.into_int_value(), one, "inc")
+                        .build_and(
+                            left.into_int_value(),
+                            right.into_int_value(),
+                            "bool.and",
+                        )
                         .into()
                 }
             }
@@ -868,8 +888,90 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | AnyTypeEnum::VectorType(_)
             | AnyTypeEnum::VoidType(_) => {
                 return Err(self.err(
-                    format!("Invalid type for UnaryOperator::Increment: {:?}", ret_type),
+                    format!(
+                        "Invalid type for BinaryOperator::BoolAnd: {:?}",
+                        ret_type
+                    ),
                     
+                ))
+            }
+        })
+    }
+
+    fn compile_bin_op_bool_or(
+        &mut self,
+        ret_type: AnyTypeEnum<'ctx>,
+        is_const: bool,
+        left: BasicValueEnum<'ctx>,
+        right: BasicValueEnum<'ctx>,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
+        Ok(match ret_type {
+            AnyTypeEnum::IntType(_) => {
+                if is_const {
+                    left.into_int_value()
+                        .const_or(right.into_int_value())
+                        .into()
+                } else {
+                    self.builder
+                        .build_or(
+                            left.into_int_value(),
+                            right.into_int_value(),
+                            "bool.or",
+                        )
+                        .into()
+                }
+            }
+            AnyTypeEnum::FloatType(_)
+            | AnyTypeEnum::ArrayType(_)
+            | AnyTypeEnum::FunctionType(_)
+            | AnyTypeEnum::PointerType(_)
+            | AnyTypeEnum::StructType(_)
+            | AnyTypeEnum::VectorType(_)
+            | AnyTypeEnum::VoidType(_) => {
+                return Err(self.err(
+                    format!(
+                        "Invalid type for BinaryOperator::BoolOr: {:?}",
+                        ret_type
+                    ),
+                    
+                ))
+            }
+        })
+    }
+
+    fn compile_un_op_increment(
+        &mut self,
+        ret_type: AnyTypeEnum<'ctx>,
+        is_const: bool,
+        value: BasicValueEnum<'ctx>,
+        var: &Variable,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
+        Ok(match ret_type {
+            AnyTypeEnum::IntType(_) => {
+                let sign_extend = false;
+                let one = ret_type.into_int_type().const_int(1, sign_extend);
+                let new_value = if is_const {
+                    value.into_int_value().const_add(one).into()
+                } else {
+                    self.builder
+                        .build_int_add(value.into_int_value(), one, "inc")
+                        .into()
+                };
+                // TODO: What AccessType? Should probably stop using this
+                //       AccessType technique and just store everything in the
+                //       Variable object.
+                self.compile_var_store(var, new_value, &AccessType::Regular)?;
+                new_value.into()
+            }
+            AnyTypeEnum::FloatType(_)
+            | AnyTypeEnum::ArrayType(_)
+            | AnyTypeEnum::FunctionType(_)
+            | AnyTypeEnum::PointerType(_)
+            | AnyTypeEnum::StructType(_)
+            | AnyTypeEnum::VectorType(_)
+            | AnyTypeEnum::VoidType(_) => {
+                return Err(self.err(
+                    format!("Invalid type for UnaryOperator::Increment: {:?}", ret_type),
                 ))
             }
         })
@@ -880,18 +982,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ret_type: AnyTypeEnum<'ctx>,
         is_const: bool,
         value: BasicValueEnum<'ctx>,
+        var: &Variable,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
                 let sign_extend = false;
                 let one = ret_type.into_int_type().const_int(1, sign_extend);
-                if is_const {
+                let new_value = if is_const {
                     value.into_int_value().const_sub(one).into()
                 } else {
                     self.builder
                         .build_int_sub(value.into_int_value(), one, "dec")
                         .into()
-                }
+                };
+                // TODO: What AccessType? Should probably stop using this
+                //       AccessType technique and just store everything in the
+                //       Variable object.
+                self.compile_var_store(var, new_value, &AccessType::Regular)?;
+                new_value.into()
             }
             AnyTypeEnum::FloatType(_)
             | AnyTypeEnum::ArrayType(_)
@@ -921,9 +1029,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Expression::Operation(Operation::BinaryOperation(bin_op)) => match bin_op.operator {
                 BinaryOperator::Dot => {
                     if let Some(var) = bin_op.right.eval_to_var() {
-                        Err(self.err("todo".into()))
+                        Ok(self.compile_var_load(var, &AccessType::Deref)?.into())
                     } else {
-                        todo!("")
+                        panic!("HERE 67123")
                     }
                 }
                 _ => Err(self.err(

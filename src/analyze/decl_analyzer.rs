@@ -42,8 +42,7 @@ impl<'a> DeclAnalyzer<'a> {
                 self.context.cur_block_id = *id;
                 self.analyze_header(header);
                 for token in body {
-                    self.context.cur_line_nr = token.line_nr;
-                    self.context.cur_column_nr = token.column_nr;
+                    self.context.cur_block_id = *id;
                     self.analyze_token(token);
                 }
             }
@@ -225,11 +224,9 @@ impl<'a> DeclAnalyzer<'a> {
     /// Need to add declaration of variable if this stmt is a variable decl
     /// and a function if this stmt is a external declaration.
     fn analyze_stmt(&mut self, stmt: &Statement) {
-        let id = self.context.cur_block_id;
-
         match stmt {
             Statement::VariableDecl(var, _) => {
-                let key = (var.name.clone(), id);
+                let key = (var.name.clone(), self.context.cur_block_id);
                 self.context.variables.insert(key, var.clone());
             }
             Statement::ExternalDecl(func) => {

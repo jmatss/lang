@@ -1,6 +1,6 @@
 use crate::analyze::analyzer::AnalyzeContext;
 use crate::parse::token::{
-    BinaryOperation, BinaryOperator, Expression, FunctionCall, Operation, ParseToken,
+    BinaryOperation, BinaryOperator, BlockHeader, Expression, FunctionCall, Operation, ParseToken,
     ParseTokenKind, Statement, StructInfo, StructInfoMember, StructInit,
 };
 
@@ -31,7 +31,30 @@ impl<'a> IndexingAnalyzer<'a> {
 
     fn analyze_indexing(&mut self, token: &mut ParseToken) {
         match token.kind {
-            ParseTokenKind::Block(_, _, ref mut body) => {
+            ParseTokenKind::Block(ref mut block_header, _, ref mut body) => {
+                match block_header {
+                    BlockHeader::IfCase(expr_opt) => {
+                        if let Some(expr) = expr_opt {
+                            self.analyze_expr(expr);
+                        }
+                    }
+                    BlockHeader::Match(expr) => {
+                        self.analyze_expr(expr);
+                    }
+                    BlockHeader::MatchCase(expr) => {
+                        self.analyze_expr(expr);
+                    }
+                    BlockHeader::For(_, expr) => {
+                        self.analyze_expr(expr);
+                    }
+                    BlockHeader::While(expr_opt) => {
+                        if let Some(expr) = expr_opt {
+                            self.analyze_expr(expr);
+                        }
+                    }
+                    _ => (),
+                }
+
                 for token in body {
                     self.analyze_indexing(token);
                 }

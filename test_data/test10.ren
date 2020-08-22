@@ -1,0 +1,31 @@
+external function printf(format: {u8}, ...) -> i32
+external function malloc(size: i32) -> {void}
+
+struct TestStruct
+{
+    i: i32,
+    msg: {u8},
+}
+
+function main() -> int
+{
+    var test_struct = TestStruct { 0 , malloc(6) }
+    
+    if test_struct.i == 0 and false
+    {
+        test_struct.msg = "TRUE"
+    }
+    else
+    {
+        test_struct.msg = "FALSE"
+    }
+
+    while test_struct.i < 3
+    {
+        test_struct.i++
+    }
+    
+    printf("i: %d, msg: %s", test_struct.i, test_struct.msg)
+    
+    return 0
+}

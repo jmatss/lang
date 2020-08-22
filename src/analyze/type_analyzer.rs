@@ -266,9 +266,9 @@ impl<'a> TypeAnalyzer<'a> {
                         Type::Custom(struct_type_ident) => struct_type_ident.clone(),
                         _ => {
                             let err_msg = format!(
-                            "Variable {} in decl block id {} expected to be struct was NOT: {:?}",
-                            &var.name, decl_block_id, &struct_type.t
-                        );
+                                "Variable {} in decl block id {} expected to be struct was NOT: {:?}",
+                                &struct_var_name, decl_block_id, &struct_type.t
+                            );
                             let err = self.context.err(err_msg);
                             self.errors.push(err);
                             return None;
@@ -294,11 +294,12 @@ impl<'a> TypeAnalyzer<'a> {
             };
 
             let mut struct_ = self.get_struct(&struct_name);
+            let mut access_instrs = None;
 
             for struct_info_member in &mut struct_info.members {
                 let info_member_name = &struct_info_member.member_name;
 
-                if let Some(members) = &struct_?.members {
+                if let Some(members) = &struct_?.clone().members {
                     for (i, member) in members.iter().enumerate() {
                         info!(
                             "i: {}\ninfo_member: {:#?}\nmember: {:#?}",
@@ -308,6 +309,7 @@ impl<'a> TypeAnalyzer<'a> {
                         if info_member_name == &member.name {
                             struct_info_member.member_index = Some(i as u32);
                             struct_info_member.struct_name = Some(struct_name.clone());
+                            struct_info_member.access_instrs = access_instrs;
 
                             // These values might be update in multiple iterations,
                             // it is only the last iteration that actualy counts
@@ -322,19 +324,58 @@ impl<'a> TypeAnalyzer<'a> {
                             // struct that will be indexed. Otherwise we have
                             // recursed to the end of nesting, set the information
                             // from this member to the var.
-                            struct_ = match member.ret_type.clone()?.t {
-                                Type::Custom(ref inner_struct_name) => {
-                                    info!("FIRST");
-                                    struct_name = inner_struct_name.clone();
-                                    self.get_struct(inner_struct_name)
-                                }
-                                _ => {
-                                    info!("SECOND");
-                                    None
+                            let mut cur_type = member.ret_type.clone()?.t;
+                            let mut access_instrs_vec = Vec::new();
+                            struct_ = loop {
+                                match cur_type {
+                                    // Structs might be nested inside ptr/array,
+                                    // get the inner (possible struct) type
+                                    // and loop until a struct is found which
+                                    // would set `struct_` to Some, otherwise
+                                    // just set it to None.
+                                    // For every ptr/array, one has to add a
+                                    // UnaryOperator to `access_instrs` containing
+                                    // information about how to access this member
+                                    // of a struct.
+                                    Type::Pointer(ty) => {
+                                        cur_type = ty.t;
+                                        access_instrs_vec.push(UnaryOperator::Deref);
+                                    }
+                                    Type::Array(ty, dim_opt) => {
+                                        // TODO: Is this logic valid for array,
+                                        //       will the array indexing affect
+                                        //       the "hierarchy" of indexing
+                                        //       into it?
+                                        cur_type = ty.t;
+                                        if let Some(dim) = dim_opt {
+                                            access_instrs_vec.push(UnaryOperator::ArrayAccess(dim));
+                                        } else {
+                                            let err_msg = format!(
+                                                "Array indexing into recursive member of {} \
+                                                doesn't have a dimension set.",
+                                                &struct_name
+                                            );
+                                            self.errors.push(self.context.err(err_msg));
+                                            return None;
+                                        }
+                                    }
+                                    Type::Custom(ref inner_struct_name) => {
+                                        info!("FIRST");
+                                        struct_name = inner_struct_name.clone();
+                                        break self.get_struct(inner_struct_name);
+                                    }
+                                    _ => {
+                                        info!("SECOND");
+                                        break None;
+                                    }
                                 }
                             };
 
-                            break;
+                            access_instrs = if access_instrs_vec.is_empty() {
+                                None
+                            } else {
+                                Some(access_instrs_vec)
+                            }
                         }
                     }
                 } else {
@@ -492,6 +533,8 @@ impl<'a> TypeAnalyzer<'a> {
         un_op: &mut UnaryOperation,
         type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
+        self.analyze_expr_type(&mut un_op.value, None);
+
         let ret_type = match un_op.operator {
             UnaryOperator::Deref => {
                 // Analyze the "outer" value that should be a pointer. Then deref

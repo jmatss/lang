@@ -60,7 +60,7 @@ pub fn generate<'a, 'ctx>(
     target_machine: &'a TargetMachine,
 ) -> CustomResult<()> {
     let mut code_gen = CodeGen::new(context, analyze_context, builder, module, target_machine);
-    code_gen.compile_recursive(ast_root)?;
+    code_gen.compile(ast_root)?;
 
     // TODO: Temporary solution, loop through all merge blocks and look for all
     //       merge blocks with no terminator instruction. If the merge block has
@@ -113,7 +113,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile_recursive(&mut self, token: &'ctx mut ParseToken) -> CustomResult<()> {
+    pub(super) fn compile(&mut self, token: &'ctx mut ParseToken) -> CustomResult<()> {
         self.cur_line_nr = token.line_nr;
         self.cur_column_nr = token.column_nr;
 
@@ -158,8 +158,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub(super) fn compile_var_decl(&mut self, var: &Variable) -> CustomResult<()> {
-        let id = self.cur_block_id;
-        let key = (var.name.clone(), id);
+        let block_id = self.cur_block_id;
+        let decl_block_id = self
+            .analyze_context
+            .get_var_decl_scope(&var.name, block_id)?;
+        let key = (var.name.clone(), decl_block_id);
 
         if let Some(var_decl) = self.analyze_context.variables.get(&key) {
             debug!("Compiling var decl. Key: {:?}", &key);
@@ -231,7 +234,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     &var.name
                 )))
             }
-            AccessType::StructAccess => panic!("Unreachable struct access in `compile_var_store`"),
             AccessType::ArrayAccess => panic!("TODO: Array access"),
         }
         Ok(())
@@ -268,7 +270,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
             AccessType::Address => Ok(BasicValueEnum::PointerValue(ptr)),
-            AccessType::StructAccess => panic!("Unreachable struct access in `compile_var_load`"),
             AccessType::ArrayAccess => panic!("TODO: Array access"),
         }
     }
@@ -335,16 +336,43 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let key = (struct_info.root_var_name.clone(), decl_block_id);
 
         if let Some(struct_ptr) = self.variables.get(&key) {
-            // "Recursively" gep the struct(s) and get the pointer desired pointer
-            // to the struct member.
             let mut current_ptr = *struct_ptr;
             for member in &struct_info.members {
+                if let Some(access_instrs) = &member.access_instrs {
+                    for access_inst in access_instrs {
+                        current_ptr = match access_inst {
+                            token::UnaryOperator::Deref => {
+                                let tmp = self.builder.build_load(current_ptr, "access.instr.load");
+                                if !tmp.is_pointer_value() {
+                                    return Err(self.err(format!(
+                                        "Deref of member {:#?} in struct_info {:#?} didn't return pointer.",
+                                        &member, struct_info
+                                    )));
+                                }
+                                tmp.into_pointer_value()
+                            }
+                            token::UnaryOperator::Address => {
+                                panic!("TODO: Address in struct member ptr load.")
+                            }
+                            token::UnaryOperator::ArrayAccess(_) => {
+                                panic!("TODO: ArrayAccess in struct member ptr load.")
+                            }
+                            _ => {
+                                return Err(self.err(format!(
+                                    "Invalid access instruction in struct member ptr load: {:?}",
+                                    access_inst
+                                )))
+                            }
+                        }
+                    }
+                }
+
                 let member_name = &member.member_name;
                 let member_index = if let Some(member_index) = member.member_index {
                     member_index
                 } else {
                     return Err(self.err(format!(
-                        "Member index not set for member \"{}\" in struct_info: {:?}.",
+                        "Member index not set for member \"{:?}\" in struct_info: {:?}.",
                         member_name, &struct_info
                     )));
                 };
@@ -354,7 +382,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     .build_struct_gep(current_ptr, member_index, "struct.gep")
                     .map_err(|_| {
                         self.err(format!(
-                            "Unable to gep from struct struct {:?}. Member name: {}, index {}.",
+                            "Unable to gep from struct {:?}. Member name: {}, index {}.",
                             &var.struct_info, member_name, member_index
                         ))
                     })?;
