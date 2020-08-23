@@ -1,9 +1,6 @@
 use super::{
-    iter::{ParseTokenIter, DEFAULT_STOP_CONDS},
-    token::{
-        BlockHeader, Expression, Function, ParseToken, ParseTokenKind, Path, Statement, Struct,
-        Variable,
-    },
+    parser::{ParseTokenIter, DEFAULT_STOP_CONDS},
+    token::{BlockHeader, Function, ParseToken, ParseTokenKind, Path, Statement, Struct, Variable},
 };
 use crate::{
     lex::token::{Keyword, LexTokenKind, Symbol},

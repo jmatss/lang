@@ -2,7 +2,7 @@ use super::{block_analyzer::BlockAnalyzer, indexing_analyzer::IndexingAnalyzer};
 use crate::analyze::decl_analyzer::DeclAnalyzer;
 use crate::analyze::type_analyzer::TypeAnalyzer;
 use crate::error::{LangError, LangErrorKind::AnalyzeError};
-use crate::parse::token::{BlockId, Enum, Function, Interface, ParseToken, Struct, Variable};
+use crate::parse::token::{BlockId, Enum, Function, Interface, ParseToken, Path, Struct, Variable};
 use crate::{common::variable_type::Type, CustomResult};
 use std::collections::HashMap;
 
@@ -94,6 +94,7 @@ pub struct AnalyzeContext {
     pub interfaces: HashMap<(String, BlockId), Interface>,
 
     pub block_info: HashMap<BlockId, BlockInfo>,
+    pub use_paths: Vec<Path>,
 
     /// The block and line/column where the `analyzer` currently is. When the
     /// analyzing is done, these variable will not be used and will be invalid.
@@ -112,6 +113,7 @@ impl AnalyzeContext {
             interfaces: HashMap::default(),
 
             block_info: HashMap::default(),
+            use_paths: Vec::default(),
 
             cur_block_id: 0,
             cur_line_nr: 0,

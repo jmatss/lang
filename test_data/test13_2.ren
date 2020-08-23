@@ -1,0 +1,4 @@
+function double(n: {i32})
+{
+    n.* *= 2
+}

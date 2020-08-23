@@ -1,5 +1,4 @@
 pub mod expr_parser;
-pub mod iter;
 pub mod keyword_parser;
 pub mod parser;
 pub mod token;

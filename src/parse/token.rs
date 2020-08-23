@@ -551,8 +551,20 @@ pub struct Path {
 }
 
 impl Path {
+    const EXTENSION: &'static str = ".ren";
+
     pub fn new(idents: Vec<String>) -> Self {
         Path { idents }
+    }
+
+    pub fn to_file_path(&self) -> Option<String> {
+        if let Some(path_str) = std::path::Path::new(&self.idents.join("/")).to_str() {
+            let mut path = path_str.to_string();
+            path.push_str(Path::EXTENSION);
+            Some(path)
+        } else {
+            None
+        }
     }
 }
 

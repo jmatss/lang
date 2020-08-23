@@ -1,4 +1,4 @@
-use super::{iter::ParseTokenIter, token::TypeStruct};
+use super::{parser::ParseTokenIter, token::TypeStruct};
 use crate::{
     common::variable_type::Type,
     lex::token::{LexTokenKind, Symbol},

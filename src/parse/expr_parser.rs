@@ -1,5 +1,5 @@
 use super::{
-    iter::ParseTokenIter,
+    parser::ParseTokenIter,
     token::{
         BinaryOperation, BinaryOperator, Expression, Fix, FunctionCall, Operation, Operator,
         Output, ParseToken, StructInit, UnaryOperation, UnaryOperator,

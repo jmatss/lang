@@ -76,7 +76,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_use(&mut self, path: &Path) -> CustomResult<()> {
-        Err(self.err("TODO: Implement \"use\" statement.".into()))
+        // Do nothing, "use"s are done during lexing/parsing for now.
+        Ok(())
     }
 
     fn compile_package(&mut self, path: &Path) -> CustomResult<()> {
