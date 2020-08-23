@@ -91,8 +91,12 @@ impl<'a> TypeAnalyzer<'a> {
             Expression::Variable(var) => {
                 debug!("ANALYZING VAR: {:#?}", var);
 
-                if var.access_instrs.is_some() && var.root_struct_var.is_some() {
-                    self.analyze_struct_member(var)
+                if let Some((ref root_var, _)) = var.access_instrs {
+                    if root_var.is_struct {
+                        self.analyze_struct_member(var)
+                    } else {
+                        self.analyze_var_type(var)
+                    }
                 } else {
                     self.analyze_var_type(var)
                 }
@@ -100,6 +104,40 @@ impl<'a> TypeAnalyzer<'a> {
             Expression::Operation(op) => self.analyze_op_type(op, type_hint_opt),
             Expression::FunctionCall(func_call) => self.analyze_func_call(func_call),
             Expression::StructInit(struct_init) => self.analyze_struct_init(struct_init),
+            Expression::ArrayInit(args) => {
+                if args.is_empty() {
+                    let err = self.context.err("ArrayInit with no arguments.".into());
+                    self.errors.push(err);
+                    return None;
+                }
+
+                // TODO: The dimension needs to be checked somehow as well.
+                let member_type_hint_opt = if let Some(b) = type_hint_opt {
+                    if let Type::Array(inner, dim) = b.t {
+                        Some(*inner)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                // Set place holder `member_type`. It will be set to something
+                // else before it is used.
+                let mut member_type = TypeStruct::new(Type::Boolean, None);
+                for arg in args.iter_mut() {
+                    member_type =
+                        self.analyze_expr_type(&mut arg.value, member_type_hint_opt.clone())?;
+                }
+
+                let lit = Literal::Integer(args.len().to_string(), 10);
+                let expr = Expression::Literal(lit, Some(member_type.clone()));
+                let generics = None;
+                Some(TypeStruct::new(
+                    Type::Array(Box::new(member_type), Some(Box::new(expr))),
+                    generics,
+                ))
+            }
         }
     }
 
@@ -228,7 +266,7 @@ impl<'a> TypeAnalyzer<'a> {
             return None;
         }
 
-        // Return the type of the  struct.
+        // Return the type of the struct.
         let ty = Type::Custom(struct_init.name.clone());
         let generics = None;
         Some(TypeStruct::new(ty, generics))
@@ -244,36 +282,50 @@ impl<'a> TypeAnalyzer<'a> {
     /// by looking up the struct, and then finding the type of the member
     /// in the struct definition.
     fn analyze_struct_member(&mut self, var: &mut Variable) -> Option<TypeStruct> {
-        if let Some(ref mut access_instrs) = var.access_instrs {
-            let (root_var_name, decl_id) = if let Some(key) = &var.root_struct_var {
-                key.clone()
+        if let Some((ref root_var, ref mut access_instrs)) = var.access_instrs {
+            let root_var_name = &root_var.name;
+            let decl_id = root_var.decl_block_id;
+
+            match access_instrs.first()? {
+                AccessInstruction::StructMember(_, _, _) => {}
+                AccessInstruction::Deref => {}
+                AccessInstruction::Address => {}
+                AccessInstruction::ArrayAccess(_) => {}
+            }
+
+            // Find the first use of a struct. This will be the entry point to
+            // accessing all structs/members recursively in this `var`.
+            let key = (root_var_name.clone(), decl_id);
+            let mut struct_name = if let Some(b) = self.context.variables.get(&key) {
+                let mut ty = b.ret_type.clone()?.t;
+                loop {
+                    match ty {
+                        Type::Pointer(ptr) => {
+                            ty = ptr.t;
+                        }
+                        Type::Array(arr_ty, _) => {
+                            ty = arr_ty.t;
+                        }
+                        Type::Custom(struct_name) => {
+                            break struct_name;
+                        }
+                        _ => {
+                            let err_msg =
+                                format!("Unable to find first struct in var: {:#?}", &var);
+                            let err = self.context.err(err_msg);
+                            self.errors.push(err);
+                            return None;
+                        }
+                    }
+                }
             } else {
-                let err_msg = format!("No root_var set for var: {:?}", &var);
+                let err_msg = format!(
+                    "Unable to find var {} in decl block id {}",
+                    &root_var_name, decl_id
+                );
                 let err = self.context.err(err_msg);
                 self.errors.push(err);
                 return None;
-            };
-
-            // If the first AccessInstruction is a StructMember, this variable is
-            // located in a struct and it needs to get fetched recrusively inside
-            // the struct. Get the name of the "root" struct that then will be
-            // "gep"ed into.
-            let mut struct_name = match self.context.get_struct_name(root_var_name.clone(), decl_id)
-            {
-                Ok(Some(struct_name)) => struct_name,
-                Ok(None) => {
-                    let err_msg = format!(
-                        "Got none when geting struct name for var {} in decl id: {}",
-                        &root_var_name, decl_id
-                    );
-                    let err = self.context.err(err_msg);
-                    self.errors.push(err);
-                    return None;
-                }
-                Err(e) => {
-                    self.errors.push(e);
-                    return None;
-                }
             };
 
             for access_instr in &mut access_instrs.iter_mut() {
@@ -323,7 +375,7 @@ impl<'a> TypeAnalyzer<'a> {
                                             Type::Pointer(ty) => {
                                                 cur_type = ty.t;
                                             }
-                                            Type::Array(ty, dim_opt) => {
+                                            Type::Array(ty, _) => {
                                                 // TODO: Is this logic valid for array,
                                                 //       will the array indexing affect
                                                 //       the "hierarchy" of indexing
@@ -663,7 +715,8 @@ impl<'a> TypeAnalyzer<'a> {
             | BlockHeader::Enum(_)
             | BlockHeader::Interface(_)
             | BlockHeader::If
-            | BlockHeader::Test(_) => (),
+            | BlockHeader::Test(_)
+            | BlockHeader::Anonymous => (),
         }
     }
 
@@ -733,8 +786,11 @@ impl<'a> TypeAnalyzer<'a> {
                 Operation::UnaryOperation(un_op) => un_op.ret_type = new_ty,
             },
 
-            // Can't set type for function call or struct init.
-            Expression::FunctionCall(_) | Expression::StructInit(_) | Expression::Type(_) => {
+            // Can't set type for function call, struct init or array init.
+            Expression::FunctionCall(_)
+            | Expression::StructInit(_)
+            | Expression::ArrayInit(_)
+            | Expression::Type(_) => {
                 let err_msg = format!("Tried to set type for unexpected expr: {:?}", &expr);
                 let err = self.context.err(err_msg);
                 self.errors.push(err);

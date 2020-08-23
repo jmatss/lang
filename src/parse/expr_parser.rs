@@ -27,6 +27,9 @@ pub struct ExprParser<'a> {
     /// matching a symbol in `stop_conds`.
     stop_conds: &'a [Symbol],
 
+    /// Keeps a copy of the previous token seen.
+    prev_token: Option<LexToken>,
+
     /// This bool is used to ensure that all "operands" are separated by operators.
     prev_was_operand: bool,
 
@@ -40,7 +43,9 @@ pub struct ExprParser<'a> {
     /// expression or the function call.
     ///
     /// If this is set to a negative number, a "ParenthesisEnd" was found that
-    /// didn't belong to this expression, assume end of expression.
+    /// didn't belong to this expression, assume end of expression. The extra
+    /// "ParenthesisEnd" will be saved in the var `parenthesis_token` so that
+    /// it can be put back into the iterator.
     parenthesis_count: isize,
 }
 
@@ -55,6 +60,7 @@ impl<'a> ExprParser<'a> {
             outputs: Vec::new(),
             operators: Vec::new(),
             stop_conds,
+            prev_token: None,
             prev_was_operand: false,
             parenthesis_count: 0,
         };
@@ -70,12 +76,23 @@ impl<'a> ExprParser<'a> {
     fn shunting_yard(&mut self) -> CustomResult<()> {
         while let Some(lex_token) = self.iter.next_skip_space() {
             debug!("SHUNTING: {:?}", &lex_token);
+            let lex_token_clone = lex_token.clone();
 
             // Break and stop parsing expression if a Symbol contained in
             // `stop_conds` are found or if EOF is reached.
             // Also stop parsing if a "ParenthesisEnd" has been found that isn't
             // part of the expression (`self.parenthesis_count < 0`).
-            if let LexTokenKind::Symbol(ref symbol) = lex_token.kind {
+            if self.parenthesis_count < 0 {
+                self.iter.put_back(lex_token)?;
+                if let Some(ref prev_lex_token) = self.prev_token {
+                    self.iter.put_back(prev_lex_token.clone())?;
+                } else {
+                    return Err(self
+                        .iter
+                        .err("`prev_token` not set when putting back ParenthesisEnd".into()));
+                }
+                break;
+            } else if let LexTokenKind::Symbol(ref symbol) = lex_token.kind {
                 if self.stop_conds.contains(symbol) {
                     if self.token_count != 0 {
                         self.iter.put_back(lex_token)?;
@@ -87,9 +104,6 @@ impl<'a> ExprParser<'a> {
                     }
                 }
             } else if let LexTokenKind::EndOfFile = lex_token.kind {
-                self.iter.put_back(lex_token)?;
-                break;
-            } else if self.parenthesis_count < 0 {
                 self.iter.put_back(lex_token)?;
                 break;
             }
@@ -105,6 +119,50 @@ impl<'a> ExprParser<'a> {
                 LexTokenKind::Literal(lit) => {
                     let expr = Expression::Literal(lit, None);
                     self.shunt_operand(expr)?;
+                }
+
+                // Array access.
+                LexTokenKind::Symbol(Symbol::ArrayIndexBegin) => {
+                    // TODO: Will only using the square bracket end as a stop
+                    //       symbol break anything? Inifinite loop?
+                    let stop_conds = [Symbol::SquareBracketEnd];
+                    let expr = ExprParser::parse(self.iter, &stop_conds)?;
+
+                    // Consume the "SquareBracketEnd".
+                    self.iter.next_skip_space();
+
+                    let op = Operator::UnaryOperator(UnaryOperator::ArrayAccess(Box::new(expr)));
+                    self.shunt_operator(op)?;
+                }
+
+                // Array init. Example: "var x = [1, 2, 3]"
+                LexTokenKind::Symbol(Symbol::SquareBracketBegin) => {
+                    // The `parse_arg_list` function expects the start symbol
+                    self.iter.put_back(lex_token)?;
+
+                    let start_symbol = Symbol::SquareBracketBegin;
+                    let end_symbol = Symbol::SquareBracketEnd;
+                    let args = self.iter.parse_arg_list(start_symbol, end_symbol)?;
+
+                    let expr = Expression::ArrayInit(args);
+                    self.shunt_operand(expr)?;
+                }
+
+                // Special case for operators that takes a "type" as rhs.
+                LexTokenKind::Symbol(symbol @ Symbol::Is)
+                | LexTokenKind::Symbol(symbol @ Symbol::As)
+                | LexTokenKind::Symbol(symbol @ Symbol::Of) => {
+                    if let Some(op) = ParseToken::get_if_expr_op(&symbol) {
+                        self.shunt_operator(op)?;
+                        let expr = Expression::Type(self.iter.parse_type()?);
+
+                        self.shunt_operand(expr)?;
+                    } else {
+                        return Err(self.iter.err(format!(
+                            "Parsed None operator during expression for symbol: {:?}",
+                            symbol
+                        )));
+                    }
                 }
 
                 LexTokenKind::Symbol(symbol) => {
@@ -125,6 +183,8 @@ impl<'a> ExprParser<'a> {
                     )));
                 }
             }
+
+            self.prev_token = Some(lex_token_clone.clone());
         }
 
         // Move the remaining `operators` to `outputs` before parsing the expression.
@@ -152,8 +212,8 @@ impl<'a> ExprParser<'a> {
     fn shunt_operator(&mut self, op: Operator) -> CustomResult<()> {
         match op {
             Operator::ParenthesisBegin => {
-                self.operators.push(op);
                 self.parenthesis_count += 1;
+                self.operators.push(op);
             }
 
             Operator::ParenthesisEnd => {
@@ -161,6 +221,8 @@ impl<'a> ExprParser<'a> {
 
                 // If `parenthesis_count` is < 0, assume that the current
                 // end parenthesis isn't part of the expression.
+                // This condition will be checked at the start of the next
+                // iteration.
                 if self.parenthesis_count >= 0 {
                     while let Some(op_pop) = self.operators.pop() {
                         if let Operator::ParenthesisBegin = op_pop {
@@ -208,7 +270,6 @@ impl<'a> ExprParser<'a> {
         let op_info = op.info()?;
 
         self.prev_was_operand = false;
-
 
         // Unary operators are treated differently than binary operators,
         // they just get added directly to one of the stacks depending on
@@ -270,9 +331,9 @@ impl<'a> ExprParser<'a> {
                     expr_stack.push(expr);
                 }
 
-                Output::Operator(Operator::UnaryOperator(unary_op)) => {
+                Output::Operator(Operator::UnaryOperator(un_op)) => {
                     if let Some(expr) = expr_stack.pop() {
-                        let op = UnaryOperation::new(unary_op, Box::new(expr));
+                        let op = UnaryOperation::new(un_op, Box::new(expr));
                         expr_stack.push(Expression::Operation(Operation::UnaryOperation(op)));
                     } else {
                         return Err(self
@@ -326,7 +387,7 @@ impl<'a> ExprParser<'a> {
         ident: &str,
     ) -> CustomResult<Expression> {
         // TODO: The peek doesn't skip line break, so can't ex. do a struct
-        //       init wit ha line break.
+        //       init with a line break at the start.
         // The identifier will be either a function call or a reference to
         // a variable.
         if let Some(lex_token) = self.iter.peek_skip_space() {

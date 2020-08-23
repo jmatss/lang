@@ -66,7 +66,8 @@ impl<'a> DeclAnalyzer<'a> {
             | BlockHeader::MatchCase(_)
             | BlockHeader::For(_, _)
             | BlockHeader::While(_)
-            | BlockHeader::Test(_) => (),
+            | BlockHeader::Test(_)
+            | BlockHeader::Anonymous => (),
         }
     }
 

@@ -2,7 +2,7 @@ use crate::analyze::analyzer::AnalyzeContext;
 use crate::error::{LangError, LangErrorKind::CodeGenError};
 use crate::parse::token;
 use crate::parse::token::{ParseToken, Variable};
-use crate::{common::variable_type::Type, CustomResult};
+use crate::{common::variable_type::Type, lex::token::Literal, CustomResult};
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -14,7 +14,7 @@ use inkwell::{
     AddressSpace,
 };
 use std::collections::HashMap;
-use token::{AccessInstruction, BlockId, ParseTokenKind, TypeStruct};
+use token::{AccessInstruction, BlockId, Expression, ParseTokenKind, TypeStruct};
 
 pub(super) struct CodeGen<'a, 'ctx> {
     pub context: &'ctx Context,
@@ -136,9 +136,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if let Some(var_type) = &var.ret_type {
             Ok(match self.compile_type(&var_type)? {
                 AnyTypeEnum::ArrayType(ty) => {
-                    // TODO: Alloca array, need to figure out constant size first.
-                    //self.builder.build_array_alloca(ty, &var.name)
-                    return Err(self.err("TODO: Alloca array.".into()));
+                    let sign_extend = false;
+                    let dim = self
+                        .context
+                        .i32_type()
+                        .const_int(ty.len() as u64, sign_extend);
+                    self.builder.build_array_alloca(ty, dim, &var.name)
                 }
                 AnyTypeEnum::FloatType(ty) => self.builder.build_alloca(ty, &var.name),
                 AnyTypeEnum::IntType(ty) => self.builder.build_alloca(ty, &var.name),
@@ -185,7 +188,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub(super) fn compile_var_store(
         &mut self,
-        var: &Variable,
+        var: &mut Variable,
         basic_value: BasicValueEnum<'ctx>,
     ) -> CustomResult<InstructionValue<'ctx>> {
         debug!(
@@ -216,7 +219,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub(super) fn compile_var_load(
         &mut self,
-        var: &Variable,
+        var: &mut Variable,
     ) -> CustomResult<BasicValueEnum<'ctx>> {
         if var.is_const {
             return self.get_const_value(var);
@@ -228,7 +231,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.get_var_ptr(var)?
         };
 
-        Ok(self.builder.build_load(ptr, "load"))
+        // TODO: Need a speical case if the last access instructions is a "Address"
+        //       since then you don't want to load the value in the ptr, you
+        //       want to return the ptr itself. Try to find a better way to
+        //       do this.
+        if let Some(AccessInstruction::Address) =
+            var.access_instrs.as_ref().and_then(|x| x.1.last())
+        {
+            Ok(ptr.into())
+        } else {
+            Ok(self.builder.build_load(ptr, "load"))
+        }
     }
 
     fn get_var_ptr(&mut self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
@@ -237,7 +250,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .analyze_context
             .get_var_decl_scope(&var.name, block_id)?;
         let key = (var.name.clone(), decl_block_id);
-        debug!("Loading variable pointer. Key: {:?}", &key);
+        debug!(
+            "Loading variable pointer. Key: {:?}, cur_block_id: {}",
+            &key, block_id
+        );
 
         if let Some(var_ptr) = self.variables.get(&key) {
             Ok(*var_ptr)
@@ -251,67 +267,44 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     /// This function assumes that the caller have made sure that the given `var`
     /// contains "AccessInstruction"s.
-    fn get_var_ptr_access_instrs(&mut self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
-        let access_instrs = if let Some(ref access_instrs) = var.access_instrs {
-            access_instrs
-        } else {
-            return Err(self.err(format!(
-                "No access access instructions found for child var \"{}\".",
-                &var.name
-            )));
-        };
-
-        let struct_name = if let Some((root_var_name, decl_id)) = &var.root_struct_var {
-            if let Some(struct_name) = self
-                .analyze_context
-                .get_struct_name(root_var_name.into(), *decl_id)?
-            {
-                struct_name
+    fn get_var_ptr_access_instrs(
+        &mut self,
+        var: &mut Variable,
+    ) -> CustomResult<PointerValue<'ctx>> {
+        let (root_var, access_instrs) =
+            if let Some((ref root_var, ref mut access_instrs)) = var.access_instrs {
+                (root_var, access_instrs)
             } else {
                 return Err(self.err(format!(
-                    "Unable to get struct name for struct var {} in decl id {}.",
-                    &root_var_name, decl_id
+                    "No access access instructions found for child var \"{}\".",
+                    &var.name
                 )));
-            }
-        } else {
-            // Set an empty string if this isn't a struct.
-            String::new()
-        };
+            };
 
         debug!(
             "Loading pointer for child var \"{}\" in `access_instrs`: {:?}",
             &var.name, &access_instrs
         );
 
-        // Get the key containg the variable and the var declare block id.
-        // It will be the "root" struct variable if this is a struct or it will
-        // be "this" `var` if it isnät a struct.
-        let key = if !struct_name.is_empty() {
-            var.root_struct_var
-                .clone()
-                .expect("The existence of this val has already been proven.")
-        } else {
-            let block_id = self.cur_block_id;
-            let decl_block_id = self
-                .analyze_context
-                .get_var_decl_scope(&var.name, block_id)?;
-            (var.name.clone(), decl_block_id)
-        };
-
+        let key = (root_var.name.clone(), root_var.decl_block_id);
         if let Some(base_ptr) = self.variables.get(&key) {
             let mut current_ptr = *base_ptr;
 
             // Iterate throw the hierachy of AccessInstruction to end up with
             // a pointer to the sought after variable.
-            for access_instr in access_instrs.iter() {
+            for access_instr in access_instrs.iter_mut() {
                 current_ptr = match access_instr {
-                    AccessInstruction::StructMember(_, member_name, member_index_opt) => {
+                    AccessInstruction::StructMember(
+                        member_struct,
+                        member_name,
+                        member_index_opt,
+                    ) => {
                         let member_index = if let Some(member_index) = member_index_opt {
                             member_index
                         } else {
                             return Err(self.err(format!(
-                                "Member index not set for member \"{:?}\" in access_instr: {:?}.",
-                                member_name, &access_instrs
+                                "Member index not set for member \"{:?}\" in struct var: {}.",
+                                member_name, &member_struct
                             )));
                         };
 
@@ -319,8 +312,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             .build_struct_gep(current_ptr, *member_index, "struct.gep")
                             .map_err(|_| {
                                 self.err(format!(
-                                    "Unable to gep from struct {:?}. Member name: {}, index {}.",
-                                    &var.access_instrs, member_name, member_index
+                                    "Unable to gep from struct {}. Member name: {}, index {}.",
+                                    &member_struct, member_name, member_index
                                 ))
                             })?
                     }
@@ -328,15 +321,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let tmp = self.builder.build_load(current_ptr, "access.instr.load");
                         if !tmp.is_pointer_value() {
                             return Err(self.err(format!(
-                                "Deref of member {:#?} in struct_info {:#?} didn't return pointer.",
-                                &access_instr, access_instrs
+                                "Deref of member {:#?} didn't return pointer.",
+                                &access_instr
                             )));
                         }
                         tmp.into_pointer_value()
                     }
                     AccessInstruction::Address => current_ptr,
-                    AccessInstruction::ArrayAccess(_) => {
-                        panic!("TODO: ArrayAccess in struct member ptr load.")
+                    AccessInstruction::ArrayAccess(dim) => {
+                        let compiled_dim = self.compile_expr(dim)?;
+                        if !compiled_dim.is_int_value() {
+                            return Err(
+                                self.err(format!("Dim in array didn't compile to int: {:?}", &dim))
+                            );
+                        }
+
+                        // Need to index the pointer to the array first.
+                        let sign_extend = false;
+                        let zero = self.context.i32_type().const_int(0, sign_extend);
+
+                        unsafe {
+                            self.builder.build_gep(
+                                current_ptr,
+                                &[zero, compiled_dim.into_int_value()],
+                                "array.gep",
+                            )
+                        }
                     }
                 };
             }
@@ -387,19 +397,51 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     AnyTypeEnum::VectorType(ty) => ty.ptr_type(address_space).into(),
                     AnyTypeEnum::VoidType(_) => {
                         // TODO: FIXME: Is this OK? Can't use pointer to void, use
-                        //              poniter to a igeneric" I8 instead.
+                        //              pointer to a generic I8 instead.
                         self.context.i8_type().ptr_type(address_space).into()
                     }
                 }
             }
-            Type::Array(t, dim_opt) => {
-                // TODO: Can fetch the inner type and call "array_type()" on it,
-                //       but the function takes a "u32" as argument, so need to
-                //       convert the "dim_opt" Expression into a u32 if possible.
-                return Err(self.err(
-                    "TODO: Array. Need to calculate dimension and the return a \"ArrayType\""
-                        .into(),
-                ));
+
+            // TODO: Calculate array size that contains ther things than just
+            //       a single integer literal
+            Type::Array(inner_ty, dim_opt) => {
+                let lit_dim = if let Some(dim) = dim_opt {
+                    match dim.as_ref() {
+                        Expression::Literal(lit, _) => match lit {
+                            Literal::Integer(num, radix) => u32::from_str_radix(num, *radix)?,
+                            _ => {
+                                return Err(self.err(format!(
+                                    "Invalid literal used as array dimension: {:?}",
+                                    lit
+                                )))
+                            }
+                        },
+                        _ => {
+                            return Err(self.err(format!(
+                                "TODO: Invalid expression used as array dimension: {:?}",
+                                dim
+                            )))
+                        }
+                    }
+                } else {
+                    return Err(self.err("No dimension set for array.".into()));
+                };
+
+                match self.compile_type(inner_ty)? {
+                    AnyTypeEnum::ArrayType(ty) => ty.array_type(lit_dim).into(),
+                    AnyTypeEnum::FloatType(ty) => ty.array_type(lit_dim).into(),
+                    AnyTypeEnum::IntType(ty) => ty.array_type(lit_dim).into(),
+                    AnyTypeEnum::PointerType(ty) => ty.array_type(lit_dim).into(),
+                    AnyTypeEnum::StructType(ty) => ty.array_type(lit_dim).into(),
+                    AnyTypeEnum::VectorType(ty) => ty.array_type(lit_dim).into(),
+                    AnyTypeEnum::FunctionType(_) => {
+                        return Err(self.err("Tried to array index into function type.".into()))
+                    }
+                    AnyTypeEnum::VoidType(_) => {
+                        return Err(self.err("Tried to array index into void type.".into()))
+                    }
+                }
             }
             Type::Void => AnyTypeEnum::VoidType(self.context.void_type()),
             Type::Character => AnyTypeEnum::IntType(self.context.i32_type()),

@@ -96,13 +96,14 @@ pub enum Symbol {
     LineBreak,
     WhiteSpace(usize),
 
-    Pipe,           // |>
-    Range,          // ..
-    RangeInclusive, // ..=
-    Arrow,          // ->
-    FatArrow,       // =>
-    Deref,          // .*
-    Address,        // .&
+    Pipe,            // |>
+    Range,           // ..
+    RangeInclusive,  // ..=
+    Arrow,           // ->
+    FatArrow,        // =>
+    Deref,           // .*
+    Address,         // .&
+    ArrayIndexBegin, // .[
 
     EqualsOperator,
     NotEquals,
@@ -327,6 +328,7 @@ impl LexToken {
                     ("..", Symbol::Range),
                     (".*", Symbol::Deref),
                     (".&", Symbol::Address),
+                    (".[", Symbol::ArrayIndexBegin),
                     ("..=", Symbol::RangeInclusive),
                     ("...", Symbol::TripleDot),
                 ],

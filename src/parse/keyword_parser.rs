@@ -1,6 +1,9 @@
 use super::{
     iter::{ParseTokenIter, DEFAULT_STOP_CONDS},
-    token::{BlockHeader, Function, ParseToken, ParseTokenKind, Path, Statement, Struct, Variable},
+    token::{
+        BlockHeader, Expression, Function, ParseToken, ParseTokenKind, Path, Statement, Struct,
+        Variable,
+    },
 };
 use crate::{
     lex::token::{Keyword, LexTokenKind, Symbol},
@@ -50,7 +53,10 @@ impl<'a> KeyworkParser<'a> {
             Keyword::External => self.parse_external(),
 
             Keyword::Var => self.parse_var_decl(),
-            Keyword::Const => self.parse_const_decl(),
+            Keyword::Const => {
+                // TODO: self.parse_const_decl()
+                self.parse_var_decl()
+            }
             Keyword::Static => Err(self.iter.err("\"Static\" keyword not implemented.".into())),
             Keyword::Private => Err(self.iter.err("\"Private\" keyword not implemented.".into())),
             Keyword::Public => Err(self.iter.err("\"Public\" keyword not implemented.".into())),
@@ -62,7 +68,7 @@ impl<'a> KeyworkParser<'a> {
                 .iter
                 .err("\"Interface\" keyword not implemented.".into())),
 
-            Keyword::Defer => Err(self.iter.err("\"Defer\" keyword not implemented.".into())),
+            Keyword::Defer => self.parse_defer(),
             Keyword::With => Err(self.iter.err("\"With\" keyword not implemented.".into())),
 
             Keyword::Test => Err(self.iter.err("\"Test\" keyword not implemented.".into())),
@@ -218,7 +224,7 @@ impl<'a> KeyworkParser<'a> {
         // If the next lex token is a "LineBreak", no expression is given after
         // this "return" keyword. Assume it is a return for a function with no
         // return value.
-        let expr = if let Some(lex_token) = self.iter.peek_skip_space_line() {
+        let expr = if let Some(lex_token) = self.iter.peek_skip_space() {
             if let LexTokenKind::Symbol(Symbol::LineBreak) = lex_token.kind {
                 None
             } else {
@@ -438,6 +444,7 @@ impl<'a> KeyworkParser<'a> {
         Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 
+    /*
     // TODO: Maybe don't force a type, let the type be infered (?).
     /// Parses a const statement.
     ///   "const <ident> : <type> = <expr>"
@@ -497,6 +504,7 @@ impl<'a> KeyworkParser<'a> {
         let kind = ParseTokenKind::Statement(var_decl);
         Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
+    */
 
     /// Parses a function and its body. See `parse_func_proto` for the structure
     /// of a function header/prototype.
@@ -617,5 +625,15 @@ impl<'a> KeyworkParser<'a> {
 
         let kind = ParseTokenKind::Block(header, block_id, body);
         Ok(ParseToken::new(kind, line_nr, column_nr))
+    }
+
+    /// Parses a defer statement.
+    ///   "defer <expr>"
+    /// The "defer" keyword has already been consumed when this function is called.
+    fn parse_defer(&mut self) -> CustomResult<ParseToken> {
+        let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
+
+        let kind = ParseTokenKind::Statement(Statement::Defer(expr));
+        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
     }
 }

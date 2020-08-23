@@ -3,7 +3,7 @@ use crate::{
     error::LangError,
     parse::token::{
         AccessInstruction, BinaryOperation, BinaryOperator, BlockHeader, Expression, FunctionCall,
-        Operation, ParseToken, ParseTokenKind, Statement, StructInit, UnaryOperation,
+        Operation, ParseToken, ParseTokenKind, RootVariable, Statement, StructInit, UnaryOperation,
         UnaryOperator,
     },
 };
@@ -119,6 +119,11 @@ impl<'a> IndexingAnalyzer<'a> {
         match expr {
             Expression::FunctionCall(func_call) => self.analyze_func_call(func_call),
             Expression::StructInit(struct_init) => self.analyze_struct_init(struct_init),
+            Expression::ArrayInit(args) => {
+                for arg in args {
+                    self.analyze_expr(&mut arg.value);
+                }
+            }
             Expression::Operation(op) => self.analyze_op(op),
 
             Expression::Literal(..) | Expression::Type(_) | Expression::Variable(_) => (),
@@ -150,8 +155,11 @@ impl<'a> IndexingAnalyzer<'a> {
     fn analyze_bin_op(&mut self, bin_op: &mut BinaryOperation) {
         let block_id = self.context.cur_block_id;
 
+        // Analyze the left hand side before the Dot logic and then analyze
+        // the right hand side after the Dot logic. This will ensure that
+        // it is evaluated left-to-right which will allow one to access find
+        // the "root variable" from the left before evaluating the right.
         self.analyze_expr(&mut bin_op.left);
-        self.analyze_expr(&mut bin_op.right);
 
         if let BinaryOperator::Dot = bin_op.operator {
             if let Some(rhs) = bin_op.right.eval_to_var() {
@@ -167,9 +175,9 @@ impl<'a> IndexingAnalyzer<'a> {
                     // when the struct declarations are analyzed.
                     if let Some(ref struct_access_instrs) = lhs.access_instrs {
                         let mut member_access_instrs = struct_access_instrs.clone();
-                        member_access_instrs.push(access_instr);
+                        member_access_instrs.1.push(access_instr);
+                        member_access_instrs.0.is_struct = true;
 
-                        rhs.root_struct_var = lhs.root_struct_var.clone();
                         rhs.access_instrs = Some(member_access_instrs);
                     } else {
                         let var_decl_id =
@@ -181,8 +189,8 @@ impl<'a> IndexingAnalyzer<'a> {
                                 }
                             };
 
-                        rhs.root_struct_var = Some((struct_var_name, var_decl_id));
-                        rhs.access_instrs = Some(vec![access_instr]);
+                        let root_var = RootVariable::new(struct_var_name, var_decl_id, true);
+                        rhs.access_instrs = Some((root_var, vec![access_instr]));
                     }
                 } else {
                     panic!(
@@ -193,18 +201,23 @@ impl<'a> IndexingAnalyzer<'a> {
                 }
             }
         }
+
+        self.analyze_expr(&mut bin_op.right);
     }
 
     /// Analyzes a unary operation. If it is a deref/address/array access it also
     /// adds a "AccessInstruction" to the Variable contain in the `un_op.value`.
     fn analyze_un_op(&mut self, un_op: &mut UnaryOperation) {
+        let block_id = self.context.cur_block_id;
+
         self.analyze_expr(&mut un_op.value);
 
         if let Some(var) = un_op.value.eval_to_var() {
-            let access_instr_opt = match &un_op.operator {
+            let access_instr_opt = match &mut un_op.operator {
                 UnaryOperator::Deref => Some(AccessInstruction::Deref),
                 UnaryOperator::Address => Some(AccessInstruction::Address),
-                UnaryOperator::ArrayAccess(dim) => {
+                UnaryOperator::ArrayAccess(ref mut dim) => {
+                    self.analyze_expr(dim);
                     Some(AccessInstruction::ArrayAccess(*dim.clone()))
                 }
                 _ => None,
@@ -213,10 +226,25 @@ impl<'a> IndexingAnalyzer<'a> {
             if let Some(access_instr) = access_instr_opt {
                 if let Some(ref old_access_instrs) = var.access_instrs {
                     let mut new_access_instrs = old_access_instrs.clone();
-                    new_access_instrs.push(access_instr);
+                    new_access_instrs.1.push(access_instr);
+
                     var.access_instrs = Some(new_access_instrs);
                 } else {
-                    var.access_instrs = Some(vec![access_instr]);
+                    let var_decl_id = match self.context.get_var_decl_scope(&var.name, block_id) {
+                        Ok(var_decl_id) => var_decl_id,
+                        Err(e) => {
+                            self.errors.push(e);
+                            return;
+                        }
+                    };
+
+                    // TODO: Does the `root_var` need to be set in the if-case
+                    //       above as well? Or is it enough just setting it here?
+                    // `is_struct` is set to false here. Might be changed to true
+                    // if at a later time during index analyzing it sees that
+                    // it does a struct index.
+                    let root_var = RootVariable::new(var.name.clone(), var_decl_id, false);
+                    var.access_instrs = Some((root_var, vec![access_instr]));
                 }
             }
         } else {

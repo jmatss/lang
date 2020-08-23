@@ -2,7 +2,7 @@ use super::generator::CodeGen;
 use crate::{
     common::variable_type::Type,
     lex::token::Literal,
-    parse::token::{Expression, FunctionCall, StructInit, TypeStruct},
+    parse::token::{Argument, Expression, FunctionCall, StructInit, TypeStruct},
     CustomResult,
 };
 use inkwell::{
@@ -25,6 +25,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Expression::FunctionCall(func_call) => self.compile_func_call(func_call),
             Expression::Operation(op) => self.compile_op(op),
             Expression::StructInit(struct_init) => self.compile_struct_init(struct_init),
+            Expression::ArrayInit(args) => self.compile_array_init(args),
             Expression::Type(ty) => {
                 // TODO: Does something need to be done here? Does a proper value
                 //       need to be returned? For now just return a dummy value.
@@ -321,6 +322,68 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .builder
             .build_load(struct_ptr, "struct.init.load")
             .into())
+    }
+
+    /// Generates a array creation/initialization.
+    fn compile_array_init(&mut self, args: &mut Vec<Argument>) -> CustomResult<AnyValueEnum<'ctx>> {
+        if args.is_empty() {
+            return Err(self.err("Array init with zero arguments.".into()));
+        }
+
+        // Compile all arguments(all values that will be set to initialize the
+        // array members) and save the type of the first argument which will
+        // be used to deduce the type of the whole array.
+        let mut compiled_args = Vec::with_capacity(args.len());
+
+        // Dummy arg_type to start with. If it is never set, it will never be used.
+        let mut arg_type = self.context.i8_type().into();
+        for arg in args.iter_mut() {
+            let any_value = self.compile_expr(&mut arg.value)?;
+            let basic_value = CodeGen::any_into_basic_value(any_value)?;
+            arg_type = basic_value.get_type();
+            compiled_args.push(basic_value);
+        }
+
+        let array_type = match arg_type {
+            BasicTypeEnum::ArrayType(ty) => ty.array_type(args.len() as u32),
+            BasicTypeEnum::FloatType(ty) => ty.array_type(args.len() as u32),
+            BasicTypeEnum::IntType(ty) => ty.array_type(args.len() as u32),
+            BasicTypeEnum::PointerType(ty) => ty.array_type(args.len() as u32),
+            BasicTypeEnum::StructType(ty) => ty.array_type(args.len() as u32),
+            BasicTypeEnum::VectorType(ty) => ty.array_type(args.len() as u32),
+        };
+
+        // TODO: Check so that the type of all arguments are the same (since
+        //       they are all part of the same array).
+
+        // TODO: What is the size? Is it the length or size in bytes?
+        let sign_extend = false;
+        let size = self
+            .context
+            .i32_type()
+            .const_int(args.len() as u64, sign_extend);
+        let array_ptr = self
+            .builder
+            .build_array_alloca(array_type, size, "array.init");
+
+        // Since the array will always be allocated on the stack, when geping
+        // the array one has to first index into the pointer. So a zero index
+        // will always be added as a first index when geping arrays.
+        let zero = self.context.i32_type().const_int(0, sign_extend);
+
+        for (i, arg_value) in compiled_args.iter().enumerate() {
+            let sign_extend = false;
+
+            let index = self.context.i32_type().const_int(i as u64, sign_extend);
+            let member_ptr = unsafe {
+                self.builder
+                    .build_gep(array_ptr, &[zero, index], "array.init.gep")
+            };
+
+            self.builder.build_store(member_ptr, *arg_value);
+        }
+
+        Ok(self.builder.build_load(array_ptr, "array.init.load").into())
     }
 
     fn infer_arg_type(

@@ -90,6 +90,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             //BlockHeader::Struct(struct_) => self.compile_struct(struct_),
             //BlockHeader::Enum(enum_) => self.compile_enum(enum_),
             //BlockHeader::Interface(interface) => self.compile_interface(interface),
+            BlockHeader::Anonymous => {
+                self.compile_anon(id, body)?;
+            }
             BlockHeader::If => {
                 self.compile_if(id, body)?;
             }
@@ -177,6 +180,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for token in body {
             self.cur_line_nr = token.line_nr;
             self.cur_column_nr = token.column_nr;
+            self.cur_block_id = id;
+
             self.compile(token)?;
         }
 
@@ -269,6 +274,53 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         */
     }
 
+    fn compile_anon(&mut self, id: BlockId, body: &'ctx mut [ParseToken]) -> CustomResult<()> {
+        let cur_func = self
+            .cur_func
+            .ok_or_else(|| self.err("cur_func is None for \"If\".".into()))?;
+
+        let cur_block = self
+            .cur_basic_block
+            .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
+
+        for token in body.iter_mut() {
+            self.cur_line_nr = token.line_nr;
+            self.cur_column_nr = token.column_nr;
+
+            self.cur_block_id = id;
+            self.cur_basic_block = Some(cur_block);
+
+            self.builder.position_at_end(cur_block);
+            self.compile(token)?;
+        }
+
+        // If all paths in this block doesn't branch away, it needs to branch
+        // to a merge block. Otherwise, if all paths branches away, no merge
+        // block should be created.
+        if let Some(block_info) = self.analyze_context.block_info.get(&id) {
+            self.cur_basic_block =
+                if !block_info.all_children_contains_returns || !block_info.contains_return {
+                    let merge_block = self.context.append_basic_block(cur_func, "anon.merge");
+                    self.merge_blocks.insert(id, merge_block);
+
+                    self.builder.position_at_end(cur_block);
+                    self.builder.build_unconditional_branch(merge_block);
+
+                    self.builder.position_at_end(merge_block);
+                    Some(merge_block)
+                } else {
+                    None
+                };
+
+            Ok(())
+        } else {
+            Err(self.err(format!(
+                "Unable to find block info for block with ID: {}",
+                id
+            )))
+        }
+    }
+
     /// All the "ParseToken" in the body should be "IfCase"s.
     fn compile_if(&mut self, id: BlockId, body: &'ctx mut [ParseToken]) -> CustomResult<()> {
         self.cur_block_id = id;
@@ -330,6 +382,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for (index, if_case) in body.iter_mut().enumerate() {
             self.cur_line_nr = if_case.line_nr;
             self.cur_column_nr = if_case.column_nr;
+            self.cur_block_id = id;
 
             if let ParseTokenKind::Block(
                 BlockHeader::IfCase(ref mut expr_opt),
@@ -402,10 +455,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         // Compile all tokens inside this if-case.
         for token in body {
-            // Need to reset `cur_block` at every iteration because of recursion.
-            self.cur_basic_block = Some(cur_block);
             self.cur_line_nr = token.line_nr;
             self.cur_column_nr = token.column_nr;
+
+            self.cur_block_id = id;
+            self.cur_basic_block = Some(cur_block);
 
             self.builder.position_at_end(cur_block);
             self.compile(token)?;
@@ -502,9 +556,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.cur_line_nr = token.line_nr;
             self.cur_column_nr = token.column_nr;
 
+            self.cur_block_id = id;
             self.cur_basic_block = Some(while_body_block);
-            self.builder.position_at_end(while_body_block);
 
+            self.builder.position_at_end(while_body_block);
             self.compile(token)?;
         }
 

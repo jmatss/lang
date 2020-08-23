@@ -49,7 +49,8 @@ impl<'a> BlockAnalyzer<'a> {
                     | ParseTokenKind::Block(BlockHeader::MatchCase(_), ..)
                     | ParseTokenKind::Block(BlockHeader::For(..), ..)
                     | ParseTokenKind::Block(BlockHeader::While(..), ..)
-                    | ParseTokenKind::Block(BlockHeader::Test(_), ..) => {
+                    | ParseTokenKind::Block(BlockHeader::Test(_), ..)
+                    | ParseTokenKind::Block(BlockHeader::Anonymous, ..) => {
                         if let Some(child_block_info) = self.analyze_block(token) {
                             if !child_block_info.all_children_contains_returns {
                                 all_children_contains_returns = false;

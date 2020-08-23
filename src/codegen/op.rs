@@ -184,13 +184,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     ));
                 }
             }
-            UnaryOperator::ArrayAccess(ref mut dim) => {
+            UnaryOperator::ArrayAccess(_) => {
                 if let Some(var) = un_op.value.eval_to_var() {
-                    self.compile_un_op_array_access(var, dim)?
+                    self.compile_un_op_array_access(var)?
                 } else {
                     return Err(self.err(
                         format!("Trying to index invalid type: {:?}", &un_op.value),
-                        
                     ));
                 }
             }
@@ -944,7 +943,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ret_type: AnyTypeEnum<'ctx>,
         is_const: bool,
         value: BasicValueEnum<'ctx>,
-        var: &Variable,
+        var: &mut Variable,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
@@ -980,7 +979,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ret_type: AnyTypeEnum<'ctx>,
         is_const: bool,
         value: BasicValueEnum<'ctx>,
-        var: &Variable,
+        var: &mut Variable,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
@@ -1017,40 +1016,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         value: &mut Expression,
         basic_value: BasicValueEnum<'ctx>,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        match value {
-            Expression::Variable(var) => {
-                Ok(self.compile_var_load(var)?.into())
-            }
-            Expression::Operation(Operation::BinaryOperation(bin_op)) => match bin_op.operator {
-                BinaryOperator::Dot => {
-                    if let Some(var) = bin_op.right.eval_to_var() {
-                        Ok(self.compile_var_load(var)?.into())
-                    } else {
-                        panic!("HERE 67123")
-                    }
-                }
-                _ => Err(self.err(
-                    format!("Invalid op in UnaryOperator::Deref: {:?}", bin_op.operator),
-                    
-                )),
-            },
-
-            Expression::Operation(Operation::UnaryOperation(un_op)) => todo!(),
-
-            Expression::Literal(..)
-            | Expression::Type(_)
-            | Expression::FunctionCall(_)
-            | Expression::StructInit(_) => Err(self.err(
-                format!(
-                    "Invalid type for UnaryOperator::Deref: {:?}",
-                    basic_value.get_type()
-                ),
-                
-            )),
+        if let Some(var) = value.eval_to_var() {
+            Ok(self.compile_var_load(var)?.into())
+        } else {
+            Err(self.err(format!("Value didn't eval to var in deref: {:?}", value)))
         }
     }
 
-    fn compile_un_op_address(&mut self, var: &Variable) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_un_op_address(&mut self, var: &mut Variable) -> CustomResult<AnyValueEnum<'ctx>> {
+        Ok(self.compile_var_load(var)?.into())
+        /*
         // Get the pointer to the variable from `variables` that contains
         // pointers to all variables allocated during code generation.
         let block_id = self.cur_block_id;
@@ -1070,13 +1045,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 
             ))
         }
+        */
     }
 
     fn compile_un_op_array_access(
         &mut self,
-        var: &Variable,
-        dim: &mut Expression,
+        var: &mut Variable,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
+        Ok(self.compile_var_load(var)?.into())
+        /*
         let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
@@ -1087,7 +1064,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if !compiled_dim.is_int_value() {
             return Err(self.err(
                 format!("Dim in array didn't compile to int: {:?}", &dim),
-                
             ));
         }
 
@@ -1107,6 +1083,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 
             ))
         }
+        */
     }
 
     fn compile_un_op_negative(

@@ -87,9 +87,9 @@ pub enum Expression {
     // TODO: FIXME: The "Variable" struct contains a type. Should the type be
     //              in this enum instead?
     Variable(Variable),
-    //ArrayAccess(Option<ArrayAccess>),
     FunctionCall(FunctionCall),
     StructInit(StructInit),
+    ArrayInit(Vec<Argument>),
     //MacroCall(Option<MacroCall>),
     Operation(Operation),
 }
@@ -239,6 +239,9 @@ pub enum BlockHeader {
     Struct(Struct),
     Enum(Enum),
     Interface(Interface),
+
+    // A anonymous block "{ ... }" that can be used to limit the scope.
+    Anonymous,
 
     // Any `IfCase` blocks should be grouped together under one `If`.
     // A `Ifcase` is a if/elif/else with its corresponding eval expression.
@@ -478,6 +481,23 @@ pub enum AccessInstruction {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct RootVariable {
+    pub name: String,
+    pub decl_block_id: BlockId,
+    pub is_struct: bool,
+}
+
+impl RootVariable {
+    pub fn new(name: String, decl_block_id: BlockId, is_struct: bool) -> Self {
+        Self {
+            name,
+            decl_block_id,
+            is_struct,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
     pub name: String,
     pub ret_type: Option<TypeStruct>,
@@ -489,13 +509,10 @@ pub struct Variable {
     /// some sort of deref/address/array access or a combination of them. This
     /// will require extra instructions when accessing the contents of the variable
     /// that will be "reproduced" when generating the code to access this var.
-    pub access_instrs: Option<Vec<AccessInstruction>>,
-
-    /// If set contains the "root" struct var name that is to be indexed. If
-    /// this is anything other than a struct member, this will not be set.
-    /// The string is the name of the "root" variable and the block id is the
-    /// block id where the struct was declared.
-    pub root_struct_var: Option<(String, BlockId)>,
+    /// The "RootVariable" is the "root" variable that will is the entry point
+    /// and to get this specific self "variable" instace, one will apply
+    /// the "AccessInstruction"s on it.
+    pub access_instrs: Option<(RootVariable, Vec<AccessInstruction>)>,
 }
 
 impl Variable {
@@ -511,7 +528,6 @@ impl Variable {
             modifiers,
             is_const,
             access_instrs: None,
-            root_struct_var: None,
         }
     }
 }
@@ -609,30 +625,29 @@ impl Operator {
 
     /*
         Precedence:
-            0   ( )      (precedence for parenthesis always highest)
-            1   []       (indexing)
-            2   . .* .&  (function calls, deref, address etc.)
-            3   +x -x
-            4   x++ x--  (only postfix)
-            5   ~ !
-            6   as
-            7   **       (power)
-            8   * / %
-            9   + -
-            10  << >>
-            11  < > <= >= is of
-            12  == !=
-            13  &
-            14  ^
-            15  |
-            16  and (bool)
-            17  or (bool)
-            18  .. ..=
-            19  in
+            0   ( )          (precedence for parenthesis always highest)
+            1   . .* .& .[]  (function calls, deref, address, indexing etc.)
+            2   +x -x
+            3   x++ x--      (only postfix)
+            4   ~ !
+            5   as
+            6   **           (power)
+            7   * / %
+            8   + -
+            9   << >>
+            10  < > <= >= is of
+            11  == !=
+            12  &
+            13  ^
+            14  |
+            15  and          (bool)
+            16  or           (bool)
+            17  .. ..=
+            18  in
 
             (Currently assignments aren't counted as expression, but they would
             have the lowest precedence if they were)
-            20  = += -= *= /= %= **= &= |= ^= <<= >>=
+            19  = += -= *= /= %= **= &= |= ^= <<= >>=
     */
     fn lookup(&self) -> Option<(bool, usize, Fix)> {
         if let Operator::ParenthesisBegin = self {
@@ -641,49 +656,49 @@ impl Operator {
             Some((true, 0, Fix::Dummy))
         } else if let Operator::UnaryOperator(unary_op) = self {
             Some(match unary_op {
-                UnaryOperator::Positive => (true, 3, Fix::Prefix),
-                UnaryOperator::Negative => (true, 3, Fix::Prefix),
-                UnaryOperator::Increment => (true, 4, Fix::Postfix),
-                UnaryOperator::Decrement => (true, 4, Fix::Postfix),
+                UnaryOperator::Positive => (true, 2, Fix::Prefix),
+                UnaryOperator::Negative => (true, 2, Fix::Prefix),
+                UnaryOperator::Increment => (true, 3, Fix::Postfix),
+                UnaryOperator::Decrement => (true, 3, Fix::Postfix),
 
-                UnaryOperator::BitComplement => (true, 5, Fix::Prefix),
-                UnaryOperator::BoolNot => (true, 5, Fix::Prefix),
-                UnaryOperator::Deref => (true, 2, Fix::Postfix),
-                UnaryOperator::Address => (true, 2, Fix::Postfix),
+                UnaryOperator::BitComplement => (true, 4, Fix::Prefix),
+                UnaryOperator::BoolNot => (true, 4, Fix::Prefix),
+                UnaryOperator::Deref => (true, 1, Fix::Postfix),
+                UnaryOperator::Address => (true, 1, Fix::Postfix),
                 UnaryOperator::ArrayAccess(_) => (true, 1, Fix::Postfix),
             })
         } else if let Operator::BinaryOperator(binary_op) = self {
             Some(match binary_op {
-                BinaryOperator::In => (false, 19, Fix::Dummy),
-                BinaryOperator::Is => (true, 11, Fix::Dummy),
-                BinaryOperator::As => (true, 6, Fix::Dummy),
-                BinaryOperator::Of => (true, 11, Fix::Dummy),
-                BinaryOperator::Range => (true, 18, Fix::Dummy),
-                BinaryOperator::RangeInclusive => (true, 18, Fix::Dummy),
-                BinaryOperator::Dot => (true, 2, Fix::Dummy),
+                BinaryOperator::In => (false, 18, Fix::Dummy),
+                BinaryOperator::Is => (true, 10, Fix::Dummy),
+                BinaryOperator::As => (true, 5, Fix::Dummy),
+                BinaryOperator::Of => (true, 10, Fix::Dummy),
+                BinaryOperator::Range => (true, 17, Fix::Dummy),
+                BinaryOperator::RangeInclusive => (true, 17, Fix::Dummy),
+                BinaryOperator::Dot => (true, 1, Fix::Dummy),
 
-                BinaryOperator::Equals => (true, 12, Fix::Dummy),
-                BinaryOperator::NotEquals => (true, 12, Fix::Dummy),
-                BinaryOperator::LessThan => (true, 11, Fix::Dummy),
-                BinaryOperator::GreaterThan => (true, 11, Fix::Dummy),
-                BinaryOperator::LessThanOrEquals => (true, 11, Fix::Dummy),
-                BinaryOperator::GreaterThanOrEquals => (true, 11, Fix::Dummy),
+                BinaryOperator::Equals => (true, 11, Fix::Dummy),
+                BinaryOperator::NotEquals => (true, 11, Fix::Dummy),
+                BinaryOperator::LessThan => (true, 10, Fix::Dummy),
+                BinaryOperator::GreaterThan => (true, 10, Fix::Dummy),
+                BinaryOperator::LessThanOrEquals => (true, 10, Fix::Dummy),
+                BinaryOperator::GreaterThanOrEquals => (true, 10, Fix::Dummy),
 
-                BinaryOperator::Addition => (true, 9, Fix::Dummy),
-                BinaryOperator::Subtraction => (true, 9, Fix::Dummy),
-                BinaryOperator::Multiplication => (true, 8, Fix::Dummy),
-                BinaryOperator::Division => (true, 8, Fix::Dummy),
-                BinaryOperator::Modulus => (true, 8, Fix::Dummy),
-                BinaryOperator::Power => (false, 7, Fix::Dummy),
+                BinaryOperator::Addition => (true, 8, Fix::Dummy),
+                BinaryOperator::Subtraction => (true, 8, Fix::Dummy),
+                BinaryOperator::Multiplication => (true, 7, Fix::Dummy),
+                BinaryOperator::Division => (true, 7, Fix::Dummy),
+                BinaryOperator::Modulus => (true, 7, Fix::Dummy),
+                BinaryOperator::Power => (false, 6, Fix::Dummy),
 
-                BinaryOperator::BitAnd => (true, 13, Fix::Dummy),
-                BinaryOperator::BitOr => (true, 15, Fix::Dummy),
-                BinaryOperator::BitXor => (true, 14, Fix::Dummy),
-                BinaryOperator::ShiftLeft => (true, 10, Fix::Dummy),
-                BinaryOperator::ShiftRight => (true, 10, Fix::Dummy),
+                BinaryOperator::BitAnd => (true, 12, Fix::Dummy),
+                BinaryOperator::BitOr => (true, 14, Fix::Dummy),
+                BinaryOperator::BitXor => (true, 13, Fix::Dummy),
+                BinaryOperator::ShiftLeft => (true, 9, Fix::Dummy),
+                BinaryOperator::ShiftRight => (true, 9, Fix::Dummy),
 
-                BinaryOperator::BoolAnd => (true, 16, Fix::Dummy),
-                BinaryOperator::BoolOr => (true, 17, Fix::Dummy),
+                BinaryOperator::BoolAnd => (true, 15, Fix::Dummy),
+                BinaryOperator::BoolOr => (true, 16, Fix::Dummy),
 
                 _ => return None,
             })

@@ -60,7 +60,7 @@ impl LexTokenIter {
                 let (symbol_kind, n) = symbol_kind_tup;
 
                 // Add special cases for string- and char literals, they start
-                // and end with " or '.
+                // and end with " or '
                 // Also filter out comments. If a comment is found, debug print
                 // the comment and parse the next token after the comment.
                 match symbol_kind {

@@ -150,7 +150,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Type::Pointer(Box::new(var_ret_type.clone())),
                 None,
             ))?,
-            AccessType::ArrayAccess => panic!("TODO: ArrayAccess in compile_assign."),
+            AccessType::ArrayAccess => match &var_ret_type.t {
+                Type::Array(inner, _) => self.compile_type(&inner)?,
+                _ => {
+                    return Err(self.err(format!(
+                        "Tried to array index variable \"{}\" that isn't a array. Is: {:?}.",
+                        &var.name, var_ret_type.t
+                    )))
+                }
+            },
         };
 
         let right_any_value = self.compile_expr(rhs)?;

@@ -15,24 +15,16 @@ use crate::{
 };
 
 /// The common stop conditions used when parsing expressions.
-pub const DEFAULT_STOP_CONDS: [Symbol; 5] = [
-    Symbol::LineBreak,
-    Symbol::SemiColon,
-    Symbol::Comma,
-    Symbol::CurlyBracketBegin,
-    Symbol::CurlyBracketEnd,
-];
+pub const DEFAULT_STOP_CONDS: [Symbol; 3] = [Symbol::LineBreak, Symbol::SemiColon, Symbol::Comma];
 
 /// The stop conditions used when one wants to parse either a "regular"
 /// expressions or a expression that is the lhs of a assignment.
 /// Other that the `DEFAULT_STOP_CONDS` this array will contains all assignment
 /// symbols plus the Colon symbol to stop on types.
-pub const DEFAULT_ASSIGN_STOP_CONDS: [Symbol; 18] = [
+pub const DEFAULT_ASSIGN_STOP_CONDS: [Symbol; 16] = [
     Symbol::LineBreak,
     Symbol::SemiColon,
     Symbol::Comma,
-    Symbol::CurlyBracketBegin,
-    Symbol::CurlyBracketEnd,
     Symbol::Colon,
     Symbol::Equals,
     Symbol::AssignAddition,
@@ -143,6 +135,15 @@ impl ParseTokenIter {
                     }
                 }
 
+                // A anonymous block.
+                LexTokenKind::Symbol(Symbol::CurlyBracketBegin) => {
+                    // Put back the CurlyBracketBegin, it is expected to be the
+                    // first symbol found in the `self.next_block` function.
+                    self.put_back(lex_token)?;
+
+                    return self.next_block(BlockHeader::Anonymous);
+                }
+
                 // Error if the iterator finds a lonely symbol of these types:
                 LexTokenKind::Symbol(Symbol::ParenthesisEnd)
                 | LexTokenKind::Symbol(Symbol::CurlyBracketEnd)
@@ -200,9 +201,6 @@ impl ParseTokenIter {
         }
 
         loop {
-            let token = self.next_token()?;
-            block_tokens.push(token);
-
             // If the next lex token is a "CurlyBracketEnd", the end of the
             // block have been reached. Break and return.
             if let Some(lex_token) = self.peek_skip_space_line() {
@@ -211,6 +209,9 @@ impl ParseTokenIter {
                     break;
                 }
             }
+
+            let token = self.next_token()?;
+            block_tokens.push(token);
         }
 
         Ok(ParseToken {
@@ -344,8 +345,17 @@ impl ParseTokenIter {
                     }
                 }
 
-                let stop_conds = [Symbol::Comma, end_symbol.clone()];
-                let arg = Argument::new(name, self.parse_expr(&stop_conds)?);
+                // Edge case if the stop condition is a parenthesis. The reason
+                // is that parenthesis are allowed in expression, so one doesn't
+                // want to exit to early in the expression. The "ExprParser"
+                // itself has logic internally that stop the parsing if a
+                // parenthesis is found that doesn't belong to the expression,
+                // so this should not be a problem.
+                let arg = if end_symbol == Symbol::ParenthesisEnd {
+                    Argument::new(name, self.parse_expr(&[Symbol::Comma])?)
+                } else {
+                    Argument::new(name, self.parse_expr(&[Symbol::Comma, end_symbol.clone()])?)
+                };
 
                 arguments.push(arg);
             } else {
@@ -521,26 +531,21 @@ impl ParseTokenIter {
     /// it will be skipped and the item after that will be fetched.
     #[inline]
     pub fn next_skip_space(&mut self) -> Option<LexToken> {
-        // Since the lexer parses all consecutive white spaces, this code only
-        // needs to check for a white space onces, since there is no possiblity
-        // that two tokens in a row are white spaces.
-        if let Some(lex_token) = self.iter.next() {
-            if let LexTokenKind::Symbol(Symbol::WhiteSpace(_)) = lex_token.kind {
-                if let Some(next_lex_token) = self.iter.next() {
-                    self.cur_line_nr = next_lex_token.line_nr;
-                    self.cur_column_nr = next_lex_token.column_nr;
-                    Some(next_lex_token)
-                } else {
-                    None
+        while let Some(lex_token) = self.iter.next() {
+            self.cur_line_nr = lex_token.line_nr;
+            self.cur_column_nr = lex_token.column_nr;
+
+            match lex_token.kind {
+                LexTokenKind::Symbol(Symbol::WhiteSpace(_)) => {
+                    continue;
                 }
-            } else {
-                self.cur_line_nr = lex_token.line_nr;
-                self.cur_column_nr = lex_token.column_nr;
-                Some(lex_token)
+                _ => return Some(lex_token),
             }
-        } else {
-            None
         }
+
+        // The last token should always be a EOF (which isn't a white space or
+        // line break) and this point should therefore NOT be reachable.
+        unreachable!();
     }
 
     /// Gets the next item from the iterator that is NOT a white space or a
@@ -548,14 +553,15 @@ impl ParseTokenIter {
     #[inline]
     pub fn next_skip_space_line(&mut self) -> Option<LexToken> {
         while let Some(lex_token) = self.iter.next() {
+            self.cur_line_nr = lex_token.line_nr;
+            self.cur_column_nr = lex_token.column_nr;
+
             match lex_token.kind {
                 LexTokenKind::Symbol(Symbol::WhiteSpace(_))
-                | LexTokenKind::Symbol(Symbol::LineBreak) => (),
-                _ => {
-                    self.cur_line_nr = lex_token.line_nr;
-                    self.cur_column_nr = lex_token.column_nr;
-                    return Some(lex_token);
+                | LexTokenKind::Symbol(Symbol::LineBreak) => {
+                    continue;
                 }
+                _ => return Some(lex_token),
             }
         }
 
@@ -569,7 +575,7 @@ impl ParseTokenIter {
     #[inline]
     pub fn peek_skip_space(&mut self) -> Option<LexToken> {
         // Since the lexer parses all consecutive white spaces, this code only
-        // needs to check for a white space onces, since there is no possiblity
+        // needs to check for a white space ones, since there is no possiblity
         // that two tokens in a row are white spaces.
         if let Some(tokens) = self.iter.peek_two() {
             if let LexTokenKind::Symbol(Symbol::WhiteSpace(_)) = tokens.0.kind {
