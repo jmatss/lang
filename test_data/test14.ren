@@ -1,0 +1,45 @@
+external function printf(format: {u8}, ...) -> i32
+
+function double(n: {i32}) -> bool
+{
+    n.* *= 2
+
+    return true
+}
+
+function main() -> i32
+{
+    var num = 3
+    
+    if true and 1 == 1 or double(num.&) {
+    }
+    
+    if false and double(num.&)
+    {
+        printf("TRUE\n")
+    }
+    else true or double(num.&)
+    {
+        printf("MIDDLE\n")
+    }
+    else
+    {
+        printf("FALSE\n")
+    }
+    
+    if num == 6
+    {
+        printf("NOT short circuit")
+    }
+    else
+    {
+        printf("short circuit")
+    }
+    
+
+    return 0
+}
+
+// a and b  =>  if a { b } else { false }
+
+// a or b   =>  if a { true } else { b }

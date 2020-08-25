@@ -15,16 +15,22 @@ use crate::{
 };
 
 /// The common stop conditions used when parsing expressions.
-pub const DEFAULT_STOP_CONDS: [Symbol; 3] = [Symbol::LineBreak, Symbol::SemiColon, Symbol::Comma];
+pub const DEFAULT_STOP_CONDS: [Symbol; 4] = [
+    Symbol::LineBreak,
+    Symbol::SemiColon,
+    Symbol::Comma,
+    Symbol::CurlyBracketBegin,
+];
 
 /// The stop conditions used when one wants to parse either a "regular"
 /// expressions or a expression that is the lhs of a assignment.
 /// Other that the `DEFAULT_STOP_CONDS` this array will contains all assignment
 /// symbols plus the Colon symbol to stop on types.
-pub const DEFAULT_ASSIGN_STOP_CONDS: [Symbol; 16] = [
+pub const DEFAULT_ASSIGN_STOP_CONDS: [Symbol; 17] = [
     Symbol::LineBreak,
     Symbol::SemiColon,
     Symbol::Comma,
+    Symbol::CurlyBracketBegin,
     Symbol::Colon,
     Symbol::Equals,
     Symbol::AssignAddition,

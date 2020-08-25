@@ -422,7 +422,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         body: &'ctx mut [ParseToken],
         branch_info: &BranchInfo<'ctx>,
     ) -> CustomResult<()> {
-        let cur_block = branch_info.get_if_case(index, self.cur_line_nr, self.cur_column_nr)?;
+        let mut cur_block = branch_info.get_if_case(index, self.cur_line_nr, self.cur_column_nr)?;
 
         self.cur_basic_block = Some(cur_block);
 
@@ -447,10 +447,40 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             // TODO: Return error instead of panicing inside the
             //       "into_int_value()" function.
-            let expr = self.compile_expr(br_expr)?.into_int_value();
             self.builder.position_at_end(branch_block);
-            self.builder
-                .build_conditional_branch(expr, cur_block, next_branch_block);
+            let expr = self.compile_expr(br_expr)?.into_int_value();
+
+            // Since the expression might create new basic blocks to facilitate
+            // short circuit logic, the `cur_block` will have been updated if
+            // the expression contains bool "and" or "or" expressions.
+            // The new `self.cur_basic_block` will be the block containing
+            // the phi value in `expr`. Branch on it to either the block after
+            // the "phi-block" which will be the new first "if.case" or branch
+            // to the next branch block.
+            // Otherwise, if a new block hasn't been created just make a simple
+            // conditional branch instruction.
+            self.builder.position_at_end(branch_block);
+            if let Some(possible_phi_block) = self.cur_basic_block {
+                if possible_phi_block != cur_block {
+                    self.builder.build_unconditional_branch(cur_block);
+
+                    // Create a new "if.case" block. The reason is that since
+                    // this is a short circuit operation, the actual "if.case"
+                    // block will just contain the unconditional branch to other
+                    // blocks, so this will be the new block contaning the "body"
+                    // if the if-case.
+                    cur_block = self
+                        .context
+                        .insert_basic_block_after(possible_phi_block, "new.if.case");
+
+                    self.builder.position_at_end(possible_phi_block);
+                }
+
+                self.builder
+                    .build_conditional_branch(expr, cur_block, next_branch_block);
+            } else {
+                return Err(self.err("Unable to get cur block after compiling if cond.".into()));
+            }
         }
 
         // Compile all tokens inside this if-case.

@@ -78,8 +78,36 @@ impl<'a> TypeAnalyzer<'a> {
             Expression::Literal(lit, old_type_opt) => {
                 // If a type is already set and has been given as a argument to
                 // this function, use that instead of the default for literals.
+                // Also make sure that the given type hint is of the same type
+                // as the literal, otherwise ignore it.
                 if let Some(type_hint) = type_hint_opt {
-                    *old_type_opt = Some(type_hint);
+                    match lit {
+                        Literal::StringLiteral(_) => {
+                            if type_hint.t.is_string() {
+                                *old_type_opt = Some(type_hint);
+                            }
+                        }
+                        Literal::CharLiteral(_) => {
+                            if type_hint.t.is_char() {
+                                *old_type_opt = Some(type_hint);
+                            }
+                        }
+                        Literal::Bool(_) => {
+                            if type_hint.t.is_bool() {
+                                *old_type_opt = Some(type_hint);
+                            }
+                        }
+                        Literal::Integer(_, _) => {
+                            if type_hint.t.is_int() {
+                                *old_type_opt = Some(type_hint);
+                            }
+                        }
+                        Literal::Float(_) => {
+                            if type_hint.t.is_float() {
+                                *old_type_opt = Some(type_hint);
+                            }
+                        }
+                    }
                     old_type_opt.clone()
                 } else {
                     let new_type_opt = Some(self.analyze_literal_type(lit));

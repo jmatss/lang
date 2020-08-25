@@ -55,4 +55,53 @@ impl Type {
             _ => Type::Custom(s.to_string()),
         }
     }
+
+    pub fn is_int(&self) -> bool {
+        match self {
+            Type::Int
+            | Type::Uint
+            | Type::I8
+            | Type::U8
+            | Type::I16
+            | Type::U16
+            | Type::I32
+            | Type::U32
+            | Type::I64
+            | Type::U64
+            | Type::I128
+            | Type::U128 => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_float(&self) -> bool {
+        match self {
+            Type::Float | Type::F32 | Type::F64 => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_bool(&self) -> bool {
+        if let Type::Boolean = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_char(&self) -> bool {
+        if let Type::Character = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_string(&self) -> bool {
+        if let Type::String = self {
+            true
+        } else {
+            false
+        }
+    }
 }
