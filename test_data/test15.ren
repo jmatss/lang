@@ -1,0 +1,25 @@
+external function printf(format: {u8}, ...) -> i32
+
+function return_short_circuit(a: i32, b: i32) -> bool
+{
+    return a == 3 and b == 4
+}
+
+function main() -> i32
+{
+    var ten = 3
+    var one = 0
+
+    while one < 10
+    {
+        if one++ % 10 == 0 and ten++ == 4
+        {
+        }
+        
+        printf("%d - %d\n", one, ten)
+    }
+    
+    printf("Res: %d", return_short_circuit(3, 4))
+
+    return 0
+}

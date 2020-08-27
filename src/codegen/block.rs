@@ -325,10 +325,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_if(&mut self, id: BlockId, body: &'ctx mut [ParseToken]) -> CustomResult<()> {
         self.cur_block_id = id;
 
-        let cur_func = self
-            .cur_func
-            .ok_or_else(|| self.err("cur_func is None for \"If\".".into()))?;
-
         let cur_block = self
             .cur_basic_block
             .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
@@ -337,6 +333,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // For every if-case that has a expression (if/elif) a extra block
         // will be created which will contain the branching logic between the
         // cases.
+        let mut prev_block = cur_block;
         let mut branch_info = BranchInfo::new();
         branch_info.if_branches.push(cur_block);
         for (i, if_case) in body.iter().enumerate() {
@@ -345,11 +342,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 // has the branch block `cur_block`). Also only add a branch block
                 // if this `if_case` contains a expression that can be "branched on".
                 if i > 0 && expr_opt.is_some() {
-                    let br_block = self.context.append_basic_block(cur_func, "if.branch");
+                    let br_block = self
+                        .context
+                        .insert_basic_block_after(prev_block, "if.branch");
+                    prev_block = br_block;
                     branch_info.if_branches.push(br_block);
                 }
 
-                let if_block = self.context.append_basic_block(cur_func, "if.case");
+                let if_block = self.context.insert_basic_block_after(prev_block, "if.case");
+                prev_block = if_block;
                 branch_info.if_cases.push(if_block);
             } else {
                 return Err(self.err(format!(
@@ -365,7 +366,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // to end up in the merge block in that case, so it would just be empty.
         let merge_block_opt = if let Some(block_info) = self.analyze_context.block_info.get(&id) {
             if !block_info.all_children_contains_returns {
-                let merge_block = self.context.append_basic_block(cur_func, "if.merge");
+                let merge_block = self
+                    .context
+                    .insert_basic_block_after(prev_block, "if.merge");
                 self.merge_blocks.insert(id, merge_block);
                 Some(merge_block)
             } else {
@@ -422,9 +425,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         body: &'ctx mut [ParseToken],
         branch_info: &BranchInfo<'ctx>,
     ) -> CustomResult<()> {
-        let mut cur_block = branch_info.get_if_case(index, self.cur_line_nr, self.cur_column_nr)?;
+        let if_case_block = branch_info.get_if_case(index, self.cur_line_nr, self.cur_column_nr)?;
 
-        self.cur_basic_block = Some(cur_block);
+        self.cur_basic_block = Some(if_case_block);
 
         // If this is a if case with a expression, the branch condition should
         // be evaluated and branched from the branch block.
@@ -447,40 +450,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             // TODO: Return error instead of panicing inside the
             //       "into_int_value()" function.
+            self.cur_basic_block = Some(branch_block);
             self.builder.position_at_end(branch_block);
             let expr = self.compile_expr(br_expr)?.into_int_value();
-
-            // Since the expression might create new basic blocks to facilitate
-            // short circuit logic, the `cur_block` will have been updated if
-            // the expression contains bool "and" or "or" expressions.
-            // The new `self.cur_basic_block` will be the block containing
-            // the phi value in `expr`. Branch on it to either the block after
-            // the "phi-block" which will be the new first "if.case" or branch
-            // to the next branch block.
-            // Otherwise, if a new block hasn't been created just make a simple
-            // conditional branch instruction.
-            self.builder.position_at_end(branch_block);
-            if let Some(possible_phi_block) = self.cur_basic_block {
-                if possible_phi_block != cur_block {
-                    self.builder.build_unconditional_branch(cur_block);
-
-                    // Create a new "if.case" block. The reason is that since
-                    // this is a short circuit operation, the actual "if.case"
-                    // block will just contain the unconditional branch to other
-                    // blocks, so this will be the new block contaning the "body"
-                    // if the if-case.
-                    cur_block = self
-                        .context
-                        .insert_basic_block_after(possible_phi_block, "new.if.case");
-
-                    self.builder.position_at_end(possible_phi_block);
-                }
-
-                self.builder
-                    .build_conditional_branch(expr, cur_block, next_branch_block);
-            } else {
-                return Err(self.err("Unable to get cur block after compiling if cond.".into()));
-            }
+            self.builder
+                .build_conditional_branch(expr, if_case_block, next_branch_block);
         }
 
         // Compile all tokens inside this if-case.
@@ -489,18 +463,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.cur_column_nr = token.column_nr;
 
             self.cur_block_id = id;
-            self.cur_basic_block = Some(cur_block);
+            self.cur_basic_block = Some(if_case_block);
 
-            self.builder.position_at_end(cur_block);
+            self.builder.position_at_end(if_case_block);
             self.compile(token)?;
         }
 
-        self.cur_basic_block = Some(cur_block);
-        self.builder.position_at_end(cur_block);
+        self.cur_basic_block = Some(if_case_block);
+        self.builder.position_at_end(if_case_block);
 
         // Add a branch to the merge block if the current basic block
         // doesn't have a terminator yet.
-        if cur_block.get_terminator().is_none() {
+        if if_case_block.get_terminator().is_none() {
             let merge_block = self.get_merge_block(id)?;
             self.builder.build_unconditional_branch(merge_block);
         }
@@ -545,17 +519,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> CustomResult<()> {
         self.cur_block_id = id;
 
-        let cur_func = self
-            .cur_func
-            .ok_or_else(|| self.err("cur_func is None for \"If\".".into()))?;
-
-        let cur_block = self
+        let mut cur_block = self
             .cur_basic_block
-            .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
+            .ok_or_else(|| self.err("cur_block is None for \"While\".".into()))?;
 
-        let while_branch_block = self.context.append_basic_block(cur_func, "while.branch");
-        let while_body_block = self.context.append_basic_block(cur_func, "while.body");
-        let merge_block = self.context.append_basic_block(cur_func, "while.merge");
+        let while_branch_block = self
+            .context
+            .insert_basic_block_after(cur_block, "while.branch");
+        let while_body_block = self
+            .context
+            .insert_basic_block_after(while_branch_block, "while.body");
+        let merge_block = self
+            .context
+            .insert_basic_block_after(while_body_block, "while.merge");
         self.merge_blocks.insert(id, merge_block);
 
         self.builder.position_at_end(cur_block);
@@ -582,22 +558,29 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         // Iterate through all "tokens" in this while-loop and compile them.
+        self.cur_block_id = id;
+        self.cur_basic_block = Some(while_body_block);
         for token in body.iter_mut() {
             self.cur_line_nr = token.line_nr;
             self.cur_column_nr = token.column_nr;
 
             self.cur_block_id = id;
-            self.cur_basic_block = Some(while_body_block);
+            cur_block = self
+                .cur_basic_block
+                .ok_or_else(|| self.err("cur_block is None for \"While\" body.".into()))?;
 
-            self.builder.position_at_end(while_body_block);
+            self.builder.position_at_end(cur_block);
             self.compile(token)?;
         }
 
         // If the block does NOT contain a terminator instruction inside it
-        // (return, yield etc.), add a uncoditional branch back up to the
+        // (return, yield etc.), add a unconditional branch back up to the
         // "while.branch" block.
-        if while_body_block.get_terminator().is_none() {
-            self.builder.position_at_end(while_body_block);
+        cur_block = self
+            .cur_basic_block
+            .ok_or_else(|| self.err("cur_block is None for \"While\" body.".into()))?;
+        if cur_block.get_terminator().is_none() {
+            self.builder.position_at_end(cur_block);
             self.builder.build_unconditional_branch(while_branch_block);
         }
 

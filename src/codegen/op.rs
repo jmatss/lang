@@ -871,7 +871,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         .context
                         .insert_basic_block_after(eval_block, "bool.and.merge");
 
-                    // The old "if.case" will be used as a branch block.
+                    // The old `cur_basic_block` will be used as a branch block.
                     self.builder.position_at_end(cur_basic_block);
                     self.builder.build_conditional_branch(
                         left.into_int_value(),
