@@ -63,7 +63,6 @@ pub enum Keyword {
     Interface,
     //Macro,
     Defer,
-    With,
 
     Test,
 }
@@ -228,7 +227,6 @@ impl LexToken {
             "interface" => LexTokenKind::Keyword(Keyword::Interface),
 
             "defer" => LexTokenKind::Keyword(Keyword::Defer),
-            "with" => LexTokenKind::Keyword(Keyword::With),
 
             "test" => LexTokenKind::Keyword(Keyword::Test),
 

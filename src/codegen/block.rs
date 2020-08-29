@@ -279,7 +279,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .cur_func
             .ok_or_else(|| self.err("cur_func is None for \"If\".".into()))?;
 
-        let cur_block = self
+        let mut cur_block = self
             .cur_basic_block
             .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
 
@@ -288,7 +288,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.cur_column_nr = token.column_nr;
 
             self.cur_block_id = id;
-            self.cur_basic_block = Some(cur_block);
+            cur_block = self
+                .cur_basic_block
+                .ok_or_else(|| self.err("cur_block is None for \"While\" body.".into()))?;
 
             self.builder.position_at_end(cur_block);
             self.compile(token)?;

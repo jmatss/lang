@@ -89,8 +89,8 @@ impl<'a> IndexingAnalyzer<'a> {
     fn analyze_stmt(&mut self, stmt: &mut Statement) {
         match stmt {
             Statement::Yield(expr) => self.analyze_expr(expr),
-            Statement::With(expr) => self.analyze_expr(expr),
             Statement::Defer(expr) => self.analyze_expr(expr),
+            Statement::DeferExecution(expr) => self.analyze_expr(expr),
             Statement::Assignment(_, lhs, rhs) => {
                 self.analyze_expr(lhs);
                 self.analyze_expr(rhs);

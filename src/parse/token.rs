@@ -42,10 +42,12 @@ pub enum Statement {
     Use(Path),
     Package(Path),
 
-    // AutoClosable.
-    With(Expression),
-    // Defer -> Run this expression at the end of the current block.
+    // Defer -> Run this expression at the end of the current block scope.
+    /// The "Defer" is the place in the code where the "defer <expr>" was written.
+    /// "DeferExecution" statements will be added during the analyzing stage
+    /// at places in the AST where the deferred expression should be executed.
     Defer(Expression),
+    DeferExecution(Expression),
 
     // The lhs can't be a "Variable" directly since it needs to support
     // ex. array indexing and dereferencing. But evaluationg the lhs expressions

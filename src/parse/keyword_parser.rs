@@ -66,7 +66,6 @@ impl<'a> KeyworkParser<'a> {
                 .err("\"Interface\" keyword not implemented.".into())),
 
             Keyword::Defer => self.parse_defer(),
-            Keyword::With => Err(self.iter.err("\"With\" keyword not implemented.".into())),
 
             Keyword::Test => Err(self.iter.err("\"Test\" keyword not implemented.".into())),
         }

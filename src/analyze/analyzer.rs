@@ -1,4 +1,7 @@
-use super::{block_analyzer::BlockAnalyzer, indexing_analyzer::IndexingAnalyzer};
+use super::{
+    block_analyzer::BlockAnalyzer, defer_analyzer::DeferAnalyzer,
+    indexing_analyzer::IndexingAnalyzer,
+};
 use crate::analyze::decl_analyzer::DeclAnalyzer;
 use crate::analyze::type_analyzer::TypeAnalyzer;
 use crate::error::{LangError, LangErrorKind::AnalyzeError};
@@ -10,12 +13,14 @@ use std::collections::HashMap;
 
 /// Updates the AST with information about function prototypes and declarations
 /// of structures.
-/// The TypeAnalyzer depends on the DeclAnalyzer to figure out types for
-/// function calls and function parameters used in expressions, so the DeclAnalyzer
-/// needs to be ran TypeAnalyzer.
-/// The TypeAnalyzer will also set the var types in "AnalyzeContext.variables".
-/// The DeclAnalyzer needs to be ran before IndexingAnalyzer since it will need
+/// The "TypeAnalyzer" depends on the "DeclAnalyzer" to figure out types for
+/// function calls and function parameters used in expressions, so the "DeclAnalyzer"
+/// needs to be ran "TypeAnalyzer".
+/// The "TypeAnalyzer" will also set the var types in "AnalyzeContext.variables".
+/// The "DeclAnalyzer" needs to be ran before "IndexingAnalyzer" since it will need
 /// to access declared variables/structs to set the idnexing correctly.
+/// The "DeferAnalyzer" will copy Expressions, so it should not be ran before
+/// the analyzing (type, indexing etc.) on Expressions are done.
 pub fn analyze(ast_root: &mut ParseToken) -> Result<AnalyzeContext, Vec<LangError>> {
     let mut context = AnalyzeContext::new();
 
@@ -23,6 +28,7 @@ pub fn analyze(ast_root: &mut ParseToken) -> Result<AnalyzeContext, Vec<LangErro
     DeclAnalyzer::analyze(&mut context, ast_root)?;
     IndexingAnalyzer::analyze(&mut context, ast_root)?;
     TypeAnalyzer::analyze(&mut context, ast_root)?;
+    DeferAnalyzer::analyze(&mut context, ast_root)?;
 
     Ok(context)
 }
@@ -40,7 +46,6 @@ pub struct BlockInfo {
     pub contains_break: bool,
     pub contains_continue: bool,
     pub contains_defer: bool,
-    pub contains_with: bool,
 
     /// Contains information about the control flow of children. If all children
     /// contains a branch instruction, this block doesn't not need to add a
@@ -79,7 +84,6 @@ impl BlockInfo {
             contains_break: false,
             contains_continue: false,
             contains_defer: false,
-            contains_with: false,
             all_children_contains_returns: false,
             is_root_block,
             is_branchable_block,

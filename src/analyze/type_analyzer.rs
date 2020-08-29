@@ -623,10 +623,10 @@ impl<'a> TypeAnalyzer<'a> {
             | Statement::Modifier(_)
             | Statement::ExternalDecl(_) => (),
 
-            Statement::With(expr) => {
+            Statement::Defer(expr) => {
                 self.analyze_expr_type(expr, None);
             }
-            Statement::Defer(expr) => {
+            Statement::DeferExecution(expr) => {
                 self.analyze_expr_type(expr, None);
             }
             Statement::Return(expr_opt) => {

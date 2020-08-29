@@ -1,9 +1,7 @@
 use super::generator::CodeGen;
 use crate::{
     common::variable_type::Type,
-    parse::token::{
-        AccessType, AssignOperator, Expression, Modifier, Operation, Path, Statement, TypeStruct,
-    },
+    parse::token::{AccessType, AssignOperator, Expression, Modifier, Path, Statement, TypeStruct},
     CustomResult,
 };
 use inkwell::{module::Linkage, types::AnyTypeEnum, values::InstructionValue};
@@ -18,8 +16,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Statement::Use(path) => self.compile_use(path),
             Statement::Package(path) => self.compile_package(path),
             Statement::Modifier(modifier) => self.compile_modifier(modifier),
-            Statement::With(expr) => self.compile_with(expr),
-            Statement::Defer(expr) => self.compile_defer(expr),
+
+            // Only the "DeferExecution" are compiled into code, the "Defer" is
+            // only used during analyzing.
+            Statement::Defer(_) => Ok(()),
+            Statement::DeferExecution(expr) => {
+                self.compile_expr(expr)?;
+                Ok(())
+            }
+
             Statement::VariableDecl(var, expr_opt) => {
                 self.compile_var_decl(var)?;
                 if let Some(expr) = expr_opt {
@@ -90,14 +95,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_modifier(&mut self, modifier: &Modifier) -> CustomResult<()> {
         Err(self.err("TODO: Implement \"modifier\" statement.".into()))
-    }
-
-    fn compile_with(&mut self, expr: &Expression) -> CustomResult<()> {
-        Err(self.err("TODO: Implement \"with\" statement.".into()))
-    }
-
-    fn compile_defer(&mut self, expr: &Expression) -> CustomResult<()> {
-        Err(self.err("TODO: Implement \"defer\" statement.".into()))
     }
 
     fn compile_assign(

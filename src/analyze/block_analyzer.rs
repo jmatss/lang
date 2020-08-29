@@ -119,7 +119,6 @@ impl<'a> BlockAnalyzer<'a> {
             Statement::Yield(_) => block_info.contains_yield = true,
             Statement::Break => block_info.contains_break = true,
             Statement::Continue => block_info.contains_continue = true,
-            Statement::With(_) => block_info.contains_with = true,
             Statement::Defer(_) => block_info.contains_defer = true,
 
             Statement::Use(_)
@@ -127,7 +126,8 @@ impl<'a> BlockAnalyzer<'a> {
             | Statement::Assignment(..)
             | Statement::VariableDecl(..)
             | Statement::ExternalDecl(_)
-            | Statement::Modifier(_) => (),
+            | Statement::Modifier(_)
+            | Statement::DeferExecution(_) => (),
         }
     }
 }
