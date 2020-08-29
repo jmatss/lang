@@ -6,7 +6,7 @@ use super::{
     },
 };
 use crate::{
-    lex::token::{LexToken, LexTokenKind, Symbol},
+    lex::token::{LexTokenKind, Symbol},
     CustomResult,
 };
 
@@ -26,9 +26,6 @@ pub struct ExprParser<'a> {
     /// The expression is parsed one token at a time until a token is found
     /// matching a symbol in `stop_conds`.
     stop_conds: &'a [Symbol],
-
-    /// Keeps a copy of the previous token seen.
-    prev_token: Option<LexToken>,
 
     /// This bool is used to ensure that all "operands" are separated by operators.
     prev_was_operand: bool,
@@ -60,7 +57,6 @@ impl<'a> ExprParser<'a> {
             outputs: Vec::new(),
             operators: Vec::new(),
             stop_conds,
-            prev_token: None,
             prev_was_operand: false,
             parenthesis_count: 0,
         };
@@ -76,26 +72,21 @@ impl<'a> ExprParser<'a> {
     fn shunting_yard(&mut self) -> CustomResult<()> {
         while let Some(lex_token) = self.iter.next_skip_space() {
             debug!("SHUNTING: {:?}", &lex_token);
-            let lex_token_clone = lex_token.clone();
 
             // Break and stop parsing expression if a Symbol contained in
             // `stop_conds` are found or if EOF is reached.
             // Also stop parsing if a "ParenthesisEnd" has been found that isn't
             // part of the expression (`self.parenthesis_count < 0`).
             if self.parenthesis_count < 0 {
-                self.iter.put_back(lex_token)?;
-                if let Some(ref prev_lex_token) = self.prev_token {
-                    self.iter.put_back(prev_lex_token.clone())?;
-                } else {
-                    return Err(self
-                        .iter
-                        .err("`prev_token` not set when putting back ParenthesisEnd".into()));
-                }
+                // Rewind to put back both the current `lewx_token` put also to
+                // put back the previous "ParenthesisEnd" that was removed.
+                self.iter.rewind_skip_space()?;
+                self.iter.rewind_skip_space()?;
                 break;
             } else if let LexTokenKind::Symbol(ref symbol) = lex_token.kind {
                 if self.stop_conds.contains(symbol) {
                     if self.token_count != 0 {
-                        self.iter.put_back(lex_token)?;
+                        self.iter.rewind_skip_space()?;
                         break;
                     } else {
                         return Err(self
@@ -104,7 +95,7 @@ impl<'a> ExprParser<'a> {
                     }
                 }
             } else if let LexTokenKind::EndOfFile = lex_token.kind {
-                self.iter.put_back(lex_token)?;
+                self.iter.rewind_skip_space()?;
                 break;
             }
 
@@ -112,7 +103,7 @@ impl<'a> ExprParser<'a> {
 
             match lex_token.clone().kind {
                 LexTokenKind::Identifier(ident) => {
-                    let expr = self.parse_expr_ident(lex_token, &ident)?;
+                    let expr = self.parse_expr_ident(&ident)?;
                     self.shunt_operand(expr)?;
                 }
 
@@ -138,7 +129,7 @@ impl<'a> ExprParser<'a> {
                 // Array init. Example: "var x = [1, 2, 3]"
                 LexTokenKind::Symbol(Symbol::SquareBracketBegin) => {
                     // The `parse_arg_list` function expects the start symbol
-                    self.iter.put_back(lex_token)?;
+                    self.iter.rewind()?;
 
                     let start_symbol = Symbol::SquareBracketBegin;
                     let end_symbol = Symbol::SquareBracketEnd;
@@ -183,8 +174,6 @@ impl<'a> ExprParser<'a> {
                     )));
                 }
             }
-
-            self.prev_token = Some(lex_token_clone.clone());
         }
 
         // Move the remaining `operators` to `outputs` before parsing the expression.
@@ -381,11 +370,7 @@ impl<'a> ExprParser<'a> {
     }
 
     // TODO: Seems like this gives incorrect column when parsed in some way.
-    fn parse_expr_ident(
-        &mut self,
-        old_lex_token: LexToken,
-        ident: &str,
-    ) -> CustomResult<Expression> {
+    fn parse_expr_ident(&mut self, ident: &str) -> CustomResult<Expression> {
         // TODO: The peek doesn't skip line break, so can't ex. do a struct
         //       init with a line break at the start.
         // The identifier will be either a function call or a reference to
@@ -419,9 +404,9 @@ impl<'a> ExprParser<'a> {
                             Operator::BinaryOperator(BinaryOperator::As)
                             | Operator::BinaryOperator(BinaryOperator::Is)
                             | Operator::BinaryOperator(BinaryOperator::Of) => {
-                                // Put back the old_lex_token contaning this
+                                // Put back the old `lex_token` contaning this
                                 // identifier and parse as type.
-                                self.iter.put_back(old_lex_token)?;
+                                self.iter.rewind()?;
                                 let ty = self.iter.parse_type()?;
                                 return Ok(Expression::Type(ty));
                             }

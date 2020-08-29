@@ -37,9 +37,9 @@ impl LexTokenIter {
             if LexTokenIter::valid_linebreak(c1, c2) {
                 self.get_linebreak()?
             } else if LexTokenIter::valid_whitespace(c1) {
-                self.get_whitespaces()?
+                self.get_whitespaces()
             } else if LexTokenIter::valid_number(c1, RADIX) {
-                self.get_number()?
+                self.get_number()
             } else if LexTokenIter::valid_identifier_start(c1) {
                 let ident: String = self.get_ident()?;
 
@@ -66,7 +66,7 @@ impl LexTokenIter {
                 match symbol_kind {
                     // TODO: Add multiline comments.
                     LexTokenKind::Symbol(Symbol::CommentSingleLine) => {
-                        let _ = self.get_comment_single(n)?;
+                        let _ = self.get_comment_single(n);
                         // TODO: Weird to be the only return statement, do this
                         //       in a better way.
                         return self.next_token();
@@ -129,7 +129,7 @@ impl LexTokenIter {
             if LexTokenIter::valid_identifier(c) {
                 result.push(c);
             } else {
-                self.iter.put_back(c)?;
+                self.iter.rewind();
                 break;
             }
         }
@@ -145,7 +145,7 @@ impl LexTokenIter {
 
     // TODO: number containing scientifical notaion (e/E).
     /// Returns the number (int or float) at the current position of the iterator.
-    fn get_number(&mut self) -> CustomResult<LexTokenKind> {
+    fn get_number(&mut self) -> LexTokenKind {
         let radix = if let Some(('0', Some(sep_char))) = self.iter.peek_two() {
             // Remove the assumed prefix.
             self.iter.skip(2);
@@ -157,8 +157,7 @@ impl LexTokenIter {
                 _ => {
                     // Put back the chars since they aren't part of a prefix,
                     // this is just a decimal number that start with '0'.
-                    self.iter.put_back(sep_char)?;
-                    self.iter.put_back('0')?;
+                    self.iter.rewind_n(2);
                     10
                 }
             }
@@ -168,7 +167,7 @@ impl LexTokenIter {
         };
 
         let mut is_float = false;
-        let mut number = self.get_integer(radix)?;
+        let mut number = self.get_integer(radix);
 
         // If this number contains a dot, assume it is a float number.
         // FIXME: (?) might not need to check number after Dot to allow for
@@ -176,7 +175,7 @@ impl LexTokenIter {
         if let Some(('.', Some(next))) = self.iter.peek_two() {
             if LexTokenIter::valid_number(next, radix) {
                 self.iter.skip(1); // Remove dot.
-                number = [number, self.get_integer(radix)?].join(".");
+                number = [number, self.get_integer(radix)].join(".");
 
                 is_float = true;
             }
@@ -185,27 +184,27 @@ impl LexTokenIter {
         self.cur_column_nr += number.chars().count() as u64;
 
         if is_float {
-            Ok(LexTokenKind::Literal(Literal::Float(number)))
+            LexTokenKind::Literal(Literal::Float(number))
         } else {
-            Ok(LexTokenKind::Literal(Literal::Integer(number, radix)))
+            LexTokenKind::Literal(Literal::Integer(number, radix))
         }
     }
 
     /// Returns the integer at the current position of the iterator with
     /// the radix/base `radix`.
-    fn get_integer(&mut self, radix: u32) -> CustomResult<String> {
+    fn get_integer(&mut self, radix: u32) -> String {
         let mut numbers = Vec::new();
 
         while let Some(c) = self.iter.next() {
             if LexTokenIter::valid_number(c, radix) {
                 numbers.push(c);
             } else {
-                self.iter.put_back(c)?;
+                self.iter.rewind();
                 break;
             }
         }
 
-        Ok(numbers.into_iter().collect())
+        numbers.into_iter().collect()
     }
 
     // https://doc.rust-lang.org/reference/tokens.html
@@ -371,7 +370,7 @@ impl LexTokenIter {
 
     /// Returns all the consecutive white spaces at the current position of the
     /// iterator.
-    fn get_whitespaces(&mut self) -> CustomResult<LexTokenKind> {
+    fn get_whitespaces(&mut self) -> LexTokenKind {
         let mut count = 0;
 
         while let Some(c) = self.iter.next() {
@@ -382,20 +381,20 @@ impl LexTokenIter {
             if LexTokenIter::valid_whitespace(c) && !LexTokenIter::valid_linebreak(c, c_next) {
                 count += 1;
             } else {
-                self.iter.put_back(c)?;
+                self.iter.rewind();
                 break;
             }
         }
 
         self.cur_column_nr += count as u64;
 
-        Ok(LexTokenKind::Symbol(Symbol::WhiteSpace(count)))
+        LexTokenKind::Symbol(Symbol::WhiteSpace(count))
     }
 
     /// Lexes a single line comment and returns the comment contents.
     /// Does NOT consume the linebreak ending the comment.
     /// The n is the size of the "CommentSingleLine" symbol.
-    fn get_comment_single(&mut self, n: usize) -> CustomResult<String> {
+    fn get_comment_single(&mut self, n: usize) -> String {
         let mut comment = Vec::new();
 
         // Consume the "CommentSingleLine" symbol.
@@ -405,13 +404,13 @@ impl LexTokenIter {
 
         while let Some(c) = self.iter.next() {
             if LexTokenIter::valid_linebreak(c, self.iter.peek()) {
-                self.iter.put_back(c)?;
+                self.iter.rewind();
                 break;
             }
             comment.push(c);
         }
 
-        Ok(comment.iter().collect())
+        comment.iter().collect()
     }
 
     /// Used when returing errors to include current line/column number.

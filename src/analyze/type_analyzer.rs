@@ -75,7 +75,7 @@ impl<'a> TypeAnalyzer<'a> {
         type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         match expr {
-            Expression::Literal(lit, old_type_opt) => {
+            Expression::Literal(lit, old_type_hint_opt) => {
                 // If a type is already set and has been given as a argument to
                 // this function, use that instead of the default for literals.
                 // Also make sure that the given type hint is of the same type
@@ -84,42 +84,42 @@ impl<'a> TypeAnalyzer<'a> {
                     match lit {
                         Literal::StringLiteral(_) => {
                             if type_hint.t.is_string() {
-                                *old_type_opt = Some(type_hint);
+                                *old_type_hint_opt = Some(type_hint);
                             }
                         }
                         Literal::CharLiteral(_) => {
                             if type_hint.t.is_char() {
-                                *old_type_opt = Some(type_hint);
+                                *old_type_hint_opt = Some(type_hint);
                             }
                         }
                         Literal::Bool(_) => {
                             if type_hint.t.is_bool() {
-                                *old_type_opt = Some(type_hint);
+                                *old_type_hint_opt = Some(type_hint);
                             }
                         }
                         Literal::Integer(_, _) => {
                             if type_hint.t.is_int() {
-                                *old_type_opt = Some(type_hint);
+                                *old_type_hint_opt = Some(type_hint);
                             }
                         }
                         Literal::Float(_) => {
                             if type_hint.t.is_float() {
-                                *old_type_opt = Some(type_hint);
+                                *old_type_hint_opt = Some(type_hint);
                             }
                         }
                     }
-                    old_type_opt.clone()
+                    old_type_hint_opt.clone()
                 } else {
                     let new_type_opt = Some(self.analyze_literal_type(lit));
-                    *old_type_opt = new_type_opt;
-                    old_type_opt.clone()
+                    *old_type_hint_opt = new_type_opt;
+                    old_type_hint_opt.clone()
                 }
             }
             Expression::Type(type_struct) => Some(type_struct.clone()),
             Expression::Variable(var) => {
                 debug!("ANALYZING VAR: {:#?}", var);
 
-                if let Some((ref root_var, _)) = var.access_instrs {
+                let ty = if let Some((ref root_var, _)) = var.access_instrs {
                     if root_var.is_struct {
                         self.analyze_struct_member(var)
                     } else {
@@ -127,7 +127,10 @@ impl<'a> TypeAnalyzer<'a> {
                     }
                 } else {
                     self.analyze_var_type(var)
-                }
+                };
+
+                var.ret_type = ty.clone();
+                ty
             }
             Expression::Operation(op) => self.analyze_op_type(op, type_hint_opt),
             Expression::FunctionCall(func_call) => self.analyze_func_call(func_call),
@@ -210,7 +213,7 @@ impl<'a> TypeAnalyzer<'a> {
                     } else {
                         None
                     };
-                    self.analyze_expr_type(&mut arg.value, prev_type_opt)?;
+                    self.analyze_expr_type(&mut arg.value, prev_type_opt);
                 }
             } else {
                 let err_msg = format!(
@@ -314,18 +317,11 @@ impl<'a> TypeAnalyzer<'a> {
             let root_var_name = &root_var.name;
             let decl_id = root_var.decl_block_id;
 
-            match access_instrs.first()? {
-                AccessInstruction::StructMember(_, _, _) => {}
-                AccessInstruction::Deref => {}
-                AccessInstruction::Address => {}
-                AccessInstruction::ArrayAccess(_) => {}
-            }
-
             // Find the first use of a struct. This will be the entry point to
             // accessing all structs/members recursively in this `var`.
             let key = (root_var_name.clone(), decl_id);
-            let mut struct_name = if let Some(b) = self.context.variables.get(&key) {
-                let mut ty = b.ret_type.clone()?.t;
+            let mut struct_name = if let Some(context_var) = self.context.variables.get(&key) {
+                let mut ty = context_var.ret_type.clone()?.t;
                 loop {
                     match ty {
                         Type::Pointer(ptr) => {
@@ -813,12 +809,16 @@ impl<'a> TypeAnalyzer<'a> {
                 Operation::BinaryOperation(bin_op) => bin_op.ret_type = new_ty,
                 Operation::UnaryOperation(un_op) => un_op.ret_type = new_ty,
             },
+            Expression::FunctionCall(_) => {
+                // Do nothing, the "return type" of a function call will be
+                // taken from the function declaration.
+            }
 
-            // Can't set type for function call, struct init or array init.
-            Expression::FunctionCall(_)
-            | Expression::StructInit(_)
-            | Expression::ArrayInit(_)
-            | Expression::Type(_) => {
+            // TODO: Make it so that one can set types to structInit/arrayInit
+            //       so that they can be used inside expressions to allow for
+            //       chaining.
+            // Can't set type for struct init or array init.
+            Expression::StructInit(_) | Expression::ArrayInit(_) | Expression::Type(_) => {
                 let err_msg = format!("Tried to set type for unexpected expr: {:?}", &expr);
                 let err = self.context.err(err_msg);
                 self.errors.push(err);

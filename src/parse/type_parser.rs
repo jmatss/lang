@@ -66,7 +66,7 @@ impl<'a> TypeParser<'a> {
             if let LexTokenKind::Symbol(Symbol::PointyBracketBegin) = lex_token.kind {
                 // Do nothing, parse generic list in logic underneath.
             } else {
-                self.iter.put_back(lex_token)?;
+                self.iter.rewind()?;
                 return Ok(None);
             }
         }

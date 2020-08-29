@@ -87,7 +87,7 @@ impl ParseTokenIter {
     }
 
     pub fn set_lex_tokens(&mut self, lex_tokens: Vec<LexToken>) {
-        self.iter = TokenIter::new(lex_tokens.into_iter());
+        self.iter = TokenIter::new(lex_tokens);
     }
 
     pub fn take_root_block(&mut self) -> ParseToken {
@@ -170,7 +170,7 @@ impl ParseTokenIter {
                 // expression atm) or it will be an expression.
                 LexTokenKind::Identifier(_) => {
                     // Put back the ident, it is a part of a expression.
-                    self.put_back(lex_token)?;
+                    self.rewind()?;
 
                     // The first parsed expr can either be the lhs or the rhs.
                     // This will be figure out later in this block.
@@ -199,7 +199,7 @@ impl ParseTokenIter {
                 LexTokenKind::Symbol(Symbol::CurlyBracketBegin) => {
                     // Put back the CurlyBracketBegin, it is expected to be the
                     // first symbol found in the `self.next_block` function.
-                    self.put_back(lex_token)?;
+                    self.rewind()?;
 
                     return self.next_block(BlockHeader::Anonymous);
                 }
@@ -222,7 +222,7 @@ impl ParseTokenIter {
                 LexTokenKind::Literal(_) | LexTokenKind::Symbol(_) => {
                     // Put back the token that was just popped and then parse
                     // everything together as an expression.
-                    self.put_back(lex_token)?;
+                    self.rewind()?;
                     let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
                     ParseTokenKind::Expression(expr)
                 }
@@ -580,10 +580,49 @@ impl ParseTokenIter {
     }
 
     #[inline]
-    pub fn put_back(&mut self, lex_token: LexToken) -> CustomResult<()> {
-        self.cur_line_nr = lex_token.line_nr;
-        self.cur_column_nr = lex_token.column_nr;
-        self.iter.put_back(lex_token)
+    pub fn rewind(&mut self) -> CustomResult<()> {
+        if self.iter.rewind() {
+            if let Some(cur_token) = self.iter.peek() {
+                self.cur_line_nr = cur_token.line_nr;
+                self.cur_column_nr = cur_token.column_nr;
+            }
+            Ok(())
+        } else {
+            Err(self.err("Tried to rewind to before the iterator (pos < 0).".into()))
+        }
+    }
+
+    #[inline]
+    pub fn rewind_skip_space(&mut self) -> CustomResult<()> {
+        loop {
+            self.rewind()?;
+
+            if let Some(cur_token) = self.iter.peek() {
+                match cur_token.kind {
+                    LexTokenKind::Symbol(Symbol::WhiteSpace(_)) => continue,
+                    _ => return Ok(()),
+                }
+            } else {
+                return Err(self.err("Got None when peeking during rewind.".into()));
+            }
+        }
+    }
+
+    #[inline]
+    pub fn rewind_skip_space_line(&mut self) -> CustomResult<()> {
+        loop {
+            self.rewind()?;
+
+            if let Some(cur_token) = self.iter.peek() {
+                match cur_token.kind {
+                    LexTokenKind::Symbol(Symbol::WhiteSpace(_))
+                    | LexTokenKind::Symbol(Symbol::LineBreak) => continue,
+                    _ => return Ok(()),
+                }
+            } else {
+                return Err(self.err("Got None when peeking during rewind.".into()));
+            }
+        }
     }
 
     /// Gets the next item from the iterator that is NOT a white space.
