@@ -37,6 +37,11 @@ pub(super) struct CodeGen<'a, 'ctx> {
     /// Contains a pointer to the current function that is being generated.
     pub cur_func: Option<FunctionValue<'ctx>>,
 
+    /// Contains the current "branch block" if the current block has one. This is
+    /// true for "while" and "for" blocks. This branch block will then be
+    /// used when a continue call is done to find the start of the loop.
+    pub cur_branch_block: Option<BasicBlock<'ctx>>,
+
     /// Merge blocks created for different if and match statements.
     /// Is stored in this struct so that it can be accessable from everywhere
     /// and statements etc. can figure out where to branch.
@@ -68,7 +73,22 @@ pub fn generate<'a, 'ctx>(
     //       blocks merge block. Otherwise something has gone wrong.
     for (block_id, merge_block) in &code_gen.merge_blocks {
         if merge_block.get_terminator().is_none() {
-            if let Some(wrapping_merge_block) = code_gen.get_parent_merge_block(*block_id)? {
+            let parent_block_id = code_gen
+                .analyze_context
+                .block_info
+                .get(&block_id)
+                .ok_or_else(|| {
+                    LangError::new(
+                        format!("Unable to find block info for block with id {}", block_id),
+                        CodeGenError {
+                            line_nr: 0,
+                            column_nr: 0,
+                        },
+                    )
+                })?
+                .parent_id;
+
+            if let Ok(wrapping_merge_block) = code_gen.get_merge_block(parent_block_id) {
                 code_gen.builder.position_at_end(*merge_block);
                 code_gen
                     .builder
@@ -106,6 +126,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             cur_block_id: 0,
             cur_basic_block: None,
             cur_func: None,
+            cur_branch_block: None,
 
             merge_blocks: HashMap::default(),
             variables: HashMap::default(),

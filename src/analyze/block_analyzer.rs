@@ -24,7 +24,8 @@ impl<'a> BlockAnalyzer<'a> {
     fn analyze_block(&mut self, token: &mut ParseToken) -> Option<BlockInfo> {
         if let ParseTokenKind::Block(ref header, id, ref mut body) = token.kind {
             let is_root_block = self.analyze_is_root(header);
-            let mut block_info = BlockInfo::new(id, is_root_block);
+            let is_branchable_block = self.analyze_is_branchable(header);
+            let mut block_info = BlockInfo::new(id, is_root_block, is_branchable_block);
 
             // Update the mapping from this block to its parent.
             // Do not set a parent for the default block.
@@ -36,7 +37,7 @@ impl<'a> BlockAnalyzer<'a> {
             // and keep track if all their children contains return statements.
             let mut all_children_contains_returns = true;
             let mut child_count = 0;
-            for token in body {
+            for token in body.iter_mut() {
                 // Since `analyze_token` recurses, need to re-set the current
                 // block to the be the "parent" (`self.context.cur_block_id`).
                 self.context.cur_block_id = id;
@@ -98,6 +99,15 @@ impl<'a> BlockAnalyzer<'a> {
             | BlockHeader::Enum(_)
             | BlockHeader::Interface(_)
             | BlockHeader::Default => true,
+            _ => false,
+        }
+    }
+
+    /// Returns true if the given header is a "branchable" block i.e. a block
+    /// that can contain branch instructions like "break".
+    fn analyze_is_branchable(&mut self, header: &BlockHeader) -> bool {
+        match header {
+            BlockHeader::Match(_) | BlockHeader::For(_, _) | BlockHeader::While(_) => true,
             _ => false,
         }
     }

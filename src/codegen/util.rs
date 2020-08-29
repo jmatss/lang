@@ -1,6 +1,6 @@
 use super::generator::CodeGen;
 use crate::error::LangErrorKind::CodeGenError;
-use crate::{error::LangError, parse::token::BlockId, CustomResult};
+use crate::{analyze::analyzer::BlockInfo, error::LangError, parse::token::BlockId, CustomResult};
 use inkwell::{
     basic_block::BasicBlock,
     types::{AnyTypeEnum, BasicTypeEnum},
@@ -39,66 +39,45 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
-    /// Returns the BasicBlock representing the merge block for the if-statement
-    /// with the block id `id` or the parent scope of the if-case with
-    /// block id `id`.
+    /// Returns the BasicBlock representing the "closest" merge block from the
+    /// current block. Merge blocks will be created for ex. if-statements
+    /// and while-loops.
     pub(super) fn get_merge_block(&self, id: BlockId) -> CustomResult<BasicBlock<'ctx>> {
-        if let Some(merge_block) = self.merge_blocks.get(&id) {
-            Ok(*merge_block)
-        } else {
-            // Get from the parent scope if possible.
-            let parent_id = self
-                .analyze_context
-                .block_info
-                .get(&id)
-                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
-                .parent_id;
-
-            if let Some(merge_block) = self.merge_blocks.get(&parent_id) {
-                Ok(*merge_block)
+        let mut cur_id = id;
+        loop {
+            if let Some(merge_block) = self.merge_blocks.get(&cur_id) {
+                return Ok(*merge_block);
             } else {
-                Err(self.err(format!(
-                    "Unable to find merge block in block with id {} and parent {}.",
-                    id, parent_id
-                )))
+                // Get from the parent scope recursively if possible.
+                cur_id = self.get_block_info(cur_id)?.parent_id;
             }
         }
     }
 
-    // TODO: Clean up.
-    /// Returns the BasicBlock representing a "outer" if block if one exists.
-    pub(super) fn get_parent_merge_block(
-        &self,
-        id: BlockId,
-    ) -> CustomResult<Option<BasicBlock<'ctx>>> {
-        if self.merge_blocks.get(&id).is_some() {
-            let parent_id = self
-                .analyze_context
-                .block_info
-                .get(&id)
-                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
-                .parent_id;
+    /// Returns the BasicBlock representing the "closest" merge block from the
+    /// current block that is "branchable". This is merge blocks that can contain
+    /// ex. "break"-statements like while-loops.
+    pub(super) fn get_branchable_merge_block(&self, id: BlockId) -> CustomResult<BasicBlock<'ctx>> {
+        let mut cur_id = id;
+        loop {
+            let merge_block = self.get_merge_block(cur_id)?;
+            let cur_block_info = self.get_block_info(cur_id)?;
 
-            Ok(self.get_merge_block(parent_id).ok())
-        } else {
-            // The given `id` was the block ID of a if case. First get the ID
-            // if the wrapping "If" block. Then get the parent ID of that block
-            // to get the sought after merge block.
-            let if_id = self
-                .analyze_context
-                .block_info
-                .get(&id)
-                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
-                .parent_id;
-
-            let parent_id = self
-                .analyze_context
-                .block_info
-                .get(&if_id)
-                .ok_or_else(|| self.err(format!("Unable to find parent block with id {}", id)))?
-                .parent_id;
-
-            Ok(self.get_merge_block(parent_id).ok())
+            if cur_block_info.is_branchable_block {
+                return Ok(merge_block);
+            } else {
+                // If this isn't a branchable block, continue looking through parents.
+                cur_id = cur_block_info.parent_id;
+            }
         }
+    }
+
+    fn get_block_info(&self, id: BlockId) -> CustomResult<&BlockInfo> {
+        self.analyze_context.block_info.get(&id).ok_or_else(|| {
+            self.err(format!(
+                "Unable to find block info for block with id {}",
+                id
+            ))
+        })
     }
 }

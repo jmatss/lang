@@ -1,0 +1,24 @@
+external function printf(format: {u8}, ...) -> i32
+
+function main() -> i32
+{
+    var i = 0
+    while i < 10
+    {
+        if i % 5 == 0
+        {
+            if i == 0
+            {
+                i++
+                continue
+            }
+
+            break
+        }
+        i++
+    }
+    
+    printf("i: %d", i)
+
+    return 0
+}

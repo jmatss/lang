@@ -64,15 +64,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_break(&mut self) -> CustomResult<()> {
-        // TODO: Is it always OK to use `self.state.cur_block_id` here?
         let id = self.cur_block_id;
-        let merge_block = self.get_merge_block(id)?;
+        let merge_block = self.get_branchable_merge_block(id)?;
         self.builder.build_unconditional_branch(merge_block);
         Ok(())
     }
 
     fn compile_continue(&mut self) -> CustomResult<()> {
-        Err(self.err("TODO: Implement \"continue\" statement.".into()))
+        if let Some(branch_block) = self.cur_branch_block {
+            self.builder.build_unconditional_branch(branch_block);
+            Ok(())
+        } else {
+            Err(self.err("Branch block None when compiling \"continue\".".into()))
+        }
     }
 
     fn compile_use(&mut self, path: &Path) -> CustomResult<()> {

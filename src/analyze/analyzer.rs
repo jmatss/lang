@@ -62,10 +62,15 @@ pub struct BlockInfo {
     /// So the "root block" for 1 & 2 would be 0. In turn the function would
     /// have a surrounding "root block" (which isn't shown in this example).
     pub is_root_block: bool,
+
+    /// Indicates if this block is a "branchable" block that can contain "break"
+    /// and "continue" statements. This is true for while-loops while it is not
+    /// true for if-statements.
+    pub is_branchable_block: bool,
 }
 
 impl BlockInfo {
-    pub fn new(block_id: BlockId, is_root_block: bool) -> Self {
+    pub fn new(block_id: BlockId, is_root_block: bool, is_branchable_block: bool) -> Self {
         Self {
             block_id,
             parent_id: usize::MAX,
@@ -77,6 +82,7 @@ impl BlockInfo {
             contains_with: false,
             all_children_contains_returns: false,
             is_root_block,
+            is_branchable_block,
         }
     }
 }

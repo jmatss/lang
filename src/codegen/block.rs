@@ -76,6 +76,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         id: BlockId,
         body: &'ctx mut [ParseToken],
     ) -> CustomResult<()> {
+        self.cur_block_id = id;
+
         match header {
             BlockHeader::Default => {
                 for token in body {
@@ -142,8 +144,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         id: BlockId,
         body: &'ctx mut [ParseToken],
     ) -> CustomResult<()> {
-        self.cur_block_id = id;
-
         let linkage = Linkage::External;
         let fn_val = self.compile_func_proto(func, Some(linkage))?;
         let entry = self.context.append_basic_block(fn_val, "entry");
@@ -323,8 +323,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     /// All the "ParseToken" in the body should be "IfCase"s.
     fn compile_if(&mut self, id: BlockId, body: &'ctx mut [ParseToken]) -> CustomResult<()> {
-        self.cur_block_id = id;
-
         let cur_block = self
             .cur_basic_block
             .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
@@ -393,7 +391,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 ref mut inner_body,
             ) = &mut if_case.kind
             {
-                self.cur_basic_block = Some(cur_block);
                 self.compile_if_case(
                     expr_opt,
                     *inner_id,
@@ -427,8 +424,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> CustomResult<()> {
         let if_case_block = branch_info.get_if_case(index, self.cur_line_nr, self.cur_column_nr)?;
 
-        self.cur_basic_block = Some(if_case_block);
-
         // If this is a if case with a expression, the branch condition should
         // be evaluated and branched from the branch block.
         if let Some(br_expr) = br_expr_opt {
@@ -458,27 +453,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         // Compile all tokens inside this if-case.
+        self.cur_basic_block = Some(if_case_block);
+        self.builder.position_at_end(if_case_block);
         for token in body {
             self.cur_line_nr = token.line_nr;
             self.cur_column_nr = token.column_nr;
 
             self.cur_block_id = id;
-            self.cur_basic_block = Some(if_case_block);
-
-            self.builder.position_at_end(if_case_block);
             self.compile(token)?;
         }
 
-        self.cur_basic_block = Some(if_case_block);
-        self.builder.position_at_end(if_case_block);
-
-        // Add a branch to the merge block if the current basic block
-        // doesn't have a terminator yet.
-        if if_case_block.get_terminator().is_none() {
-            let merge_block = self.get_merge_block(id)?;
-            self.builder.build_unconditional_branch(merge_block);
+        if let Some(cur_basic_block) = self.cur_basic_block {
+            self.builder.position_at_end(cur_basic_block);
+            // Add a branch to the merge block if the current basic block
+            // doesn't have a terminator yet.
+            if cur_basic_block.get_terminator().is_none() {
+                let merge_block = self.get_merge_block(id)?;
+                self.builder.build_unconditional_branch(merge_block);
+            }
+            Ok(())
+        } else {
+            Err(self.err("Current basic block None".into()))
         }
-        Ok(())
     }
 
     pub(super) fn compile_struct(&mut self, struct_: &Struct) -> CustomResult<()> {
@@ -517,8 +513,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         id: BlockId,
         body: &'ctx mut [ParseToken],
     ) -> CustomResult<()> {
-        self.cur_block_id = id;
-
         let mut cur_block = self
             .cur_basic_block
             .ok_or_else(|| self.err("cur_block is None for \"While\".".into()))?;
@@ -558,13 +552,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         // Iterate through all "tokens" in this while-loop and compile them.
-        self.cur_block_id = id;
         self.cur_basic_block = Some(while_body_block);
         for token in body.iter_mut() {
             self.cur_line_nr = token.line_nr;
             self.cur_column_nr = token.column_nr;
 
             self.cur_block_id = id;
+            self.cur_branch_block = Some(while_branch_block);
             cur_block = self
                 .cur_basic_block
                 .ok_or_else(|| self.err("cur_block is None for \"While\" body.".into()))?;
@@ -586,6 +580,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         self.cur_basic_block = Some(merge_block);
         self.builder.position_at_end(merge_block);
+        self.cur_branch_block = None;
         Ok(())
     }
 }
