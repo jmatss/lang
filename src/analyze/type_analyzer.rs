@@ -1,7 +1,7 @@
 use super::type_inference::TypeChoice;
 use crate::analyze::analyzer::AnalyzeContext;
+use crate::common::error::LangError;
 use crate::common::variable_type::Type;
-use crate::error::LangError;
 use crate::lex::token::Literal;
 use crate::parse::token::{
     AccessInstruction, BinaryOperator, BlockHeader, Expression, FunctionCall, ParseTokenKind,

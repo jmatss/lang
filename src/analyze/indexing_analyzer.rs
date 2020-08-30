@@ -1,6 +1,6 @@
 use crate::analyze::analyzer::AnalyzeContext;
 use crate::{
-    error::LangError,
+    common::error::LangError,
     parse::token::{
         AccessInstruction, BinaryOperation, BinaryOperator, BlockHeader, Expression, FunctionCall,
         Operation, ParseToken, ParseTokenKind, RootVariable, Statement, StructInit, UnaryOperation,

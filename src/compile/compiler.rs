@@ -1,4 +1,4 @@
-use crate::error::{LangError, LangErrorKind::CompileError};
+use crate::common::error::{LangError, LangErrorKind::CompileError};
 use crate::CustomResult;
 use inkwell::{
     module::Module,

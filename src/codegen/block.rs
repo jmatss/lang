@@ -1,5 +1,5 @@
 use super::generator::CodeGen;
-use crate::error::{LangError, LangErrorKind::CodeGenError};
+use crate::common::error::{LangError, LangErrorKind::CodeGenError};
 use crate::{
     parse::token::{
         BlockHeader, BlockId, Expression, Function, ParseToken, ParseTokenKind, Struct, Variable,

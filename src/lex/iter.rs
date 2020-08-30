@@ -1,5 +1,5 @@
 use super::token::LexTokenKind;
-use crate::error::{LangError, LangErrorKind::LexError};
+use crate::common::error::{LangError, LangErrorKind::LexError};
 use crate::lex::token::{LexToken, Literal, Symbol};
 use crate::{common::iter::TokenIter, CustomResult};
 

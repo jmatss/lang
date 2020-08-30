@@ -78,7 +78,7 @@ impl<'a> ExprParser<'a> {
             // Also stop parsing if a "ParenthesisEnd" has been found that isn't
             // part of the expression (`self.parenthesis_count < 0`).
             if self.parenthesis_count < 0 {
-                // Rewind to put back both the current `lewx_token` put also to
+                // Rewind to put back both the current `lex_token` and also to
                 // put back the previous "ParenthesisEnd" that was removed.
                 self.iter.rewind_skip_space()?;
                 self.iter.rewind_skip_space()?;

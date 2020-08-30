@@ -1,4 +1,4 @@
-use crate::error::{LangError, LangErrorKind::ParseError};
+use crate::common::error::{LangError, LangErrorKind::ParseError};
 use crate::{common::variable_type::Type, lex, CustomResult};
 
 /// A unique number given to every block.

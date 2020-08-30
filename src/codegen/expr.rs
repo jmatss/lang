@@ -6,7 +6,6 @@ use crate::{
     CustomResult,
 };
 use inkwell::{
-    basic_block::BasicBlock,
     types::{AnyTypeEnum, BasicTypeEnum},
     values::{AnyValueEnum, FloatValue, IntValue},
     AddressSpace,

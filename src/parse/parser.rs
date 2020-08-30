@@ -10,8 +10,8 @@ use super::{
 use crate::lex::token::{Keyword, LexToken, LexTokenKind, Symbol};
 use crate::CustomResult;
 use crate::{
+    common::error::{LangError, LangErrorKind::ParseError},
     common::iter::TokenIter,
-    error::{LangError, LangErrorKind::ParseError},
 };
 
 /// The common stop conditions used when parsing expressions.
@@ -167,7 +167,8 @@ impl ParseTokenIter {
                     return self.parse_keyword(keyword, lex_token.line_nr, lex_token.column_nr);
                 }
 
-                // Skip line breaks, white spaces and semi colons.
+                // Skip line breaks, white spaces and semi colons. Just return
+                // the symbol and let the caller decide what to do with it.
                 // Call this function recursively to get an "actual" token.
                 LexTokenKind::Symbol(Symbol::LineBreak)
                 | LexTokenKind::Symbol(Symbol::WhiteSpace(_))
@@ -289,30 +290,6 @@ impl ParseTokenIter {
             line_nr,
             column_nr,
         })
-    }
-
-    // Parses a identifier that either starts a assignment or a expressions.
-    // If the next lex token is a assignment symbol or a colon(type specification),
-    // it is a stmt, otherwise expr.
-    fn parse_ident(&mut self, ident: &str) -> CustomResult<Option<Variable>> {
-        if let Some(next_lex_token) = self.peek_skip_space() {
-            // If this is a assignment, this function will return a variable
-            // wrapped in Some. Otherwise it will be set to None to indicate
-            // that this identifier is part of a expression.
-            Ok(match next_lex_token.kind {
-                LexTokenKind::Symbol(Symbol::Colon) => Some(self.parse_var_type(ident)?),
-                LexTokenKind::Symbol(_) => {
-                    if let Some(_assign_op) = ParseToken::get_if_stmt_op(&next_lex_token) {
-                        Some(self.parse_var_type(ident)?)
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })
-        } else {
-            Err(self.err("next_lex_token None when parsing ident.".into()))
-        }
     }
 
     pub fn parse_keyword(
@@ -618,23 +595,6 @@ impl ParseTokenIter {
         }
     }
 
-    #[inline]
-    pub fn rewind_skip_space_line(&mut self) -> CustomResult<()> {
-        loop {
-            self.rewind()?;
-
-            if let Some(cur_token) = self.iter.peek() {
-                match cur_token.kind {
-                    LexTokenKind::Symbol(Symbol::WhiteSpace(_))
-                    | LexTokenKind::Symbol(Symbol::LineBreak) => continue,
-                    _ => return Ok(()),
-                }
-            } else {
-                return Err(self.err("Got None when peeking during rewind.".into()));
-            }
-        }
-    }
-
     /// Gets the next item from the iterator that is NOT a white space.
     /// If the item at the current position of the iterator is a white space,
     /// it will be skipped and the item after that will be fetched.
@@ -658,7 +618,8 @@ impl ParseTokenIter {
     }
 
     /// Gets the next item from the iterator that is NOT a white space or a
-    /// line break. Will loop until a non white space/line break is found.
+    /// line break (including semi colon). Will loop until a non white space/line
+    /// break is found.
     #[inline]
     pub fn next_skip_space_line(&mut self) -> Option<LexToken> {
         while let Some(lex_token) = self.iter.next() {
@@ -667,7 +628,8 @@ impl ParseTokenIter {
 
             match lex_token.kind {
                 LexTokenKind::Symbol(Symbol::WhiteSpace(_))
-                | LexTokenKind::Symbol(Symbol::LineBreak) => {
+                | LexTokenKind::Symbol(Symbol::LineBreak)
+                | LexTokenKind::Symbol(Symbol::SemiColon) => {
                     continue;
                 }
                 _ => return Some(lex_token),
@@ -698,15 +660,16 @@ impl ParseTokenIter {
     }
 
     /// Peeks and clones the next item from the iterator that is NOT a
-    /// white space or a line break. Will loop until a non white space/line break
-    /// is found.
+    /// white space or a line break (including semi colon). Will loop until a non
+    /// white space/line break is found.
     #[inline]
     pub fn peek_skip_space_line(&mut self) -> Option<LexToken> {
         let mut i = 0;
         while let Some(current) = self.iter.peek_at_n(i) {
             match current.kind {
                 LexTokenKind::Symbol(Symbol::WhiteSpace(_))
-                | LexTokenKind::Symbol(Symbol::LineBreak) => (),
+                | LexTokenKind::Symbol(Symbol::LineBreak)
+                | LexTokenKind::Symbol(Symbol::SemiColon) => (),
                 _ => return Some(current),
             }
             i += 1;

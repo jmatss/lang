@@ -4,9 +4,9 @@ use super::{
 };
 use crate::analyze::decl_analyzer::DeclAnalyzer;
 use crate::analyze::type_analyzer::TypeAnalyzer;
-use crate::error::{LangError, LangErrorKind::AnalyzeError};
+use crate::common::error::{LangError, LangErrorKind::AnalyzeError};
 use crate::parse::token::{BlockId, Enum, Function, Interface, ParseToken, Path, Struct, Variable};
-use crate::{common::variable_type::Type, CustomResult};
+use crate::CustomResult;
 use std::collections::HashMap;
 
 // TODO: Error if a function that doesn't have a return type has a return in it.
@@ -267,44 +267,6 @@ impl AnalyzeContext {
                 column_nr: self.cur_column_nr,
             },
         ))
-    }
-
-    /// Given a variable with the name `struct_var_name` inside a block with
-    /// ID `block_id`, returns the name of the actual struct type of the variable.
-    pub fn get_struct_name(
-        &self,
-        struct_var_name: String,
-        block_id: BlockId,
-    ) -> CustomResult<Option<String>> {
-        let decl_block_id = self.get_var_decl_scope(&struct_var_name, block_id)?;
-        let key = (struct_var_name.clone(), decl_block_id);
-
-        Ok(if let Some(struct_var) = self.variables.get(&key) {
-            if let Some(ref struct_type) = struct_var.ret_type {
-                match &struct_type.t {
-                    Type::Custom(struct_type_ident) => Some(struct_type_ident.clone()),
-                    _ => {
-                        let err_msg = format!(
-                            "Variable {} in decl block id {} expected to be struct was NOT: {:?}",
-                            &struct_var_name, decl_block_id, &struct_type.t
-                        );
-                        return Err(self.err(err_msg));
-                    }
-                }
-            } else {
-                let err_msg = format!(
-                    "Struct type not set for variable {} in decl block id {}.",
-                    &struct_var_name, decl_block_id
-                );
-                return Err(self.err(err_msg));
-            }
-        } else {
-            let err_msg = format!(
-                "Unable to find variable {} in decl block id {}.",
-                &struct_var_name, decl_block_id
-            );
-            return Err(self.err(err_msg));
-        })
     }
 
     pub fn get_struct(&mut self, struct_name: &str) -> CustomResult<Option<&Struct>> {

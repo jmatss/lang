@@ -1,6 +1,8 @@
 use super::generator::CodeGen;
-use crate::error::LangErrorKind::CodeGenError;
-use crate::{analyze::analyzer::BlockInfo, error::LangError, parse::token::BlockId, CustomResult};
+use crate::common::error::LangErrorKind::CodeGenError;
+use crate::{
+    analyze::analyzer::BlockInfo, common::error::LangError, parse::token::BlockId, CustomResult,
+};
 use inkwell::{
     basic_block::BasicBlock,
     types::{AnyTypeEnum, BasicTypeEnum},

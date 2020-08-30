@@ -183,7 +183,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )));
                 }
             }
-            UnaryOperator::Deref => self.compile_un_op_deref(&mut un_op.value, basic_value)?,
+            UnaryOperator::Deref => self.compile_un_op_deref(&mut un_op.value)?,
             UnaryOperator::Address => {
                 if let Some(var) = un_op.value.eval_to_var() {
                     self.compile_un_op_address(var)?
@@ -1060,11 +1060,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
-    fn compile_un_op_deref(
-        &mut self,
-        value: &mut Expression,
-        basic_value: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_un_op_deref(&mut self, value: &mut Expression) -> CustomResult<AnyValueEnum<'ctx>> {
         if let Some(var) = value.eval_to_var() {
             Ok(self.compile_var_load(var)?.into())
         } else {
@@ -1074,27 +1070,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_un_op_address(&mut self, var: &mut Variable) -> CustomResult<AnyValueEnum<'ctx>> {
         Ok(self.compile_var_load(var)?.into())
-        /*
-        // Get the pointer to the variable from `variables` that contains
-        // pointers to all variables allocated during code generation.
-        let block_id = self.cur_block_id;
-        let decl_block_id = self
-            .analyze_context
-            .get_var_decl_scope(&var.name, block_id)?;
-        let key = (var.name.clone(), decl_block_id);
-
-        if let Some(var_ptr) = self.variables.get(&key) {
-            Ok(var_ptr.clone().into())
-        } else {
-            Err(self.err(
-                format!(
-                    "Unable to find var \"{}\" in decl block id {}.",
-                    &var.name, decl_block_id
-                ),
-
-            ))
-        }
-        */
     }
 
     fn compile_un_op_array_access(

@@ -1,5 +1,5 @@
 use crate::analyze::analyzer::AnalyzeContext;
-use crate::error::LangError;
+use crate::common::error::LangError;
 use crate::parse::token::{BlockId, Expression, ParseToken, ParseTokenKind, Statement};
 use std::collections::HashMap;
 
@@ -73,7 +73,6 @@ impl<'a> DeferAnalyzer<'a> {
                             Statement::Return(_) => {
                                 if let Some(defers) = self.get_all_defers(*id) {
                                     for expr in defers.iter() {
-                                        warn!("Return - expr: {:#?}", expr);
                                         let kind = ParseTokenKind::Statement(
                                             Statement::DeferExecution(expr.clone()),
                                         );
@@ -86,7 +85,6 @@ impl<'a> DeferAnalyzer<'a> {
                             Statement::Yield(_) | Statement::Break | Statement::Continue => {
                                 if let Some(defers) = self.get_branchable_defers(*id) {
                                     for expr in defers.iter() {
-                                        warn!("Yield/Break/Continue - expr: {:#?}", expr);
                                         let kind = ParseTokenKind::Statement(
                                             Statement::DeferExecution(expr.clone()),
                                         );
@@ -122,7 +120,6 @@ impl<'a> DeferAnalyzer<'a> {
                     {
                         if let Some(defers) = self.get_block_defers(*id) {
                             for expr in defers.iter() {
-                                warn!("Block end - expr: {:#?}", expr);
                                 let kind = ParseTokenKind::Statement(Statement::DeferExecution(
                                     expr.clone(),
                                 ));

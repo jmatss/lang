@@ -1,5 +1,5 @@
 use super::token::LexTokenKind;
-use crate::error::LangError;
+use crate::common::error::LangError;
 use crate::lex::iter::LexTokenIter;
 use crate::lex::token::LexToken;
 use std::fs::File;

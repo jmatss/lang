@@ -1,5 +1,5 @@
 use crate::analyze::analyzer::AnalyzeContext;
-use crate::error::{LangError, LangErrorKind::CodeGenError};
+use crate::common::error::{LangError, LangErrorKind::CodeGenError};
 use crate::parse::token;
 use crate::parse::token::{ParseToken, Variable};
 use crate::{common::variable_type::Type, lex::token::Literal, CustomResult};

@@ -2,7 +2,6 @@ mod analyze;
 mod codegen;
 mod common;
 mod compile;
-mod error;
 mod lex;
 mod parse;
 
@@ -11,11 +10,11 @@ extern crate log;
 
 use crate::analyze::analyzer;
 use crate::codegen::generator;
+use crate::common::error::LangErrorKind::GeneralError;
 use crate::compile::compiler;
-use crate::error::LangErrorKind::GeneralError;
 use crate::lex::lexer;
 use crate::parse::parser::ParseTokenIter;
-use error::LangError;
+use common::error::LangError;
 use inkwell::context::Context;
 use log::Level;
 
@@ -42,7 +41,6 @@ fn main() -> CustomResult<()> {
     // Loop through files and lex+parse them until there or no more uses/includes
     // to process. ALl files will be incldued in the same module.
     let mut parser = ParseTokenIter::new();
-    let mut i = 0;
     let mut ast_root = loop {
         let lex_tokens = match lexer::lex(&input_file) {
             Ok(lex_tokens) => lex_tokens,
@@ -70,8 +68,6 @@ fn main() -> CustomResult<()> {
                 std::process::exit(1);
             }
         }
-
-        i += 1;
 
         if parser.uses.is_empty() {
             break parser.take_root_block();

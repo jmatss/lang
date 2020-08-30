@@ -1,5 +1,5 @@
 use crate::analyze::analyzer::AnalyzeContext;
-use crate::error::LangError;
+use crate::common::error::LangError;
 use crate::parse::token::{
     BlockHeader, BlockId, Enum, Function, Interface, ParseToken, ParseTokenKind, Statement, Struct,
 };
