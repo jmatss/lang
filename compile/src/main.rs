@@ -1,8 +1,9 @@
 mod compiler;
 
 use analyze::analyze;
+use clap::{App, Arg};
 use codegen::generator;
-use common::error::{CustomResult, LangError, LangErrorKind::GeneralError};
+use common::error::CustomResult;
 use inkwell::context::Context;
 use lex::lexer;
 use log::Level;
@@ -11,21 +12,48 @@ use parse::parser::ParseTokenIter;
 #[macro_use]
 extern crate log;
 
-const OUTPUT_PATH: &str = "a.o";
-
 fn main() -> CustomResult<()> {
-    let args: Vec<_> = std::env::args().collect();
-    if args.len() != 2 {
-        let msg = format!(
-            "Invalid amount of args. Expected: {}, got: {}.\nUsage: {} <TEST_DATA>",
-            2,
-            args.len(),
-            args[0]
-        );
-        return Err(LangError::new(msg, GeneralError));
+    let matches = App::new("lang")
+        .arg(
+            Arg::with_name("input")
+                .short("i")
+                .long("input")
+                .value_name("FILE")
+                .help("The file to compile.")
+                .takes_value(true)
+                .required(true),
+        )
+        .arg(
+            Arg::with_name("output")
+                .short("o")
+                .long("output")
+                .value_name("NAME")
+                .help("The output name of the produced object file.")
+                .takes_value(true)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("optimize")
+                .short("O")
+                .long("optimize")
+                .help("Set to run optimization of the LLVM IR.")
+                .takes_value(false)
+                .required(false),
+        )
+        .get_matches();
+
+    let mut input_file = matches.value_of("input").unwrap().to_owned();
+    if !input_file.ends_with(".ren") {
+        error!("Expected input file to end with the extension \".ren\".");
+        std::process::exit(1);
     }
-    let mut input_file = args[1].clone();
-    let module_name = args[1].split('/').last().unwrap();
+    let input_file_clone = input_file.clone();
+    let input_file_name = input_file_clone.split('/').last().unwrap();
+
+    let default_output_file = input_file_name.replace(".ren", ".o");
+    let output_file = matches.value_of("output").unwrap_or(&default_output_file);
+    let optimize = matches.is_present("optimize");
+    let module_name = input_file_name.split('.').next().unwrap();
 
     env_logger::init();
 
@@ -112,14 +140,15 @@ fn main() -> CustomResult<()> {
         }
     }
     println!("Generating complete.");
+    module.verify()?;
+
+    compiler::compile(target_machine, &module, output_file, optimize)?;
+    println!("Compiled to: {}", output_file);
 
     if log_enabled!(Level::Debug) {
         module.print_to_stderr();
+        println!("Module after optimization.");
     }
-    module.verify()?;
-
-    compiler::compile(target_machine, &module, OUTPUT_PATH)?;
-    println!("Compiled to: {}", OUTPUT_PATH);
 
     Ok(())
 }

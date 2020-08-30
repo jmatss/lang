@@ -12,7 +12,10 @@ pub enum BlockHeader {
     Enum(Enum),
     Interface(Interface),
 
-    // A anonymous block "{ ... }" that can be used to limit the scope.
+    /// The string is the name of the structure that this impl block implements.
+    Implement(String, Vec<Function>),
+
+    /// A anonymous block "{ ... }" that can be used to limit the scope.
     Anonymous,
 
     // Any `IfCase` blocks should be grouped together under one `If`.

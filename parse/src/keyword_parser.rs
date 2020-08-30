@@ -69,6 +69,7 @@ impl<'a> KeyworkParser<'a> {
             Keyword::Interface => Err(self
                 .iter
                 .err("\"Interface\" keyword not implemented.".into())),
+            Keyword::Implement => self.parse_impl(),
 
             Keyword::Defer => self.parse_defer(),
 
@@ -598,6 +599,60 @@ impl<'a> KeyworkParser<'a> {
             return Err(self
                 .iter
                 .err("Received None when looking at token after \"struct\".".into()));
+        };
+
+        // Parse the members of the struct.
+        let start_symbol = Symbol::CurlyBracketBegin;
+        let end_symbol = Symbol::CurlyBracketEnd;
+        let (members, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol)?;
+        if is_var_arg {
+            return Err(self.iter.err(format!(
+                "Found invalid var_arg symbol in struct with name: {}",
+                &ident
+            )));
+        }
+
+        let members_opt = if !members.is_empty() {
+            Some(members)
+        } else {
+            None
+        };
+        // TODO: Generics & implements (?).
+        let generics = None;
+        let implements = None;
+        let header = BlockHeader::Struct(Struct::new(ident, generics, implements, members_opt));
+
+        let block_id = self.iter.reserve_block_id();
+        let body = Vec::with_capacity(0);
+
+        let kind = ParseTokenKind::Block(header, block_id, body);
+        Ok(ParseToken::new(kind, line_nr, column_nr))
+    }
+
+    // TODO: Generics
+    /// Parses a implement header.
+    ///   "implement <ident> { [<func> ...] }"
+    /// The "implement" keyword has already been consumed when this function is called.
+    fn parse_impl(&mut self) -> CustomResult<ParseToken> {
+        // Start by parsing the identifier
+        let line_nr;
+        let column_nr;
+        let ident = if let Some(lex_token) = self.iter.next_skip_space() {
+            line_nr = lex_token.line_nr;
+            column_nr = lex_token.column_nr;
+
+            if let LexTokenKind::Identifier(ident) = lex_token.kind {
+                ident
+            } else {
+                return Err(self.iter.err(format!(
+                    "Expected ident when parsing \"implement\", got: {:?}",
+                    lex_token
+                )));
+            }
+        } else {
+            return Err(self
+                .iter
+                .err("Received None when looking at token after \"implement\".".into()));
         };
 
         // Parse the members of the struct.

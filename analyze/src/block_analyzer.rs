@@ -63,7 +63,8 @@ impl<'a> BlockAnalyzer<'a> {
                     ParseTokenKind::Block(BlockHeader::Default, ..)
                     | ParseTokenKind::Block(BlockHeader::Struct(_), ..)
                     | ParseTokenKind::Block(BlockHeader::Enum(_), ..)
-                    | ParseTokenKind::Block(BlockHeader::Interface(_), ..) => {
+                    | ParseTokenKind::Block(BlockHeader::Interface(_), ..)
+                    | ParseTokenKind::Block(BlockHeader::Implement(..), ..) => {
                         self.analyze_block(token)?;
                     }
 
@@ -98,6 +99,7 @@ impl<'a> BlockAnalyzer<'a> {
             | BlockHeader::Struct(_)
             | BlockHeader::Enum(_)
             | BlockHeader::Interface(_)
+            | BlockHeader::Implement(..)
             | BlockHeader::Default => true,
             _ => false,
         }

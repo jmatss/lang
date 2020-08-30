@@ -54,6 +54,7 @@ pub enum Keyword {
     Struct,
     Enum,
     Interface,
+    Implement,
     //Macro,
     Defer,
 
@@ -217,6 +218,7 @@ impl LexToken {
             "function" => LexTokenKind::Keyword(Keyword::Function),
             "struct" => LexTokenKind::Keyword(Keyword::Struct),
             "enum" => LexTokenKind::Keyword(Keyword::Enum),
+            "implement" => LexTokenKind::Keyword(Keyword::Implement),
             "interface" => LexTokenKind::Keyword(Keyword::Interface),
 
             "defer" => LexTokenKind::Keyword(Keyword::Defer),

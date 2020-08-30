@@ -66,6 +66,7 @@ impl<'a> DeclAnalyzer<'a> {
             BlockHeader::Interface(interface) => self.analyze_interface_header(interface, cur_id),
 
             BlockHeader::Default
+            | BlockHeader::Implement(..)
             | BlockHeader::If
             | BlockHeader::IfCase(_)
             | BlockHeader::Match(_)
