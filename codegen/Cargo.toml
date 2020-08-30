@@ -1,0 +1,15 @@
+[package]
+name = "codegen"
+version = "0.1.0"
+authors = ["jmatss <jmatss@kth.se>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "llvm10-0" }
+log = "0.4.11"
+
+analyze = { path = "../analyze" }
+common = { path = "../common" }
+parse = { path = "../parse" }

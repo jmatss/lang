@@ -20,24 +20,24 @@ struct TestArrayStruct
 
 function main() -> int
 {
-    //var x = [1, 2, 3]
-    //printf("1: %d", x.[1])
+    var x1 = [1, 2, 3]
+    printf("1: %d", x1.[1])
 
-    //var x = [1, 2, 3]
-    //var i = 0
-    //while i < 3
-    //{
-    //    double(x.[i].&)
-    //    i++
-    //}
-    //printf("0: %d\n1: %d\n2: %d", x.[0], x.[1], x.[2])
+    var x2 = [1, 2, 3]
+    var i = 0
+    while i < 3
+    {
+        double(x2.[i].&)
+        i++
+    }
+    printf("0: %d\n1: %d\n2: %d", x2.[0], x2.[1], x2.[2])
 
-    //var x = [TestStruct{ 12, 34 }]
-    //printf("Result: %d", x.[0].a)
+    var x3 = [TestStruct{ 12, 34 }]
+    printf("Result: %d", x3.[0].a)
 
     var heap_array = malloc(8) as {[i32: 2]}
     heap_array.* = [12, 24]
-    //printf("first: %d - %d", heap_array.*.[0], (heap_array.*).[1])
+    printf("first: %d - %d", heap_array.*.[0], (heap_array.*).[1])
     var abc = TestArrayStruct { 456, heap_array }
     printf("a: %d\nb: %d - %d", abc.a, abc.b.*.[0], abc.b.*.[1])
 
