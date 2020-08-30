@@ -8,6 +8,7 @@ use common::{
     BlockId,
 };
 use parse::token::{ParseToken, ParseTokenKind};
+use std::collections::hash_map::Entry;
 
 pub struct DeclAnalyzer<'a> {
     context: &'a mut AnalyzeContext,
@@ -233,10 +234,23 @@ impl<'a> DeclAnalyzer<'a> {
         match stmt {
             Statement::VariableDecl(var, _) => {
                 let key = (var.name.clone(), self.context.cur_block_id);
-                self.context.variables.insert(key, var.clone());
+
+                if let Entry::Vacant(v) = self.context.variables.entry(key) {
+                    v.insert(var.clone());
+                } else {
+                    let err_msg = format!(
+                        "A variable with name \"{}\" already declared in this scope ({}).",
+                        &var.name, self.context.cur_block_id
+                    );
+                    let err = self.context.err(err_msg);
+                    self.errors.push(err);
+                }
             }
             Statement::ExternalDecl(func) => {
                 // TODO: Don't hardcode zeros for the default block everywhere.
+                // TODO: Should probably check that if there are multiple extern
+                //       declarations of a function that they have the same
+                //       parameters & return type.
                 // External declarations should always be in the default block.
                 let key = (func.name.clone(), 0);
                 self.context.functions.insert(key, func.clone());

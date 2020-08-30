@@ -3,6 +3,11 @@ use super::{
     expr::{Expression, Variable},
     op::AssignOperator,
 };
+use crate::{
+    error::{CustomResult, LangError, LangErrorKind::GeneralError},
+    ENV_VAR,
+};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
@@ -69,13 +74,49 @@ impl Path {
         Path { idents }
     }
 
-    pub fn to_file_path(&self) -> Option<String> {
-        if let Some(path_str) = std::path::Path::new(&self.idents.join("/")).to_str() {
-            let mut path = path_str.to_string();
-            path.push_str(Path::EXTENSION);
-            Some(path)
+    /// Returns the path to a file. First looks for the file in the env var
+    /// "LANG_HOME". If it isn't found, assume the file is located relative
+    /// to the current working directory.
+    pub fn to_file_path(&self) -> CustomResult<String> {
+        let lang_path = std::env::var(ENV_VAR)?;
+        let relative_path = self.idents.join("/");
+
+        let lang_file_path = PathBuf::from(format!(
+            "{}/{}{}",
+            lang_path,
+            relative_path,
+            Path::EXTENSION
+        ));
+        let relative_file_path = PathBuf::from(format!("{}{}", relative_path, Path::EXTENSION));
+
+        if lang_file_path.exists() {
+            Ok(lang_file_path
+                .to_str()
+                .ok_or_else(|| {
+                    LangError::new(
+                        format!("Unable to convert path \"{:?}\" to str.", lang_file_path),
+                        GeneralError,
+                    )
+                })?
+                .into())
+        } else if relative_file_path.exists() {
+            Ok(relative_file_path
+                .to_str()
+                .ok_or_else(|| {
+                    LangError::new(
+                        format!(
+                            "Unable to convert path \"{:?}\" to str.",
+                            relative_file_path
+                        ),
+                        GeneralError,
+                    )
+                })?
+                .into())
         } else {
-            None
+            Err(LangError::new(
+                format!("Unable to find file: {}{}", relative_path, Path::EXTENSION),
+                GeneralError,
+            ))
         }
     }
 }

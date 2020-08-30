@@ -1,4 +1,4 @@
-use test_data.assert
+use std.assert
 
 external function printf(format: {u8}, ...) -> i32
 

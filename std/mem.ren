@@ -1,0 +1,2 @@
+external function malloc(size: i32) -> {void}
+external function free(ptr: {void})

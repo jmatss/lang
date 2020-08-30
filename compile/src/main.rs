@@ -60,20 +60,18 @@ fn main() -> CustomResult<()> {
             }
         }
 
-        if parser.uses.is_empty() {
-            break parser.take_root_block();
-        } else {
-            input_file = if let Some(use_path) = parser.uses.pop() {
-                if let Some(input_file) = use_path.to_file_path() {
-                    input_file
-                } else {
-                    error!("Unable to convert path to string, path: {:?}", use_path);
+        if let Some(use_path) = parser.uses.pop() {
+            input_file = match use_path.to_file_path() {
+                Ok(input_file) => input_file,
+                Err(e) => {
+                    error!("{}", e);
                     std::process::exit(1);
                 }
-            } else {
-                error!("Unable to get path from use stack");
-                std::process::exit(1);
             };
+        } else {
+            // No more "use" statements that includes more files. Break, all
+            // files parsed/lexed.
+            break parser.take_root_block();
         }
     };
     println!("Parsing complete.");

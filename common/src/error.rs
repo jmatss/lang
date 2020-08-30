@@ -1,9 +1,13 @@
+use crate::ENV_VAR;
 use backtrace::Backtrace;
 use inkwell::support::LLVMString;
 use log::Level;
 use std::error::Error;
 use std::fmt;
-use std::fmt::{Display, Formatter};
+use std::{
+    env::VarError,
+    fmt::{Display, Formatter},
+};
 
 pub type CustomResult<T> = Result<T, LangError>;
 
@@ -97,5 +101,11 @@ impl From<LLVMString> for LangError {
                 column_nr: 0,
             },
         )
+    }
+}
+
+impl From<VarError> for LangError {
+    fn from(e: VarError) -> Self {
+        LangError::new(format!("{}: {}", e, ENV_VAR), LangErrorKind::GeneralError)
     }
 }

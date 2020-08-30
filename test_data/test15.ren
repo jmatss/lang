@@ -1,4 +1,4 @@
-use test_data.assert
+use std.assert
 
 function return_short_circuit(a: i32, b: i32) -> bool
 {

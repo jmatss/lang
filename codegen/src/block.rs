@@ -13,7 +13,6 @@ use inkwell::{
     types::AnyTypeEnum,
     values::{FunctionValue, PointerValue},
 };
-use log::warn;
 use parse::token::{ParseToken, ParseTokenKind};
 
 /// Contains information related to branches in either a if-statement or a
@@ -254,8 +253,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .void_type()
                 .fn_type(param_types.as_slice(), func.is_var_arg)
         };
-
-        warn!("Compiling prototype for func: {:#?}", &func);
 
         Ok(self.module.add_function(&func.name, fn_type, linkage_opt))
 
