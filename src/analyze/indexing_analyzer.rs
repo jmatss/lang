@@ -247,13 +247,6 @@ impl<'a> IndexingAnalyzer<'a> {
                     var.access_instrs = Some((root_var, vec![access_instr]));
                 }
             }
-        } else {
-            let err_msg = format!(
-                "Value in un op does not eval to variable, value: {:?}.",
-                &un_op.value
-            );
-            let err = self.context.err(err_msg);
-            self.errors.push(err);
         }
     }
 }

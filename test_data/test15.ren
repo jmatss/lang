@@ -1,4 +1,5 @@
 external function printf(format: {u8}, ...) -> i32
+external function assert(expr: bool)
 
 function return_short_circuit(a: i32, b: i32) -> bool
 {
@@ -19,6 +20,7 @@ function main() -> i32
         printf("%d - %d\n", one, ten)
     }
     
+    assert(true)
     printf("Res: %d", return_short_circuit(3, 4))
 
     return 0

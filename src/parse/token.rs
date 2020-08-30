@@ -643,7 +643,7 @@ impl Operator {
             1   . .* .& .[]  (function calls, deref, address, indexing etc.)
             2   +x -x
             3   x++ x--      (only postfix)
-            4   ~ !
+            4   ~
             5   as
             6   **           (power)
             7   * / %
@@ -654,14 +654,15 @@ impl Operator {
             12  &
             13  ^
             14  |
-            15  and          (bool)
-            16  or           (bool)
-            17  .. ..=
-            18  in
+            15  not          (!)
+            16  and          (bool)
+            17  or           (bool)
+            18  .. ..=
+            19  in
 
             (Currently assignments aren't counted as expression, but they would
             have the lowest precedence if they were)
-            19  = += -= *= /= %= **= &= |= ^= <<= >>=
+            20  = += -= *= /= %= **= &= |= ^= <<= >>=
     */
     fn lookup(&self) -> Option<(bool, usize, Fix)> {
         if let Operator::ParenthesisBegin = self {
@@ -676,19 +677,19 @@ impl Operator {
                 UnaryOperator::Decrement => (true, 3, Fix::Postfix),
 
                 UnaryOperator::BitComplement => (true, 4, Fix::Prefix),
-                UnaryOperator::BoolNot => (true, 4, Fix::Prefix),
+                UnaryOperator::BoolNot => (true, 15, Fix::Prefix),
                 UnaryOperator::Deref => (true, 1, Fix::Postfix),
                 UnaryOperator::Address => (true, 1, Fix::Postfix),
                 UnaryOperator::ArrayAccess(_) => (true, 1, Fix::Postfix),
             })
         } else if let Operator::BinaryOperator(binary_op) = self {
             Some(match binary_op {
-                BinaryOperator::In => (false, 18, Fix::Dummy),
+                BinaryOperator::In => (false, 19, Fix::Dummy),
                 BinaryOperator::Is => (true, 10, Fix::Dummy),
                 BinaryOperator::As => (true, 5, Fix::Dummy),
                 BinaryOperator::Of => (true, 10, Fix::Dummy),
-                BinaryOperator::Range => (true, 17, Fix::Dummy),
-                BinaryOperator::RangeInclusive => (true, 17, Fix::Dummy),
+                BinaryOperator::Range => (true, 18, Fix::Dummy),
+                BinaryOperator::RangeInclusive => (true, 18, Fix::Dummy),
                 BinaryOperator::Dot => (true, 1, Fix::Dummy),
 
                 BinaryOperator::Equals => (true, 11, Fix::Dummy),
@@ -711,8 +712,8 @@ impl Operator {
                 BinaryOperator::ShiftLeft => (true, 9, Fix::Dummy),
                 BinaryOperator::ShiftRight => (true, 9, Fix::Dummy),
 
-                BinaryOperator::BoolAnd => (true, 15, Fix::Dummy),
-                BinaryOperator::BoolOr => (true, 16, Fix::Dummy),
+                BinaryOperator::BoolAnd => (true, 16, Fix::Dummy),
+                BinaryOperator::BoolOr => (true, 17, Fix::Dummy),
 
                 _ => return None,
             })
