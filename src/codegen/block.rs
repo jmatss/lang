@@ -252,6 +252,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .fn_type(param_types.as_slice(), func.is_var_arg)
         };
 
+        warn!("Compiling prototype for func: {:#?}", &func);
+
         Ok(self.module.add_function(&func.name, fn_type, linkage_opt))
 
         // TODO: Set names?

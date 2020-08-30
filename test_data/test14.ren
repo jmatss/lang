@@ -1,3 +1,5 @@
+use test_data.assert
+
 external function printf(format: {u8}, ...) -> i32
 
 function double(n: {i32}) -> bool
@@ -27,15 +29,7 @@ function main() -> i32
         printf("FALSE\n")
     }
     
-    if num == 6
-    {
-        printf("NOT short circuit")
-    }
-    else
-    {
-        printf("short circuit")
-    }
-    
+    assert_msg(num == 3, "Short circuit not working correctly.")    
 
     return 0
 }

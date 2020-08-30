@@ -103,6 +103,12 @@ impl ParseTokenIter {
     pub fn parse(&mut self) -> Result<(), Vec<LangError>> {
         let mut errors = Vec::new();
 
+        // Keep track of the tokens that have been parsed for the current `parse`
+        // call. This is needed so that they can be added infront of the previous
+        // tokens in one go. This makes it so that the contents of a file included
+        // with a "use" is put before the file containing the "use".
+        let mut cur_block_body = Vec::new();
+
         loop {
             match self.next_token() {
                 Ok(parse_token) => {
@@ -114,13 +120,17 @@ impl ParseTokenIter {
                         _ => (),
                     }
 
-                    self.root_block_body.push(parse_token);
+                    cur_block_body.push(parse_token);
                 }
                 Err(e) => errors.push(e),
             }
         }
 
         if errors.is_empty() {
+            // Move all previous tokens to the end of this vec and then replace
+            // the old vec with the new one containing all tokens.
+            cur_block_body.append(&mut self.root_block_body);
+            self.root_block_body = cur_block_body;
             Ok(())
         } else {
             Err(errors)

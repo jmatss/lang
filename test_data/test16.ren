@@ -1,4 +1,4 @@
-external function printf(format: {u8}, ...) -> i32
+use test_data.assert
 
 function main() -> i32
 {
@@ -18,7 +18,7 @@ function main() -> i32
         i++
     }
     
-    printf("i: %d", i)
+    assert(i == 5)
 
     return 0
 }

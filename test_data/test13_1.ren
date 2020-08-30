@@ -5,7 +5,8 @@ external function printf(format: {u8}, ...) -> i32
 function main() -> int
 {
     var i = 3
-    
+
+    double(i.&)
     printf("i: %d", i)
 
     return 123
