@@ -2,6 +2,7 @@ mod block_analyzer;
 mod decl_analyzer;
 mod defer_analyzer;
 mod indexing_analyzer;
+mod method_analyzer;
 mod type_analyzer;
 mod type_inference;
 
@@ -18,6 +19,7 @@ use common::{
 use decl_analyzer::DeclAnalyzer;
 use defer_analyzer::DeferAnalyzer;
 use indexing_analyzer::IndexingAnalyzer;
+use method_analyzer::MethodAnalyzer;
 use parse::token::ParseToken;
 use std::collections::HashMap;
 use type_analyzer::TypeAnalyzer;
@@ -34,6 +36,8 @@ use type_analyzer::TypeAnalyzer;
 /// to access declared variables/structs to set the idnexing correctly.
 /// The "DeferAnalyzer" will copy Expressions, so it should not be ran before
 /// the analyzing (type, indexing etc.) on Expressions are done.
+/// The "MethodAnalyzer" will also copy Expressions ("this"/"self" into func calls),
+/// so it follows the same rules as "DeferAnalyzer" above.
 pub fn analyze(ast_root: &mut ParseToken) -> Result<AnalyzeContext, Vec<LangError>> {
     let mut context = AnalyzeContext::new();
 
@@ -41,6 +45,7 @@ pub fn analyze(ast_root: &mut ParseToken) -> Result<AnalyzeContext, Vec<LangErro
     DeclAnalyzer::analyze(&mut context, ast_root)?;
     IndexingAnalyzer::analyze(&mut context, ast_root)?;
     TypeAnalyzer::analyze(&mut context, ast_root)?;
+    MethodAnalyzer::analyze(&mut context, ast_root)?;
     DeferAnalyzer::analyze(&mut context, ast_root)?;
 
     Ok(context)
@@ -115,6 +120,10 @@ pub struct AnalyzeContext {
     pub structs: HashMap<(String, BlockId), Struct>,
     pub enums: HashMap<(String, BlockId), Enum>,
     pub interfaces: HashMap<(String, BlockId), Interface>,
+    /// A `methods` entry should have a corresponding struct in `structs` with
+    /// the same key. The string in the outer map key is the name of the struct
+    /// and the string in the inner map is the name of the method.
+    pub methods: HashMap<(String, BlockId), HashMap<String, Function>>,
 
     pub block_info: HashMap<BlockId, BlockInfo>,
     pub use_paths: Vec<Path>,
@@ -140,6 +149,7 @@ impl AnalyzeContext {
             structs: HashMap::default(),
             enums: HashMap::default(),
             interfaces: HashMap::default(),
+            methods: HashMap::default(),
 
             block_info: HashMap::default(),
             use_paths: Vec::default(),

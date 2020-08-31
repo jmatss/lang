@@ -142,6 +142,14 @@ impl Expression {
             _ => None,
         }
     }
+
+    pub fn eval_to_func_call(&mut self) -> Option<&mut FunctionCall> {
+        if let Expression::FunctionCall(func_call) = self {
+            Some(func_call)
+        } else {
+            None
+        }
+    }
 }
 
 // TODO: Rethink this approach of using "AccessType"s, should not do it.
@@ -195,11 +203,17 @@ impl Variable {
 pub struct FunctionCall {
     pub name: String,
     pub arguments: Vec<Argument>,
+    /// See the `access_instrs` in "Variable" for a explanation.
+    pub access_instrs: Option<(RootVariable, Vec<AccessInstruction>)>,
 }
 
 impl FunctionCall {
     pub fn new(name: String, arguments: Vec<Argument>) -> Self {
-        Self { name, arguments }
+        Self {
+            name,
+            arguments,
+            access_instrs: None,
+        }
     }
 }
 
@@ -234,6 +248,11 @@ pub enum AccessInstruction {
     /// The second string is the name of this member/variable and the u32 is the
     /// position/index of this var in the struct.
     StructMember(String, String, Option<u32>),
+
+    // TODO: This will need to be changed if overloading is to be supported.
+    /// The first string is the name of the struct.
+    /// The string is the name of the method.
+    StructMethod(Option<String>, String),
 
     Deref,
     Address,

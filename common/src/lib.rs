@@ -11,4 +11,5 @@ pub const ENV_VAR: &str = "LANG_HOME";
 pub mod error;
 pub mod iter;
 pub mod token;
+pub mod util;
 pub mod variable_type;

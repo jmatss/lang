@@ -523,7 +523,7 @@ impl<'a> KeyworkParser<'a> {
     /// The "function" keyword has already been consumed when this function is called.
     fn parse_func_proto(&mut self) -> CustomResult<Function> {
         // Start by parsing the identifier
-        let ident = if let Some(lex_token) = self.iter.next_skip_space() {
+        let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
             if let LexTokenKind::Identifier(ident) = lex_token.kind {
                 ident
             } else {
@@ -583,7 +583,7 @@ impl<'a> KeyworkParser<'a> {
         // Start by parsing the identifier
         let line_nr;
         let column_nr;
-        let ident = if let Some(lex_token) = self.iter.next_skip_space() {
+        let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
             line_nr = lex_token.line_nr;
             column_nr = lex_token.column_nr;
 
@@ -635,12 +635,7 @@ impl<'a> KeyworkParser<'a> {
     /// The "implement" keyword has already been consumed when this function is called.
     fn parse_impl(&mut self) -> CustomResult<ParseToken> {
         // Start by parsing the identifier
-        let line_nr;
-        let column_nr;
-        let ident = if let Some(lex_token) = self.iter.next_skip_space() {
-            line_nr = lex_token.line_nr;
-            column_nr = lex_token.column_nr;
-
+        let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
             if let LexTokenKind::Identifier(ident) = lex_token.kind {
                 ident
             } else {
@@ -655,32 +650,30 @@ impl<'a> KeyworkParser<'a> {
                 .err("Received None when looking at token after \"implement\".".into()));
         };
 
-        // Parse the members of the struct.
-        let start_symbol = Symbol::CurlyBracketBegin;
-        let end_symbol = Symbol::CurlyBracketEnd;
-        let (members, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol)?;
-        if is_var_arg {
+        let header = BlockHeader::Implement(ident);
+        let impl_token = self.iter.next_block(header)?;
+
+        // Iterate through the tokens in the body and make sure that all tokens
+        // are functions.
+        if let ParseTokenKind::Block(BlockHeader::Implement(_), _, body) = &impl_token.kind {
+            for token in body {
+                if let ParseTokenKind::Block(BlockHeader::Function(_), ..) = token.kind {
+                    // Do nothing, the token is of correct type.
+                } else {
+                    return Err(self.iter.err(format!(
+                        "Non function parsed in \"implement\" block: {:#?}.",
+                        token
+                    )));
+                }
+            }
+        } else {
             return Err(self.iter.err(format!(
-                "Found invalid var_arg symbol in struct with name: {}",
-                &ident
+                "Parsed \"implement\" block not a impl block: {:#?}.",
+                impl_token
             )));
         }
 
-        let members_opt = if !members.is_empty() {
-            Some(members)
-        } else {
-            None
-        };
-        // TODO: Generics & implements (?).
-        let generics = None;
-        let implements = None;
-        let header = BlockHeader::Struct(Struct::new(ident, generics, implements, members_opt));
-
-        let block_id = self.iter.reserve_block_id();
-        let body = Vec::with_capacity(0);
-
-        let kind = ParseTokenKind::Block(header, block_id, body);
-        Ok(ParseToken::new(kind, line_nr, column_nr))
+        Ok(impl_token)
     }
 
     /// Parses a defer statement.

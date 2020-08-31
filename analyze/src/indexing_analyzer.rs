@@ -164,8 +164,11 @@ impl<'a> IndexingAnalyzer<'a> {
         self.analyze_expr(&mut bin_op.left);
 
         if let BinaryOperator::Dot = bin_op.operator {
-            if let Some(rhs) = bin_op.right.eval_to_var() {
-                if let Some(lhs) = bin_op.left.eval_to_var() {
+            if let Some(lhs) = bin_op.left.eval_to_var() {
+                // If the right is a variable, this is a struct member access.
+                // Else if the right is a function call, this is a use of a method
+                // belonging to the struct variable at the left hand side.
+                if let Some(rhs) = bin_op.right.eval_to_var() {
                     let struct_var_name = lhs.name.clone();
                     let member_name = rhs.name.clone();
 
@@ -175,8 +178,8 @@ impl<'a> IndexingAnalyzer<'a> {
                     // If true: Nested struct, else: just a basic struct member.
                     // The index isn't set here, it will be set during TypeAnalyzing
                     // when the struct declarations are analyzed.
-                    if let Some(ref struct_access_instrs) = lhs.access_instrs {
-                        let mut member_access_instrs = struct_access_instrs.clone();
+                    if let Some(ref lhs_access_instrs) = lhs.access_instrs {
+                        let mut member_access_instrs = lhs_access_instrs.clone();
                         member_access_instrs.1.push(access_instr);
                         member_access_instrs.0.is_struct = true;
 
@@ -194,13 +197,46 @@ impl<'a> IndexingAnalyzer<'a> {
                         let root_var = RootVariable::new(struct_var_name, var_decl_id, true);
                         rhs.access_instrs = Some((root_var, vec![access_instr]));
                     }
-                } else {
-                    panic!(
-                        "Left hand side of Dot symbol didn't eval to variable. \
-                        Left: {:?}, right: {:?}",
-                        bin_op.left, bin_op.right
-                    );
+                } else if let Some(rhs_method_call) = bin_op.right.eval_to_func_call() {
+                    let struct_var_name = lhs.name.clone();
+                    let method_name = rhs_method_call.name.clone();
+
+                    // The first argument is the struct name and it will be set
+                    // during "method analyzing" since the type/struct are at
+                    // this stage not known, it will be known after "type analyzing"
+                    // has been ran.
+                    let access_instr = AccessInstruction::StructMethod(None, method_name);
+
+                    // If true: Nested struct, else: just a basic struct member.
+                    if let Some(ref lhs_access_instrs) = lhs.access_instrs {
+                        let mut method_access_instrs = lhs_access_instrs.clone();
+                        method_access_instrs.1.push(access_instr);
+                        method_access_instrs.0.is_struct = true;
+
+                        rhs_method_call.access_instrs = Some(method_access_instrs);
+                    } else {
+                        let var_decl_id =
+                            match self.context.get_var_decl_scope(&struct_var_name, block_id) {
+                                Ok(var_decl_id) => var_decl_id,
+                                Err(e) => {
+                                    self.errors.push(e);
+                                    return;
+                                }
+                            };
+
+                        let root_var = RootVariable::new(struct_var_name, var_decl_id, true);
+                        rhs_method_call.access_instrs = Some((root_var, vec![access_instr]));
+                    }
                 }
+            } else {
+                let err_msg = format!(
+                    "Left hand side of Dot symbol didn't eval to variable. \
+                    Left: {:?}, right: {:?}",
+                    bin_op.left, bin_op.right
+                );
+                let err = self.context.err(err_msg);
+                self.errors.push(err);
+                return;
             }
         }
 

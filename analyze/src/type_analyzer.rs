@@ -135,7 +135,26 @@ impl<'a> TypeAnalyzer<'a> {
                 ty
             }
             Expression::Operation(op) => self.analyze_op_type(op, type_hint_opt),
-            Expression::FunctionCall(func_call) => self.analyze_func_call(func_call),
+            Expression::FunctionCall(func_call) => {
+                // If true: This is a method. The type hint given from the lhs
+                //          will be the type of the struct that this method
+                //          is called on.
+                // Else: This is a regular function call.
+                if func_call.access_instrs.is_some() {
+                    if let Some(type_hint) = type_hint_opt {
+                        self.analyze_method_call(func_call, type_hint)
+                    } else {
+                        let err = self.context.err(format!(
+                            "Analyzing type of method call with None type hint, method name: {}",
+                            &func_call.name
+                        ));
+                        self.errors.push(err);
+                        None
+                    }
+                } else {
+                    self.analyze_func_call(func_call)
+                }
+            }
             Expression::StructInit(struct_init) => self.analyze_struct_init(struct_init),
             Expression::ArrayInit(args) => {
                 if args.is_empty() {
@@ -242,6 +261,108 @@ impl<'a> TypeAnalyzer<'a> {
 
         // Always return the type of the actual function.
         func.ret_type.clone()
+    }
+
+    fn analyze_method_call(
+        &mut self,
+        func_call: &mut FunctionCall,
+        type_hint: TypeStruct,
+    ) -> Option<TypeStruct> {
+        let struct_name = if let Type::Custom(struct_name) = type_hint.t {
+            struct_name
+        } else {
+            let err_msg = format!(
+                "lhs type during method call not a struct: {:#?}",
+                &type_hint
+            );
+            let err = self.context.err(err_msg);
+            self.errors.push(err);
+            return None;
+        };
+
+        let cur_block_id = self.context.cur_block_id;
+        let struct_block_id = match self
+            .context
+            .get_struct_parent_id(struct_name.clone(), cur_block_id)
+        {
+            Ok(struct_id) => struct_id,
+            Err(err) => {
+                self.errors.push(err);
+                return None;
+            }
+        };
+
+        // Get the method from the map parsed during "decl analyzing".
+        let key = (struct_name.clone(), struct_block_id);
+        let method = if let Some(methods) = self.context.methods.get(&key) {
+            if let Some(method) = methods.get(&func_call.name) {
+                method.clone()
+            } else {
+                let err_msg = format!(
+                    "Unable to find method with name \"{}\" for struct \"{}\" in block {}.",
+                    &func_call.name, struct_name, struct_block_id
+                );
+                let err = self.context.err(err_msg);
+                self.errors.push(err);
+                return None;
+            }
+        } else {
+            let err_msg = format!(
+                "Unable to find methods for struct \"{}\" in block {}.",
+                &struct_name, struct_block_id
+            );
+            let err = self.context.err(err_msg);
+            self.errors.push(err);
+            return None;
+        };
+
+        // Analyze all arguments of the method call and make sure that
+        // the amount of types of the args/params are the same. The method
+        // will have a extra parameters which represents "this"/"self". They can
+        // differ if this method is variadic.
+        if let Some(func_params) = method.parameters {
+            if (func_call.arguments.len() + 1 == func_params.len() && !method.is_var_arg)
+                || (func_call.arguments.len() + 1 >= func_params.len() && method.is_var_arg)
+            {
+                for (i, arg) in func_call.arguments.iter_mut().enumerate() {
+                    let prev_type_opt = if i + 1 < func_params.len() {
+                        func_params
+                            .get(i + 1)
+                            .expect("More args than params, unreachable.")
+                            .ret_type
+                            .clone()
+                    } else {
+                        None
+                    };
+                    self.analyze_expr_type(&mut arg.value, prev_type_opt);
+                }
+            } else {
+                let err_msg = format!(
+                    "Method call to {} for struct {}, incorrect amount of param/arg (vararg={}). \
+                    Actual method #: {}, got: {}(+ 1).",
+                    &func_call.name,
+                    &struct_name,
+                    method.is_var_arg,
+                    func_params.len(),
+                    func_call.arguments.len()
+                );
+                let err = self.context.err(err_msg);
+                self.errors.push(err);
+                return None;
+            }
+        } else if !func_call.arguments.is_empty() {
+            let err_msg = format!(
+                "Method {} has no params, but func_call had {} args.",
+                &func_call.name,
+                func_call.arguments.len()
+            );
+            let err = self.context.err(err_msg);
+            self.errors.push(err);
+            return None;
+        }
+
+        // Always return the type of the actual function.
+        method.ret_type.clone()
     }
 
     fn analyze_struct_init(&mut self, struct_init: &mut StructInit) -> Option<TypeStruct> {
@@ -430,7 +551,8 @@ impl<'a> TypeAnalyzer<'a> {
                     }
                     AccessInstruction::Deref
                     | AccessInstruction::Address
-                    | AccessInstruction::ArrayAccess(_) => continue,
+                    | AccessInstruction::ArrayAccess(_)
+                    | AccessInstruction::StructMethod(..) => continue,
                 };
             }
 
@@ -737,6 +859,7 @@ impl<'a> TypeAnalyzer<'a> {
 
             BlockHeader::Default
             | BlockHeader::Function(_)
+            | BlockHeader::Implement(..)
             | BlockHeader::Struct(_)
             | BlockHeader::Enum(_)
             | BlockHeader::Interface(_)

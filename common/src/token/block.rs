@@ -12,8 +12,9 @@ pub enum BlockHeader {
     Enum(Enum),
     Interface(Interface),
 
-    /// The string is the name of the structure that this impl block implements.
-    Implement(String, Vec<Function>),
+    /// The string is the name of the structure that this impl block implements
+    /// and the body of this block will contain the functions.
+    Implement(String),
 
     /// A anonymous block "{ ... }" that can be used to limit the scope.
     Anonymous,
@@ -111,6 +112,10 @@ pub struct Function {
     pub parameters: Option<Vec<Variable>>,
     pub ret_type: Option<TypeStruct>,
     pub is_var_arg: bool,
+
+    /// Will be set if this is a function in a "impl" block which means that
+    /// this is a function tied to a struct. The string will be the struct name.
+    pub method_struct: Option<String>,
 }
 
 impl Function {
@@ -127,6 +132,7 @@ impl Function {
             parameters,
             ret_type,
             is_var_arg,
+            method_struct: None,
         }
     }
 }

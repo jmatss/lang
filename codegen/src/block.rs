@@ -5,7 +5,7 @@ use common::{
         block::{BlockHeader, Function, Struct},
         expr::{Expression, Variable},
     },
-    BlockId,
+    util, BlockId,
 };
 use inkwell::{
     basic_block::BasicBlock,
@@ -91,6 +91,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BlockHeader::Function(func) => {
                 self.compile_func(func, id, body)?;
             }
+            BlockHeader::Implement(_) => {
+                for token in body {
+                    if let ParseTokenKind::Block(BlockHeader::Function(func), func_id, func_body) =
+                        &mut token.kind
+                    {
+                        self.compile_func(func, *func_id, func_body)?;
+                    }
+                }
+            }
             //BlockHeader::Struct(struct_) => self.compile_struct(struct_),
             //BlockHeader::Enum(enum_) => self.compile_enum(enum_),
             //BlockHeader::Interface(interface) => self.compile_interface(interface),
@@ -143,7 +152,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_func(
         &mut self,
         func: &'ctx Function,
-        id: BlockId,
+        func_id: BlockId,
         body: &'ctx mut [ParseToken],
     ) -> CustomResult<()> {
         let linkage = Linkage::External;
@@ -174,7 +183,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let ptr = self.create_entry_block_alloca(param)?;
             self.builder.build_store(ptr, arg);
 
-            let key = (param.name.clone(), self.cur_block_id);
+            let key = (param.name.clone(), func_id);
             self.variables.insert(key, ptr);
         }
 
@@ -182,7 +191,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for token in body {
             self.cur_line_nr = token.line_nr;
             self.cur_column_nr = token.column_nr;
-            self.cur_block_id = id;
+            self.cur_block_id = func_id;
 
             self.compile(token)?;
         }
@@ -254,7 +263,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .fn_type(param_types.as_slice(), func.is_var_arg)
         };
 
-        Ok(self.module.add_function(&func.name, fn_type, linkage_opt))
+        // True if this is a method tied to struct (first arg "this"/"self").
+        // False if this is just a regular func.
+        let name = if let Some(struct_name) = &func.method_struct {
+            util::to_method_name(struct_name, &func.name)
+        } else {
+            func.name.clone()
+        };
+
+        Ok(self.module.add_function(&name, fn_type, linkage_opt))
 
         // TODO: Set names?
         /*

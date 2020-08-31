@@ -3,16 +3,24 @@ use common::{
     error::LangError,
     token::{
         block::{BlockHeader, Enum, Function, Interface, Struct},
+        expr::Variable,
         stmt::Statement,
     },
+    variable_type::{Type, TypeStruct},
     BlockId,
 };
 use parse::token::{ParseToken, ParseTokenKind};
-use std::collections::hash_map::Entry;
+use std::collections::{hash_map::Entry, HashMap};
 
 pub struct DeclAnalyzer<'a> {
     context: &'a mut AnalyzeContext,
     errors: Vec<LangError>,
+
+    /// Contains the name of the struct for the current "implement" block (if any).
+    /// This is needed during analyzing of functions since they might be
+    /// declared in a impl block which means that they need to extra logic to
+    /// handle the current "object".
+    cur_impl: Option<String>,
 }
 
 impl<'a> DeclAnalyzer<'a> {
@@ -36,6 +44,7 @@ impl<'a> DeclAnalyzer<'a> {
         Self {
             context,
             errors: Vec::default(),
+            cur_impl: None,
         }
     }
 
@@ -47,20 +56,36 @@ impl<'a> DeclAnalyzer<'a> {
             ParseTokenKind::Block(header, id, body) => {
                 self.context.cur_block_id = *id;
                 self.analyze_header(header);
+
+                // Update the current impl block if needed for every iteration
+                // of the tokens in the body.
+                let cur_impl_opt = if let BlockHeader::Implement(ident) = header {
+                    Some(ident.clone())
+                } else {
+                    None
+                };
                 for token in body {
                     self.context.cur_block_id = *id;
+                    self.cur_impl = cur_impl_opt.clone();
                     self.analyze_token(token);
                 }
+                self.cur_impl = None;
             }
             ParseTokenKind::Statement(stmt) => self.analyze_stmt(&stmt),
             ParseTokenKind::Expression(_) | ParseTokenKind::EndOfFile => (),
         }
     }
 
-    fn analyze_header(&mut self, header: &BlockHeader) {
+    fn analyze_header(&mut self, header: &mut BlockHeader) {
         let cur_id = self.context.cur_block_id;
         match header {
-            BlockHeader::Function(func) => self.analyze_func_header(func, cur_id),
+            BlockHeader::Function(ref mut func) => {
+                if let Some(cur_impl_struct_name) = self.cur_impl.clone() {
+                    self.analyze_method_header(&cur_impl_struct_name, func, cur_id)
+                } else {
+                    self.analyze_func_header(func, cur_id)
+                }
+            }
             BlockHeader::Struct(struct_) => self.analyze_struct_header(struct_, cur_id),
             BlockHeader::Enum(enum_) => self.analyze_enum_header(enum_, cur_id),
             BlockHeader::Interface(interface) => self.analyze_interface_header(interface, cur_id),
@@ -156,6 +181,56 @@ impl<'a> DeclAnalyzer<'a> {
                     let param_key = (param.name.clone(), func_id);
                     self.context.variables.insert(param_key, param.clone());
                 }
+            }
+        }
+    }
+
+    fn analyze_method_header(&mut self, struct_name: &str, func: &mut Function, func_id: BlockId) {
+        // Add the methods in the scope of the structs root parent.
+        let struct_parent_id = match self
+            .context
+            .get_struct_parent_id(struct_name.into(), func_id)
+        {
+            Ok(id) => id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
+        func.method_struct = Some(struct_name.into());
+
+        // Since this is a method, the first parameters should be "this"/"self".
+        // TODO: Where should the name of "this"/"self" be specified?
+        const THIS_VAR_NAME: &str = "this";
+        let ty = Type::Custom(struct_name.into());
+        let generics = None;
+        let type_struct = TypeStruct::new(ty, generics);
+        let var = Variable::new(THIS_VAR_NAME.into(), Some(type_struct), None, false);
+        if let Some(ref mut params) = func.parameters {
+            params.insert(0, var);
+        } else {
+            func.parameters = Some(vec![var]);
+        }
+
+        let key = (struct_name.into(), struct_parent_id);
+        if let Some(inner_methods) = self.context.methods.get_mut(&key) {
+            // TODO: Should probably check that it doesn't exists two functions
+            //       with the same name. Or if overloading allowed, that they
+            //       are different enough etc.
+            inner_methods.insert(func.name.clone(), func.clone());
+        } else {
+            let mut inner_methods = HashMap::new();
+            inner_methods.insert(func.name.clone(), func.clone());
+
+            self.context.methods.insert(key, inner_methods);
+        }
+
+        // Add the parameters as variables in the method scope.
+        if let Some(ref params) = func.parameters {
+            for param in params {
+                let param_key = (param.name.clone(), func_id);
+                self.context.variables.insert(param_key, param.clone());
             }
         }
     }
