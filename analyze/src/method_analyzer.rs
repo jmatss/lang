@@ -126,7 +126,7 @@ impl<'a> MethodAnalyzer<'a> {
                             access_instrs.last_mut()
                         {
                             if let Some(Type::Custom(struct_name)) =
-                                lhs_var.ret_type.clone().map(|type_struct| type_struct.t)
+                                lhs_var.ret_type.clone().map(|type_struct| type_struct.ty)
                             {
                                 *struct_name_opt = Some(struct_name)
                             } else {

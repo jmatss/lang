@@ -3,7 +3,7 @@ use std.assert
 struct TestStruct
 {
     a: i32,
-    b: {f32},
+    b: {f64},
     c: i32,
 }
 
@@ -19,12 +19,6 @@ implement TestStruct
 
 function main() -> int
 {
-    // TODO: If the `b` inside "TestStruct" is f64, this won't compile.
-    //       It seems like this local `b` gets the inferred type of f32
-    //       and then won't be compatible with the f64 in the TestStruct.
-    //       Need to infer the type correctly.
-    //       It compiles if the local `b` sets the type to f64 manually.
-
     var b = 1.0
     var test_struct = TestStruct { 10, b.&, 2 }
 
@@ -32,6 +26,7 @@ function main() -> int
 
     assert(actual_result == 30)
     assert(test_struct.b.* == 2.0)
+    printf("actual_result: %d, test_struct.b.*: %lf", actual_result, test_struct.b.*)
     
     return 0
 }

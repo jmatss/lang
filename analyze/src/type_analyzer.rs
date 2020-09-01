@@ -1,5 +1,5 @@
 use super::type_inference::TypeChoice;
-use crate::AnalyzeContext;
+use crate::{type_inference::unify, AnalyzeContext};
 use common::error::LangError;
 use common::{
     token::{
@@ -30,7 +30,14 @@ impl<'a> TypeAnalyzer<'a> {
         ast_root: &mut ParseToken,
     ) -> Result<(), Vec<LangError>> {
         let mut type_analyzer = TypeAnalyzer::new(context);
+
+        // Run it twice. The first run will go through everything and will find
+        // all the types and assign them to ex. the variables. The second
+        // run will use that information and propagate all the types to the
+        // expressions.
         type_analyzer.analyze_type(ast_root);
+        type_analyzer.analyze_type(ast_root);
+
         if type_analyzer.errors.is_empty() {
             Ok(())
         } else {
@@ -77,62 +84,66 @@ impl<'a> TypeAnalyzer<'a> {
         type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         match expr {
-            Expression::Literal(lit, old_type_hint_opt) => {
-                // If a type is already set and has been given as a argument to
-                // this function, use that instead of the default for literals.
-                // Also make sure that the given type hint is of the same type
-                // as the literal, otherwise ignore it.
-                if let Some(type_hint) = type_hint_opt {
-                    match lit {
-                        Literal::StringLiteral(_) => {
-                            if type_hint.t.is_string() {
-                                *old_type_hint_opt = Some(type_hint);
-                            }
-                        }
-                        Literal::CharLiteral(_) => {
-                            if type_hint.t.is_char() {
-                                *old_type_hint_opt = Some(type_hint);
-                            }
-                        }
-                        Literal::Bool(_) => {
-                            if type_hint.t.is_bool() {
-                                *old_type_hint_opt = Some(type_hint);
-                            }
-                        }
-                        Literal::Integer(_, _) => {
-                            if type_hint.t.is_int() {
-                                *old_type_hint_opt = Some(type_hint);
-                            }
-                        }
-                        Literal::Float(_) => {
-                            if type_hint.t.is_float() {
-                                *old_type_hint_opt = Some(type_hint);
-                            }
-                        }
+            Expression::Literal(lit, cur_type_opt) => {
+                // If this literal already has a type that is NOT inferred, don't
+                // change it, do early return.
+                if let Some(cur_type) = cur_type_opt {
+                    if !cur_type.is_inferred {
+                        return cur_type_opt.clone();
                     }
-                    old_type_hint_opt.clone()
-                } else {
-                    let new_type_opt = Some(self.analyze_literal_type(lit));
-                    *old_type_hint_opt = new_type_opt;
-                    old_type_hint_opt.clone()
                 }
+
+                // If the new type is prefered, use it.
+                let new_type_opt = Some(self.analyze_literal_type(lit));
+                if let Some(TypeChoice::Second) =
+                    unify(cur_type_opt.as_ref(), new_type_opt.as_ref())
+                {
+                    *cur_type_opt = new_type_opt;
+                }
+
+                // If no type is set for the literal, use the type hint. It
+                // doesn't matter what the type hint is since it will always
+                // be better or equal to the current None type.
+                // Also make sure that the given type hint is of the same type
+                // as the literal.
+                if let Some(type_hint) = type_hint_opt.clone() {
+                    let possible_type_hint = match lit {
+                        Literal::StringLiteral(_) if type_hint.ty.is_string() => Some(type_hint),
+                        Literal::CharLiteral(_) if type_hint.ty.is_char() => Some(type_hint),
+                        Literal::Bool(_) if type_hint.ty.is_bool() => Some(type_hint),
+                        Literal::Integer(_, _) if type_hint.ty.is_int() => Some(type_hint),
+                        Literal::Float(_) if type_hint.ty.is_float() => Some(type_hint),
+                        _ => None,
+                    };
+
+                    // If the type hint is prefered, use it.
+                    if let Some(TypeChoice::Second) =
+                        unify(cur_type_opt.as_ref(), possible_type_hint.as_ref())
+                    {
+                        *cur_type_opt = possible_type_hint;
+                    }
+                }
+
+                // Return the now (possible) updated type.
+                cur_type_opt.clone()
             }
             Expression::Type(type_struct) => Some(type_struct.clone()),
             Expression::Variable(var) => {
                 debug!("ANALYZING VAR: {:#?}", var);
 
-                let ty = if let Some((ref root_var, _)) = var.access_instrs {
+                // TODO: FIXME: Currently the type hint is used when analyzing
+                //              a "regular" var. Should it be used when analyzing
+                //              struct members as well? Will there be any problems
+                //              if it isn't used?
+                if let Some((ref root_var, _)) = var.access_instrs {
                     if root_var.is_struct {
                         self.analyze_struct_member(var)
                     } else {
-                        self.analyze_var_type(var)
+                        self.analyze_var_type(var, type_hint_opt)
                     }
                 } else {
-                    self.analyze_var_type(var)
-                };
-
-                var.ret_type = ty.clone();
-                ty
+                    self.analyze_var_type(var, type_hint_opt)
+                }
             }
             Expression::Operation(op) => self.analyze_op_type(op, type_hint_opt),
             Expression::FunctionCall(func_call) => {
@@ -165,7 +176,7 @@ impl<'a> TypeAnalyzer<'a> {
 
                 // TODO: The dimension needs to be checked somehow as well.
                 let member_type_hint_opt = if let Some(b) = type_hint_opt {
-                    if let Type::Array(inner, dim) = b.t {
+                    if let Type::Array(inner, dim) = b.ty {
                         Some(*inner)
                     } else {
                         None
@@ -176,7 +187,7 @@ impl<'a> TypeAnalyzer<'a> {
 
                 // Set place holder `member_type`. It will be set to something
                 // else before it is used.
-                let mut member_type = TypeStruct::new(Type::Boolean, None);
+                let mut member_type = TypeStruct::new(Type::Boolean, None, true);
                 for arg in args.iter_mut() {
                     member_type =
                         self.analyze_expr_type(&mut arg.value, member_type_hint_opt.clone())?;
@@ -185,9 +196,11 @@ impl<'a> TypeAnalyzer<'a> {
                 let lit = Literal::Integer(args.len().to_string(), 10);
                 let expr = Expression::Literal(lit, Some(member_type.clone()));
                 let generics = None;
+                let inferred = false;
                 Some(TypeStruct::new(
                     Type::Array(Box::new(member_type), Some(Box::new(expr))),
                     generics,
+                    inferred,
                 ))
             }
         }
@@ -268,7 +281,7 @@ impl<'a> TypeAnalyzer<'a> {
         func_call: &mut FunctionCall,
         type_hint: TypeStruct,
     ) -> Option<TypeStruct> {
-        let struct_name = if let Type::Custom(struct_name) = type_hint.t {
+        let struct_name = if let Type::Custom(struct_name) = type_hint.ty {
             struct_name
         } else {
             let err_msg = format!(
@@ -423,7 +436,8 @@ impl<'a> TypeAnalyzer<'a> {
         // Return the type of the struct.
         let ty = Type::Custom(struct_init.name.clone());
         let generics = None;
-        Some(TypeStruct::new(ty, generics))
+        let inferred = false;
+        Some(TypeStruct::new(ty, generics, inferred))
     }
 
     // TODO: This function also sets the `block_info` (info about struct root
@@ -444,14 +458,14 @@ impl<'a> TypeAnalyzer<'a> {
             // accessing all structs/members recursively in this `var`.
             let key = (root_var_name.clone(), decl_id);
             let mut struct_name = if let Some(context_var) = self.context.variables.get(&key) {
-                let mut ty = context_var.ret_type.clone()?.t;
+                let mut ty = context_var.ret_type.clone()?.ty;
                 loop {
                     match ty {
                         Type::Pointer(ptr) => {
-                            ty = ptr.t;
+                            ty = ptr.ty;
                         }
                         Type::Array(arr_ty, _) => {
-                            ty = arr_ty.t;
+                            ty = arr_ty.ty;
                         }
                         Type::Custom(struct_name) => {
                             break struct_name;
@@ -516,18 +530,18 @@ impl<'a> TypeAnalyzer<'a> {
                                     // struct that will be indexed. Otherwise we have
                                     // recursed to the end of nesting, set the information
                                     // from this member to the var.
-                                    let mut cur_type = member.ret_type.clone()?.t;
+                                    let mut cur_type = member.ret_type.clone()?.ty;
                                     loop {
                                         match cur_type {
                                             Type::Pointer(ty) => {
-                                                cur_type = ty.t;
+                                                cur_type = ty.ty;
                                             }
                                             Type::Array(ty, _) => {
                                                 // TODO: Is this logic valid for array,
                                                 //       will the array indexing affect
                                                 //       the "hierarchy" of indexing
                                                 //       into it?
-                                                cur_type = ty.t;
+                                                cur_type = ty.ty;
                                             }
                                             Type::Custom(ref inner_struct_name) => {
                                                 struct_name = inner_struct_name.clone();
@@ -575,21 +589,27 @@ impl<'a> TypeAnalyzer<'a> {
     }
 
     fn analyze_literal_type(&mut self, lit: &Literal) -> TypeStruct {
+        let ty = match lit {
+            Literal::StringLiteral(_) => Type::String,
+            Literal::CharLiteral(_) => Type::Character,
+            Literal::Bool(_) => Type::Boolean,
+            // Default type for int are Int.
+            Literal::Integer(_, _) => Type::Int,
+            // Default type for float are F32.
+            Literal::Float(_) => Type::F32,
+        };
+
         // TODO: Implement generics.
         let generics = None;
-
-        match lit {
-            Literal::StringLiteral(_) => TypeStruct::new(Type::String, generics),
-            Literal::CharLiteral(_) => TypeStruct::new(Type::Character, generics),
-            Literal::Bool(_) => TypeStruct::new(Type::Boolean, generics),
-            // Default type for int are Int.
-            Literal::Integer(_, _) => TypeStruct::new(Type::Int, generics),
-            // Default type for float are F32.
-            Literal::Float(_) => TypeStruct::new(Type::F32, generics),
-        }
+        let inferred = true;
+        TypeStruct::new(ty, generics, inferred)
     }
 
-    fn analyze_var_type(&mut self, var: &mut Variable) -> Option<TypeStruct> {
+    fn analyze_var_type(
+        &mut self,
+        var: &mut Variable,
+        type_hint_opt: Option<TypeStruct>,
+    ) -> Option<TypeStruct> {
         let cur_block_id = self.context.cur_block_id;
         let var_decl_id = match self.context.get_var_decl_scope(&var.name, cur_block_id) {
             Ok(id) => id,
@@ -599,31 +619,33 @@ impl<'a> TypeAnalyzer<'a> {
             }
         };
 
+        // If the type hint is prefered, use it instead.
+        if let Some(TypeChoice::Second) = unify(var.ret_type.as_ref(), type_hint_opt.as_ref()) {
+            var.ret_type = type_hint_opt;
+        }
+
         // TODO: Compare types from the current `var` and the var in context?
-        // If the variable in `context` has a type, use that type. Otherwise
-        // use the current `var` type and update the type in `context` with it.
+        // Check the type of the current variable and the global variable
+        // that was put into the `context` during analyzing. Decide the prefered
+        // type of the two and then assign it to both.
         let key = (var.name.clone(), var_decl_id);
-        self.context.variables.entry(key.clone()).and_modify(|e| {
-            if e.ret_type.is_some() {
-                var.ret_type = e.ret_type.clone();
-            } else if var.ret_type.is_some() {
-                e.ret_type = var.ret_type.clone();
+        self.context.variables.entry(key).and_modify(|global_var| {
+            match unify(global_var.ret_type.as_ref(), var.ret_type.as_ref()) {
+                Some(TypeChoice::First) => {
+                    var.ret_type = global_var.ret_type.clone();
+                }
+                Some(TypeChoice::Second) => {
+                    global_var.ret_type = var.ret_type.clone();
+                }
+                _ => (),
             }
 
             // Update the fields that are set during declaration.
-            var.modifiers = e.modifiers.clone();
-            var.is_const = e.is_const;
+            var.modifiers = global_var.modifiers.clone();
+            var.is_const = global_var.is_const;
         });
 
-        if var.ret_type.is_none() {
-            if let Some(context_var) = self.context.variables.get(&key) {
-                context_var.ret_type.clone()
-            } else {
-                None
-            }
-        } else {
-            var.ret_type.clone()
-        }
+        var.ret_type.clone()
     }
 
     fn analyze_op_type(
@@ -681,7 +703,7 @@ impl<'a> TypeAnalyzer<'a> {
                 // Analyze the "outer" value that should be a pointer. Then deref
                 // the result to get the value that is inside the pointer.
                 if let Some(type_struct) = self.analyze_expr_type(&mut un_op.value, type_hint_opt) {
-                    if let Type::Pointer(inner) = type_struct.t {
+                    if let Type::Pointer(inner) = type_struct.ty {
                         Some(*inner)
                     } else {
                         let err_msg =
@@ -695,14 +717,33 @@ impl<'a> TypeAnalyzer<'a> {
                     return None;
                 }
             }
-            // TODO: Address
             UnaryOperator::Address => {
+                // The type hint should be a pointer. Since we want to analyze
+                // the inner value, unwrap the pointer type hint.
+                let inner_type_hint_opt = if let Some(ptr_type_hint) = type_hint_opt {
+                    if let Type::Pointer(ref inner_type_hint) = ptr_type_hint.ty {
+                        Some(*inner_type_hint.clone())
+                    } else {
+                        let err_msg = format!(
+                            "Type hint during Address not a pointer: {:?}.",
+                            ptr_type_hint
+                        );
+                        self.errors.push(self.context.err(err_msg));
+                        return None;
+                    }
+                } else {
+                    None
+                };
+
                 // Analyze the "inner" value. Then take the address of that
                 // which will give us the address.
-                if let Some(type_struct) = self.analyze_expr_type(&mut un_op.value, type_hint_opt) {
+                if let Some(type_struct) =
+                    self.analyze_expr_type(&mut un_op.value, inner_type_hint_opt)
+                {
                     let new_ptr = Type::Pointer(Box::new(type_struct));
                     let generics = None;
-                    Some(TypeStruct::new(new_ptr, generics))
+                    let inferred = false;
+                    Some(TypeStruct::new(new_ptr, generics, inferred))
                 } else {
                     let err_msg = "Type set to None when taking address.".into();
                     self.errors.push(self.context.err(err_msg));
@@ -713,7 +754,7 @@ impl<'a> TypeAnalyzer<'a> {
                 // Analyze the "outer" value that should be a array. Then deref
                 // the result to get the value that is inside the pointer.
                 if let Some(type_struct) = self.analyze_expr_type(&mut un_op.value, type_hint_opt) {
-                    if let Type::Array(inner, _) = type_struct.t {
+                    if let Type::Array(inner, _) = type_struct.ty {
                         Some(*inner)
                     } else {
                         let err_msg = format!("Trying to index non array type: {:?}", type_struct);
@@ -765,7 +806,7 @@ impl<'a> TypeAnalyzer<'a> {
                 let lhs_type = self.analyze_expr_type(lhs, None);
                 let expr_type = self.analyze_expr_type(rhs, lhs_type);
 
-                // "Dereference" and get the variable from the lhs expr.
+                // get the variable from the lhs expr.
                 let var = if let Some(var) = lhs.eval_to_var() {
                     var
                 } else {
@@ -776,7 +817,7 @@ impl<'a> TypeAnalyzer<'a> {
 
                 // Update the variable type if it is None.
                 if var.ret_type.is_none() {
-                    var.ret_type = expr_type.clone();
+                    var.ret_type = expr_type;
                 }
 
                 // Update the type of the variable in the "AnalyzeContext"
@@ -793,9 +834,15 @@ impl<'a> TypeAnalyzer<'a> {
                         }
                     };
                     let key = (var.name.clone(), var_decl_id);
-                    self.context.variables.entry(key).and_modify(|e| {
-                        if e.ret_type.is_none() {
-                            e.ret_type = expr_type.clone()
+                    self.context.variables.entry(key).and_modify(|global_var| {
+                        match unify(global_var.ret_type.as_ref(), var.ret_type.as_ref()) {
+                            Some(TypeChoice::First) => {
+                                var.ret_type = global_var.ret_type.clone();
+                            }
+                            Some(TypeChoice::Second) => {
+                                global_var.ret_type = var.ret_type.clone();
+                            }
+                            _ => (),
                         }
                     });
                 }
@@ -810,7 +857,7 @@ impl<'a> TypeAnalyzer<'a> {
 
                 // Update the variable type if it is None.
                 if var.ret_type.is_none() {
-                    var.ret_type = expr_type.clone();
+                    var.ret_type = expr_type;
                 }
 
                 // Update the type of the variable in the "AnalyzeContext"
@@ -824,11 +871,22 @@ impl<'a> TypeAnalyzer<'a> {
                     }
                 };
                 let key = (var.name.clone(), var_decl_id);
-                self.context.variables.entry(key).and_modify(|e| {
-                    if e.ret_type.is_none() {
-                        e.ret_type = expr_type.clone()
+                self.context.variables.entry(key).and_modify(|global_var| {
+                    match unify(global_var.ret_type.as_ref(), var.ret_type.as_ref()) {
+                        Some(TypeChoice::First) => {
+                            var.ret_type = global_var.ret_type.clone();
+                        }
+                        Some(TypeChoice::Second) => {
+                            global_var.ret_type = var.ret_type.clone();
+                        }
+                        _ => (),
                     }
                 });
+
+                // TODO: Do this in a cleaner way.
+                // Re-analyze the expressions since the var ret type might have
+                // been updated.
+                self.analyze_expr_type_opt(expr_opt, var.ret_type.clone());
             }
         }
     }
@@ -925,7 +983,7 @@ impl<'a> TypeAnalyzer<'a> {
         }
     }
 
-    /// Set the type of a expression after it has ben infered.
+    /// Set the type of a expression after it has ben inferred.
     fn set_type(&mut self, expr: &mut Expression, new_ty: Option<TypeStruct>) {
         match expr {
             Expression::Literal(_, old_ty) => *old_ty = new_ty,

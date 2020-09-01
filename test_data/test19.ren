@@ -1,0 +1,21 @@
+use std.assert
+
+struct TestStruct
+{
+    a: i32,
+    b: i32,
+}
+
+function new() -> TestStruct
+{
+    return TestStruct { 10, 2 }
+}
+
+function main() -> int
+{
+    var xyz = new()
+
+    printf("a: %d, b: %d", xyz.a, xyz.b)
+    
+    return 0
+}

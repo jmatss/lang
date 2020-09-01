@@ -205,7 +205,8 @@ impl<'a> DeclAnalyzer<'a> {
         const THIS_VAR_NAME: &str = "this";
         let ty = Type::Custom(struct_name.into());
         let generics = None;
-        let type_struct = TypeStruct::new(ty, generics);
+        let inferred = false;
+        let type_struct = TypeStruct::new(ty, generics, inferred);
         let var = Variable::new(THIS_VAR_NAME.into(), Some(type_struct), None, false);
         if let Some(ref mut params) = func.parameters {
             params.insert(0, var);

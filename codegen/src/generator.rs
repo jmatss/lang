@@ -417,7 +417,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Generic;
 
-        Ok(match &type_struct.t {
+        Ok(match &type_struct.ty {
             Type::Pointer(ref ptr) => {
                 // Get the type of the inner type and wrap into a "PointerType".
                 match self.compile_type(ptr)? {

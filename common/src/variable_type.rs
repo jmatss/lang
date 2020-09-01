@@ -5,13 +5,18 @@ use crate::token::expr::Expression;
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeStruct {
     // None == void
-    pub t: Type,
+    pub ty: Type,
     pub generics: Option<Vec<TypeStruct>>,
+    pub is_inferred: bool,
 }
 
 impl TypeStruct {
-    pub fn new(t: Type, generics: Option<Vec<TypeStruct>>) -> Self {
-        TypeStruct { t, generics }
+    pub fn new(t: Type, generics: Option<Vec<TypeStruct>>, is_inferred: bool) -> Self {
+        TypeStruct {
+            ty: t,
+            generics,
+            is_inferred,
+        }
     }
 }
 

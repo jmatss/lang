@@ -6,6 +6,37 @@ pub enum TypeChoice {
     Second,
 }
 
+/// Tries to decide which type of the two given arguments to use.
+pub fn unify(
+    first_opt: Option<&TypeStruct>,
+    second_opt: Option<&TypeStruct>,
+) -> Option<TypeChoice> {
+    if let Some(first) = first_opt {
+        if let Some(second) = second_opt {
+            if !first.is_inferred && !second.is_inferred {
+                if first.ty == second.ty {
+                    Some(TypeChoice::Second)
+                } else {
+                    None
+                }
+            } else if !first.is_inferred || first.ty == second.ty {
+                // Defaults to "First" is they are equal.
+                Some(TypeChoice::First)
+            } else if !second.is_inferred {
+                Some(TypeChoice::Second)
+            } else {
+                None
+            }
+        } else {
+            Some(TypeChoice::First)
+        }
+    } else if second_opt.is_some() {
+        Some(TypeChoice::Second)
+    } else {
+        None
+    }
+}
+
 impl<'a> TypeAnalyzer<'a> {
     /// Used for integer and float promotion. Compares two "TypeStruct"s and
     /// returns the type that should be used if the two types are used in a
@@ -14,14 +45,14 @@ impl<'a> TypeAnalyzer<'a> {
     pub fn compare_type(&self, first: &TypeStruct, second: &TypeStruct) -> Option<TypeChoice> {
         // TODO: Generics?
         // TODO: Implement for more types.
-        match first.t {
+        match first.ty {
             Type::Pointer(_) => None,
             Type::Array(_, _) => None,
             Type::Void => None,
             Type::Character => None,
             Type::String => None,
             Type::Boolean => None,
-            Type::Int | Type::Uint => match second.t {
+            Type::Int | Type::Uint => match second.ty {
                 Type::Uint
                 | Type::I8
                 | Type::U8
@@ -42,7 +73,7 @@ impl<'a> TypeAnalyzer<'a> {
                 Type::Custom(_) => None,
                 _ => None,
             },
-            Type::I8 | Type::U8 => match second.t {
+            Type::I8 | Type::U8 => match second.ty {
                 Type::U8 => Some(TypeChoice::First),
 
                 Type::I8
@@ -63,7 +94,7 @@ impl<'a> TypeAnalyzer<'a> {
                 Type::Custom(_) => None,
                 _ => None,
             },
-            Type::I16 | Type::U16 => match second.t {
+            Type::I16 | Type::U16 => match second.ty {
                 Type::I8 | Type::U8 => Some(TypeChoice::First),
 
                 Type::Int
@@ -83,7 +114,7 @@ impl<'a> TypeAnalyzer<'a> {
                 Type::Custom(_) => None,
                 _ => None,
             },
-            Type::I32 | Type::U32 => match second.t {
+            Type::I32 | Type::U32 => match second.ty {
                 Type::Int | Type::Uint | Type::I8 | Type::U8 | Type::I16 | Type::U16 => {
                     Some(TypeChoice::First)
                 }
@@ -101,7 +132,7 @@ impl<'a> TypeAnalyzer<'a> {
                 Type::Custom(_) => None,
                 _ => None,
             },
-            Type::I64 | Type::U64 => match second.t {
+            Type::I64 | Type::U64 => match second.ty {
                 Type::Int
                 | Type::Uint
                 | Type::I8
@@ -120,7 +151,7 @@ impl<'a> TypeAnalyzer<'a> {
                 Type::Custom(_) => None,
                 _ => None,
             },
-            Type::I128 | Type::U128 => match second.t {
+            Type::I128 | Type::U128 => match second.ty {
                 Type::Int
                 | Type::Uint
                 | Type::I8
@@ -140,7 +171,7 @@ impl<'a> TypeAnalyzer<'a> {
                 Type::Custom(_) => None,
                 _ => None,
             },
-            Type::F32 | Type::Float => match second.t {
+            Type::F32 | Type::Float => match second.ty {
                 Type::Int
                 | Type::Uint
                 | Type::I8
@@ -158,7 +189,7 @@ impl<'a> TypeAnalyzer<'a> {
                 Type::Custom(_) => None,
                 _ => None,
             },
-            Type::F64 => match second.t {
+            Type::F64 => match second.ty {
                 Type::Int
                 | Type::Uint
                 | Type::I8

@@ -118,7 +118,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // TODO: Where should the integer literal conversion be made?
 
         Ok(match ty_opt {
-            Some(type_struct) => match type_struct.t {
+            Some(type_struct) => match type_struct.ty {
                 Type::I8 => {
                     let val = i8::from_str_radix(lit, radix)? as u64;
                     self.context.i8_type().const_int(val, true)
@@ -168,7 +168,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let val = u32::from_str_radix(lit, radix)? as u64;
                     self.context.i32_type().const_int(val, false)
                 }
-                _ => return Err(self.err(format!("Invalid integer type: {:?}", type_struct.t))),
+                _ => {
+                    return Err(self.err(format!(
+                        "Invalid literal integer type: {:?}",
+                        type_struct.ty
+                    )))
+                }
             },
             // TODO: What should the default int size be? Signed 32 atm.
             None => {
@@ -186,12 +191,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ty_opt: &Option<TypeStruct>,
     ) -> CustomResult<FloatValue<'ctx>> {
         Ok(match ty_opt {
-            Some(type_struct) => match type_struct.t {
+            Some(type_struct) => match type_struct.ty {
                 Type::F32 => self.context.f32_type().const_float(lit.parse()?),
                 Type::F64 => self.context.f64_type().const_float(lit.parse()?),
                 // TODO: What should the default float size be?
                 Type::Float => self.context.f32_type().const_float(lit.parse()?),
-                _ => return Err(self.err(format!("Invalid float type: {:?}", type_struct.t))),
+                _ => {
+                    return Err(
+                        self.err(format!("Invalid literal float type: {:?}", type_struct.ty))
+                    )
+                }
             },
             // TODO: What should the default float size be? F32 atm.
             None => self.context.f32_type().const_float(lit.parse()?),

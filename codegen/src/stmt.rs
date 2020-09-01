@@ -143,25 +143,26 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // Figure out the actual return type.
         let ret_type = match access_type {
             AccessType::Regular => self.compile_type(var_ret_type)?,
-            AccessType::Deref => match &var_ret_type.t {
+            AccessType::Deref => match &var_ret_type.ty {
                 Type::Pointer(inner) => self.compile_type(&inner)?,
                 _ => {
                     return Err(self.err(format!(
                         "Tried to dereference variable \"{}\" that isn't a pointer. Is: {:?}.",
-                        &var.name, var_ret_type.t
+                        &var.name, var_ret_type.ty
                     )))
                 }
             },
             AccessType::Address => self.compile_type(&TypeStruct::new(
                 Type::Pointer(Box::new(var_ret_type.clone())),
                 None,
+                false,
             ))?,
-            AccessType::ArrayAccess => match &var_ret_type.t {
+            AccessType::ArrayAccess => match &var_ret_type.ty {
                 Type::Array(inner, _) => self.compile_type(&inner)?,
                 _ => {
                     return Err(self.err(format!(
                         "Tried to array index variable \"{}\" that isn't a array. Is: {:?}.",
-                        &var.name, var_ret_type.t
+                        &var.name, var_ret_type.ty
                     )))
                 }
             },
