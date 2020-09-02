@@ -122,8 +122,17 @@ impl Expression {
             Expression::Operation(op) => match op {
                 Operation::BinaryOperation(bin_op) => match bin_op.operator {
                     BinaryOperator::Dot => {
-                        if bin_op.left.is_var() && bin_op.right.is_var() {
-                            bin_op.right.eval_to_var()
+                        if bin_op.left.eval_to_var().is_some() {
+                            if bin_op.right.eval_to_var().is_some() {
+                                bin_op.right.eval_to_var()
+                            } else if bin_op.right.eval_to_func_call().is_some() {
+                                // If the rhs is a function call, this is a method
+                                // call on a variable. Return the var from the
+                                // lhs.
+                                bin_op.left.eval_to_var()
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
@@ -143,11 +152,25 @@ impl Expression {
         }
     }
 
+    /// Returns Some if this expr is a function call or if this is a binary Dot
+    /// operation where the rhs evals to a function call.
     pub fn eval_to_func_call(&mut self) -> Option<&mut FunctionCall> {
-        if let Expression::FunctionCall(func_call) = self {
-            Some(func_call)
-        } else {
-            None
+        match self {
+            Expression::FunctionCall(func_call) => Some(func_call),
+            Expression::Operation(op) => match op {
+                Operation::BinaryOperation(bin_op) => match bin_op.operator {
+                    BinaryOperator::Dot => {
+                        if bin_op.right.eval_to_func_call().is_some() {
+                            bin_op.right.eval_to_func_call()
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
         }
     }
 }

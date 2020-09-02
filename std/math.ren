@@ -1,0 +1,6 @@
+external function fabs(x: f64) -> f64
+
+function abs_f64(x: f64) -> f64
+{
+    return fabs(x)
+}

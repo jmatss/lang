@@ -631,7 +631,8 @@ impl<'a> TypeAnalyzer<'a> {
         let key = (var.name.clone(), var_decl_id);
         self.context.variables.entry(key).and_modify(|global_var| {
             match unify(global_var.ret_type.as_ref(), var.ret_type.as_ref()) {
-                Some(TypeChoice::First) => {
+                // Always prefer the type given to the global variable.
+                Some(TypeChoice::First) | None => {
                     var.ret_type = global_var.ret_type.clone();
                 }
                 Some(TypeChoice::Second) => {
@@ -836,7 +837,8 @@ impl<'a> TypeAnalyzer<'a> {
                     let key = (var.name.clone(), var_decl_id);
                     self.context.variables.entry(key).and_modify(|global_var| {
                         match unify(global_var.ret_type.as_ref(), var.ret_type.as_ref()) {
-                            Some(TypeChoice::First) => {
+                            // Always prefer the type given to the global variable.
+                            Some(TypeChoice::First) | None => {
                                 var.ret_type = global_var.ret_type.clone();
                             }
                             Some(TypeChoice::Second) => {
@@ -873,7 +875,8 @@ impl<'a> TypeAnalyzer<'a> {
                 let key = (var.name.clone(), var_decl_id);
                 self.context.variables.entry(key).and_modify(|global_var| {
                     match unify(global_var.ret_type.as_ref(), var.ret_type.as_ref()) {
-                        Some(TypeChoice::First) => {
+                        // Always prefer the type given to the global variable.
+                        Some(TypeChoice::First) | None => {
                             var.ret_type = global_var.ret_type.clone();
                         }
                         Some(TypeChoice::Second) => {

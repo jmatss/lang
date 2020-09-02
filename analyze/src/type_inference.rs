@@ -14,13 +14,8 @@ pub fn unify(
     if let Some(first) = first_opt {
         if let Some(second) = second_opt {
             if !first.is_inferred && !second.is_inferred {
-                if first.ty == second.ty {
-                    Some(TypeChoice::Second)
-                } else {
-                    None
-                }
-            } else if !first.is_inferred || first.ty == second.ty {
-                // Defaults to "First" is they are equal.
+                None
+            } else if !first.is_inferred {
                 Some(TypeChoice::First)
             } else if !second.is_inferred {
                 Some(TypeChoice::Second)

@@ -1,21 +1,47 @@
 use std.assert
 
-struct TestStruct
+struct InnerStruct
 {
-    a: i32,
-    b: i32,
+    x: f32,
+    y: f64,
 }
 
-function new() -> TestStruct
+implement InnerStruct
 {
-    return TestStruct { 10, 2 }
+    function sum() -> f64
+    {
+        return this.x as f64 + this.y
+    }
+}
+
+struct OuterStruct
+{
+    a: i32,
+    b: i64,
+}
+
+implement OuterStruct
+{
+    function new() -> InnerStruct
+    {
+        return InnerStruct { 1.0, 2.0 }
+    }
 }
 
 function main() -> int
 {
-    var xyz = new()
+    var outer = OuterStruct { 1, 2 }
+    var inner = outer.new()
 
-    printf("a: %d, b: %d", xyz.a, xyz.b)
+    // TODO: Chaining operations on a function call and chaining function call
+    //       on struct init.
+    //var inner_y: f64 = outer.new().y
+    //var inner = OuterStruct { 1, 2 }.new()
+
+    var expected_sum = 3.0
+    assert_equals_f64(expected_sum, inner.sum(), 0.001)
+
+    printf("\ninner.x: %f, inner.y: %llf, sum: %llf\n", inner.x as f64, inner.y, inner.sum())
     
     return 0
 }

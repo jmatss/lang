@@ -1,3 +1,5 @@
+use std.math
+
 external function printf(format: {u8}, ...) -> i32
 external function exit(exit_code: i32)
 
@@ -6,6 +8,16 @@ function assert(expr: bool)
     if not expr
     {
         printf("ASSERT FAILED\n")
+        exit(1)
+    }
+}
+
+function assert_equals_f64(expected: f64, actual: f64, epsilon: f64)
+{
+    var diff = abs_f64(expected - actual)
+    if diff > epsilon
+    {
+        printf("ASSERT FAILED:\n")
         exit(1)
     }
 }
