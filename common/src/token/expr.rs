@@ -22,7 +22,7 @@ pub enum Expression {
     Variable(Variable),
     FunctionCall(FunctionCall),
     StructInit(StructInit),
-    ArrayInit(Vec<Argument>),
+    ArrayInit(Vec<Argument>, Option<TypeStruct>),
     //MacroCall(Option<MacroCall>),
     Operation(Operation),
 }
@@ -226,8 +226,13 @@ impl Variable {
 pub struct FunctionCall {
     pub name: String,
     pub arguments: Vec<Argument>,
+
     /// See the `access_instrs` in "Variable" for a explanation.
     pub access_instrs: Option<(RootVariable, Vec<AccessInstruction>)>,
+
+    /// Will be set if this function call is a method call. This variable will
+    /// be set to the name/struct ... that this method belongs to.
+    pub struct_name: Option<String>,
 }
 
 impl FunctionCall {
@@ -236,6 +241,7 @@ impl FunctionCall {
             name,
             arguments,
             access_instrs: None,
+            struct_name: None,
         }
     }
 }
@@ -271,11 +277,6 @@ pub enum AccessInstruction {
     /// The second string is the name of this member/variable and the u32 is the
     /// position/index of this var in the struct.
     StructMember(String, String, Option<u32>),
-
-    // TODO: This will need to be changed if overloading is to be supported.
-    /// The first string is the name of the struct.
-    /// The string is the name of the method.
-    StructMethod(Option<String>, String),
 
     Deref,
     Address,

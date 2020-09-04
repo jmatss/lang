@@ -167,16 +167,23 @@ impl<'a> TypeAnalyzer<'a> {
                 }
             }
             Expression::StructInit(struct_init) => self.analyze_struct_init(struct_init),
-            Expression::ArrayInit(args) => {
+            Expression::ArrayInit(args, init_type_opt) => {
                 if args.is_empty() {
                     let err = self.context.err("ArrayInit with no arguments.".into());
                     self.errors.push(err);
                     return None;
                 }
 
-                // TODO: The dimension needs to be checked somehow as well.
-                let member_type_hint_opt = if let Some(b) = type_hint_opt {
-                    if let Type::Array(inner, dim) = b.ty {
+                let type_opt = if let Some(init_type) = init_type_opt {
+                    Some(init_type.clone())
+                } else if let Some(ref type_hint) = type_hint_opt {
+                    Some(type_hint.clone())
+                } else {
+                    None
+                };
+
+                let mut member_type_opt = if let Some(type_struct) = type_opt {
+                    if let Type::Array(inner, dim) = type_struct.ty {
                         Some(*inner)
                     } else {
                         None
@@ -185,23 +192,44 @@ impl<'a> TypeAnalyzer<'a> {
                     None
                 };
 
-                // Set place holder `member_type`. It will be set to something
-                // else before it is used.
-                let mut member_type = TypeStruct::new(Type::Boolean, None, true);
                 for arg in args.iter_mut() {
-                    member_type =
-                        self.analyze_expr_type(&mut arg.value, member_type_hint_opt.clone())?;
+                    // TODO: Need to comapre `member_type_opt` and the actual type
+                    //       of the args returned from the call below.
+                    if member_type_opt.is_none() {
+                        member_type_opt =
+                            self.analyze_expr_type(&mut arg.value, member_type_opt.clone());
+                    }
                 }
 
+                let member_type = if let Some(member_type) = member_type_opt {
+                    member_type
+                } else {
+                    let err_msg = format!("Unable to deduce type for array init members. Args: {:?}, array type: {:?}", args, init_type_opt);
+                    let err = self.context.err(err_msg);
+                    self.errors.push(err);
+                    return None;
+                };
+
+                // Infer a type from the type of the members of this array.
                 let lit = Literal::Integer(args.len().to_string(), 10);
-                let expr = Expression::Literal(lit, Some(member_type.clone()));
+                let dim_type = TypeStruct::new(Type::I32, None, false);
+                let dim_expr = Expression::Literal(lit, Some(dim_type));
                 let generics = None;
                 let inferred = false;
-                Some(TypeStruct::new(
-                    Type::Array(Box::new(member_type), Some(Box::new(expr))),
+                let new_init_type = TypeStruct::new(
+                    Type::Array(Box::new(member_type), Some(Box::new(dim_expr))),
                     generics,
                     inferred,
-                ))
+                );
+
+                if let Some(init_type) = init_type_opt {
+                    if init_type.is_inferred {
+                        *init_type_opt = Some(new_init_type);
+                    }
+                } else {
+                    *init_type_opt = Some(new_init_type);
+                }
+                init_type_opt.clone()
             }
         }
     }
@@ -565,8 +593,7 @@ impl<'a> TypeAnalyzer<'a> {
                     }
                     AccessInstruction::Deref
                     | AccessInstruction::Address
-                    | AccessInstruction::ArrayAccess(_)
-                    | AccessInstruction::StructMethod(..) => continue,
+                    | AccessInstruction::ArrayAccess(_) => continue,
                 };
             }
 
@@ -638,7 +665,6 @@ impl<'a> TypeAnalyzer<'a> {
                 Some(TypeChoice::Second) => {
                     global_var.ret_type = var.ret_type.clone();
                 }
-                _ => (),
             }
 
             // Update the fields that are set during declaration.
@@ -844,7 +870,6 @@ impl<'a> TypeAnalyzer<'a> {
                             Some(TypeChoice::Second) => {
                                 global_var.ret_type = var.ret_type.clone();
                             }
-                            _ => (),
                         }
                     });
                 }
@@ -882,7 +907,6 @@ impl<'a> TypeAnalyzer<'a> {
                         Some(TypeChoice::Second) => {
                             global_var.ret_type = var.ret_type.clone();
                         }
-                        _ => (),
                     }
                 });
 
@@ -1004,7 +1028,7 @@ impl<'a> TypeAnalyzer<'a> {
             //       so that they can be used inside expressions to allow for
             //       chaining.
             // Can't set type for struct init or array init.
-            Expression::StructInit(_) | Expression::ArrayInit(_) | Expression::Type(_) => {
+            Expression::StructInit(_) | Expression::ArrayInit(..) | Expression::Type(_) => {
                 let err_msg = format!("Tried to set type for unexpected expr: {:?}", &expr);
                 let err = self.context.err(err_msg);
                 self.errors.push(err);

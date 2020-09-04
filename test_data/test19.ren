@@ -31,12 +31,12 @@ implement OuterStruct
 function main() -> int
 {
     var outer = OuterStruct { 1, 2 }
-    var inner = outer.new()
+    //var inner = outer.new()
 
     // TODO: Chaining operations on a function call and chaining function call
     //       on struct init.
     //var inner_y: f64 = outer.new().y
-    //var inner = OuterStruct { 1, 2 }.new()
+    var inner = OuterStruct { 1, 2 }.new()
 
     var expected_sum = 3.0
     assert_equals_f64(expected_sum, inner.sum(), 0.001)

@@ -2,10 +2,9 @@ use crate::generator::CodeGen;
 use common::{
     error::CustomResult,
     token::{
-        expr::{AccessInstruction, Argument, Expression, FunctionCall, StructInit},
+        expr::{Argument, Expression, FunctionCall, StructInit},
         lit::Literal,
     },
-    util,
     variable_type::{Type, TypeStruct},
 };
 use inkwell::{
@@ -26,15 +25,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Ok(self.compile_var_load(var)?.into())
             }
             Expression::FunctionCall(func_call) => {
-                if func_call.access_instrs.is_some() {
-                    self.compile_method_call(func_call)
-                } else {
-                    self.compile_func_call(func_call)
-                }
+                // There will be no difference compiling a function call and a
+                // method call. The method call will during the analyzing have
+                // been given a new name containing the "struct_name/..." and
+                // the func name to make it uniqe. "this" will always have been
+                // inserted as the first argument.
+                self.compile_func_call(func_call)
             }
             Expression::Operation(op) => self.compile_op(op),
             Expression::StructInit(struct_init) => self.compile_struct_init(struct_init),
-            Expression::ArrayInit(args) => self.compile_array_init(args),
+            Expression::ArrayInit(args, type_struct_opt) => {
+                self.compile_array_init(args, type_struct_opt)
+            }
             Expression::Type(ty) => {
                 // TODO: Does something need to be done here? Does a proper value
                 //       need to be returned? For now just return a dummy value.
@@ -209,38 +211,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     // TODO: Temporarily treats functions return void as return i32 "0".
     //       Should make a custom value ex rusts "()" instead.
-    /// Generates a method call. Returns the return value of the compiled
-    /// function. The first argument of the method will be "this"/"self" which
-    /// has been added during analyzing.
-    fn compile_method_call(
-        &mut self,
-        func_call: &mut FunctionCall,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
-        let (struct_name, method_name) = if let Some((root_var, access_instrs)) =
-            &func_call.access_instrs
-        {
-            if let Some(AccessInstruction::StructMethod(Some(struct_name), method_name)) =
-                access_instrs.last()
-            {
-                (struct_name, method_name)
-            } else {
-                return Err(self.err(format!(
-                    "Last access instruction not a valid \"StructMethod\" {}. Root var: {}, method: {}",
-                    "when compiling method call", root_var.name, func_call.name
-                )));
-            }
-        } else {
-            return Err(self.err("Access instructions None when compiling method call".into()));
-        };
-
-        // TODO: Cleaner way to do this. For now just change the name so that
-        //       it points to the correct struct methodd in `functions`.
-        func_call.name = util::to_method_name(struct_name, method_name);
-        self.compile_func_call(func_call)
-    }
-
-    // TODO: Temporarily treats functions return void as return i32 "0".
-    //       Should make a custom value ex rusts "()" instead.
     /// Generates a function call. Returns the return value of the compiled
     /// function.
     fn compile_func_call(
@@ -373,7 +343,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     /// Generates a array creation/initialization.
-    fn compile_array_init(&mut self, args: &mut Vec<Argument>) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_array_init(
+        &mut self,
+        args: &mut Vec<Argument>,
+        type_struct_opt: &Option<TypeStruct>,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
         if args.is_empty() {
             return Err(self.err("Array init with zero arguments.".into()));
         }
@@ -383,6 +357,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // be used to deduce the type of the whole array.
         let mut compiled_args = Vec::with_capacity(args.len());
 
+        // TODO: Use the type in `type_struct_opt` to decide type.
         // Dummy arg_type to start with. If it is never set, it will never be used.
         let mut arg_type = self.context.i8_type().into();
         for arg in args.iter_mut() {

@@ -2,11 +2,12 @@ use crate::AnalyzeContext;
 use common::{
     error::LangError,
     token::{
-        expr::{AccessInstruction, Argument, Expression},
+        expr::{Argument, Expression, FunctionCall},
         op::{BinaryOperation, BinaryOperator, Operation},
         stmt::Statement,
     },
-    variable_type::Type,
+    util,
+    variable_type::{Type, TypeStruct},
 };
 use parse::token::{ParseToken, ParseTokenKind};
 
@@ -97,7 +98,7 @@ impl<'a> MethodAnalyzer<'a> {
                     self.analyze_expr(&mut arg.value);
                 }
             }
-            Expression::ArrayInit(args) => {
+            Expression::ArrayInit(args, _) => {
                 for arg in args {
                     self.analyze_expr(&mut arg.value);
                 }
@@ -111,70 +112,58 @@ impl<'a> MethodAnalyzer<'a> {
         }
     }
 
-    /// If this binary operation is a method call (lhs == var && rhs == method),
-    /// insert the lhs variable ("this"/"self") as a first argument in the
-    /// function call.
+    /// If this binary operation is a method call (rhs == func_call),
+    /// insert the lhs expression ("this"/"self") as a first argument in the
+    /// function call. It also saves the name/struct ... of the lhs that this
+    /// method "belongs" to.
     fn analyze_bin_op(&mut self, bin_op: &mut BinaryOperation) {
         self.analyze_expr(&mut bin_op.left);
         self.analyze_expr(&mut bin_op.right);
 
+        // TODO: FIXME: For now, it doesn't matter what the lhs is. It will always
+        //              be used as the first argument to the function call.
         if let BinaryOperator::Dot = bin_op.operator {
-            if let Some(lhs_var) = bin_op.left.eval_to_var() {
-                if let Some(rhs_method_call) = bin_op.right.eval_to_func_call() {
-                    if let Some((_, access_instrs)) = &mut rhs_method_call.access_instrs {
-                        if let Some(AccessInstruction::StructMethod(ref mut struct_name_opt, _)) =
-                            access_instrs.last_mut()
-                        {
-                            if let Some(Type::Custom(struct_name)) =
-                                lhs_var.ret_type.clone().map(|type_struct| type_struct.ty)
-                            {
-                                *struct_name_opt = Some(struct_name)
-                            } else {
-                                let err_msg = format!(
-                                    "Last access instruction of rhs in method call not \"StructMethod\". \
-                                    Left: {:?}, right: {:?}",
-                                    bin_op.left, bin_op.right
-                                );
-                                let err = self.context.err(err_msg);
-                                self.errors.push(err);
-                                return;
-                            }
-                        } else {
-                            let err_msg = format!(
-                                "Last access instruction of rhs in method call not \"StructMethod\". \
-                                Left: {:?}, right: {:?}",
-                                bin_op.left, bin_op.right
-                            );
-                            let err = self.context.err(err_msg);
-                            self.errors.push(err);
-                            return;
-                        }
+            if let Some(rhs_method_call) = bin_op.right.eval_to_func_call() {
+                if let Some(lhs_type) = self.get_ret_type(&bin_op.left) {
+                    let struct_name = match lhs_type.ty {
+                        Type::Custom(ref struct_name) => struct_name,
+                        _ => panic!("TODO: More lhs type in method call"),
+                    };
 
-                        // TODO: Where should the name of "this"/"self" be specified?
-                        const THIS_VAR_NAME: &str = "this";
-                        let arg = Argument::new(Some(THIS_VAR_NAME.into()), *bin_op.left.clone());
-                        rhs_method_call.arguments.insert(0, arg);
-                    } else {
-                        let err_msg = format!(
-                            "Rhs method call during Dot has None access instructions set. \
-                            Left: {:?}, right: {:?}",
-                            bin_op.left, bin_op.right
-                        );
-                        let err = self.context.err(err_msg);
-                        self.errors.push(err);
-                        return;
-                    }
+                    rhs_method_call.name = util::to_method_name(struct_name, &rhs_method_call.name);
+                } else {
+                    let err_msg = format!(
+                        "Unable to get type of lhs in Dot operation. Lhs: {:?}",
+                        &bin_op.left,
+                    );
+                    let err = self.context.err(err_msg);
+                    self.errors.push(err);
+                    return;
                 }
-            } else {
-                let err_msg = format!(
-                    "Left hand side of Dot symbol didn't eval to variable. \
-                    Left: {:?}, right: {:?}",
-                    bin_op.left, bin_op.right
-                );
-                let err = self.context.err(err_msg);
-                self.errors.push(err);
-                return;
+
+                // TODO: Where should the name of "this"/"self" be specified?
+                const THIS_VAR_NAME: &str = "this";
+                let arg = Argument::new(Some(THIS_VAR_NAME.into()), *bin_op.left.clone());
+                rhs_method_call.arguments.insert(0, arg);
             }
+        }
+    }
+
+    fn get_ret_type(&self, expr: &Expression) -> Option<TypeStruct> {
+        match expr {
+            Expression::Literal(_, type_struct_opt) => type_struct_opt.clone(),
+            Expression::Type(type_struct) => Some(type_struct.clone()),
+            Expression::Variable(var) => var.ret_type.clone(),
+            Expression::FunctionCall(func_call) => panic!("TODO: Get return type from func call."),
+            Expression::StructInit(struct_init) => {
+                let ty = Type::Custom(struct_init.name.clone());
+                Some(TypeStruct::new(ty, None, false))
+            }
+            Expression::ArrayInit(_, type_struct_opt) => type_struct_opt.clone(),
+            Expression::Operation(op) => match op {
+                Operation::BinaryOperation(bin_op) => bin_op.ret_type.clone(),
+                Operation::UnaryOperation(un_op) => un_op.ret_type.clone(),
+            },
         }
     }
 }

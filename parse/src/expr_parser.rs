@@ -137,7 +137,7 @@ impl<'a> ExprParser<'a> {
                     let end_symbol = Symbol::SquareBracketEnd;
                     let args = self.iter.parse_arg_list(start_symbol, end_symbol)?;
 
-                    let expr = Expression::ArrayInit(args);
+                    let expr = Expression::ArrayInit(args, None);
                     self.shunt_operand(expr)?;
                 }
 

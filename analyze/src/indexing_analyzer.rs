@@ -121,7 +121,7 @@ impl<'a> IndexingAnalyzer<'a> {
         match expr {
             Expression::FunctionCall(func_call) => self.analyze_func_call(func_call),
             Expression::StructInit(struct_init) => self.analyze_struct_init(struct_init),
-            Expression::ArrayInit(args) => {
+            Expression::ArrayInit(args, _) => {
                 for arg in args {
                     self.analyze_expr(&mut arg.value);
                 }
@@ -197,46 +197,7 @@ impl<'a> IndexingAnalyzer<'a> {
                         let root_var = RootVariable::new(struct_var_name, var_decl_id, true);
                         rhs.access_instrs = Some((root_var, vec![access_instr]));
                     }
-                } else if let Some(rhs_method_call) = bin_op.right.eval_to_func_call() {
-                    let struct_var_name = lhs.name.clone();
-                    let method_name = rhs_method_call.name.clone();
-
-                    // The first argument is the struct name and it will be set
-                    // during "method analyzing" since the type/struct are at
-                    // this stage not known, it will be known after "type analyzing"
-                    // has been ran.
-                    let access_instr = AccessInstruction::StructMethod(None, method_name);
-
-                    // If true: Nested struct, else: just a basic struct member.
-                    if let Some(ref lhs_access_instrs) = lhs.access_instrs {
-                        let mut method_access_instrs = lhs_access_instrs.clone();
-                        method_access_instrs.1.push(access_instr);
-                        method_access_instrs.0.is_struct = true;
-
-                        rhs_method_call.access_instrs = Some(method_access_instrs);
-                    } else {
-                        let var_decl_id =
-                            match self.context.get_var_decl_scope(&struct_var_name, block_id) {
-                                Ok(var_decl_id) => var_decl_id,
-                                Err(e) => {
-                                    self.errors.push(e);
-                                    return;
-                                }
-                            };
-
-                        let root_var = RootVariable::new(struct_var_name, var_decl_id, true);
-                        rhs_method_call.access_instrs = Some((root_var, vec![access_instr]));
-                    }
                 }
-            } else {
-                let err_msg = format!(
-                    "Left hand side of Dot symbol didn't eval to variable. \
-                    Left: {:?}, right: {:?}",
-                    bin_op.left, bin_op.right
-                );
-                let err = self.context.err(err_msg);
-                self.errors.push(err);
-                return;
             }
         }
 

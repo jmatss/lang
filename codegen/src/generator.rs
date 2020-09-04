@@ -375,12 +375,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             )
                         }
                     }
-                    AccessInstruction::StructMethod(struct_name_opt, method_name) => {
-                        return Err(self.err(format!(
-                            "Got struct method when getting var pointer. Struct name: {:?}, method name: {}.",
-                            &struct_name_opt, &method_name
-                        )));
-                    }
                 };
             }
 
