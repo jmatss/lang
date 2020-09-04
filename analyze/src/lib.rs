@@ -11,7 +11,7 @@ use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
     token::{
         block::{Enum, Function, Interface, Struct},
-        expr::Variable,
+        expr::Var,
         stmt::Path,
     },
     BlockId,
@@ -115,7 +115,7 @@ pub struct AnalyzeContext {
     /// The BlockId represent the outer scope for a item. For variables it will
     /// be the scope in which they are declared in and for the rest the BlockId
     /// will be their first root parent traversing upwards.
-    pub variables: HashMap<(String, BlockId), Variable>,
+    pub variables: HashMap<(String, BlockId), Var>,
     pub functions: HashMap<(String, BlockId), Function>,
     pub structs: HashMap<(String, BlockId), Struct>,
     pub enums: HashMap<(String, BlockId), Enum>,

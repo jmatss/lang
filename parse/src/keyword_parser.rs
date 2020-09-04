@@ -6,11 +6,11 @@ use common::{
     error::CustomResult,
     token::{
         block::{BlockHeader, Function, Struct},
-        expr::Variable,
+        expr::Var,
         stmt::{Path, Statement},
     },
 };
-use lex::token::{Keyword, LexTokenKind, Symbol};
+use lex::token::{Kw, LexTokenKind, Sym};
 
 pub struct KeyworkParser<'a> {
     iter: &'a mut ParseTokenIter,
@@ -23,7 +23,7 @@ pub struct KeyworkParser<'a> {
 impl<'a> KeyworkParser<'a> {
     pub fn parse(
         iter: &'a mut ParseTokenIter,
-        keyword: Keyword,
+        keyword: Kw,
         line_nr: u64,
         column_nr: u64,
     ) -> CustomResult<ParseToken> {
@@ -35,45 +35,45 @@ impl<'a> KeyworkParser<'a> {
         keyword_parser.parse_keyword(keyword)
     }
 
-    fn parse_keyword(&mut self, keyword: Keyword) -> CustomResult<ParseToken> {
+    fn parse_keyword(&mut self, keyword: Kw) -> CustomResult<ParseToken> {
         match keyword {
             // Parses all the else(x)/else blocks after aswell.
-            Keyword::If => self.parse_if(),
-            Keyword::Else => Err(self.iter.err("Else keyword in keyword parser.".into())),
-            Keyword::Match => self.parse_match(),
+            Kw::If => self.parse_if(),
+            Kw::Else => Err(self.iter.err("Else keyword in keyword parser.".into())),
+            Kw::Match => self.parse_match(),
 
-            Keyword::For => self.parse_for(),
-            Keyword::While => self.parse_while(),
+            Kw::For => self.parse_for(),
+            Kw::While => self.parse_while(),
 
-            Keyword::Return => self.parse_return(),
-            Keyword::Yield => self.parse_yield(),
-            Keyword::Break => self.parse_break(),
-            Keyword::Continue => self.parse_continue(),
+            Kw::Return => self.parse_return(),
+            Kw::Yield => self.parse_yield(),
+            Kw::Break => self.parse_break(),
+            Kw::Continue => self.parse_continue(),
 
-            Keyword::Use => self.parse_use(),
-            Keyword::Package => self.parse_package(),
-            Keyword::External => self.parse_external(),
+            Kw::Use => self.parse_use(),
+            Kw::Package => self.parse_package(),
+            Kw::External => self.parse_external(),
 
-            Keyword::Var => self.parse_var_decl(),
-            Keyword::Const => {
+            Kw::Var => self.parse_var_decl(),
+            Kw::Const => {
                 // TODO: self.parse_const_decl()
                 self.parse_var_decl()
             }
-            Keyword::Static => Err(self.iter.err("\"Static\" keyword not implemented.".into())),
-            Keyword::Private => Err(self.iter.err("\"Private\" keyword not implemented.".into())),
-            Keyword::Public => Err(self.iter.err("\"Public\" keyword not implemented.".into())),
+            Kw::Static => Err(self.iter.err("\"Static\" keyword not implemented.".into())),
+            Kw::Private => Err(self.iter.err("\"Private\" keyword not implemented.".into())),
+            Kw::Public => Err(self.iter.err("\"Public\" keyword not implemented.".into())),
 
-            Keyword::Function => self.parse_func(),
-            Keyword::Struct => self.parse_struct(),
-            Keyword::Enum => Err(self.iter.err("\"Enum\" keyword not implemented.".into())),
-            Keyword::Interface => Err(self
+            Kw::Function => self.parse_func(),
+            Kw::Struct => self.parse_struct(),
+            Kw::Enum => Err(self.iter.err("\"Enum\" keyword not implemented.".into())),
+            Kw::Interface => Err(self
                 .iter
                 .err("\"Interface\" keyword not implemented.".into())),
-            Keyword::Implement => self.parse_impl(),
+            Kw::Implement => self.parse_impl(),
 
-            Keyword::Defer => self.parse_defer(),
+            Kw::Defer => self.parse_defer(),
 
-            Keyword::Test => Err(self.iter.err("\"Test\" keyword not implemented.".into())),
+            Kw::Test => Err(self.iter.err("\"Test\" keyword not implemented.".into())),
         }
     }
 
@@ -90,7 +90,7 @@ impl<'a> KeyworkParser<'a> {
             // given after this "if case". Assume this is the ending "else".
             // Otherwise parse the expression.
             let expr = if let Some(lex_token) = self.iter.peek_skip_space_line() {
-                if let LexTokenKind::Symbol(Symbol::CurlyBracketBegin) = lex_token.kind {
+                if let LexTokenKind::Sym(Sym::CurlyBracketBegin) = lex_token.kind {
                     None
                 } else {
                     Some(self.iter.parse_expr(&DEFAULT_STOP_CONDS)?)
@@ -109,7 +109,7 @@ impl<'a> KeyworkParser<'a> {
             // function should keep parsing the "if cases", otherwise it is
             // time to break and return.
             if let Some(lex_token) = self.iter.peek_skip_space_line() {
-                if let LexTokenKind::Keyword(Keyword::Else) = lex_token.kind {
+                if let LexTokenKind::Kw(Kw::Else) = lex_token.kind {
                     self.iter.next_skip_space_line(); // Skip the "else" keyword.
                     continue;
                 } else {
@@ -144,7 +144,7 @@ impl<'a> KeyworkParser<'a> {
             // it is the curly bracket matching the outer "match" statement.
             // Break in that case, otherwise keep parsing cases.
             if let Some(lex_token) = self.iter.peek_skip_space_line() {
-                if let LexTokenKind::Symbol(Symbol::CurlyBracketEnd) = lex_token.kind {
+                if let LexTokenKind::Sym(Sym::CurlyBracketEnd) = lex_token.kind {
                     self.iter.next_skip_space_line(); // Skip the "CurlyBracketEnd".
                     break;
                 }
@@ -160,7 +160,7 @@ impl<'a> KeyworkParser<'a> {
     /// The "for" keyword has already been consumed when this function is called.
     fn parse_for(&mut self) -> CustomResult<ParseToken> {
         let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
-            if let LexTokenKind::Identifier(ident) = lex_token.kind {
+            if let LexTokenKind::Ident(ident) = lex_token.kind {
                 ident
             } else {
                 return Err(self.iter.err(format!(
@@ -175,7 +175,7 @@ impl<'a> KeyworkParser<'a> {
 
         // Ensure that the next token is a "In".
         if let Some(lex_token) = self.iter.next_skip_space() {
-            if let LexTokenKind::Symbol(Symbol::In) = lex_token.kind {
+            if let LexTokenKind::Sym(Sym::In) = lex_token.kind {
                 // Do nothing, everything OK.
             } else {
                 return Err(self
@@ -203,7 +203,7 @@ impl<'a> KeyworkParser<'a> {
         // given after this "while" keyword. Assume that it means a infinite
         // loop (equivalent to "while(true)").
         let expr = if let Some(lex_token) = self.iter.peek_skip_space_line() {
-            if let LexTokenKind::Symbol(Symbol::CurlyBracketBegin) = lex_token.kind {
+            if let LexTokenKind::Sym(Sym::CurlyBracketBegin) = lex_token.kind {
                 None
             } else {
                 Some(self.iter.parse_expr(&DEFAULT_STOP_CONDS)?)
@@ -227,7 +227,7 @@ impl<'a> KeyworkParser<'a> {
         // this "return" keyword. Assume it is a return for a function with no
         // return value.
         let expr = if let Some(lex_token) = self.iter.peek_skip_space() {
-            if let LexTokenKind::Symbol(Symbol::LineBreak) = lex_token.kind {
+            if let LexTokenKind::Sym(Sym::LineBreak) = lex_token.kind {
                 None
             } else {
                 Some(self.iter.parse_expr(&DEFAULT_STOP_CONDS)?)
@@ -274,7 +274,7 @@ impl<'a> KeyworkParser<'a> {
         loop {
             // Get the ident from the current path part.
             if let Some(lex_token) = self.iter.next_skip_space() {
-                if let LexTokenKind::Identifier(ident) = lex_token.kind {
+                if let LexTokenKind::Ident(ident) = lex_token.kind {
                     path_parts.push(ident);
                 } else {
                     return Err(self.iter.err(format!(
@@ -292,10 +292,10 @@ impl<'a> KeyworkParser<'a> {
             // path continues; or a line break which indicates that the path
             // has been ended.
             if let Some(lex_token) = self.iter.peek_skip_space() {
-                if let LexTokenKind::Symbol(Symbol::Dot) = lex_token.kind {
+                if let LexTokenKind::Sym(Sym::Dot) = lex_token.kind {
                     self.iter.next_skip_space(); // Consume "Dot".
                     continue;
-                } else if let LexTokenKind::Symbol(Symbol::LineBreak) = lex_token.kind {
+                } else if let LexTokenKind::Sym(Sym::LineBreak) = lex_token.kind {
                     self.iter.next_skip_space(); // Consume "LineBreak".
                     break;
                 } else {
@@ -324,7 +324,7 @@ impl<'a> KeyworkParser<'a> {
         loop {
             // Get the ident from the current path part.
             if let Some(lex_token) = self.iter.next_skip_space() {
-                if let LexTokenKind::Identifier(ident) = lex_token.kind {
+                if let LexTokenKind::Ident(ident) = lex_token.kind {
                     path_parts.push(ident);
                 } else {
                     return Err(self.iter.err(format!(
@@ -342,10 +342,10 @@ impl<'a> KeyworkParser<'a> {
             // path continues; or a line break which indicates that the path
             // has been ended.
             if let Some(lex_token) = self.iter.peek_skip_space() {
-                if let LexTokenKind::Symbol(Symbol::Dot) = lex_token.kind {
+                if let LexTokenKind::Sym(Sym::Dot) = lex_token.kind {
                     self.iter.next_skip_space(); // Consume "Dot".
                     continue;
-                } else if let LexTokenKind::Symbol(Symbol::LineBreak) = lex_token.kind {
+                } else if let LexTokenKind::Sym(Sym::LineBreak) = lex_token.kind {
                     self.iter.next_skip_space(); // Consume "LineBreak".
                     break;
                 } else {
@@ -372,7 +372,7 @@ impl<'a> KeyworkParser<'a> {
     fn parse_external(&mut self) -> CustomResult<ParseToken> {
         if let Some(lex_token) = self.iter.next_skip_space_line() {
             let func = match lex_token.kind {
-                LexTokenKind::Keyword(Keyword::Function) => self.parse_func_proto()?,
+                LexTokenKind::Kw(Kw::Function) => self.parse_func_proto()?,
                 _ => {
                     return Err(self.iter.err(format!(
                         "Invalid keyword after external keyword: {:?}",
@@ -396,7 +396,7 @@ impl<'a> KeyworkParser<'a> {
     fn parse_var_decl(&mut self) -> CustomResult<ParseToken> {
         // Start by parsing the identifier
         let ident = if let Some(lex_token) = self.iter.next_skip_space() {
-            if let LexTokenKind::Identifier(ident) = lex_token.kind {
+            if let LexTokenKind::Ident(ident) = lex_token.kind {
                 ident
             } else {
                 return Err(self.iter.err(format!(
@@ -412,7 +412,7 @@ impl<'a> KeyworkParser<'a> {
 
         // If the next token is a "Colon", parse the type.
         let var_type = if let Some(lex_token) = self.iter.peek_skip_space() {
-            if let LexTokenKind::Symbol(Symbol::Colon) = lex_token.kind {
+            if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
                 self.iter.next_skip_space(); // Consume "Colon".
                 Some(self.iter.parse_type()?)
             } else {
@@ -427,7 +427,7 @@ impl<'a> KeyworkParser<'a> {
         // If the next token is a "Equals" this is an initializer, parse the
         // next expression which will be the assigned value.
         let expr_opt = if let Some(lex_token) = self.iter.peek_skip_space() {
-            if let LexTokenKind::Symbol(Symbol::Equals) = lex_token.kind {
+            if let LexTokenKind::Sym(Sym::Equals) = lex_token.kind {
                 self.iter.next_skip_space(); // Consume "Equals".
                 Some(self.iter.parse_expr(&DEFAULT_STOP_CONDS)?)
             } else {
@@ -440,7 +440,7 @@ impl<'a> KeyworkParser<'a> {
         };
 
         let is_const = false;
-        let variable = Variable::new(ident, var_type, None, is_const);
+        let variable = Var::new(ident, var_type, None, is_const);
         let var_decl = Statement::VariableDecl(variable, expr_opt);
         let kind = ParseTokenKind::Statement(var_decl);
         Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
@@ -524,7 +524,7 @@ impl<'a> KeyworkParser<'a> {
     fn parse_func_proto(&mut self) -> CustomResult<Function> {
         // Start by parsing the identifier
         let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
-            if let LexTokenKind::Identifier(ident) = lex_token.kind {
+            if let LexTokenKind::Ident(ident) = lex_token.kind {
                 ident
             } else {
                 return Err(self.iter.err(format!(
@@ -538,15 +538,15 @@ impl<'a> KeyworkParser<'a> {
                 .err("Received None when looking at token after \"function\".".into()));
         };
 
-        let start_symbol = Symbol::ParenthesisBegin;
-        let end_symbol = Symbol::ParenthesisEnd;
+        let start_symbol = Sym::ParenthesisBegin;
+        let end_symbol = Sym::ParenthesisEnd;
         let (params, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol)?;
 
         // If the next token is a "Arrow" ("->"), assume that the return type
         // of the function is specified afterwards. If there are no arrow,
         // assume that the function returns void.
         let return_type = if let Some(lex_token) = self.iter.peek_skip_space_line() {
-            if let LexTokenKind::Symbol(Symbol::Arrow) = lex_token.kind {
+            if let LexTokenKind::Sym(Sym::Arrow) = lex_token.kind {
                 // Consume the arrow.
                 self.iter.next_skip_space_line();
                 Some(self.iter.parse_type()?)
@@ -587,7 +587,7 @@ impl<'a> KeyworkParser<'a> {
             line_nr = lex_token.line_nr;
             column_nr = lex_token.column_nr;
 
-            if let LexTokenKind::Identifier(ident) = lex_token.kind {
+            if let LexTokenKind::Ident(ident) = lex_token.kind {
                 ident
             } else {
                 return Err(self.iter.err(format!(
@@ -602,8 +602,8 @@ impl<'a> KeyworkParser<'a> {
         };
 
         // Parse the members of the struct.
-        let start_symbol = Symbol::CurlyBracketBegin;
-        let end_symbol = Symbol::CurlyBracketEnd;
+        let start_symbol = Sym::CurlyBracketBegin;
+        let end_symbol = Sym::CurlyBracketEnd;
         let (members, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol)?;
         if is_var_arg {
             return Err(self.iter.err(format!(
@@ -636,7 +636,7 @@ impl<'a> KeyworkParser<'a> {
     fn parse_impl(&mut self) -> CustomResult<ParseToken> {
         // Start by parsing the identifier
         let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
-            if let LexTokenKind::Identifier(ident) = lex_token.kind {
+            if let LexTokenKind::Ident(ident) = lex_token.kind {
                 ident
             } else {
                 return Err(self.iter.err(format!(

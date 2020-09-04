@@ -5,11 +5,11 @@ use crate::{
 use common::{
     error::CustomResult,
     token::{
-        expr::{Expression, FunctionCall, StructInit},
-        op::{BinaryOperation, BinaryOperator, Operation, UnaryOperation, UnaryOperator},
+        expr::{Expression, FuncCall, StructInit},
+        op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
 };
-use lex::token::{LexTokenKind, Symbol};
+use lex::token::{LexTokenKind, Sym};
 use log::debug;
 
 pub struct ExprParser<'a> {
@@ -27,7 +27,7 @@ pub struct ExprParser<'a> {
 
     /// The expression is parsed one token at a time until a token is found
     /// matching a symbol in `stop_conds`.
-    stop_conds: &'a [Symbol],
+    stop_conds: &'a [Sym],
 
     /// This bool is used to ensure that all "operands" are separated by operators.
     prev_was_operand: bool,
@@ -51,7 +51,7 @@ pub struct ExprParser<'a> {
 impl<'a> ExprParser<'a> {
     pub fn parse(
         iter: &'a mut ParseTokenIter,
-        stop_conds: &'a [Symbol],
+        stop_conds: &'a [Sym],
     ) -> CustomResult<Expression> {
         let mut expr_parser = Self {
             iter,
@@ -85,7 +85,7 @@ impl<'a> ExprParser<'a> {
                 self.iter.rewind_skip_space()?;
                 self.iter.rewind_skip_space()?;
                 break;
-            } else if let LexTokenKind::Symbol(ref symbol) = lex_token.kind {
+            } else if let LexTokenKind::Sym(ref symbol) = lex_token.kind {
                 if self.stop_conds.contains(symbol) {
                     if self.token_count != 0 {
                         self.iter.rewind_skip_space()?;
@@ -96,7 +96,7 @@ impl<'a> ExprParser<'a> {
                             .err(format!("A `stop_cond` found before token: {:?}", symbol)));
                     }
                 }
-            } else if let LexTokenKind::EndOfFile = lex_token.kind {
+            } else if let LexTokenKind::EOF = lex_token.kind {
                 self.iter.rewind_skip_space()?;
                 break;
             }
@@ -104,37 +104,37 @@ impl<'a> ExprParser<'a> {
             self.token_count += 1;
 
             match lex_token.clone().kind {
-                LexTokenKind::Identifier(ident) => {
+                LexTokenKind::Ident(ident) => {
                     let expr = self.parse_expr_ident(&ident)?;
                     self.shunt_operand(expr)?;
                 }
 
-                LexTokenKind::Literal(lit) => {
-                    let expr = Expression::Literal(lit, None);
+                LexTokenKind::Lit(lit) => {
+                    let expr = Expression::Lit(lit, None);
                     self.shunt_operand(expr)?;
                 }
 
                 // Array access.
-                LexTokenKind::Symbol(Symbol::ArrayIndexBegin) => {
+                LexTokenKind::Sym(Sym::ArrayIndexBegin) => {
                     // TODO: Will only using the square bracket end as a stop
                     //       symbol break anything? Inifinite loop?
-                    let stop_conds = [Symbol::SquareBracketEnd];
+                    let stop_conds = [Sym::SquareBracketEnd];
                     let expr = ExprParser::parse(self.iter, &stop_conds)?;
 
                     // Consume the "SquareBracketEnd".
                     self.iter.next_skip_space();
 
-                    let op = Operator::UnaryOperator(UnaryOperator::ArrayAccess(Box::new(expr)));
+                    let op = Operator::UnaryOperator(UnOperator::ArrayAccess(Box::new(expr)));
                     self.shunt_operator(op)?;
                 }
 
                 // Array init. Example: "var x = [1, 2, 3]"
-                LexTokenKind::Symbol(Symbol::SquareBracketBegin) => {
+                LexTokenKind::Sym(Sym::SquareBracketBegin) => {
                     // The `parse_arg_list` function expects the start symbol
                     self.iter.rewind()?;
 
-                    let start_symbol = Symbol::SquareBracketBegin;
-                    let end_symbol = Symbol::SquareBracketEnd;
+                    let start_symbol = Sym::SquareBracketBegin;
+                    let end_symbol = Sym::SquareBracketEnd;
                     let args = self.iter.parse_arg_list(start_symbol, end_symbol)?;
 
                     let expr = Expression::ArrayInit(args, None);
@@ -142,9 +142,9 @@ impl<'a> ExprParser<'a> {
                 }
 
                 // Special case for operators that takes a "type" as rhs.
-                LexTokenKind::Symbol(symbol @ Symbol::Is)
-                | LexTokenKind::Symbol(symbol @ Symbol::As)
-                | LexTokenKind::Symbol(symbol @ Symbol::Of) => {
+                LexTokenKind::Sym(symbol @ Sym::Is)
+                | LexTokenKind::Sym(symbol @ Sym::As)
+                | LexTokenKind::Sym(symbol @ Sym::Of) => {
                     if let Some(op) = ParseToken::get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
                         let expr = Expression::Type(self.iter.parse_type()?);
@@ -158,7 +158,7 @@ impl<'a> ExprParser<'a> {
                     }
                 }
 
-                LexTokenKind::Symbol(symbol) => {
+                LexTokenKind::Sym(symbol) => {
                     if let Some(op) = ParseToken::get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
                     } else {
@@ -230,9 +230,9 @@ impl<'a> ExprParser<'a> {
             // binary and unary operators (x + +y).
             Operator::Plus => {
                 let plus_op = if self.prev_was_operand {
-                    Operator::BinaryOperator(BinaryOperator::Addition)
+                    Operator::BinaryOperator(BinOperator::Addition)
                 } else {
-                    Operator::UnaryOperator(UnaryOperator::Positive)
+                    Operator::UnaryOperator(UnOperator::Positive)
                 };
                 self.add_operator(plus_op)?;
             }
@@ -241,9 +241,9 @@ impl<'a> ExprParser<'a> {
             // binary and unary operators (x - -y).
             Operator::Minus => {
                 let minus_op = if self.prev_was_operand {
-                    Operator::BinaryOperator(BinaryOperator::Subtraction)
+                    Operator::BinaryOperator(BinOperator::Subtraction)
                 } else {
-                    Operator::UnaryOperator(UnaryOperator::Negative)
+                    Operator::UnaryOperator(UnOperator::Negative)
                 };
                 self.add_operator(minus_op)?;
             }
@@ -324,8 +324,8 @@ impl<'a> ExprParser<'a> {
 
                 Output::Operator(Operator::UnaryOperator(un_op)) => {
                     if let Some(expr) = expr_stack.pop() {
-                        let op = UnaryOperation::new(un_op, Box::new(expr));
-                        expr_stack.push(Expression::Operation(Operation::UnaryOperation(op)));
+                        let op = UnOp::new(un_op, Box::new(expr));
+                        expr_stack.push(Expression::Op(Op::UnOp(op)));
                     } else {
                         return Err(self
                             .iter
@@ -336,8 +336,8 @@ impl<'a> ExprParser<'a> {
                 Output::Operator(Operator::BinaryOperator(bin_op)) => {
                     if let Some(right) = expr_stack.pop() {
                         if let Some(left) = expr_stack.pop() {
-                            let op = BinaryOperation::new(bin_op, Box::new(left), Box::new(right));
-                            expr_stack.push(Expression::Operation(Operation::BinaryOperation(op)));
+                            let op = BinOp::new(bin_op, Box::new(left), Box::new(right));
+                            expr_stack.push(Expression::Op(Op::BinOp(op)));
                         } else {
                             return Err(self.iter.err(
                                 "Empty expr in expr_stack when popping (binary left).".into(),
@@ -380,18 +380,18 @@ impl<'a> ExprParser<'a> {
         if let Some(lex_token) = self.iter.peek_skip_space() {
             match lex_token.kind {
                 // Function call.
-                LexTokenKind::Symbol(Symbol::ParenthesisBegin) => {
-                    let start_symbol = Symbol::ParenthesisBegin;
-                    let end_symbol = Symbol::ParenthesisEnd;
+                LexTokenKind::Sym(Sym::ParenthesisBegin) => {
+                    let start_symbol = Sym::ParenthesisBegin;
+                    let end_symbol = Sym::ParenthesisEnd;
                     let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
-                    let func_call = FunctionCall::new(ident.into(), arguments);
-                    Ok(Expression::FunctionCall(func_call))
+                    let func_call = FuncCall::new(ident.into(), arguments);
+                    Ok(Expression::FuncCall(func_call))
                 }
 
                 // Struct construction.
-                LexTokenKind::Symbol(Symbol::CurlyBracketBegin) => {
-                    let start_symbol = Symbol::CurlyBracketBegin;
-                    let end_symbol = Symbol::CurlyBracketEnd;
+                LexTokenKind::Sym(Sym::CurlyBracketBegin) => {
+                    let start_symbol = Sym::CurlyBracketBegin;
+                    let end_symbol = Sym::CurlyBracketEnd;
                     let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
                     let struct_init = StructInit::new(ident.into(), arguments);
                     Ok(Expression::StructInit(struct_init))
@@ -403,9 +403,9 @@ impl<'a> ExprParser<'a> {
                     // as the right hand side.
                     if let Some(last_op) = self.operators.last() {
                         match last_op {
-                            Operator::BinaryOperator(BinaryOperator::As)
-                            | Operator::BinaryOperator(BinaryOperator::Is)
-                            | Operator::BinaryOperator(BinaryOperator::Of) => {
+                            Operator::BinaryOperator(BinOperator::As)
+                            | Operator::BinaryOperator(BinOperator::Is)
+                            | Operator::BinaryOperator(BinOperator::Of) => {
                                 // Put back the old `lex_token` contaning this
                                 // identifier and parse as type.
                                 self.iter.rewind()?;
@@ -417,13 +417,13 @@ impl<'a> ExprParser<'a> {
                     }
 
                     let var = self.iter.parse_var_type(ident)?;
-                    Ok(Expression::Variable(var))
+                    Ok(Expression::Var(var))
                 }
             }
         } else {
             // TODO: Merge with logic above, same stuff.
             let var = self.iter.parse_var_type(ident)?;
-            Ok(Expression::Variable(var))
+            Ok(Expression::Var(var))
         }
     }
 }

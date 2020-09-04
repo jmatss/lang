@@ -3,7 +3,7 @@ use common::{
     error::LangError,
     token::{
         block::{BlockHeader, Enum, Function, Interface, Struct},
-        expr::Variable,
+        expr::Var,
         stmt::Statement,
     },
     variable_type::{Type, TypeStruct},
@@ -207,7 +207,7 @@ impl<'a> DeclAnalyzer<'a> {
         let generics = None;
         let inferred = false;
         let type_struct = TypeStruct::new(ty, generics, inferred);
-        let var = Variable::new(THIS_VAR_NAME.into(), Some(type_struct), None, false);
+        let var = Var::new(THIS_VAR_NAME.into(), Some(type_struct), None, false);
         if let Some(ref mut params) = func.parameters {
             params.insert(0, var);
         } else {

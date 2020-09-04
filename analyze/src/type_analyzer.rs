@@ -4,9 +4,9 @@ use common::error::LangError;
 use common::{
     token::{
         block::BlockHeader,
-        expr::{AccessInstruction, Expression, FunctionCall, StructInit, Variable},
-        lit::Literal,
-        op::{BinaryOperation, BinaryOperator, Operation, UnaryOperation, UnaryOperator},
+        expr::{AccessInstruction, Expression, FuncCall, StructInit, Var},
+        lit::Lit,
+        op::{BinOp, BinOperator, Op, UnOp, UnOperator},
         stmt::Statement,
     },
     variable_type::{Type, TypeStruct},
@@ -84,7 +84,7 @@ impl<'a> TypeAnalyzer<'a> {
         type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         match expr {
-            Expression::Literal(lit, cur_type_opt) => {
+            Expression::Lit(lit, cur_type_opt) => {
                 // If this literal already has a type that is NOT inferred, don't
                 // change it, do early return.
                 if let Some(cur_type) = cur_type_opt {
@@ -108,11 +108,11 @@ impl<'a> TypeAnalyzer<'a> {
                 // as the literal.
                 if let Some(type_hint) = type_hint_opt.clone() {
                     let possible_type_hint = match lit {
-                        Literal::StringLiteral(_) if type_hint.ty.is_string() => Some(type_hint),
-                        Literal::CharLiteral(_) if type_hint.ty.is_char() => Some(type_hint),
-                        Literal::Bool(_) if type_hint.ty.is_bool() => Some(type_hint),
-                        Literal::Integer(_, _) if type_hint.ty.is_int() => Some(type_hint),
-                        Literal::Float(_) if type_hint.ty.is_float() => Some(type_hint),
+                        Lit::String(_) if type_hint.ty.is_string() => Some(type_hint),
+                        Lit::Char(_) if type_hint.ty.is_char() => Some(type_hint),
+                        Lit::Bool(_) if type_hint.ty.is_bool() => Some(type_hint),
+                        Lit::Integer(_, _) if type_hint.ty.is_int() => Some(type_hint),
+                        Lit::Float(_) if type_hint.ty.is_float() => Some(type_hint),
                         _ => None,
                     };
 
@@ -128,7 +128,7 @@ impl<'a> TypeAnalyzer<'a> {
                 cur_type_opt.clone()
             }
             Expression::Type(type_struct) => Some(type_struct.clone()),
-            Expression::Variable(var) => {
+            Expression::Var(var) => {
                 debug!("ANALYZING VAR: {:#?}", var);
 
                 // TODO: FIXME: Currently the type hint is used when analyzing
@@ -145,8 +145,8 @@ impl<'a> TypeAnalyzer<'a> {
                     self.analyze_var_type(var, type_hint_opt)
                 }
             }
-            Expression::Operation(op) => self.analyze_op_type(op, type_hint_opt),
-            Expression::FunctionCall(func_call) => {
+            Expression::Op(op) => self.analyze_op_type(op, type_hint_opt),
+            Expression::FuncCall(func_call) => {
                 // If true: This is a method. The type hint given from the lhs
                 //          will be the type of the struct that this method
                 //          is called on.
@@ -211,9 +211,9 @@ impl<'a> TypeAnalyzer<'a> {
                 };
 
                 // Infer a type from the type of the members of this array.
-                let lit = Literal::Integer(args.len().to_string(), 10);
+                let lit = Lit::Integer(args.len().to_string(), 10);
                 let dim_type = TypeStruct::new(Type::I32, None, false);
-                let dim_expr = Expression::Literal(lit, Some(dim_type));
+                let dim_expr = Expression::Lit(lit, Some(dim_type));
                 let generics = None;
                 let inferred = false;
                 let new_init_type = TypeStruct::new(
@@ -234,7 +234,7 @@ impl<'a> TypeAnalyzer<'a> {
         }
     }
 
-    fn analyze_func_call(&mut self, func_call: &mut FunctionCall) -> Option<TypeStruct> {
+    fn analyze_func_call(&mut self, func_call: &mut FuncCall) -> Option<TypeStruct> {
         let cur_block_id = self.context.cur_block_id;
         let func_block_id = match self
             .context
@@ -306,7 +306,7 @@ impl<'a> TypeAnalyzer<'a> {
 
     fn analyze_method_call(
         &mut self,
-        func_call: &mut FunctionCall,
+        func_call: &mut FuncCall,
         type_hint: TypeStruct,
     ) -> Option<TypeStruct> {
         let struct_name = if let Type::Custom(struct_name) = type_hint.ty {
@@ -477,7 +477,7 @@ impl<'a> TypeAnalyzer<'a> {
     /// indexing of a struct. Try to figure out the type of the member
     /// by looking up the struct, and then finding the type of the member
     /// in the struct definition.
-    fn analyze_struct_member(&mut self, var: &mut Variable) -> Option<TypeStruct> {
+    fn analyze_struct_member(&mut self, var: &mut Var) -> Option<TypeStruct> {
         if let Some((ref root_var, ref mut access_instrs)) = var.access_instrs {
             let root_var_name = &root_var.name;
             let decl_id = root_var.decl_block_id;
@@ -615,15 +615,15 @@ impl<'a> TypeAnalyzer<'a> {
         }
     }
 
-    fn analyze_literal_type(&mut self, lit: &Literal) -> TypeStruct {
+    fn analyze_literal_type(&mut self, lit: &Lit) -> TypeStruct {
         let ty = match lit {
-            Literal::StringLiteral(_) => Type::String,
-            Literal::CharLiteral(_) => Type::Character,
-            Literal::Bool(_) => Type::Boolean,
+            Lit::String(_) => Type::String,
+            Lit::Char(_) => Type::Character,
+            Lit::Bool(_) => Type::Boolean,
             // Default type for int are Int.
-            Literal::Integer(_, _) => Type::Int,
+            Lit::Integer(_, _) => Type::Int,
             // Default type for float are F32.
-            Literal::Float(_) => Type::F32,
+            Lit::Float(_) => Type::F32,
         };
 
         // TODO: Implement generics.
@@ -634,7 +634,7 @@ impl<'a> TypeAnalyzer<'a> {
 
     fn analyze_var_type(
         &mut self,
-        var: &mut Variable,
+        var: &mut Var,
         type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         let cur_block_id = self.context.cur_block_id;
@@ -677,14 +677,14 @@ impl<'a> TypeAnalyzer<'a> {
 
     fn analyze_op_type(
         &mut self,
-        op: &mut Operation,
+        op: &mut Op,
         type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         match op {
-            Operation::BinaryOperation(ref mut bin_op) => {
+            Op::BinOp(ref mut bin_op) => {
                 self.analyze_bin_op_type(bin_op, type_hint_opt)
             }
-            Operation::UnaryOperation(ref mut un_op) => {
+            Op::UnOp(ref mut un_op) => {
                 self.analyze_un_op_type(un_op, type_hint_opt)
             }
         }
@@ -694,7 +694,7 @@ impl<'a> TypeAnalyzer<'a> {
     //       of the binary operation have different types, in most of those cases it should not panic.
     fn analyze_bin_op_type(
         &mut self,
-        bin_op: &mut BinaryOperation,
+        bin_op: &mut BinOp,
         type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         // TODO: If this is a assignment, the type of the right hand side should
@@ -720,13 +720,13 @@ impl<'a> TypeAnalyzer<'a> {
 
     fn analyze_un_op_type(
         &mut self,
-        un_op: &mut UnaryOperation,
+        un_op: &mut UnOp,
         type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         self.analyze_expr_type(&mut un_op.value, None);
 
         let ret_type = match un_op.operator {
-            UnaryOperator::Deref => {
+            UnOperator::Deref => {
                 // Analyze the "outer" value that should be a pointer. Then deref
                 // the result to get the value that is inside the pointer.
                 if let Some(type_struct) = self.analyze_expr_type(&mut un_op.value, type_hint_opt) {
@@ -744,7 +744,7 @@ impl<'a> TypeAnalyzer<'a> {
                     return None;
                 }
             }
-            UnaryOperator::Address => {
+            UnOperator::Address => {
                 // The type hint should be a pointer. Since we want to analyze
                 // the inner value, unwrap the pointer type hint.
                 let inner_type_hint_opt = if let Some(ptr_type_hint) = type_hint_opt {
@@ -777,7 +777,7 @@ impl<'a> TypeAnalyzer<'a> {
                     return None;
                 }
             }
-            UnaryOperator::ArrayAccess(_) => {
+            UnOperator::ArrayAccess(_) => {
                 // Analyze the "outer" value that should be a array. Then deref
                 // the result to get the value that is inside the pointer.
                 if let Some(type_struct) = self.analyze_expr_type(&mut un_op.value, type_hint_opt) {
@@ -795,12 +795,12 @@ impl<'a> TypeAnalyzer<'a> {
                 }
             }
 
-            UnaryOperator::Increment
-            | UnaryOperator::Decrement
-            | UnaryOperator::Positive
-            | UnaryOperator::Negative
-            | UnaryOperator::BitComplement
-            | UnaryOperator::BoolNot => self.analyze_expr_type(&mut un_op.value, type_hint_opt),
+            UnOperator::Increment
+            | UnOperator::Decrement
+            | UnOperator::Positive
+            | UnOperator::Negative
+            | UnOperator::BitComplement
+            | UnOperator::BoolNot => self.analyze_expr_type(&mut un_op.value, type_hint_opt),
         };
         un_op.ret_type = ret_type.clone();
         ret_type
@@ -957,7 +957,7 @@ impl<'a> TypeAnalyzer<'a> {
     // TODO: How should inheritance/implements etc. work?
     fn infer_type(
         &mut self,
-        bin_op: &mut BinaryOperation,
+        bin_op: &mut BinOp,
         left_type_opt: &Option<TypeStruct>,
         right_type_opt: &Option<TypeStruct>,
     ) -> Option<TypeStruct> {
@@ -976,13 +976,13 @@ impl<'a> TypeAnalyzer<'a> {
             // sides should be prefered. Otherwise have a look at the both
             // types and try to figure out which one to prefer.
             Some(match bin_op.operator {
-                BinaryOperator::In => left_type,
-                BinaryOperator::Is => right_type,
-                BinaryOperator::As => right_type,
-                BinaryOperator::Of => right_type,
-                BinaryOperator::Dot => right_type,
-                BinaryOperator::ShiftLeft => left_type,
-                BinaryOperator::ShiftRight => left_type,
+                BinOperator::In => left_type,
+                BinOperator::Is => right_type,
+                BinOperator::As => right_type,
+                BinOperator::Of => right_type,
+                BinOperator::Dot => right_type,
+                BinOperator::ShiftLeft => left_type,
+                BinOperator::ShiftRight => left_type,
                 _ => {
                     // The "compare" function will try and promote values and take the
                     // one with the "higesht priority". Returns None if unable to compare
@@ -1013,13 +1013,13 @@ impl<'a> TypeAnalyzer<'a> {
     /// Set the type of a expression after it has ben inferred.
     fn set_type(&mut self, expr: &mut Expression, new_ty: Option<TypeStruct>) {
         match expr {
-            Expression::Literal(_, old_ty) => *old_ty = new_ty,
-            Expression::Variable(var) => var.ret_type = new_ty,
-            Expression::Operation(op) => match op {
-                Operation::BinaryOperation(bin_op) => bin_op.ret_type = new_ty,
-                Operation::UnaryOperation(un_op) => un_op.ret_type = new_ty,
+            Expression::Lit(_, old_ty) => *old_ty = new_ty,
+            Expression::Var(var) => var.ret_type = new_ty,
+            Expression::Op(op) => match op {
+                Op::BinOp(bin_op) => bin_op.ret_type = new_ty,
+                Op::UnOp(un_op) => un_op.ret_type = new_ty,
             },
-            Expression::FunctionCall(_) => {
+            Expression::FuncCall(_) => {
                 // Do nothing, the "return type" of a function call will be
                 // taken from the function declaration.
             }

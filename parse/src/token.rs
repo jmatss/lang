@@ -3,7 +3,7 @@ use common::{
     token::{
         block::BlockHeader,
         expr::Expression,
-        op::{AssignOperator, BinaryOperator, UnaryOperator},
+        op::{AssignOperator, BinOperator, UnOperator},
         stmt::Statement,
     },
     BlockId,
@@ -45,8 +45,8 @@ pub enum Output {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operator {
-    BinaryOperator(BinaryOperator),
-    UnaryOperator(UnaryOperator),
+    BinaryOperator(BinOperator),
+    UnaryOperator(UnOperator),
 
     // Special operators that needs extra logic.
     // Need to figure out if plus/minus is Addition/Subtraction(binary) or
@@ -117,49 +117,49 @@ impl Operator {
             Some((true, 0, Fix::Dummy))
         } else if let Operator::UnaryOperator(unary_op) = self {
             Some(match unary_op {
-                UnaryOperator::Positive => (true, 2, Fix::Prefix),
-                UnaryOperator::Negative => (true, 2, Fix::Prefix),
-                UnaryOperator::Increment => (true, 3, Fix::Postfix),
-                UnaryOperator::Decrement => (true, 3, Fix::Postfix),
+                UnOperator::Positive => (true, 2, Fix::Prefix),
+                UnOperator::Negative => (true, 2, Fix::Prefix),
+                UnOperator::Increment => (true, 3, Fix::Postfix),
+                UnOperator::Decrement => (true, 3, Fix::Postfix),
 
-                UnaryOperator::BitComplement => (true, 4, Fix::Prefix),
-                UnaryOperator::BoolNot => (true, 15, Fix::Prefix),
-                UnaryOperator::Deref => (true, 1, Fix::Postfix),
-                UnaryOperator::Address => (true, 1, Fix::Postfix),
-                UnaryOperator::ArrayAccess(_) => (true, 1, Fix::Postfix),
+                UnOperator::BitComplement => (true, 4, Fix::Prefix),
+                UnOperator::BoolNot => (true, 15, Fix::Prefix),
+                UnOperator::Deref => (true, 1, Fix::Postfix),
+                UnOperator::Address => (true, 1, Fix::Postfix),
+                UnOperator::ArrayAccess(_) => (true, 1, Fix::Postfix),
             })
         } else if let Operator::BinaryOperator(binary_op) = self {
             Some(match binary_op {
-                BinaryOperator::In => (false, 19, Fix::Dummy),
-                BinaryOperator::Is => (true, 10, Fix::Dummy),
-                BinaryOperator::As => (true, 5, Fix::Dummy),
-                BinaryOperator::Of => (true, 10, Fix::Dummy),
-                BinaryOperator::Range => (true, 18, Fix::Dummy),
-                BinaryOperator::RangeInclusive => (true, 18, Fix::Dummy),
-                BinaryOperator::Dot => (true, 1, Fix::Dummy),
+                BinOperator::In => (false, 19, Fix::Dummy),
+                BinOperator::Is => (true, 10, Fix::Dummy),
+                BinOperator::As => (true, 5, Fix::Dummy),
+                BinOperator::Of => (true, 10, Fix::Dummy),
+                BinOperator::Range => (true, 18, Fix::Dummy),
+                BinOperator::RangeInclusive => (true, 18, Fix::Dummy),
+                BinOperator::Dot => (true, 1, Fix::Dummy),
 
-                BinaryOperator::Equals => (true, 11, Fix::Dummy),
-                BinaryOperator::NotEquals => (true, 11, Fix::Dummy),
-                BinaryOperator::LessThan => (true, 10, Fix::Dummy),
-                BinaryOperator::GreaterThan => (true, 10, Fix::Dummy),
-                BinaryOperator::LessThanOrEquals => (true, 10, Fix::Dummy),
-                BinaryOperator::GreaterThanOrEquals => (true, 10, Fix::Dummy),
+                BinOperator::Equals => (true, 11, Fix::Dummy),
+                BinOperator::NotEquals => (true, 11, Fix::Dummy),
+                BinOperator::LessThan => (true, 10, Fix::Dummy),
+                BinOperator::GreaterThan => (true, 10, Fix::Dummy),
+                BinOperator::LessThanOrEquals => (true, 10, Fix::Dummy),
+                BinOperator::GreaterThanOrEquals => (true, 10, Fix::Dummy),
 
-                BinaryOperator::Addition => (true, 8, Fix::Dummy),
-                BinaryOperator::Subtraction => (true, 8, Fix::Dummy),
-                BinaryOperator::Multiplication => (true, 7, Fix::Dummy),
-                BinaryOperator::Division => (true, 7, Fix::Dummy),
-                BinaryOperator::Modulus => (true, 7, Fix::Dummy),
-                BinaryOperator::Power => (false, 6, Fix::Dummy),
+                BinOperator::Addition => (true, 8, Fix::Dummy),
+                BinOperator::Subtraction => (true, 8, Fix::Dummy),
+                BinOperator::Multiplication => (true, 7, Fix::Dummy),
+                BinOperator::Division => (true, 7, Fix::Dummy),
+                BinOperator::Modulus => (true, 7, Fix::Dummy),
+                BinOperator::Power => (false, 6, Fix::Dummy),
 
-                BinaryOperator::BitAnd => (true, 12, Fix::Dummy),
-                BinaryOperator::BitOr => (true, 14, Fix::Dummy),
-                BinaryOperator::BitXor => (true, 13, Fix::Dummy),
-                BinaryOperator::ShiftLeft => (true, 9, Fix::Dummy),
-                BinaryOperator::ShiftRight => (true, 9, Fix::Dummy),
+                BinOperator::BitAnd => (true, 12, Fix::Dummy),
+                BinOperator::BitOr => (true, 14, Fix::Dummy),
+                BinOperator::BitXor => (true, 13, Fix::Dummy),
+                BinOperator::ShiftLeft => (true, 9, Fix::Dummy),
+                BinOperator::ShiftRight => (true, 9, Fix::Dummy),
 
-                BinaryOperator::BoolAnd => (true, 16, Fix::Dummy),
-                BinaryOperator::BoolOr => (true, 17, Fix::Dummy),
+                BinOperator::BoolAnd => (true, 16, Fix::Dummy),
+                BinOperator::BoolOr => (true, 17, Fix::Dummy),
 
                 _ => return None,
             })
@@ -190,29 +190,29 @@ impl Operator {
 impl ParseToken {
     /// Returns some Operator if the given symbol is a valid operator inside a
     /// expression, returns None otherwise.
-    pub fn get_if_expr_op(symbol: &lex::token::Symbol) -> Option<Operator> {
+    pub fn get_if_expr_op(symbol: &lex::token::Sym) -> Option<Operator> {
         Some(match symbol {
-            lex::token::Symbol::ParenthesisBegin => Operator::ParenthesisBegin,
-            lex::token::Symbol::ParenthesisEnd => Operator::ParenthesisEnd,
-            lex::token::Symbol::Plus => Operator::Plus,
-            lex::token::Symbol::Minus => Operator::Minus,
+            lex::token::Sym::ParenthesisBegin => Operator::ParenthesisBegin,
+            lex::token::Sym::ParenthesisEnd => Operator::ParenthesisEnd,
+            lex::token::Sym::Plus => Operator::Plus,
+            lex::token::Sym::Minus => Operator::Minus,
             /*
             lex::token::Symbol::SquareBracketBegin,
             lex::token::Symbol::SquareBracketEnd,
             lex::token::Symbol::CurlyBracketBegin,
             lex::token::Symbol::CurlyBracketEnd,
             */
-            lex::token::Symbol::PointyBracketBegin => {
-                Operator::BinaryOperator(BinaryOperator::LessThan)
+            lex::token::Sym::PointyBracketBegin => {
+                Operator::BinaryOperator(BinOperator::LessThan)
             }
-            lex::token::Symbol::PointyBracketEnd => {
-                Operator::BinaryOperator(BinaryOperator::GreaterThan)
+            lex::token::Sym::PointyBracketEnd => {
+                Operator::BinaryOperator(BinOperator::GreaterThan)
             }
 
-            lex::token::Symbol::Increment => Operator::UnaryOperator(UnaryOperator::Increment),
-            lex::token::Symbol::Decrement => Operator::UnaryOperator(UnaryOperator::Decrement),
+            lex::token::Sym::Increment => Operator::UnaryOperator(UnOperator::Increment),
+            lex::token::Sym::Decrement => Operator::UnaryOperator(UnOperator::Decrement),
 
-            lex::token::Symbol::Dot => Operator::BinaryOperator(BinaryOperator::Dot),
+            lex::token::Sym::Dot => Operator::BinaryOperator(BinOperator::Dot),
             //lex::token::Symbol::Comma,
             //lex::token::Symbol::QuestionMark,
             //lex::token::Symbol::ExclamationMark,
@@ -227,43 +227,43 @@ impl ParseToken {
             //lex::token::Symbol::WhiteSpace(usize),
 
             //lex::token::Symbol::Pipe,
-            lex::token::Symbol::Range => Operator::BinaryOperator(BinaryOperator::Range),
-            lex::token::Symbol::RangeInclusive => {
-                Operator::BinaryOperator(BinaryOperator::RangeInclusive)
+            lex::token::Sym::Range => Operator::BinaryOperator(BinOperator::Range),
+            lex::token::Sym::RangeInclusive => {
+                Operator::BinaryOperator(BinOperator::RangeInclusive)
             }
             //lex::token::Symbol::Arrow,
-            lex::token::Symbol::Deref => Operator::UnaryOperator(UnaryOperator::Deref),
-            lex::token::Symbol::Address => Operator::UnaryOperator(UnaryOperator::Address),
+            lex::token::Sym::Deref => Operator::UnaryOperator(UnOperator::Deref),
+            lex::token::Sym::Address => Operator::UnaryOperator(UnOperator::Address),
 
-            lex::token::Symbol::EqualsOperator => Operator::BinaryOperator(BinaryOperator::Equals),
-            lex::token::Symbol::NotEquals => Operator::BinaryOperator(BinaryOperator::NotEquals),
-            lex::token::Symbol::SquareBracketBegin => {
-                Operator::BinaryOperator(BinaryOperator::LessThan)
+            lex::token::Sym::EqualsOperator => Operator::BinaryOperator(BinOperator::Equals),
+            lex::token::Sym::NotEquals => Operator::BinaryOperator(BinOperator::NotEquals),
+            lex::token::Sym::SquareBracketBegin => {
+                Operator::BinaryOperator(BinOperator::LessThan)
             }
-            lex::token::Symbol::SquareBracketEnd => {
-                Operator::BinaryOperator(BinaryOperator::GreaterThan)
+            lex::token::Sym::SquareBracketEnd => {
+                Operator::BinaryOperator(BinOperator::GreaterThan)
             }
-            lex::token::Symbol::LessThanOrEquals => {
-                Operator::BinaryOperator(BinaryOperator::LessThanOrEquals)
+            lex::token::Sym::LessThanOrEquals => {
+                Operator::BinaryOperator(BinOperator::LessThanOrEquals)
             }
-            lex::token::Symbol::GreaterThanOrEquals => {
-                Operator::BinaryOperator(BinaryOperator::GreaterThanOrEquals)
+            lex::token::Sym::GreaterThanOrEquals => {
+                Operator::BinaryOperator(BinOperator::GreaterThanOrEquals)
             }
 
-            lex::token::Symbol::Multiplication => {
-                Operator::BinaryOperator(BinaryOperator::Multiplication)
+            lex::token::Sym::Multiplication => {
+                Operator::BinaryOperator(BinOperator::Multiplication)
             }
-            lex::token::Symbol::Division => Operator::BinaryOperator(BinaryOperator::Division),
-            lex::token::Symbol::Modulus => Operator::BinaryOperator(BinaryOperator::Modulus),
-            lex::token::Symbol::Power => Operator::BinaryOperator(BinaryOperator::Power),
+            lex::token::Sym::Division => Operator::BinaryOperator(BinOperator::Division),
+            lex::token::Sym::Modulus => Operator::BinaryOperator(BinOperator::Modulus),
+            lex::token::Sym::Power => Operator::BinaryOperator(BinOperator::Power),
 
-            lex::token::Symbol::BitAnd => Operator::BinaryOperator(BinaryOperator::BitAnd),
-            lex::token::Symbol::BitOr => Operator::BinaryOperator(BinaryOperator::BitOr),
-            lex::token::Symbol::BitXor => Operator::BinaryOperator(BinaryOperator::BitXor),
-            lex::token::Symbol::ShiftLeft => Operator::BinaryOperator(BinaryOperator::ShiftLeft),
-            lex::token::Symbol::ShiftRight => Operator::BinaryOperator(BinaryOperator::ShiftRight),
-            lex::token::Symbol::BitCompliment => {
-                Operator::UnaryOperator(UnaryOperator::BitComplement)
+            lex::token::Sym::BitAnd => Operator::BinaryOperator(BinOperator::BitAnd),
+            lex::token::Sym::BitOr => Operator::BinaryOperator(BinOperator::BitOr),
+            lex::token::Sym::BitXor => Operator::BinaryOperator(BinOperator::BitXor),
+            lex::token::Sym::ShiftLeft => Operator::BinaryOperator(BinOperator::ShiftLeft),
+            lex::token::Sym::ShiftRight => Operator::BinaryOperator(BinOperator::ShiftRight),
+            lex::token::Sym::BitCompliment => {
+                Operator::UnaryOperator(UnOperator::BitComplement)
             }
 
             /*
@@ -271,14 +271,14 @@ impl ParseToken {
             lex::token::Symbol::CommentMultiLineBegin,
             lex::token::Symbol::CommentMultiLineEnd,
             */
-            lex::token::Symbol::BoolNot => Operator::UnaryOperator(UnaryOperator::BoolNot),
-            lex::token::Symbol::BoolAnd => Operator::BinaryOperator(BinaryOperator::BoolAnd),
-            lex::token::Symbol::BoolOr => Operator::BinaryOperator(BinaryOperator::BoolOr),
+            lex::token::Sym::BoolNot => Operator::UnaryOperator(UnOperator::BoolNot),
+            lex::token::Sym::BoolAnd => Operator::BinaryOperator(BinOperator::BoolAnd),
+            lex::token::Sym::BoolOr => Operator::BinaryOperator(BinOperator::BoolOr),
 
-            lex::token::Symbol::In => Operator::BinaryOperator(BinaryOperator::In),
-            lex::token::Symbol::Is => Operator::BinaryOperator(BinaryOperator::Is),
-            lex::token::Symbol::As => Operator::BinaryOperator(BinaryOperator::As),
-            lex::token::Symbol::Of => Operator::BinaryOperator(BinaryOperator::Of),
+            lex::token::Sym::In => Operator::BinaryOperator(BinOperator::In),
+            lex::token::Sym::Is => Operator::BinaryOperator(BinOperator::Is),
+            lex::token::Sym::As => Operator::BinaryOperator(BinOperator::As),
+            lex::token::Sym::Of => Operator::BinaryOperator(BinOperator::Of),
 
             _ => return None,
         })
@@ -287,20 +287,20 @@ impl ParseToken {
     /// Returns some Operator if the given symbol is a valid operator inside a
     /// expression, returns None otherwise.
     pub fn get_if_stmt_op(lex_token: &lex::token::LexToken) -> Option<AssignOperator> {
-        if let lex::token::LexTokenKind::Symbol(ref symbol) = lex_token.kind {
+        if let lex::token::LexTokenKind::Sym(ref symbol) = lex_token.kind {
             Some(match symbol {
-                lex::token::Symbol::Equals => AssignOperator::Assignment,
-                lex::token::Symbol::AssignAddition => AssignOperator::AssignAddition,
-                lex::token::Symbol::AssignSubtraction => AssignOperator::AssignSubtraction,
-                lex::token::Symbol::AssignMultiplication => AssignOperator::AssignMultiplication,
-                lex::token::Symbol::AssignDivision => AssignOperator::AssignDivision,
-                lex::token::Symbol::AssignModulus => AssignOperator::AssignModulus,
-                lex::token::Symbol::AssignPower => AssignOperator::AssignPower,
-                lex::token::Symbol::AssignBitAnd => AssignOperator::AssignBitAnd,
-                lex::token::Symbol::AssignBitOr => AssignOperator::AssignBitOr,
-                lex::token::Symbol::AssignBitXor => AssignOperator::AssignBitXor,
-                lex::token::Symbol::AssignShiftLeft => AssignOperator::AssignShiftLeft,
-                lex::token::Symbol::AssignShiftRight => AssignOperator::AssignShiftRight,
+                lex::token::Sym::Equals => AssignOperator::Assignment,
+                lex::token::Sym::AssignAddition => AssignOperator::AssignAddition,
+                lex::token::Sym::AssignSubtraction => AssignOperator::AssignSubtraction,
+                lex::token::Sym::AssignMultiplication => AssignOperator::AssignMultiplication,
+                lex::token::Sym::AssignDivision => AssignOperator::AssignDivision,
+                lex::token::Sym::AssignModulus => AssignOperator::AssignModulus,
+                lex::token::Sym::AssignPower => AssignOperator::AssignPower,
+                lex::token::Sym::AssignBitAnd => AssignOperator::AssignBitAnd,
+                lex::token::Sym::AssignBitOr => AssignOperator::AssignBitOr,
+                lex::token::Sym::AssignBitXor => AssignOperator::AssignBitXor,
+                lex::token::Sym::AssignShiftLeft => AssignOperator::AssignShiftLeft,
+                lex::token::Sym::AssignShiftRight => AssignOperator::AssignShiftRight,
 
                 _ => return None,
             })

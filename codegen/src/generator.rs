@@ -2,8 +2,8 @@ use analyze::AnalyzeContext;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
     token::{
-        expr::{AccessInstruction, Expression, Variable},
-        lit::Literal,
+        expr::{AccessInstruction, Expression, Var},
+        lit::Lit,
     },
     variable_type::{Type, TypeStruct},
     BlockId,
@@ -159,7 +159,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn compile_alloca(&self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
+    pub(super) fn compile_alloca(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
         if let Some(var_type) = &var.ret_type {
             Ok(match self.compile_type(&var_type)? {
                 AnyTypeEnum::ArrayType(ty) => {
@@ -187,7 +187,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile_var_decl(&mut self, var: &Variable) -> CustomResult<()> {
+    pub(super) fn compile_var_decl(&mut self, var: &Var) -> CustomResult<()> {
         let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
@@ -215,7 +215,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub(super) fn compile_var_store(
         &mut self,
-        var: &mut Variable,
+        var: &mut Var,
         basic_value: BasicValueEnum<'ctx>,
     ) -> CustomResult<InstructionValue<'ctx>> {
         debug!(
@@ -246,7 +246,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub(super) fn compile_var_load(
         &mut self,
-        var: &mut Variable,
+        var: &mut Var,
     ) -> CustomResult<BasicValueEnum<'ctx>> {
         if var.is_const {
             return self.get_const_value(var);
@@ -271,7 +271,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn get_var_ptr(&mut self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
+    fn get_var_ptr(&mut self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
         let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
@@ -296,7 +296,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// contains "AccessInstruction"s.
     fn get_var_ptr_access_instrs(
         &mut self,
-        var: &mut Variable,
+        var: &mut Var,
     ) -> CustomResult<PointerValue<'ctx>> {
         let (root_var, access_instrs) =
             if let Some((ref root_var, ref mut access_instrs)) = var.access_instrs {
@@ -389,7 +389,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     // TODO: Implement logic to load both regular variables and struct members
     //       if they are const.
-    fn get_const_value(&mut self, var: &Variable) -> CustomResult<BasicValueEnum<'ctx>> {
+    fn get_const_value(&mut self, var: &Var) -> CustomResult<BasicValueEnum<'ctx>> {
         let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
@@ -435,8 +435,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Type::Array(inner_ty, dim_opt) => {
                 let lit_dim = if let Some(dim) = dim_opt {
                     match dim.as_ref() {
-                        Expression::Literal(lit, _) => match lit {
-                            Literal::Integer(num, radix) => u32::from_str_radix(num, *radix)?,
+                        Expression::Lit(lit, _) => match lit {
+                            Lit::Integer(num, radix) => u32::from_str_radix(num, *radix)?,
                             _ => {
                                 return Err(self.err(format!(
                                     "Invalid literal used as array dimension: {:?}",

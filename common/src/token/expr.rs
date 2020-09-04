@@ -1,6 +1,6 @@
 use super::{
-    lit::Literal,
-    op::{BinaryOperator, Operation, UnaryOperator},
+    lit::Lit,
+    op::{BinOperator, Op, UnOperator},
     stmt::Modifier,
 };
 use crate::{variable_type::TypeStruct, BlockId};
@@ -11,7 +11,7 @@ pub enum Expression {
     //       implied. For numbers the postfix notation might be converted to a
     //       "As" so that the type doesn't need to be stored in the literal,
     //       it will be stored in the surrounding expression.
-    Literal(Literal, Option<TypeStruct>),
+    Lit(Lit, Option<TypeStruct>),
 
     // TODO: Is it ok to have type as a expression? This lets one handle binary
     //       operators like ex. "as" in a simple way.
@@ -19,27 +19,27 @@ pub enum Expression {
 
     // TODO: FIXME: The "Variable" struct contains a type. Should the type be
     //              in this enum instead?
-    Variable(Variable),
-    FunctionCall(FunctionCall),
+    Var(Var),
+    FuncCall(FuncCall),
     StructInit(StructInit),
     ArrayInit(Vec<Argument>, Option<TypeStruct>),
     //MacroCall(Option<MacroCall>),
-    Operation(Operation),
+    Op(Op),
 }
 
 impl Expression {
     pub fn is_var(&self) -> bool {
         match self {
-            Expression::Variable(_) => true,
-            Expression::Operation(op) => match op {
-                Operation::BinaryOperation(bin_op) => match bin_op.operator {
-                    BinaryOperator::Dot => bin_op.left.is_var() && bin_op.right.is_var(),
+            Expression::Var(_) => true,
+            Expression::Op(op) => match op {
+                Op::BinOp(bin_op) => match bin_op.operator {
+                    BinOperator::Dot => bin_op.left.is_var() && bin_op.right.is_var(),
                     _ => false,
                 },
-                Operation::UnaryOperation(un_op) => match un_op.operator {
-                    UnaryOperator::Deref
-                    | UnaryOperator::Address
-                    | UnaryOperator::ArrayAccess(_) => true,
+                Op::UnOp(un_op) => match un_op.operator {
+                    UnOperator::Deref
+                    | UnOperator::Address
+                    | UnOperator::ArrayAccess(_) => true,
                     _ => false,
                 },
             },
@@ -49,10 +49,10 @@ impl Expression {
 
     pub fn get_access_type(&self) -> Option<AccessType> {
         match self {
-            Expression::Variable(_) => Some(AccessType::Regular),
-            Expression::Operation(op) => match op {
-                Operation::BinaryOperation(bin_op) => match bin_op.operator {
-                    BinaryOperator::Dot => {
+            Expression::Var(_) => Some(AccessType::Regular),
+            Expression::Op(op) => match op {
+                Op::BinOp(bin_op) => match bin_op.operator {
+                    BinOperator::Dot => {
                         if bin_op.right.is_deref() {
                             Some(AccessType::Deref)
                         } else if bin_op.right.is_address() {
@@ -67,10 +67,10 @@ impl Expression {
                     }
                     _ => None,
                 },
-                Operation::UnaryOperation(un_op) => match un_op.operator {
-                    UnaryOperator::Deref => Some(AccessType::Deref),
-                    UnaryOperator::Address => Some(AccessType::Address),
-                    UnaryOperator::ArrayAccess(_) => Some(AccessType::ArrayAccess),
+                Op::UnOp(un_op) => match un_op.operator {
+                    UnOperator::Deref => Some(AccessType::Deref),
+                    UnOperator::Address => Some(AccessType::Address),
+                    UnOperator::ArrayAccess(_) => Some(AccessType::ArrayAccess),
                     _ => None,
                 },
             },
@@ -79,8 +79,8 @@ impl Expression {
     }
 
     pub fn is_deref(&self) -> bool {
-        if let Expression::Operation(Operation::UnaryOperation(un_op)) = self {
-            if let UnaryOperator::Deref = un_op.operator {
+        if let Expression::Op(Op::UnOp(un_op)) = self {
+            if let UnOperator::Deref = un_op.operator {
                 return true;
             }
         }
@@ -88,8 +88,8 @@ impl Expression {
     }
 
     pub fn is_address(&self) -> bool {
-        if let Expression::Operation(Operation::UnaryOperation(un_op)) = self {
-            if let UnaryOperator::Address = un_op.operator {
+        if let Expression::Op(Op::UnOp(un_op)) = self {
+            if let UnOperator::Address = un_op.operator {
                 return true;
             }
         }
@@ -97,8 +97,8 @@ impl Expression {
     }
 
     pub fn is_array_access(&self) -> bool {
-        if let Expression::Operation(Operation::UnaryOperation(un_op)) = self {
-            if let UnaryOperator::ArrayAccess(_) = un_op.operator {
+        if let Expression::Op(Op::UnOp(un_op)) = self {
+            if let UnOperator::ArrayAccess(_) = un_op.operator {
                 return true;
             }
         }
@@ -106,8 +106,8 @@ impl Expression {
     }
 
     pub fn is_struct_access(&self) -> bool {
-        if let Expression::Operation(Operation::BinaryOperation(bin_op)) = self {
-            if let BinaryOperator::Dot = bin_op.operator {
+        if let Expression::Op(Op::BinOp(bin_op)) = self {
+            if let BinOperator::Dot = bin_op.operator {
                 return bin_op.left.is_var() && bin_op.right.is_var();
             }
         }
@@ -116,12 +116,12 @@ impl Expression {
 
     /// If this is a Dot operation, this function will return the variable from
     /// the rhs.
-    pub fn eval_to_var(&mut self) -> Option<&mut Variable> {
+    pub fn eval_to_var(&mut self) -> Option<&mut Var> {
         match self {
-            Expression::Variable(var) => Some(var),
-            Expression::Operation(op) => match op {
-                Operation::BinaryOperation(bin_op) => match bin_op.operator {
-                    BinaryOperator::Dot => {
+            Expression::Var(var) => Some(var),
+            Expression::Op(op) => match op {
+                Op::BinOp(bin_op) => match bin_op.operator {
+                    BinOperator::Dot => {
                         if bin_op.left.eval_to_var().is_some() {
                             if bin_op.right.eval_to_var().is_some() {
                                 bin_op.right.eval_to_var()
@@ -139,12 +139,12 @@ impl Expression {
                     }
                     _ => None,
                 },
-                Operation::UnaryOperation(un_op) => match un_op.operator {
+                Op::UnOp(un_op) => match un_op.operator {
                     // TODO: This returns the variable that this un op is applied
                     // on and not the variable resulting from the addr/deref op.
-                    UnaryOperator::Deref
-                    | UnaryOperator::Address
-                    | UnaryOperator::ArrayAccess(_) => un_op.value.eval_to_var(),
+                    UnOperator::Deref
+                    | UnOperator::Address
+                    | UnOperator::ArrayAccess(_) => un_op.value.eval_to_var(),
                     _ => None,
                 },
             },
@@ -154,12 +154,12 @@ impl Expression {
 
     /// Returns Some if this expr is a function call or if this is a binary Dot
     /// operation where the rhs evals to a function call.
-    pub fn eval_to_func_call(&mut self) -> Option<&mut FunctionCall> {
+    pub fn eval_to_func_call(&mut self) -> Option<&mut FuncCall> {
         match self {
-            Expression::FunctionCall(func_call) => Some(func_call),
-            Expression::Operation(op) => match op {
-                Operation::BinaryOperation(bin_op) => match bin_op.operator {
-                    BinaryOperator::Dot => {
+            Expression::FuncCall(func_call) => Some(func_call),
+            Expression::Op(op) => match op {
+                Op::BinOp(bin_op) => match bin_op.operator {
+                    BinOperator::Dot => {
                         if bin_op.right.eval_to_func_call().is_some() {
                             bin_op.right.eval_to_func_call()
                         } else {
@@ -188,7 +188,7 @@ pub enum AccessType {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Variable {
+pub struct Var {
     pub name: String,
     pub ret_type: Option<TypeStruct>,
     pub modifiers: Option<Vec<Modifier>>,
@@ -205,14 +205,14 @@ pub struct Variable {
     pub access_instrs: Option<(RootVariable, Vec<AccessInstruction>)>,
 }
 
-impl Variable {
+impl Var {
     pub fn new(
         name: String,
         ret_type: Option<TypeStruct>,
         modifiers: Option<Vec<Modifier>>,
         is_const: bool,
     ) -> Self {
-        Variable {
+        Var {
             name,
             ret_type,
             modifiers,
@@ -223,7 +223,7 @@ impl Variable {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FunctionCall {
+pub struct FuncCall {
     pub name: String,
     pub arguments: Vec<Argument>,
 
@@ -235,7 +235,7 @@ pub struct FunctionCall {
     pub struct_name: Option<String>,
 }
 
-impl FunctionCall {
+impl FuncCall {
     pub fn new(name: String, arguments: Vec<Argument>) -> Self {
         Self {
             name,

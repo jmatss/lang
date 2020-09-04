@@ -2,8 +2,8 @@ use crate::generator::CodeGen;
 use common::{
     error::CustomResult,
     token::{
-        expr::{Argument, Expression, FunctionCall, StructInit},
-        lit::Literal,
+        expr::{Argument, Expression, FuncCall, StructInit},
+        lit::Lit,
     },
     variable_type::{Type, TypeStruct},
 };
@@ -19,12 +19,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         expr: &mut Expression,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         match expr {
-            Expression::Literal(lit, ty_opt) => self.compile_lit(lit, ty_opt),
-            Expression::Variable(var) => {
+            Expression::Lit(lit, ty_opt) => self.compile_lit(lit, ty_opt),
+            Expression::Var(var) => {
                 // TODO: Will this always be regular?
                 Ok(self.compile_var_load(var)?.into())
             }
-            Expression::FunctionCall(func_call) => {
+            Expression::FuncCall(func_call) => {
                 // There will be no difference compiling a function call and a
                 // method call. The method call will during the analyzing have
                 // been given a new name containing the "struct_name/..." and
@@ -32,7 +32,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 // inserted as the first argument.
                 self.compile_func_call(func_call)
             }
-            Expression::Operation(op) => self.compile_op(op),
+            Expression::Op(op) => self.compile_op(op),
             Expression::StructInit(struct_init) => self.compile_struct_init(struct_init),
             Expression::ArrayInit(args, type_struct_opt) => {
                 self.compile_array_init(args, type_struct_opt)
@@ -56,11 +56,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_lit(
         &mut self,
-        lit: &Literal,
+        lit: &Lit,
         ty_opt: &Option<TypeStruct>,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         match lit {
-            Literal::StringLiteral(str_lit) => {
+            Lit::String(str_lit) => {
                 // Returns a pointer to the newly created string literal.
                 // The string literal will be an array of u8(/i8(?)) with a
                 // null terminator.
@@ -78,7 +78,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Ok(lit_ptr.const_cast(i8_ptr_type).into())
             }
 
-            Literal::CharLiteral(char_lit) => {
+            Lit::Char(char_lit) => {
                 if char_lit.chars().count() == 1 {
                     if let Some(ch) = char_lit.chars().next() {
                         Ok(AnyValueEnum::IntValue(
@@ -92,18 +92,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
 
-            Literal::Bool(true) => Ok(AnyValueEnum::IntValue(
+            Lit::Bool(true) => Ok(AnyValueEnum::IntValue(
                 self.context.bool_type().const_all_ones(),
             )),
-            Literal::Bool(false) => Ok(AnyValueEnum::IntValue(
+            Lit::Bool(false) => Ok(AnyValueEnum::IntValue(
                 self.context.bool_type().const_zero(),
             )),
 
-            Literal::Integer(int_lit, radix) => Ok(AnyValueEnum::IntValue(
+            Lit::Integer(int_lit, radix) => Ok(AnyValueEnum::IntValue(
                 self.compile_lit_int(int_lit, ty_opt, *radix)?,
             )),
 
-            Literal::Float(float_lit) => Ok(AnyValueEnum::FloatValue(
+            Lit::Float(float_lit) => Ok(AnyValueEnum::FloatValue(
                 self.compile_lit_float(float_lit, ty_opt)?,
             )),
         }
@@ -215,7 +215,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// function.
     fn compile_func_call(
         &mut self,
-        func_call: &mut FunctionCall,
+        func_call: &mut FuncCall,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         if let Some(func_ptr) = self.module.get_function(&func_call.name) {
             // Checks to see if the arguments are fewer that parameters. The

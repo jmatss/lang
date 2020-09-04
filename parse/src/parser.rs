@@ -9,44 +9,44 @@ use common::{
     iter::TokenIter,
     token::{
         block::BlockHeader,
-        expr::{Argument, Expression, Variable},
+        expr::{Argument, Expression, Var},
         stmt::{Path, Statement},
     },
     variable_type::TypeStruct,
     BlockId,
 };
-use lex::token::{Keyword, LexToken, LexTokenKind, Symbol};
+use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 
 /// The common stop conditions used when parsing expressions.
-pub const DEFAULT_STOP_CONDS: [Symbol; 4] = [
-    Symbol::LineBreak,
-    Symbol::SemiColon,
-    Symbol::Comma,
-    Symbol::CurlyBracketBegin,
+pub const DEFAULT_STOP_CONDS: [Sym; 4] = [
+    Sym::LineBreak,
+    Sym::SemiColon,
+    Sym::Comma,
+    Sym::CurlyBracketBegin,
 ];
 
 /// The stop conditions used when one wants to parse either a "regular"
 /// expressions or a expression that is the lhs of a assignment.
 /// Other that the `DEFAULT_STOP_CONDS` this array will contains all assignment
 /// symbols plus the Colon symbol to stop on types.
-pub const DEFAULT_ASSIGN_STOP_CONDS: [Symbol; 17] = [
-    Symbol::LineBreak,
-    Symbol::SemiColon,
-    Symbol::Comma,
-    Symbol::CurlyBracketBegin,
-    Symbol::Colon,
-    Symbol::Equals,
-    Symbol::AssignAddition,
-    Symbol::AssignSubtraction,
-    Symbol::AssignMultiplication,
-    Symbol::AssignDivision,
-    Symbol::AssignModulus,
-    Symbol::AssignPower,
-    Symbol::AssignBitAnd,
-    Symbol::AssignBitOr,
-    Symbol::AssignBitXor,
-    Symbol::AssignShiftLeft,
-    Symbol::AssignShiftRight,
+pub const DEFAULT_ASSIGN_STOP_CONDS: [Sym; 17] = [
+    Sym::LineBreak,
+    Sym::SemiColon,
+    Sym::Comma,
+    Sym::CurlyBracketBegin,
+    Sym::Colon,
+    Sym::Equals,
+    Sym::AssignAddition,
+    Sym::AssignSubtraction,
+    Sym::AssignMultiplication,
+    Sym::AssignDivision,
+    Sym::AssignModulus,
+    Sym::AssignPower,
+    Sym::AssignBitAnd,
+    Sym::AssignBitOr,
+    Sym::AssignBitXor,
+    Sym::AssignShiftLeft,
+    Sym::AssignShiftRight,
 ];
 
 // TODO: Clean up logic for storing line_nr and column_nr for parser.
@@ -167,28 +167,28 @@ impl ParseTokenIter {
             // recursively to get an "actual" token.
             if lex_token.is_break_symbol() {
                 return self.next_token();
-            } else if let LexTokenKind::Symbol(Symbol::WhiteSpace(_)) = lex_token.kind {
+            } else if let LexTokenKind::Sym(Sym::WhiteSpace(_)) = lex_token.kind {
                 return self.next_token();
             }
 
             let kind = match lex_token.kind {
-                LexTokenKind::Keyword(keyword) => {
+                LexTokenKind::Kw(keyword) => {
                     return self.parse_keyword(keyword, lex_token.line_nr, lex_token.column_nr);
                 }
 
                 // Skip line breaks, white spaces and semi colons. Just return
                 // the symbol and let the caller decide what to do with it.
                 // Call this function recursively to get an "actual" token.
-                LexTokenKind::Symbol(Symbol::LineBreak)
-                | LexTokenKind::Symbol(Symbol::WhiteSpace(_))
-                | LexTokenKind::Symbol(Symbol::SemiColon) => {
+                LexTokenKind::Sym(Sym::LineBreak)
+                | LexTokenKind::Sym(Sym::WhiteSpace(_))
+                | LexTokenKind::Sym(Sym::SemiColon) => {
                     return self.next_token();
                 }
 
                 // If a "line" starts with a identifier this can either be a
                 // assignment to a variable (assignment aren't treated as
                 // expression atm) or it will be an expression.
-                LexTokenKind::Identifier(_) => {
+                LexTokenKind::Ident(_) => {
                     // Put back the ident, it is a part of a expression.
                     self.rewind()?;
 
@@ -216,7 +216,7 @@ impl ParseTokenIter {
                 }
 
                 // A anonymous block.
-                LexTokenKind::Symbol(Symbol::CurlyBracketBegin) => {
+                LexTokenKind::Sym(Sym::CurlyBracketBegin) => {
                     // Put back the CurlyBracketBegin, it is expected to be the
                     // first symbol found in the `self.next_block` function.
                     self.rewind()?;
@@ -225,10 +225,10 @@ impl ParseTokenIter {
                 }
 
                 // Error if the iterator finds a lonely symbol of these types:
-                LexTokenKind::Symbol(Symbol::ParenthesisEnd)
-                | LexTokenKind::Symbol(Symbol::CurlyBracketEnd)
-                | LexTokenKind::Symbol(Symbol::PointyBracketEnd)
-                | LexTokenKind::Symbol(Symbol::SquareBracketEnd) => {
+                LexTokenKind::Sym(Sym::ParenthesisEnd)
+                | LexTokenKind::Sym(Sym::CurlyBracketEnd)
+                | LexTokenKind::Sym(Sym::PointyBracketEnd)
+                | LexTokenKind::Sym(Sym::SquareBracketEnd) => {
                     let msg = format!(
                         "Found end symbol with no corresponding start: {:?}",
                         lex_token
@@ -239,7 +239,7 @@ impl ParseTokenIter {
                 // If a literal or symbol is found, one can assume that they
                 // belong to a expression. There is a possibility that they are
                 // part of a statement, but then they should never end up here.
-                LexTokenKind::Literal(_) | LexTokenKind::Symbol(_) => {
+                LexTokenKind::Lit(_) | LexTokenKind::Sym(_) => {
                     // Put back the token that was just popped and then parse
                     // everything together as an expression.
                     self.rewind()?;
@@ -247,7 +247,7 @@ impl ParseTokenIter {
                     ParseTokenKind::Expression(expr)
                 }
 
-                LexTokenKind::EndOfFile => ParseTokenKind::EndOfFile,
+                LexTokenKind::EOF => ParseTokenKind::EndOfFile,
             };
 
             Ok(ParseToken::new(kind, self.cur_line_nr, self.cur_column_nr))
@@ -267,7 +267,7 @@ impl ParseTokenIter {
 
         // Ensure that the block starts with a "CurlyBracketBegin".
         if let Some(lex_token) = self.next_skip_space_line() {
-            if let LexTokenKind::Symbol(Symbol::CurlyBracketBegin) = lex_token.kind {
+            if let LexTokenKind::Sym(Sym::CurlyBracketBegin) = lex_token.kind {
                 line_nr = lex_token.line_nr;
                 column_nr = lex_token.column_nr;
             } else {
@@ -284,7 +284,7 @@ impl ParseTokenIter {
             // If the next lex token is a "CurlyBracketEnd", the end of the
             // block have been reached. Break and return.
             if let Some(lex_token) = self.peek_skip_space_line() {
-                if let LexTokenKind::Symbol(Symbol::CurlyBracketEnd) = lex_token.kind {
+                if let LexTokenKind::Sym(Sym::CurlyBracketEnd) = lex_token.kind {
                     self.next_skip_space_line(); // Consume "CurlyBracketEnd".
                     break;
                 }
@@ -303,14 +303,14 @@ impl ParseTokenIter {
 
     pub fn parse_keyword(
         &mut self,
-        keyword: Keyword,
+        keyword: Kw,
         line_nr: u64,
         column_nr: u64,
     ) -> CustomResult<ParseToken> {
         KeyworkParser::parse(self, keyword, line_nr, column_nr)
     }
 
-    pub fn parse_expr(&mut self, stop_conds: &[Symbol]) -> CustomResult<Expression> {
+    pub fn parse_expr(&mut self, stop_conds: &[Sym]) -> CustomResult<Expression> {
         ExprParser::parse(self, stop_conds)
     }
 
@@ -320,11 +320,11 @@ impl ParseTokenIter {
 
     /// Parses a variable and any type that it might have specified after which
     /// would indicate a declaration.
-    pub fn parse_var_type(&mut self, ident: &str) -> CustomResult<Variable> {
+    pub fn parse_var_type(&mut self, ident: &str) -> CustomResult<Var> {
         // If the next token is a colon, a type is specified after this variable.
         // Parse it and set the `var_type` inside the variable.
         let var_type = if let Some(next_token) = self.peek_skip_space() {
-            if let LexTokenKind::Symbol(Symbol::Colon) = next_token.kind {
+            if let LexTokenKind::Sym(Sym::Colon) = next_token.kind {
                 self.next_skip_space(); // Skip the colon.
                 Some(self.parse_type()?)
             } else {
@@ -334,7 +334,7 @@ impl ParseTokenIter {
             None
         };
 
-        Ok(Variable::new(ident.into(), var_type, None, false))
+        Ok(Var::new(ident.into(), var_type, None, false))
     }
 
     /// Parses a list of arguments. This can be used on generic list containing
@@ -342,15 +342,15 @@ impl ParseTokenIter {
     ///   "<start_symbol> [ [<ident> =] <expr> [,]] ... <end_symbol>"
     pub fn parse_arg_list(
         &mut self,
-        start_symbol: Symbol,
-        end_symbol: Symbol,
+        start_symbol: Sym,
+        end_symbol: Sym,
     ) -> CustomResult<Vec<Argument>> {
         let mut arguments = Vec::new();
 
         // Skip the first symbol and ensure that it is the `start_symbol`.
         if let Some(start_token) = self.next_skip_space_line() {
             match start_token.kind {
-                LexTokenKind::Symbol(s) if s == start_symbol => (),
+                LexTokenKind::Sym(s) if s == start_symbol => (),
                 _ => {
                     return Err(self.err(format!(
                         "Bad start symbol when parsing arg list. Expected: {:?}, got: {:?}",
@@ -366,7 +366,7 @@ impl ParseTokenIter {
         // empty vector.
         if let Some(next) = self.peek_skip_space_line() {
             match next.kind {
-                LexTokenKind::Symbol(s) if s == end_symbol => {
+                LexTokenKind::Sym(s) if s == end_symbol => {
                     // Consume the `end_symbol` of the list and return.
                     self.next_skip_space_line();
                     return Ok(arguments);
@@ -390,8 +390,8 @@ impl ParseTokenIter {
             let first_opt = self.peek_skip_space_line();
             let second_opt = self.peek_skip_space_line();
             if let (Some(first), Some(second)) = (first_opt, second_opt) {
-                if let LexTokenKind::Identifier(ident) = first.kind {
-                    if let LexTokenKind::Symbol(Symbol::Equals) = second.kind {
+                if let LexTokenKind::Ident(ident) = first.kind {
+                    if let LexTokenKind::Sym(Sym::Equals) = second.kind {
                         // 1. Named argument.
                         // skip the ident and equals.
                         self.next_skip_space_line();
@@ -407,10 +407,10 @@ impl ParseTokenIter {
                 // itself has logic internally that stop the parsing if a
                 // parenthesis is found that doesn't belong to the expression,
                 // so this should not be a problem.
-                let arg = if end_symbol == Symbol::ParenthesisEnd {
-                    Argument::new(name, self.parse_expr(&[Symbol::Comma])?)
+                let arg = if end_symbol == Sym::ParenthesisEnd {
+                    Argument::new(name, self.parse_expr(&[Sym::Comma])?)
                 } else {
-                    Argument::new(name, self.parse_expr(&[Symbol::Comma, end_symbol.clone()])?)
+                    Argument::new(name, self.parse_expr(&[Sym::Comma, end_symbol.clone()])?)
                 };
 
                 arguments.push(arg);
@@ -425,11 +425,11 @@ impl ParseTokenIter {
             // next token is a `end_symbol`.
             if let Some(lex_token) = self.next_skip_space_line() {
                 match lex_token.kind {
-                    LexTokenKind::Symbol(Symbol::Comma) => {
+                    LexTokenKind::Sym(Sym::Comma) => {
                         // Makes a extra check to allow for trailing commas.
                         if let Some(next) = self.peek_skip_space_line() {
                             match next.kind {
-                                LexTokenKind::Symbol(s) if s == end_symbol => {
+                                LexTokenKind::Sym(s) if s == end_symbol => {
                                     self.next_skip_space_line();
                                     return Ok(arguments);
                                 }
@@ -438,7 +438,7 @@ impl ParseTokenIter {
                         }
                         continue;
                     }
-                    LexTokenKind::Symbol(s) if s == end_symbol => {
+                    LexTokenKind::Sym(s) if s == end_symbol => {
                         return Ok(arguments);
                     }
                     _ => {
@@ -463,16 +463,16 @@ impl ParseTokenIter {
     /// "variadic symbol".
     pub fn parse_par_list(
         &mut self,
-        start_symbol: Symbol,
-        end_symbol: Symbol,
-    ) -> CustomResult<(Vec<Variable>, bool)> {
+        start_symbol: Sym,
+        end_symbol: Sym,
+    ) -> CustomResult<(Vec<Var>, bool)> {
         let mut parameters = Vec::new();
         let mut is_var_arg = false;
 
         // Skip the first symbol and ensure that it is the `start_symbol`.
         if let Some(start_token) = self.next_skip_space_line() {
             match start_token.kind {
-                LexTokenKind::Symbol(s) if s == start_symbol => (),
+                LexTokenKind::Sym(s) if s == start_symbol => (),
                 _ => {
                     return Err(self.err(format!(
                         "Bad start symbol when parsing param list. Expected: {:?}, got: {:?}",
@@ -488,7 +488,7 @@ impl ParseTokenIter {
         // empty vector.
         if let Some(next) = self.peek_skip_space_line() {
             match next.kind {
-                LexTokenKind::Symbol(s) if s == end_symbol => {
+                LexTokenKind::Sym(s) if s == end_symbol => {
                     // Consume the `end_symbol` of the list and return.
                     self.next_skip_space_line();
                     return Ok((parameters, is_var_arg));
@@ -502,15 +502,15 @@ impl ParseTokenIter {
                 // Parses either a identifier followed by a type or a "TripleDot"
                 // which is the indicator for a variadic function.
                 match lex_token.kind {
-                    LexTokenKind::Identifier(ident) => {
+                    LexTokenKind::Ident(ident) => {
                         let var_type = self.parse_colon_type()?;
                         let const_ = false;
-                        let parameter = Variable::new(ident, Some(var_type), None, const_);
+                        let parameter = Var::new(ident, Some(var_type), None, const_);
 
                         parameters.push(parameter);
                     }
 
-                    LexTokenKind::Symbol(Symbol::TripleDot) => is_var_arg = true,
+                    LexTokenKind::Sym(Sym::TripleDot) => is_var_arg = true,
 
                     _ => {
                         return Err(self.err(format!(
@@ -530,11 +530,11 @@ impl ParseTokenIter {
             // next token is a `end_symbol`.
             if let Some(lex_token) = self.next_skip_space_line() {
                 match lex_token.kind {
-                    LexTokenKind::Symbol(Symbol::Comma) => {
+                    LexTokenKind::Sym(Sym::Comma) => {
                         // Makes a extra check to allow for trailing commas.
                         if let Some(next) = self.peek_skip_space_line() {
                             match next.kind {
-                                LexTokenKind::Symbol(s) if s == end_symbol => {
+                                LexTokenKind::Sym(s) if s == end_symbol => {
                                     self.next_skip_space_line();
                                     return Ok((parameters, is_var_arg));
                                 }
@@ -543,7 +543,7 @@ impl ParseTokenIter {
                         }
                         continue;
                     }
-                    LexTokenKind::Symbol(s) if s == end_symbol => {
+                    LexTokenKind::Sym(s) if s == end_symbol => {
                         return Ok((parameters, is_var_arg));
                     }
                     _ => {
@@ -562,7 +562,7 @@ impl ParseTokenIter {
     /// Parses a type including the starting colon.
     fn parse_colon_type(&mut self) -> CustomResult<TypeStruct> {
         if let Some(lex_token) = self.next_skip_space() {
-            if let LexTokenKind::Symbol(Symbol::Colon) = lex_token.kind {
+            if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
                 self.parse_type()
             } else {
                 Err(self.err(format!(
@@ -595,7 +595,7 @@ impl ParseTokenIter {
 
             if let Some(cur_token) = self.iter.peek() {
                 match cur_token.kind {
-                    LexTokenKind::Symbol(Symbol::WhiteSpace(_)) => continue,
+                    LexTokenKind::Sym(Sym::WhiteSpace(_)) => continue,
                     _ => return Ok(()),
                 }
             } else {
@@ -614,7 +614,7 @@ impl ParseTokenIter {
             self.cur_column_nr = lex_token.column_nr;
 
             match lex_token.kind {
-                LexTokenKind::Symbol(Symbol::WhiteSpace(_)) => {
+                LexTokenKind::Sym(Sym::WhiteSpace(_)) => {
                     continue;
                 }
                 _ => return Some(lex_token),
@@ -636,9 +636,9 @@ impl ParseTokenIter {
             self.cur_column_nr = lex_token.column_nr;
 
             match lex_token.kind {
-                LexTokenKind::Symbol(Symbol::WhiteSpace(_))
-                | LexTokenKind::Symbol(Symbol::LineBreak)
-                | LexTokenKind::Symbol(Symbol::SemiColon) => {
+                LexTokenKind::Sym(Sym::WhiteSpace(_))
+                | LexTokenKind::Sym(Sym::LineBreak)
+                | LexTokenKind::Sym(Sym::SemiColon) => {
                     continue;
                 }
                 _ => return Some(lex_token),
@@ -658,7 +658,7 @@ impl ParseTokenIter {
         // needs to check for a white space ones, since there is no possiblity
         // that two tokens in a row are white spaces.
         if let Some(tokens) = self.iter.peek_two() {
-            if let LexTokenKind::Symbol(Symbol::WhiteSpace(_)) = tokens.0.kind {
+            if let LexTokenKind::Sym(Sym::WhiteSpace(_)) = tokens.0.kind {
                 tokens.1
             } else {
                 Some(tokens.0)
@@ -676,9 +676,9 @@ impl ParseTokenIter {
         let mut i = 0;
         while let Some(current) = self.iter.peek_at_n(i) {
             match current.kind {
-                LexTokenKind::Symbol(Symbol::WhiteSpace(_))
-                | LexTokenKind::Symbol(Symbol::LineBreak)
-                | LexTokenKind::Symbol(Symbol::SemiColon) => (),
+                LexTokenKind::Sym(Sym::WhiteSpace(_))
+                | LexTokenKind::Sym(Sym::LineBreak)
+                | LexTokenKind::Sym(Sym::SemiColon) => (),
                 _ => return Some(current),
             }
             i += 1;

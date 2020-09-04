@@ -5,8 +5,8 @@ use crate::generator::CodeGen;
 use common::{
     error::CustomResult,
     token::{
-        expr::{Expression, Variable},
-        op::{BinaryOperation, BinaryOperator, Operation, UnaryOperation, UnaryOperator},
+        expr::{Expression, Var},
+        op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
 };
 use inkwell::{
@@ -16,14 +16,14 @@ use inkwell::{
 };
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    pub(super) fn compile_op(&mut self, op: &mut Operation) -> CustomResult<AnyValueEnum<'ctx>> {
+    pub(super) fn compile_op(&mut self, op: &mut Op) -> CustomResult<AnyValueEnum<'ctx>> {
         match op {
-            Operation::BinaryOperation(ref mut bin_op) => self.compile_bin_op(bin_op),
-            Operation::UnaryOperation(ref mut un_op) => self.compile_un_op(un_op),
+            Op::BinOp(ref mut bin_op) => self.compile_bin_op(bin_op),
+            Op::UnOp(ref mut un_op) => self.compile_un_op(un_op),
         }
     }
 
-    fn compile_bin_op(&mut self, bin_op: &mut BinaryOperation) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_bin_op(&mut self, bin_op: &mut BinOp) -> CustomResult<AnyValueEnum<'ctx>> {
         // TODO: Can one always assume that the `ret_type` will be set at this point?
         let ret_type = if let Some(ref ret_type) = bin_op.ret_type {
             self.compile_type(&ret_type)?
@@ -42,10 +42,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // to ensure that they are evaluated before the right hand side is
         // compiled. This logic should be merged better with the other operators.
         match bin_op.operator {
-            BinaryOperator::BoolAnd => {
+            BinOperator::BoolAnd => {
                 return self.compile_bin_op_bool_and(ret_type, left, &mut bin_op.right)
             }
-            BinaryOperator::BoolOr => {
+            BinOperator::BoolOr => {
                 return self.compile_bin_op_bool_or(ret_type, left, &mut bin_op.right)
             }
             _ => (),
@@ -63,11 +63,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // can interact correctly in expressions. For some operations this is
         // not required and they are therefore excluded from the base type check.
         match bin_op.operator {
-            BinaryOperator::In
-            | BinaryOperator::Is
-            | BinaryOperator::As
-            | BinaryOperator::Of
-            | BinaryOperator::Dot => {}
+            BinOperator::In
+            | BinOperator::Is
+            | BinOperator::As
+            | BinOperator::Of
+            | BinOperator::Dot => {}
 
             _ => {
                 if !self.is_same_base_type(left_type, right_type) {
@@ -83,22 +83,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         Ok(match bin_op.operator {
-            BinaryOperator::In => panic!("TODO: In"),
-            BinaryOperator::Is => panic!("TODO: Is"),
-            BinaryOperator::As => self.compile_bin_op_as(ret_type, bin_op.is_const, left, right)?,
-            BinaryOperator::Of => panic!("TODO: Of"),
+            BinOperator::In => panic!("TODO: In"),
+            BinOperator::Is => panic!("TODO: Is"),
+            BinOperator::As => self.compile_bin_op_as(ret_type, bin_op.is_const, left, right)?,
+            BinOperator::Of => panic!("TODO: Of"),
 
             // Create some sort of typedef that then can be used to iterate over.
-            BinaryOperator::Range => panic!("TODO: Range"),
-            BinaryOperator::RangeInclusive => panic!("TODO: RangeInclusive"),
-            BinaryOperator::Dot => self.compile_bin_op_dot(ret_type, left, right)?,
+            BinOperator::Range => panic!("TODO: Range"),
+            BinOperator::RangeInclusive => panic!("TODO: RangeInclusive"),
+            BinOperator::Dot => self.compile_bin_op_dot(ret_type, left, right)?,
 
-            BinaryOperator::Equals
-            | BinaryOperator::NotEquals
-            | BinaryOperator::LessThan
-            | BinaryOperator::GreaterThan
-            | BinaryOperator::LessThanOrEquals
-            | BinaryOperator::GreaterThanOrEquals => self.compile_bin_op_compare(
+            BinOperator::Equals
+            | BinOperator::NotEquals
+            | BinOperator::LessThan
+            | BinOperator::GreaterThan
+            | BinOperator::LessThanOrEquals
+            | BinOperator::GreaterThanOrEquals => self.compile_bin_op_compare(
                 ret_type,
                 bin_op.is_const,
                 &bin_op.operator,
@@ -106,48 +106,48 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 right,
             )?,
 
-            BinaryOperator::Addition => {
+            BinOperator::Addition => {
                 self.compile_bin_op_addition(ret_type, bin_op.is_const, left, right)?
             }
-            BinaryOperator::Subtraction => {
+            BinOperator::Subtraction => {
                 self.compile_bin_op_subtraction(ret_type, bin_op.is_const, left, right)?
             }
-            BinaryOperator::Multiplication => {
+            BinOperator::Multiplication => {
                 self.compile_bin_op_multiplication(ret_type, bin_op.is_const, left, right)?
             }
-            BinaryOperator::Division => {
+            BinOperator::Division => {
                 self.compile_bin_op_division(ret_type, bin_op.is_const, left, right)?
             }
-            BinaryOperator::Modulus => {
+            BinOperator::Modulus => {
                 self.compile_bin_op_modulus(ret_type, bin_op.is_const, left, right)?
             }
-            BinaryOperator::Power => panic!("TODO: Power"),
-            BinaryOperator::BitAnd => {
+            BinOperator::Power => panic!("TODO: Power"),
+            BinOperator::BitAnd => {
                 self.compile_bin_op_bit_and(ret_type, bin_op.is_const, left, right)?
             }
-            BinaryOperator::BitOr => {
+            BinOperator::BitOr => {
                 self.compile_bin_op_bit_or(ret_type, bin_op.is_const, left, right)?
             }
-            BinaryOperator::BitXor => {
+            BinOperator::BitXor => {
                 self.compile_bin_op_bit_xor(ret_type, bin_op.is_const, left, right)?
             }
-            BinaryOperator::ShiftLeft => {
+            BinOperator::ShiftLeft => {
                 self.compile_bin_op_shift_left(ret_type, bin_op.is_const, left, right)?
             }
-            BinaryOperator::ShiftRight => {
+            BinOperator::ShiftRight => {
                 self.compile_bin_op_shift_right(ret_type, bin_op.is_const, left, right)?
             }
-            BinaryOperator::BoolAnd => {
+            BinOperator::BoolAnd => {
                 panic!("Unexpected BoolAnd to late in func.");
             }
-            BinaryOperator::BoolOr => {
+            BinOperator::BoolOr => {
                 panic!("Unexpected BoolOr to late in func.");
             }
-            BinaryOperator::ExpressionAnd => panic!("TODO: ExpressionAnd"),
+            BinOperator::ExpressionAnd => panic!("TODO: ExpressionAnd"),
         })
     }
 
-    fn compile_un_op(&mut self, un_op: &mut UnaryOperation) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_un_op(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
         // TODO: Can one always assume that the `ret_type` will be set at this point?
         let ret_type = if let Some(ref ret_type) = un_op.ret_type {
             self.compile_type(&ret_type)?
@@ -164,7 +164,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         un_op.is_const = self.is_const(&[&basic_value]);
 
         Ok(match un_op.operator {
-            UnaryOperator::Increment => {
+            UnOperator::Increment => {
                 if let Some(var) = un_op.value.eval_to_var() {
                     self.compile_un_op_increment(ret_type, un_op.is_const, basic_value, var)?
                 } else {
@@ -174,7 +174,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )));
                 }
             }
-            UnaryOperator::Decrement => {
+            UnOperator::Decrement => {
                 if let Some(var) = un_op.value.eval_to_var() {
                     self.compile_un_op_decrement(ret_type, un_op.is_const, basic_value, var)?
                 } else {
@@ -184,8 +184,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )));
                 }
             }
-            UnaryOperator::Deref => self.compile_un_op_deref(&mut un_op.value)?,
-            UnaryOperator::Address => {
+            UnOperator::Deref => self.compile_un_op_deref(&mut un_op.value)?,
+            UnOperator::Address => {
                 if let Some(var) = un_op.value.eval_to_var() {
                     self.compile_un_op_address(var)?
                 } else {
@@ -195,7 +195,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )));
                 }
             }
-            UnaryOperator::ArrayAccess(_) => {
+            UnOperator::ArrayAccess(_) => {
                 if let Some(var) = un_op.value.eval_to_var() {
                     self.compile_un_op_array_access(var)?
                 } else {
@@ -204,15 +204,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     );
                 }
             }
-            UnaryOperator::Positive => {
+            UnOperator::Positive => {
                 // Do nothing.
                 basic_value.into()
             }
-            UnaryOperator::Negative => {
+            UnOperator::Negative => {
                 self.compile_un_op_negative(ret_type, un_op.is_const, basic_value)?
             }
-            UnaryOperator::BitComplement => panic!("TODO: Bit complement"),
-            UnaryOperator::BoolNot => {
+            UnOperator::BitComplement => panic!("TODO: Bit complement"),
+            UnOperator::BoolNot => {
                 self.compile_un_op_bool_not(ret_type, un_op.is_const, basic_value)?
             }
         })
@@ -344,7 +344,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
         is_const: bool,
-        op: &BinaryOperator,
+        op: &BinOperator,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
@@ -352,12 +352,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(match ret_type {
             AnyTypeEnum::FloatType(_) => {
                 let predicate = match op {
-                    BinaryOperator::Equals => FloatPredicate::OEQ,
-                    BinaryOperator::NotEquals => FloatPredicate::ONE,
-                    BinaryOperator::LessThan => FloatPredicate::OLT,
-                    BinaryOperator::GreaterThan => FloatPredicate::OGT,
-                    BinaryOperator::LessThanOrEquals => FloatPredicate::OLE,
-                    BinaryOperator::GreaterThanOrEquals => FloatPredicate::OGE,
+                    BinOperator::Equals => FloatPredicate::OEQ,
+                    BinOperator::NotEquals => FloatPredicate::ONE,
+                    BinOperator::LessThan => FloatPredicate::OLT,
+                    BinOperator::GreaterThan => FloatPredicate::OGT,
+                    BinOperator::LessThanOrEquals => FloatPredicate::OLE,
+                    BinOperator::GreaterThanOrEquals => FloatPredicate::OGE,
                     _ => {
                         return Err(
                             self.err(format!("Invalid operator in bin_op compare: {:?}", op))
@@ -384,12 +384,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // TODO: Signness
             AnyTypeEnum::IntType(_) => {
                 let predicate = match op {
-                    BinaryOperator::Equals => IntPredicate::EQ,
-                    BinaryOperator::NotEquals => IntPredicate::NE,
-                    BinaryOperator::LessThan => IntPredicate::SLT,
-                    BinaryOperator::GreaterThan => IntPredicate::SGT,
-                    BinaryOperator::LessThanOrEquals => IntPredicate::SLE,
-                    BinaryOperator::GreaterThanOrEquals => IntPredicate::SGE,
+                    BinOperator::Equals => IntPredicate::EQ,
+                    BinOperator::NotEquals => IntPredicate::NE,
+                    BinOperator::LessThan => IntPredicate::SLT,
+                    BinOperator::GreaterThan => IntPredicate::SGT,
+                    BinOperator::LessThanOrEquals => IntPredicate::SLE,
+                    BinOperator::GreaterThanOrEquals => IntPredicate::SGE,
                     _ => {
                         return Err(
                             self.err(format!("Invalid operator in bin_op compare: {:?}", op))
@@ -992,7 +992,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ret_type: AnyTypeEnum<'ctx>,
         is_const: bool,
         value: BasicValueEnum<'ctx>,
-        var: &mut Variable,
+        var: &mut Var,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
@@ -1029,7 +1029,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ret_type: AnyTypeEnum<'ctx>,
         is_const: bool,
         value: BasicValueEnum<'ctx>,
-        var: &mut Variable,
+        var: &mut Var,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
@@ -1069,13 +1069,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_un_op_address(&mut self, var: &mut Variable) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_un_op_address(&mut self, var: &mut Var) -> CustomResult<AnyValueEnum<'ctx>> {
         Ok(self.compile_var_load(var)?.into())
     }
 
     fn compile_un_op_array_access(
         &mut self,
-        var: &mut Variable,
+        var: &mut Var,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         Ok(self.compile_var_load(var)?.into())
         /*

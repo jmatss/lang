@@ -9,8 +9,8 @@ use common::{
     error::LangError,
     token::{
         block::BlockHeader,
-        expr::{AccessInstruction, Expression, FunctionCall, RootVariable, StructInit},
-        op::{BinaryOperation, BinaryOperator, Operation, UnaryOperation, UnaryOperator},
+        expr::{AccessInstruction, Expression, FuncCall, RootVariable, StructInit},
+        op::{BinOp, BinOperator, Op, UnOp, UnOperator},
         stmt::Statement,
     },
 };
@@ -119,20 +119,20 @@ impl<'a> IndexingAnalyzer<'a> {
 
     fn analyze_expr(&mut self, expr: &mut Expression) {
         match expr {
-            Expression::FunctionCall(func_call) => self.analyze_func_call(func_call),
+            Expression::FuncCall(func_call) => self.analyze_func_call(func_call),
             Expression::StructInit(struct_init) => self.analyze_struct_init(struct_init),
             Expression::ArrayInit(args, _) => {
                 for arg in args {
                     self.analyze_expr(&mut arg.value);
                 }
             }
-            Expression::Operation(op) => self.analyze_op(op),
+            Expression::Op(op) => self.analyze_op(op),
 
-            Expression::Literal(..) | Expression::Type(_) | Expression::Variable(_) => (),
+            Expression::Lit(..) | Expression::Type(_) | Expression::Var(_) => (),
         }
     }
 
-    fn analyze_func_call(&mut self, func_call: &mut FunctionCall) {
+    fn analyze_func_call(&mut self, func_call: &mut FuncCall) {
         for arg in func_call.arguments.iter_mut() {
             self.analyze_expr(&mut arg.value);
         }
@@ -144,17 +144,17 @@ impl<'a> IndexingAnalyzer<'a> {
         }
     }
 
-    fn analyze_op(&mut self, op: &mut Operation) {
+    fn analyze_op(&mut self, op: &mut Op) {
         match op {
-            Operation::BinaryOperation(bin_op) => self.analyze_bin_op(bin_op),
-            Operation::UnaryOperation(un_op) => self.analyze_un_op(un_op),
+            Op::BinOp(bin_op) => self.analyze_bin_op(bin_op),
+            Op::UnOp(un_op) => self.analyze_un_op(un_op),
         }
     }
 
     /// Set any variables that are used as lhs in a "Dot" bin op as a struct
     /// and all variables used in rhs of a "Dot" as a struct member.
     /// The vars will be found recursively.
-    fn analyze_bin_op(&mut self, bin_op: &mut BinaryOperation) {
+    fn analyze_bin_op(&mut self, bin_op: &mut BinOp) {
         let block_id = self.context.cur_block_id;
 
         // Analyze the left hand side before the Dot logic and then analyze
@@ -163,7 +163,7 @@ impl<'a> IndexingAnalyzer<'a> {
         // the "root variable" from the left before evaluating the right.
         self.analyze_expr(&mut bin_op.left);
 
-        if let BinaryOperator::Dot = bin_op.operator {
+        if let BinOperator::Dot = bin_op.operator {
             if let Some(lhs) = bin_op.left.eval_to_var() {
                 // If the right is a variable, this is a struct member access.
                 // Else if the right is a function call, this is a use of a method
@@ -206,16 +206,16 @@ impl<'a> IndexingAnalyzer<'a> {
 
     /// Analyzes a unary operation. If it is a deref/address/array access it also
     /// adds a "AccessInstruction" to the Variable contain in the `un_op.value`.
-    fn analyze_un_op(&mut self, un_op: &mut UnaryOperation) {
+    fn analyze_un_op(&mut self, un_op: &mut UnOp) {
         let block_id = self.context.cur_block_id;
 
         self.analyze_expr(&mut un_op.value);
 
         if let Some(var) = un_op.value.eval_to_var() {
             let access_instr_opt = match &mut un_op.operator {
-                UnaryOperator::Deref => Some(AccessInstruction::Deref),
-                UnaryOperator::Address => Some(AccessInstruction::Address),
-                UnaryOperator::ArrayAccess(ref mut dim) => {
+                UnOperator::Deref => Some(AccessInstruction::Deref),
+                UnOperator::Address => Some(AccessInstruction::Address),
+                UnOperator::ArrayAccess(ref mut dim) => {
                     self.analyze_expr(dim);
                     Some(AccessInstruction::ArrayAccess(*dim.clone()))
                 }

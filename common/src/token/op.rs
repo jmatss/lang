@@ -2,23 +2,23 @@ use super::expr::Expression;
 use crate::variable_type::TypeStruct;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Operation {
-    BinaryOperation(BinaryOperation),
-    UnaryOperation(UnaryOperation),
+pub enum Op {
+    BinOp(BinOp),
+    UnOp(UnOp),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct BinaryOperation {
-    pub operator: BinaryOperator,
+pub struct BinOp {
+    pub operator: BinOperator,
     pub ret_type: Option<TypeStruct>,
     pub is_const: bool,
     pub left: Box<Expression>,
     pub right: Box<Expression>,
 }
 
-impl BinaryOperation {
-    pub fn new(operator: BinaryOperator, left: Box<Expression>, right: Box<Expression>) -> Self {
-        BinaryOperation {
+impl BinOp {
+    pub fn new(operator: BinOperator, left: Box<Expression>, right: Box<Expression>) -> Self {
+        BinOp {
             operator,
             ret_type: None,
             is_const: false,
@@ -29,16 +29,16 @@ impl BinaryOperation {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct UnaryOperation {
-    pub operator: UnaryOperator,
+pub struct UnOp {
+    pub operator: UnOperator,
     pub ret_type: Option<TypeStruct>,
     pub is_const: bool,
     pub value: Box<Expression>,
 }
 
-impl UnaryOperation {
-    pub fn new(operator: UnaryOperator, value: Box<Expression>) -> Self {
-        UnaryOperation {
+impl UnOp {
+    pub fn new(operator: UnOperator, value: Box<Expression>) -> Self {
+        UnOp {
             operator,
             ret_type: None,
             is_const: false,
@@ -48,7 +48,7 @@ impl UnaryOperation {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum BinaryOperator {
+pub enum BinOperator {
     /* GENERAL */
     // Used in for loops etc.
     // TODO: Maybe make keyword instead and only allow use it in "for" loops.
@@ -99,7 +99,7 @@ pub enum BinaryOperator {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum UnaryOperator {
+pub enum UnOperator {
     /* NUMBERS */
     Increment,
     Decrement,

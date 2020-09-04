@@ -3,7 +3,7 @@ use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
     token::{
         block::{BlockHeader, Function, Struct},
-        expr::{Expression, Variable},
+        expr::{Expression, Var},
     },
     util, BlockId,
 };
@@ -130,7 +130,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    fn create_entry_block_alloca(&self, var: &Variable) -> CustomResult<PointerValue<'ctx>> {
+    fn create_entry_block_alloca(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
         if let Some(func) = self.cur_func {
             let entry = func
                 .get_first_basic_block()

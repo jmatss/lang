@@ -1,6 +1,6 @@
 use super::{
     block::Function,
-    expr::{Expression, Variable},
+    expr::{Expression, Var},
     op::AssignOperator,
 };
 use crate::{
@@ -43,7 +43,7 @@ pub enum Statement {
 
     // Used both for "var" and "const" variables. The expr options will be Some
     // if this var decl also has han initializer.
-    VariableDecl(Variable, Option<Expression>),
+    VariableDecl(Var, Option<Expression>),
 
     // TODO: Implement extern for variables as well.
     // Declaration of extern functions.

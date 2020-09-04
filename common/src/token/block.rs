@@ -1,4 +1,4 @@
-use super::expr::{Expression, Variable};
+use super::expr::{Expression, Var};
 use crate::variable_type::TypeStruct;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,7 +73,7 @@ pub enum BlockHeader {
     Match(Expression),
     MatchCase(Expression),
 
-    For(Variable, Expression),
+    For(Var, Expression),
     // TODO: Maybe merge while and loop (?)
     While(Option<Expression>),
 
@@ -86,7 +86,7 @@ pub struct Struct {
     pub name: String,
     pub generics: Option<Vec<TypeStruct>>,
     pub implements: Option<Vec<TypeStruct>>,
-    pub members: Option<Vec<Variable>>, // TODO: extends: Vec<Type>
+    pub members: Option<Vec<Var>>, // TODO: extends: Vec<Type>
 }
 
 impl Struct {
@@ -94,7 +94,7 @@ impl Struct {
         name: String,
         generics: Option<Vec<TypeStruct>>,
         implements: Option<Vec<TypeStruct>>,
-        members: Option<Vec<Variable>>,
+        members: Option<Vec<Var>>,
     ) -> Self {
         Self {
             name,
@@ -109,7 +109,7 @@ impl Struct {
 pub struct Function {
     pub name: String,
     pub generics: Option<Vec<TypeStruct>>,
-    pub parameters: Option<Vec<Variable>>,
+    pub parameters: Option<Vec<Var>>,
     pub ret_type: Option<TypeStruct>,
     pub is_var_arg: bool,
 
@@ -122,7 +122,7 @@ impl Function {
     pub fn new(
         name: String,
         generics: Option<Vec<TypeStruct>>,
-        parameters: Option<Vec<Variable>>,
+        parameters: Option<Vec<Var>>,
         ret_type: Option<TypeStruct>,
         is_var_arg: bool,
     ) -> Self {

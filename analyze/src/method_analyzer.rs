@@ -2,8 +2,8 @@ use crate::AnalyzeContext;
 use common::{
     error::LangError,
     token::{
-        expr::{Argument, Expression, FunctionCall},
-        op::{BinaryOperation, BinaryOperator, Operation},
+        expr::{Argument, Expression, FuncCall},
+        op::{BinOp, BinOperator, Op},
         stmt::Statement,
     },
     util,
@@ -88,7 +88,7 @@ impl<'a> MethodAnalyzer<'a> {
 
     fn analyze_expr(&mut self, expr: &mut Expression) {
         match expr {
-            Expression::FunctionCall(func_call) => {
+            Expression::FuncCall(func_call) => {
                 for arg in &mut func_call.arguments {
                     self.analyze_expr(&mut arg.value);
                 }
@@ -103,12 +103,12 @@ impl<'a> MethodAnalyzer<'a> {
                     self.analyze_expr(&mut arg.value);
                 }
             }
-            Expression::Operation(op) => match op {
-                Operation::BinaryOperation(bin_op) => self.analyze_bin_op(bin_op),
-                Operation::UnaryOperation(un_op) => self.analyze_expr(&mut un_op.value),
+            Expression::Op(op) => match op {
+                Op::BinOp(bin_op) => self.analyze_bin_op(bin_op),
+                Op::UnOp(un_op) => self.analyze_expr(&mut un_op.value),
             },
 
-            Expression::Literal(..) | Expression::Type(_) | Expression::Variable(_) => (),
+            Expression::Lit(..) | Expression::Type(_) | Expression::Var(_) => (),
         }
     }
 
@@ -116,13 +116,13 @@ impl<'a> MethodAnalyzer<'a> {
     /// insert the lhs expression ("this"/"self") as a first argument in the
     /// function call. It also saves the name/struct ... of the lhs that this
     /// method "belongs" to.
-    fn analyze_bin_op(&mut self, bin_op: &mut BinaryOperation) {
+    fn analyze_bin_op(&mut self, bin_op: &mut BinOp) {
         self.analyze_expr(&mut bin_op.left);
         self.analyze_expr(&mut bin_op.right);
 
         // TODO: FIXME: For now, it doesn't matter what the lhs is. It will always
         //              be used as the first argument to the function call.
-        if let BinaryOperator::Dot = bin_op.operator {
+        if let BinOperator::Dot = bin_op.operator {
             if let Some(rhs_method_call) = bin_op.right.eval_to_func_call() {
                 if let Some(lhs_type) = self.get_ret_type(&bin_op.left) {
                     let struct_name = match lhs_type.ty {
@@ -151,18 +151,18 @@ impl<'a> MethodAnalyzer<'a> {
 
     fn get_ret_type(&self, expr: &Expression) -> Option<TypeStruct> {
         match expr {
-            Expression::Literal(_, type_struct_opt) => type_struct_opt.clone(),
+            Expression::Lit(_, type_struct_opt) => type_struct_opt.clone(),
             Expression::Type(type_struct) => Some(type_struct.clone()),
-            Expression::Variable(var) => var.ret_type.clone(),
-            Expression::FunctionCall(func_call) => panic!("TODO: Get return type from func call."),
+            Expression::Var(var) => var.ret_type.clone(),
+            Expression::FuncCall(func_call) => panic!("TODO: Get return type from func call."),
             Expression::StructInit(struct_init) => {
                 let ty = Type::Custom(struct_init.name.clone());
                 Some(TypeStruct::new(ty, None, false))
             }
             Expression::ArrayInit(_, type_struct_opt) => type_struct_opt.clone(),
-            Expression::Operation(op) => match op {
-                Operation::BinaryOperation(bin_op) => bin_op.ret_type.clone(),
-                Operation::UnaryOperation(un_op) => un_op.ret_type.clone(),
+            Expression::Op(op) => match op {
+                Op::BinOp(bin_op) => bin_op.ret_type.clone(),
+                Op::UnOp(un_op) => un_op.ret_type.clone(),
             },
         }
     }

@@ -1,4 +1,4 @@
-use common::token::lit::Literal;
+use common::token::lit::Lit;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexToken {
@@ -19,15 +19,15 @@ impl LexToken {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LexTokenKind {
-    Identifier(String),
-    Literal(Literal),
-    Keyword(Keyword),
-    Symbol(Symbol),
-    EndOfFile,
+    Ident(String),
+    Lit(Lit),
+    Kw(Kw),
+    Sym(Sym),
+    EOF,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Keyword {
+pub enum Kw {
     If,
     Else,
     Match,
@@ -62,7 +62,7 @@ pub enum Keyword {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Symbol {
+pub enum Sym {
     ParenthesisBegin,
     ParenthesisEnd,
     SquareBracketBegin,
@@ -155,9 +155,7 @@ pub enum Symbol {
 impl LexToken {
     pub fn is_break_symbol(&self) -> bool {
         match self.kind {
-            LexTokenKind::Symbol(Symbol::LineBreak) | LexTokenKind::Symbol(Symbol::SemiColon) => {
-                true
-            }
+            LexTokenKind::Sym(Sym::LineBreak) | LexTokenKind::Sym(Sym::SemiColon) => true,
             _ => false,
         }
     }
@@ -166,8 +164,8 @@ impl LexToken {
     /// the literal as a token type, otherwise returns None.
     pub fn get_if_bool(ident: &str) -> Option<LexTokenKind> {
         Some(match ident {
-            "true" => LexTokenKind::Literal(Literal::Bool(true)),
-            "false" => LexTokenKind::Literal(Literal::Bool(false)),
+            "true" => LexTokenKind::Lit(Lit::Bool(true)),
+            "false" => LexTokenKind::Lit(Lit::Bool(false)),
             _ => return None,
         })
     }
@@ -176,14 +174,14 @@ impl LexToken {
     /// the symbol as a token type, otherwise returns None.
     pub fn get_if_symbol(ident: &str) -> Option<LexTokenKind> {
         Some(match ident {
-            "not" => LexTokenKind::Symbol(Symbol::BoolNot),
-            "and" => LexTokenKind::Symbol(Symbol::BoolAnd),
-            "or" => LexTokenKind::Symbol(Symbol::BoolOr),
+            "not" => LexTokenKind::Sym(Sym::BoolNot),
+            "and" => LexTokenKind::Sym(Sym::BoolAnd),
+            "or" => LexTokenKind::Sym(Sym::BoolOr),
 
-            "in" => LexTokenKind::Symbol(Symbol::In),
-            "is" => LexTokenKind::Symbol(Symbol::Is),
-            "as" => LexTokenKind::Symbol(Symbol::As),
-            "of" => LexTokenKind::Symbol(Symbol::Of),
+            "in" => LexTokenKind::Sym(Sym::In),
+            "is" => LexTokenKind::Sym(Sym::Is),
+            "as" => LexTokenKind::Sym(Sym::As),
+            "of" => LexTokenKind::Sym(Sym::Of),
 
             _ => return None,
         })
@@ -193,37 +191,37 @@ impl LexToken {
     /// the keyword as a token type, otherwise returns None.
     pub fn get_if_keyword(ident: &str) -> Option<LexTokenKind> {
         Some(match ident {
-            "if" => LexTokenKind::Keyword(Keyword::If),
-            "else" => LexTokenKind::Keyword(Keyword::Else),
-            "match" => LexTokenKind::Keyword(Keyword::Match),
+            "if" => LexTokenKind::Kw(Kw::If),
+            "else" => LexTokenKind::Kw(Kw::Else),
+            "match" => LexTokenKind::Kw(Kw::Match),
 
-            "for" => LexTokenKind::Keyword(Keyword::For),
-            "while" => LexTokenKind::Keyword(Keyword::While),
+            "for" => LexTokenKind::Kw(Kw::For),
+            "while" => LexTokenKind::Kw(Kw::While),
 
-            "return" => LexTokenKind::Keyword(Keyword::Return),
-            "yield" => LexTokenKind::Keyword(Keyword::Yield),
-            "break" => LexTokenKind::Keyword(Keyword::Break),
-            "continue" => LexTokenKind::Keyword(Keyword::Continue),
+            "return" => LexTokenKind::Kw(Kw::Return),
+            "yield" => LexTokenKind::Kw(Kw::Yield),
+            "break" => LexTokenKind::Kw(Kw::Break),
+            "continue" => LexTokenKind::Kw(Kw::Continue),
 
-            "use" => LexTokenKind::Keyword(Keyword::Use),
-            "package" => LexTokenKind::Keyword(Keyword::Package),
-            "external" => LexTokenKind::Keyword(Keyword::External),
+            "use" => LexTokenKind::Kw(Kw::Use),
+            "package" => LexTokenKind::Kw(Kw::Package),
+            "external" => LexTokenKind::Kw(Kw::External),
 
-            "var" => LexTokenKind::Keyword(Keyword::Var),
-            "const" => LexTokenKind::Keyword(Keyword::Const),
-            "static" => LexTokenKind::Keyword(Keyword::Static),
-            "private" => LexTokenKind::Keyword(Keyword::Private),
-            "public" => LexTokenKind::Keyword(Keyword::Public),
+            "var" => LexTokenKind::Kw(Kw::Var),
+            "const" => LexTokenKind::Kw(Kw::Const),
+            "static" => LexTokenKind::Kw(Kw::Static),
+            "private" => LexTokenKind::Kw(Kw::Private),
+            "public" => LexTokenKind::Kw(Kw::Public),
 
-            "function" => LexTokenKind::Keyword(Keyword::Function),
-            "struct" => LexTokenKind::Keyword(Keyword::Struct),
-            "enum" => LexTokenKind::Keyword(Keyword::Enum),
-            "implement" => LexTokenKind::Keyword(Keyword::Implement),
-            "interface" => LexTokenKind::Keyword(Keyword::Interface),
+            "function" => LexTokenKind::Kw(Kw::Function),
+            "struct" => LexTokenKind::Kw(Kw::Struct),
+            "enum" => LexTokenKind::Kw(Kw::Enum),
+            "implement" => LexTokenKind::Kw(Kw::Implement),
+            "interface" => LexTokenKind::Kw(Kw::Interface),
 
-            "defer" => LexTokenKind::Keyword(Keyword::Defer),
+            "defer" => LexTokenKind::Kw(Kw::Defer),
 
-            "test" => LexTokenKind::Keyword(Keyword::Test),
+            "test" => LexTokenKind::Kw(Kw::Test),
 
             _ => return None,
         })
@@ -267,132 +265,132 @@ impl LexToken {
         let real_string: String = tmp_chars.into_iter().collect();
 
         match c1 {
-            '(' => LexToken::ret_single_lookup(Symbol::ParenthesisBegin),
-            ')' => LexToken::ret_single_lookup(Symbol::ParenthesisEnd),
-            '[' => LexToken::ret_single_lookup(Symbol::SquareBracketBegin),
-            ']' => LexToken::ret_single_lookup(Symbol::SquareBracketEnd),
-            '{' => LexToken::ret_single_lookup(Symbol::CurlyBracketBegin),
-            '}' => LexToken::ret_single_lookup(Symbol::CurlyBracketEnd),
-            ',' => LexToken::ret_single_lookup(Symbol::Comma),
-            '_' => LexToken::ret_single_lookup(Symbol::UnderScore),
-            '?' => LexToken::ret_single_lookup(Symbol::QuestionMark),
-            '\"' => LexToken::ret_single_lookup(Symbol::DoubleQuote),
-            '\'' => LexToken::ret_single_lookup(Symbol::SingleQuote),
-            ':' => LexToken::ret_single_lookup(Symbol::Colon),
-            ';' => LexToken::ret_single_lookup(Symbol::SemiColon),
-            '~' => LexToken::ret_single_lookup(Symbol::BitCompliment),
-            '#' => LexToken::ret_single_lookup(Symbol::Pound),
-            '@' => LexToken::ret_single_lookup(Symbol::At),
-            '$' => LexToken::ret_single_lookup(Symbol::Dollar),
+            '(' => LexToken::ret_single_lookup(Sym::ParenthesisBegin),
+            ')' => LexToken::ret_single_lookup(Sym::ParenthesisEnd),
+            '[' => LexToken::ret_single_lookup(Sym::SquareBracketBegin),
+            ']' => LexToken::ret_single_lookup(Sym::SquareBracketEnd),
+            '{' => LexToken::ret_single_lookup(Sym::CurlyBracketBegin),
+            '}' => LexToken::ret_single_lookup(Sym::CurlyBracketEnd),
+            ',' => LexToken::ret_single_lookup(Sym::Comma),
+            '_' => LexToken::ret_single_lookup(Sym::UnderScore),
+            '?' => LexToken::ret_single_lookup(Sym::QuestionMark),
+            '\"' => LexToken::ret_single_lookup(Sym::DoubleQuote),
+            '\'' => LexToken::ret_single_lookup(Sym::SingleQuote),
+            ':' => LexToken::ret_single_lookup(Sym::Colon),
+            ';' => LexToken::ret_single_lookup(Sym::SemiColon),
+            '~' => LexToken::ret_single_lookup(Sym::BitCompliment),
+            '#' => LexToken::ret_single_lookup(Sym::Pound),
+            '@' => LexToken::ret_single_lookup(Sym::At),
+            '$' => LexToken::ret_single_lookup(Sym::Dollar),
 
             '%' => LexToken::match_symbol(
                 &real_string,
-                vec![("%", Symbol::Modulus), ("%=", Symbol::AssignModulus)],
+                vec![("%", Sym::Modulus), ("%=", Sym::AssignModulus)],
             ),
 
             '&' => LexToken::match_symbol(
                 &real_string,
-                vec![("&", Symbol::BitAnd), ("&=", Symbol::AssignBitAnd)],
+                vec![("&", Sym::BitAnd), ("&=", Sym::AssignBitAnd)],
             ),
 
             '^' => LexToken::match_symbol(
                 &real_string,
-                vec![("^", Symbol::BitXor), ("^=", Symbol::AssignBitXor)],
+                vec![("^", Sym::BitXor), ("^=", Sym::AssignBitXor)],
             ),
 
             '!' => LexToken::match_symbol(
                 &real_string,
-                vec![("!", Symbol::ExclamationMark), ("!=", Symbol::NotEquals)],
+                vec![("!", Sym::ExclamationMark), ("!=", Sym::NotEquals)],
             ),
 
             '|' => LexToken::match_symbol(
                 &real_string,
                 vec![
-                    ("|", Symbol::BitOr),
-                    ("|>", Symbol::Pipe),
-                    ("|=", Symbol::AssignBitOr),
+                    ("|", Sym::BitOr),
+                    ("|>", Sym::Pipe),
+                    ("|=", Sym::AssignBitOr),
                 ],
             ),
 
             '.' => LexToken::match_symbol(
                 &real_string,
                 vec![
-                    (".", Symbol::Dot),
-                    ("..", Symbol::Range),
-                    (".*", Symbol::Deref),
-                    (".&", Symbol::Address),
-                    (".[", Symbol::ArrayIndexBegin),
-                    ("..=", Symbol::RangeInclusive),
-                    ("...", Symbol::TripleDot),
+                    (".", Sym::Dot),
+                    ("..", Sym::Range),
+                    (".*", Sym::Deref),
+                    (".&", Sym::Address),
+                    (".[", Sym::ArrayIndexBegin),
+                    ("..=", Sym::RangeInclusive),
+                    ("...", Sym::TripleDot),
                 ],
             ),
 
             '=' => LexToken::match_symbol(
                 &real_string,
                 vec![
-                    ("=", Symbol::Equals),
-                    ("==", Symbol::EqualsOperator),
-                    ("=>", Symbol::FatArrow),
+                    ("=", Sym::Equals),
+                    ("==", Sym::EqualsOperator),
+                    ("=>", Sym::FatArrow),
                 ],
             ),
 
             '+' => LexToken::match_symbol(
                 &real_string,
                 vec![
-                    ("+", Symbol::Plus),
-                    ("++", Symbol::Increment),
-                    ("+=", Symbol::AssignAddition),
+                    ("+", Sym::Plus),
+                    ("++", Sym::Increment),
+                    ("+=", Sym::AssignAddition),
                 ],
             ),
 
             '<' => LexToken::match_symbol(
                 &real_string,
                 vec![
-                    ("<", Symbol::PointyBracketBegin),
-                    ("<=", Symbol::LessThanOrEquals),
-                    ("<<", Symbol::ShiftLeft),
-                    ("<<=", Symbol::AssignShiftLeft),
+                    ("<", Sym::PointyBracketBegin),
+                    ("<=", Sym::LessThanOrEquals),
+                    ("<<", Sym::ShiftLeft),
+                    ("<<=", Sym::AssignShiftLeft),
                 ],
             ),
 
             '>' => LexToken::match_symbol(
                 &real_string,
                 vec![
-                    (">", Symbol::PointyBracketEnd),
-                    (">=", Symbol::GreaterThanOrEquals),
-                    (">>", Symbol::ShiftRight),
-                    (">>=", Symbol::AssignShiftRight),
+                    (">", Sym::PointyBracketEnd),
+                    (">=", Sym::GreaterThanOrEquals),
+                    (">>", Sym::ShiftRight),
+                    (">>=", Sym::AssignShiftRight),
                 ],
             ),
 
             '-' => LexToken::match_symbol(
                 &real_string,
                 vec![
-                    ("-", Symbol::Minus),
-                    ("--", Symbol::Decrement),
-                    ("->", Symbol::Arrow),
-                    ("-=", Symbol::AssignSubtraction),
+                    ("-", Sym::Minus),
+                    ("--", Sym::Decrement),
+                    ("->", Sym::Arrow),
+                    ("-=", Sym::AssignSubtraction),
                 ],
             ),
 
             '*' => LexToken::match_symbol(
                 &real_string,
                 vec![
-                    ("*", Symbol::Multiplication),
-                    ("*/", Symbol::CommentMultiLineEnd),
-                    ("**", Symbol::Power),
-                    ("*=", Symbol::AssignMultiplication),
-                    ("**=", Symbol::AssignPower),
+                    ("*", Sym::Multiplication),
+                    ("*/", Sym::CommentMultiLineEnd),
+                    ("**", Sym::Power),
+                    ("*=", Sym::AssignMultiplication),
+                    ("**=", Sym::AssignPower),
                 ],
             ),
 
             '/' => LexToken::match_symbol(
                 &real_string,
                 vec![
-                    ("/", Symbol::Division),
-                    ("//", Symbol::CommentSingleLine),
-                    ("/*", Symbol::CommentMultiLineBegin),
-                    ("/=", Symbol::AssignDivision),
+                    ("/", Sym::Division),
+                    ("//", Sym::CommentSingleLine),
+                    ("/*", Sym::CommentMultiLineBegin),
+                    ("/=", Sym::AssignDivision),
                 ],
             ),
 
@@ -400,15 +398,15 @@ impl LexToken {
         }
     }
 
-    fn ret_single_lookup(symbol: Symbol) -> Option<(LexTokenKind, usize)> {
-        Some((LexTokenKind::Symbol(symbol), 1))
+    fn ret_single_lookup(symbol: Sym) -> Option<(LexTokenKind, usize)> {
+        Some((LexTokenKind::Sym(symbol), 1))
     }
 
     /// Sees if the given `real_string` which is created with the "peeked"
     /// characters forms a valid symbol and in that case returns it.
     fn match_symbol(
         real_string: &str,
-        mut string_symbol_tuples: Vec<(&str, Symbol)>,
+        mut string_symbol_tuples: Vec<(&str, Sym)>,
     ) -> Option<(LexTokenKind, usize)> {
         // Sort the tuples by the length of their "strings".
         // This ensures that the longest symbols are matched
@@ -420,7 +418,7 @@ impl LexToken {
             let current_symbol = tuple.1;
 
             if real_string.starts_with(current_string) {
-                return Some((LexTokenKind::Symbol(current_symbol), current_string.len()));
+                return Some((LexTokenKind::Sym(current_symbol), current_string.len()));
             }
         }
 
