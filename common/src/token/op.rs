@@ -1,5 +1,5 @@
-use super::expr::Expression;
-use crate::variable_type::TypeStruct;
+use super::expr::Expr;
+use crate::types::GenericableType;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
@@ -10,14 +10,14 @@ pub enum Op {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BinOp {
     pub operator: BinOperator,
-    pub ret_type: Option<TypeStruct>,
+    pub ret_type: Option<GenericableType>,
     pub is_const: bool,
-    pub left: Box<Expression>,
-    pub right: Box<Expression>,
+    pub left: Box<Expr>,
+    pub right: Box<Expr>,
 }
 
 impl BinOp {
-    pub fn new(operator: BinOperator, left: Box<Expression>, right: Box<Expression>) -> Self {
+    pub fn new(operator: BinOperator, left: Box<Expr>, right: Box<Expr>) -> Self {
         BinOp {
             operator,
             ret_type: None,
@@ -31,13 +31,13 @@ impl BinOp {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnOp {
     pub operator: UnOperator,
-    pub ret_type: Option<TypeStruct>,
+    pub ret_type: Option<GenericableType>,
     pub is_const: bool,
-    pub value: Box<Expression>,
+    pub value: Box<Expr>,
 }
 
 impl UnOp {
-    pub fn new(operator: UnOperator, value: Box<Expression>) -> Self {
+    pub fn new(operator: UnOperator, value: Box<Expr>) -> Self {
         UnOp {
             operator,
             ret_type: None,
@@ -88,14 +88,6 @@ pub enum BinOperator {
     /* BOOL */
     BoolAnd,
     BoolOr,
-
-    // Example ExpressionAnd:
-    //  for i in 0..1 and j in 0..1:
-    //  with s = Scanner(stdin) and x = Abc():
-    // Might use Comma instead:
-    //  for i in 0..1, j in 0..1:
-    //  with s = Scanner(stdin), x = Abc():
-    ExpressionAnd,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -114,7 +106,7 @@ pub enum UnOperator {
 
     // TODO: Slice/slicing.
     // The expression is the dimension.
-    ArrayAccess(Box<Expression>),
+    ArrayAccess(Box<Expr>),
 
     /* NUMBERS (BIT) */
     BitComplement,

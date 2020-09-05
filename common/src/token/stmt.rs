@@ -1,6 +1,6 @@
 use super::{
     block::Function,
-    expr::{Expression, Var},
+    expr::{Expr, Var},
     op::AssignOperator,
 };
 use crate::{
@@ -10,10 +10,10 @@ use crate::{
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Statement {
-    Return(Option<Expression>),
+pub enum Stmt {
+    Return(Option<Expr>),
     // Yield ~= Break with a value
-    Yield(Expression),
+    Yield(Expr),
     Break,
     // Continue == Next
     Continue,
@@ -25,8 +25,8 @@ pub enum Statement {
     /// The "Defer" is the place in the code where the "defer <expr>" was written.
     /// "DeferExecution" statements will be added during the analyzing stage
     /// at places in the AST where the deferred expression should be executed.
-    Defer(Expression),
-    DeferExecution(Expression),
+    Defer(Expr),
+    DeferExecution(Expr),
 
     // The lhs can't be a "Variable" directly since it needs to support
     // ex. array indexing and dereferencing. But evaluationg the lhs expressions
@@ -39,11 +39,11 @@ pub enum Statement {
     //     Deref
     //     Address
     // The "middle expr" is the lhs and the "right expr" is the rhs of the assignment.
-    Assignment(AssignOperator, Expression, Expression),
+    Assignment(AssignOperator, Expr, Expr),
 
     // Used both for "var" and "const" variables. The expr options will be Some
     // if this var decl also has han initializer.
-    VariableDecl(Var, Option<Expression>),
+    VariableDecl(Var, Option<Expr>),
 
     // TODO: Implement extern for variables as well.
     // Declaration of extern functions.

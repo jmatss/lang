@@ -4,12 +4,12 @@ use common::{
     token::{
         block::{BlockHeader, Enum, Function, Interface, Struct},
         expr::Var,
-        stmt::Statement,
+        stmt::Stmt,
     },
-    variable_type::{Type, TypeStruct},
+    types::{GenericableType, Type},
     BlockId,
 };
-use parse::token::{ParseToken, ParseTokenKind};
+use parse::token::{AstToken, AstTokenKind};
 use std::collections::{hash_map::Entry, HashMap};
 
 pub struct DeclAnalyzer<'a> {
@@ -29,7 +29,7 @@ impl<'a> DeclAnalyzer<'a> {
     /// they can quickly be looked up during LLVM code generation.
     pub fn analyze(
         context: &'a mut AnalyzeContext,
-        ast_root: &mut ParseToken,
+        ast_root: &mut AstToken,
     ) -> Result<(), Vec<LangError>> {
         let mut decl_analyzer = DeclAnalyzer::new(context);
         decl_analyzer.analyze_token(ast_root);
@@ -48,12 +48,12 @@ impl<'a> DeclAnalyzer<'a> {
         }
     }
 
-    fn analyze_token(&mut self, token: &mut ParseToken) {
+    fn analyze_token(&mut self, token: &mut AstToken) {
         self.context.cur_line_nr = token.line_nr;
         self.context.cur_column_nr = token.column_nr;
 
         match &mut token.kind {
-            ParseTokenKind::Block(header, id, body) => {
+            AstTokenKind::Block(header, id, body) => {
                 self.context.cur_block_id = *id;
                 self.analyze_header(header);
 
@@ -71,8 +71,8 @@ impl<'a> DeclAnalyzer<'a> {
                 }
                 self.cur_impl = None;
             }
-            ParseTokenKind::Statement(stmt) => self.analyze_stmt(&stmt),
-            ParseTokenKind::Expression(_) | ParseTokenKind::EndOfFile => (),
+            AstTokenKind::Statement(stmt) => self.analyze_stmt(&stmt),
+            AstTokenKind::Expression(_) | AstTokenKind::EndOfFile => (),
         }
     }
 
@@ -204,10 +204,8 @@ impl<'a> DeclAnalyzer<'a> {
         // TODO: Where should the name of "this"/"self" be specified?
         const THIS_VAR_NAME: &str = "this";
         let ty = Type::Custom(struct_name.into());
-        let generics = None;
-        let inferred = false;
-        let type_struct = TypeStruct::new(ty, generics, inferred);
-        let var = Var::new(THIS_VAR_NAME.into(), Some(type_struct), None, false);
+        let gen_ty = GenericableType::Type(ty, None);
+        let var = Var::new(THIS_VAR_NAME.into(), Some(gen_ty), None, false);
         if let Some(ref mut params) = func.parameters {
             params.insert(0, var);
         } else {
@@ -307,9 +305,9 @@ impl<'a> DeclAnalyzer<'a> {
 
     /// Need to add declaration of variable if this stmt is a variable decl
     /// and a function if this stmt is a external declaration.
-    fn analyze_stmt(&mut self, stmt: &Statement) {
+    fn analyze_stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            Statement::VariableDecl(var, _) => {
+            Stmt::VariableDecl(var, _) => {
                 let key = (var.name.clone(), self.context.cur_block_id);
 
                 if let Entry::Vacant(v) = self.context.variables.entry(key) {
@@ -323,7 +321,7 @@ impl<'a> DeclAnalyzer<'a> {
                     self.errors.push(err);
                 }
             }
-            Statement::ExternalDecl(func) => {
+            Stmt::ExternalDecl(func) => {
                 // TODO: Don't hardcode zeros for the default block everywhere.
                 // TODO: Should probably check that if there are multiple extern
                 //       declarations of a function that they have the same

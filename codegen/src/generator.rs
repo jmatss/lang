@@ -2,10 +2,10 @@ use analyze::AnalyzeContext;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
     token::{
-        expr::{AccessInstruction, Expression, Var},
+        expr::{AccessInstruction, Expr, Var},
         lit::Lit,
     },
-    variable_type::{Type, TypeStruct},
+    types::{Type, TypeStruct},
     BlockId,
 };
 use inkwell::{
@@ -19,7 +19,7 @@ use inkwell::{
     AddressSpace,
 };
 use log::debug;
-use parse::token::{ParseToken, ParseTokenKind};
+use parse::token::{AstToken, AstTokenKind};
 use std::collections::HashMap;
 
 pub(super) struct CodeGen<'a, 'ctx> {
@@ -63,7 +63,7 @@ pub(super) struct CodeGen<'a, 'ctx> {
 }
 
 pub fn generate<'a, 'ctx>(
-    ast_root: &'ctx mut ParseToken,
+    ast_root: &'ctx mut AstToken,
     analyze_context: &'ctx AnalyzeContext,
     context: &'ctx Context,
     builder: &'a Builder<'ctx>,
@@ -140,21 +140,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile(&mut self, token: &'ctx mut ParseToken) -> CustomResult<()> {
+    pub(super) fn compile(&mut self, token: &'ctx mut AstToken) -> CustomResult<()> {
         self.cur_line_nr = token.line_nr;
         self.cur_column_nr = token.column_nr;
 
         match &mut token.kind {
-            ParseTokenKind::Block(header, id, ref mut body) => {
+            AstTokenKind::Block(header, id, ref mut body) => {
                 self.compile_block(header, *id, body)?;
             }
-            ParseTokenKind::Statement(ref mut stmt) => {
+            AstTokenKind::Statement(ref mut stmt) => {
                 self.compile_stmt(stmt)?;
             }
-            ParseTokenKind::Expression(ref mut expr) => {
+            AstTokenKind::Expression(ref mut expr) => {
                 self.compile_expr(expr)?;
             }
-            ParseTokenKind::EndOfFile => (),
+            AstTokenKind::EndOfFile => (),
         }
         Ok(())
     }
@@ -244,10 +244,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(self.builder.build_store(ptr, basic_value))
     }
 
-    pub(super) fn compile_var_load(
-        &mut self,
-        var: &mut Var,
-    ) -> CustomResult<BasicValueEnum<'ctx>> {
+    pub(super) fn compile_var_load(&mut self, var: &mut Var) -> CustomResult<BasicValueEnum<'ctx>> {
         if var.is_const {
             return self.get_const_value(var);
         }
@@ -294,10 +291,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     /// This function assumes that the caller have made sure that the given `var`
     /// contains "AccessInstruction"s.
-    fn get_var_ptr_access_instrs(
-        &mut self,
-        var: &mut Var,
-    ) -> CustomResult<PointerValue<'ctx>> {
+    fn get_var_ptr_access_instrs(&mut self, var: &mut Var) -> CustomResult<PointerValue<'ctx>> {
         let (root_var, access_instrs) =
             if let Some((ref root_var, ref mut access_instrs)) = var.access_instrs {
                 (root_var, access_instrs)
@@ -435,7 +429,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Type::Array(inner_ty, dim_opt) => {
                 let lit_dim = if let Some(dim) = dim_opt {
                     match dim.as_ref() {
-                        Expression::Lit(lit, _) => match lit {
+                        Expr::Lit(lit, _) => match lit {
                             Lit::Integer(num, radix) => u32::from_str_radix(num, *radix)?,
                             _ => {
                                 return Err(self.err(format!(

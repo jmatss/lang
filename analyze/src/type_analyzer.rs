@@ -4,15 +4,15 @@ use common::error::LangError;
 use common::{
     token::{
         block::BlockHeader,
-        expr::{AccessInstruction, Expression, FuncCall, StructInit, Var},
+        expr::{AccessInstruction, Expr, FuncCall, StructInit, Var},
         lit::Lit,
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
-        stmt::Statement,
+        stmt::Stmt,
     },
-    variable_type::{Type, TypeStruct},
+    types::{GenericableType, Type},
 };
 use log::debug;
-use parse::token::{ParseToken, ParseTokenKind};
+use parse::token::{AstToken, AstTokenKind};
 pub struct TypeAnalyzer<'a> {
     context: &'a mut AnalyzeContext,
     errors: Vec<LangError>,
@@ -27,7 +27,7 @@ impl<'a> TypeAnalyzer<'a> {
     /// for variables and expressions (what type the expressions evaluates to).
     pub fn analyze(
         context: &'a mut AnalyzeContext,
-        ast_root: &mut ParseToken,
+        ast_root: &mut AstToken,
     ) -> Result<(), Vec<LangError>> {
         let mut type_analyzer = TypeAnalyzer::new(context);
 
@@ -52,12 +52,12 @@ impl<'a> TypeAnalyzer<'a> {
         }
     }
 
-    fn analyze_type(&mut self, token: &mut ParseToken) {
+    fn analyze_type(&mut self, token: &mut AstToken) {
         self.context.cur_line_nr = token.line_nr;
         self.context.cur_column_nr = token.column_nr;
 
         match token.kind {
-            ParseTokenKind::Block(ref mut header, id, ref mut body) => {
+            AstTokenKind::Block(ref mut header, id, ref mut body) => {
                 self.context.cur_block_id = id;
                 self.analyze_header_type(header);
                 for token in body {
@@ -66,13 +66,13 @@ impl<'a> TypeAnalyzer<'a> {
                     self.analyze_type(token);
                 }
             }
-            ParseTokenKind::Statement(ref mut stmt) => {
+            AstTokenKind::Statement(ref mut stmt) => {
                 self.analyze_stmt_type(stmt);
             }
-            ParseTokenKind::Expression(ref mut expr) => {
+            AstTokenKind::Expression(ref mut expr) => {
                 self.analyze_expr_type(expr, None);
             }
-            ParseTokenKind::EndOfFile => (),
+            AstTokenKind::EndOfFile => (),
         }
     }
 
@@ -80,18 +80,21 @@ impl<'a> TypeAnalyzer<'a> {
     /// should be cascaded down the expression and be set for them as well.
     fn analyze_expr_type(
         &mut self,
-        expr: &mut Expression,
-        type_hint_opt: Option<TypeStruct>,
-    ) -> Option<TypeStruct> {
+        expr: &mut Expr,
+        type_hint_opt: Option<GenericableType>,
+    ) -> Option<GenericableType> {
         match expr {
-            Expression::Lit(lit, cur_type_opt) => {
+            Expr::Lit(lit, cur_type_opt) => {
+                // TODO: Will be updated during refactoring.
                 // If this literal already has a type that is NOT inferred, don't
                 // change it, do early return.
+                /*
                 if let Some(cur_type) = cur_type_opt {
                     if !cur_type.is_inferred {
                         return cur_type_opt.clone();
                     }
                 }
+                */
 
                 // If the new type is prefered, use it.
                 let new_type_opt = Some(self.analyze_literal_type(lit));
@@ -106,13 +109,15 @@ impl<'a> TypeAnalyzer<'a> {
                 // be better or equal to the current None type.
                 // Also make sure that the given type hint is of the same type
                 // as the literal.
-                if let Some(type_hint) = type_hint_opt.clone() {
+                if let Some(gen_type_hint @ GenericableType::Type(type_hint, _)) =
+                    type_hint_opt.clone()
+                {
                     let possible_type_hint = match lit {
-                        Lit::String(_) if type_hint.ty.is_string() => Some(type_hint),
-                        Lit::Char(_) if type_hint.ty.is_char() => Some(type_hint),
-                        Lit::Bool(_) if type_hint.ty.is_bool() => Some(type_hint),
-                        Lit::Integer(_, _) if type_hint.ty.is_int() => Some(type_hint),
-                        Lit::Float(_) if type_hint.ty.is_float() => Some(type_hint),
+                        Lit::String(_) if type_hint.is_string() => Some(type_hint),
+                        Lit::Char(_) if type_hint.is_char() => Some(type_hint),
+                        Lit::Bool(_) if type_hint.is_bool() => Some(type_hint),
+                        Lit::Integer(_, _) if type_hint.is_int() => Some(type_hint),
+                        Lit::Float(_) if type_hint.is_float() => Some(type_hint),
                         _ => None,
                     };
 
@@ -120,15 +125,15 @@ impl<'a> TypeAnalyzer<'a> {
                     if let Some(TypeChoice::Second) =
                         unify(cur_type_opt.as_ref(), possible_type_hint.as_ref())
                     {
-                        *cur_type_opt = possible_type_hint;
+                        *cur_type_opt = Some(gen_type_hint);
                     }
                 }
 
                 // Return the now (possible) updated type.
                 cur_type_opt.clone()
             }
-            Expression::Type(type_struct) => Some(type_struct.clone()),
-            Expression::Var(var) => {
+            Expr::Type(type_struct) => Some(type_struct.clone()),
+            Expr::Var(var) => {
                 debug!("ANALYZING VAR: {:#?}", var);
 
                 // TODO: FIXME: Currently the type hint is used when analyzing
@@ -145,8 +150,8 @@ impl<'a> TypeAnalyzer<'a> {
                     self.analyze_var_type(var, type_hint_opt)
                 }
             }
-            Expression::Op(op) => self.analyze_op_type(op, type_hint_opt),
-            Expression::FuncCall(func_call) => {
+            Expr::Op(op) => self.analyze_op_type(op, type_hint_opt),
+            Expr::FuncCall(func_call) => {
                 // If true: This is a method. The type hint given from the lhs
                 //          will be the type of the struct that this method
                 //          is called on.
@@ -166,8 +171,8 @@ impl<'a> TypeAnalyzer<'a> {
                     self.analyze_func_call(func_call)
                 }
             }
-            Expression::StructInit(struct_init) => self.analyze_struct_init(struct_init),
-            Expression::ArrayInit(args, init_type_opt) => {
+            Expr::StructInit(struct_init) => self.analyze_struct_init(struct_init),
+            Expr::ArrayInit(args, init_type_opt) => {
                 if args.is_empty() {
                     let err = self.context.err("ArrayInit with no arguments.".into());
                     self.errors.push(err);
@@ -213,7 +218,7 @@ impl<'a> TypeAnalyzer<'a> {
                 // Infer a type from the type of the members of this array.
                 let lit = Lit::Integer(args.len().to_string(), 10);
                 let dim_type = TypeStruct::new(Type::I32, None, false);
-                let dim_expr = Expression::Lit(lit, Some(dim_type));
+                let dim_expr = Expr::Lit(lit, Some(dim_type));
                 let generics = None;
                 let inferred = false;
                 let new_init_type = TypeStruct::new(
@@ -605,7 +610,7 @@ impl<'a> TypeAnalyzer<'a> {
 
     fn analyze_expr_type_opt(
         &mut self,
-        expr_opt: &mut Option<Expression>,
+        expr_opt: &mut Option<Expr>,
         type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         if let Some(expr) = expr_opt {
@@ -681,12 +686,8 @@ impl<'a> TypeAnalyzer<'a> {
         type_hint_opt: Option<TypeStruct>,
     ) -> Option<TypeStruct> {
         match op {
-            Op::BinOp(ref mut bin_op) => {
-                self.analyze_bin_op_type(bin_op, type_hint_opt)
-            }
-            Op::UnOp(ref mut un_op) => {
-                self.analyze_un_op_type(un_op, type_hint_opt)
-            }
+            Op::BinOp(ref mut bin_op) => self.analyze_bin_op_type(bin_op, type_hint_opt),
+            Op::UnOp(ref mut un_op) => self.analyze_un_op_type(un_op, type_hint_opt),
         }
     }
 
@@ -806,28 +807,28 @@ impl<'a> TypeAnalyzer<'a> {
         ret_type
     }
 
-    fn analyze_stmt_type(&mut self, statement: &mut Statement) {
+    fn analyze_stmt_type(&mut self, statement: &mut Stmt) {
         match statement {
-            Statement::Break
-            | Statement::Continue
-            | Statement::Use(_)
-            | Statement::Package(_)
-            | Statement::Modifier(_)
-            | Statement::ExternalDecl(_) => (),
+            Stmt::Break
+            | Stmt::Continue
+            | Stmt::Use(_)
+            | Stmt::Package(_)
+            | Stmt::Modifier(_)
+            | Stmt::ExternalDecl(_) => (),
 
-            Statement::Defer(expr) => {
+            Stmt::Defer(expr) => {
                 self.analyze_expr_type(expr, None);
             }
-            Statement::DeferExecution(expr) => {
+            Stmt::DeferExecution(expr) => {
                 self.analyze_expr_type(expr, None);
             }
-            Statement::Return(expr_opt) => {
+            Stmt::Return(expr_opt) => {
                 self.analyze_expr_type_opt(expr_opt, None);
             }
-            Statement::Yield(expr) => {
+            Stmt::Yield(expr) => {
                 self.analyze_expr_type(expr, None);
             }
-            Statement::Assignment(_, lhs, rhs) => {
+            Stmt::Assignment(_, lhs, rhs) => {
                 // TODO: Should this check so that the left and right hand side
                 //       have the same type (or just are compatible?).
                 let lhs_type = self.analyze_expr_type(lhs, None);
@@ -874,7 +875,7 @@ impl<'a> TypeAnalyzer<'a> {
                     });
                 }
             }
-            Statement::VariableDecl(var, expr_opt) => {
+            Stmt::VariableDecl(var, expr_opt) => {
                 // TODO: Should this check so that the left and right hand side
                 //       have the same type (or just are compatible?).
                 // If a type can be found for the right hand size, set the left
@@ -1011,15 +1012,15 @@ impl<'a> TypeAnalyzer<'a> {
     }
 
     /// Set the type of a expression after it has ben inferred.
-    fn set_type(&mut self, expr: &mut Expression, new_ty: Option<TypeStruct>) {
+    fn set_type(&mut self, expr: &mut Expr, new_ty: Option<TypeStruct>) {
         match expr {
-            Expression::Lit(_, old_ty) => *old_ty = new_ty,
-            Expression::Var(var) => var.ret_type = new_ty,
-            Expression::Op(op) => match op {
+            Expr::Lit(_, old_ty) => *old_ty = new_ty,
+            Expr::Var(var) => var.ret_type = new_ty,
+            Expr::Op(op) => match op {
                 Op::BinOp(bin_op) => bin_op.ret_type = new_ty,
                 Op::UnOp(un_op) => un_op.ret_type = new_ty,
             },
-            Expression::FuncCall(_) => {
+            Expr::FuncCall(_) => {
                 // Do nothing, the "return type" of a function call will be
                 // taken from the function declaration.
             }
@@ -1028,7 +1029,7 @@ impl<'a> TypeAnalyzer<'a> {
             //       so that they can be used inside expressions to allow for
             //       chaining.
             // Can't set type for struct init or array init.
-            Expression::StructInit(_) | Expression::ArrayInit(..) | Expression::Type(_) => {
+            Expr::StructInit(_) | Expr::ArrayInit(..) | Expr::Type(_) => {
                 let err_msg = format!("Tried to set type for unexpected expr: {:?}", &expr);
                 let err = self.context.err(err_msg);
                 self.errors.push(err);

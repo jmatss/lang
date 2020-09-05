@@ -1,4 +1,5 @@
 mod block_analyzer;
+mod block_visitor;
 mod decl_analyzer;
 mod defer_analyzer;
 mod indexing_analyzer;
@@ -20,7 +21,7 @@ use decl_analyzer::DeclAnalyzer;
 use defer_analyzer::DeferAnalyzer;
 use indexing_analyzer::IndexingAnalyzer;
 use method_analyzer::MethodAnalyzer;
-use parse::token::ParseToken;
+use parse::token::AstToken;
 use std::collections::HashMap;
 use type_analyzer::TypeAnalyzer;
 
@@ -38,7 +39,7 @@ use type_analyzer::TypeAnalyzer;
 /// the analyzing (type, indexing etc.) on Expressions are done.
 /// The "MethodAnalyzer" will also copy Expressions ("this"/"self" into func calls),
 /// so it follows the same rules as "DeferAnalyzer" above.
-pub fn analyze(ast_root: &mut ParseToken) -> Result<AnalyzeContext, Vec<LangError>> {
+pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>> {
     let mut context = AnalyzeContext::new();
 
     BlockAnalyzer::analyze(&mut context, ast_root);

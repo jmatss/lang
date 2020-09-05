@@ -3,7 +3,7 @@ use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
     token::{
         block::{BlockHeader, Function, Struct},
-        expr::{Expression, Var},
+        expr::{Expr, Var},
     },
     util, BlockId,
 };
@@ -13,7 +13,7 @@ use inkwell::{
     types::AnyTypeEnum,
     values::{FunctionValue, PointerValue},
 };
-use parse::token::{ParseToken, ParseTokenKind};
+use parse::token::{AstToken, AstTokenKind};
 
 /// Contains information related to branches in either a if-statement or a
 /// match-statement. This will then be sent around to all if-cases so that
@@ -76,7 +76,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         header: &'ctx mut BlockHeader,
         id: BlockId,
-        body: &'ctx mut [ParseToken],
+        body: &'ctx mut [AstToken],
     ) -> CustomResult<()> {
         self.cur_block_id = id;
 
@@ -93,7 +93,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
             BlockHeader::Implement(_) => {
                 for token in body {
-                    if let ParseTokenKind::Block(BlockHeader::Function(func), func_id, func_body) =
+                    if let AstTokenKind::Block(BlockHeader::Function(func), func_id, func_body) =
                         &mut token.kind
                     {
                         self.compile_func(func, *func_id, func_body)?;
@@ -153,7 +153,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         func: &'ctx Function,
         func_id: BlockId,
-        body: &'ctx mut [ParseToken],
+        body: &'ctx mut [AstToken],
     ) -> CustomResult<()> {
         let linkage = Linkage::External;
         let fn_val = self.compile_func_proto(func, Some(linkage))?;
@@ -293,7 +293,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         */
     }
 
-    fn compile_anon(&mut self, id: BlockId, body: &'ctx mut [ParseToken]) -> CustomResult<()> {
+    fn compile_anon(&mut self, id: BlockId, body: &'ctx mut [AstToken]) -> CustomResult<()> {
         let cur_func = self
             .cur_func
             .ok_or_else(|| self.err("cur_func is None for \"If\".".into()))?;
@@ -343,7 +343,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     /// All the "ParseToken" in the body should be "IfCase"s.
-    fn compile_if(&mut self, id: BlockId, body: &'ctx mut [ParseToken]) -> CustomResult<()> {
+    fn compile_if(&mut self, id: BlockId, body: &'ctx mut [AstToken]) -> CustomResult<()> {
         let cur_block = self
             .cur_basic_block
             .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
@@ -356,7 +356,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let mut branch_info = BranchInfo::new();
         branch_info.if_branches.push(cur_block);
         for (i, if_case) in body.iter().enumerate() {
-            if let ParseTokenKind::Block(BlockHeader::IfCase(expr_opt), _, _) = &if_case.kind {
+            if let AstTokenKind::Block(BlockHeader::IfCase(expr_opt), _, _) = &if_case.kind {
                 // Skip adding a branch block if this is the first case (since it
                 // has the branch block `cur_block`). Also only add a branch block
                 // if this `if_case` contains a expression that can be "branched on".
@@ -406,7 +406,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.cur_column_nr = if_case.column_nr;
             self.cur_block_id = id;
 
-            if let ParseTokenKind::Block(
+            if let AstTokenKind::Block(
                 BlockHeader::IfCase(ref mut expr_opt),
                 inner_id,
                 ref mut inner_body,
@@ -437,10 +437,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_if_case(
         &mut self,
-        br_expr_opt: &mut Option<Expression>,
+        br_expr_opt: &mut Option<Expr>,
         id: BlockId,
         index: usize,
-        body: &'ctx mut [ParseToken],
+        body: &'ctx mut [AstToken],
         branch_info: &BranchInfo<'ctx>,
     ) -> CustomResult<()> {
         let if_case_block = branch_info.get_if_case(index, self.cur_line_nr, self.cur_column_nr)?;
@@ -530,9 +530,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// All the "ParseToken" in the body should be "IfCase"s.
     fn compile_while(
         &mut self,
-        expr_opt: &mut Option<Expression>,
+        expr_opt: &mut Option<Expr>,
         id: BlockId,
-        body: &'ctx mut [ParseToken],
+        body: &'ctx mut [AstToken],
     ) -> CustomResult<()> {
         let mut cur_block = self
             .cur_basic_block

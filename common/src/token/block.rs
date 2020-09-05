@@ -1,5 +1,5 @@
-use super::expr::{Expression, Var};
-use crate::variable_type::TypeStruct;
+use super::expr::{Expr, Var};
+use crate::types::GenericableType;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockHeader {
@@ -66,16 +66,16 @@ pub enum BlockHeader {
     //     ]
     //   )
     If,
-    IfCase(Option<Expression>),
+    IfCase(Option<Expr>),
 
     // Any `MatchCase` blocks should be grouped together under one `Match`.
     // See the example above for `If`, should be structured ~similarly.
-    Match(Expression),
-    MatchCase(Expression),
+    Match(Expr),
+    MatchCase(Expr),
 
-    For(Var, Expression),
+    For(Var, Expr),
     // TODO: Maybe merge while and loop (?)
-    While(Option<Expression>),
+    While(Option<Expr>),
 
     // Function for testing, allows strings as test names with spaces etc.
     Test(Function),
@@ -84,16 +84,16 @@ pub enum BlockHeader {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
     pub name: String,
-    pub generics: Option<Vec<TypeStruct>>,
-    pub implements: Option<Vec<TypeStruct>>,
+    pub generics: Option<Vec<GenericableType>>,
+    pub implements: Option<Vec<GenericableType>>,
     pub members: Option<Vec<Var>>, // TODO: extends: Vec<Type>
 }
 
 impl Struct {
     pub fn new(
         name: String,
-        generics: Option<Vec<TypeStruct>>,
-        implements: Option<Vec<TypeStruct>>,
+        generics: Option<Vec<GenericableType>>,
+        implements: Option<Vec<GenericableType>>,
         members: Option<Vec<Var>>,
     ) -> Self {
         Self {
@@ -108,9 +108,9 @@ impl Struct {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
-    pub generics: Option<Vec<TypeStruct>>,
+    pub generics: Option<Vec<GenericableType>>,
     pub parameters: Option<Vec<Var>>,
-    pub ret_type: Option<TypeStruct>,
+    pub ret_type: Option<GenericableType>,
     pub is_var_arg: bool,
 
     /// Will be set if this is a function in a "impl" block which means that
@@ -121,9 +121,9 @@ pub struct Function {
 impl Function {
     pub fn new(
         name: String,
-        generics: Option<Vec<TypeStruct>>,
+        generics: Option<Vec<GenericableType>>,
         parameters: Option<Vec<Var>>,
-        ret_type: Option<TypeStruct>,
+        ret_type: Option<GenericableType>,
         is_var_arg: bool,
     ) -> Self {
         Function {
@@ -140,11 +140,11 @@ impl Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Enum {
     pub name: String,
-    pub generics: Vec<TypeStruct>,
+    pub generics: Vec<GenericableType>,
 }
 
 impl Enum {
-    pub fn new(name: String, generics: Vec<TypeStruct>) -> Self {
+    pub fn new(name: String, generics: Vec<GenericableType>) -> Self {
         Enum { name, generics }
     }
 }
@@ -152,11 +152,11 @@ impl Enum {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Interface {
     pub name: String,
-    pub generics: Vec<TypeStruct>,
+    pub generics: Vec<GenericableType>,
 }
 
 impl Interface {
-    pub fn new(name: String, generics: Vec<TypeStruct>) -> Self {
+    pub fn new(name: String, generics: Vec<GenericableType>) -> Self {
         Interface { name, generics }
     }
 }

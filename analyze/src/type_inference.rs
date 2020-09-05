@@ -1,5 +1,5 @@
 use crate::TypeAnalyzer;
-use common::variable_type::{Type, TypeStruct};
+use common::types::{Type, TypeStruct};
 
 pub enum TypeChoice {
     First,

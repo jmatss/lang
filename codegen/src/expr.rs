@@ -2,10 +2,10 @@ use crate::generator::CodeGen;
 use common::{
     error::CustomResult,
     token::{
-        expr::{Argument, Expression, FuncCall, StructInit},
+        expr::{Argument, Expr, FuncCall, StructInit},
         lit::Lit,
     },
-    variable_type::{Type, TypeStruct},
+    types::{Type, TypeStruct},
 };
 use inkwell::{
     types::{AnyTypeEnum, BasicTypeEnum},
@@ -16,15 +16,15 @@ use inkwell::{
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_expr(
         &mut self,
-        expr: &mut Expression,
+        expr: &mut Expr,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         match expr {
-            Expression::Lit(lit, ty_opt) => self.compile_lit(lit, ty_opt),
-            Expression::Var(var) => {
+            Expr::Lit(lit, ty_opt) => self.compile_lit(lit, ty_opt),
+            Expr::Var(var) => {
                 // TODO: Will this always be regular?
                 Ok(self.compile_var_load(var)?.into())
             }
-            Expression::FuncCall(func_call) => {
+            Expr::FuncCall(func_call) => {
                 // There will be no difference compiling a function call and a
                 // method call. The method call will during the analyzing have
                 // been given a new name containing the "struct_name/..." and
@@ -32,12 +32,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 // inserted as the first argument.
                 self.compile_func_call(func_call)
             }
-            Expression::Op(op) => self.compile_op(op),
-            Expression::StructInit(struct_init) => self.compile_struct_init(struct_init),
-            Expression::ArrayInit(args, type_struct_opt) => {
+            Expr::Op(op) => self.compile_op(op),
+            Expr::StructInit(struct_init) => self.compile_struct_init(struct_init),
+            Expr::ArrayInit(args, type_struct_opt) => {
                 self.compile_array_init(args, type_struct_opt)
             }
-            Expression::Type(ty) => {
+            Expr::Type(ty) => {
                 // TODO: Does something need to be done here? Does a proper value
                 //       need to be returned? For now just return a dummy value.
                 Ok(match self.compile_type(&ty)? {
@@ -213,10 +213,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     //       Should make a custom value ex rusts "()" instead.
     /// Generates a function call. Returns the return value of the compiled
     /// function.
-    fn compile_func_call(
-        &mut self,
-        func_call: &mut FuncCall,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_func_call(&mut self, func_call: &mut FuncCall) -> CustomResult<AnyValueEnum<'ctx>> {
         if let Some(func_ptr) = self.module.get_function(&func_call.name) {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic

@@ -1,6 +1,6 @@
 use crate::{AnalyzeContext, BlockInfo};
-use common::token::{block::BlockHeader, stmt::Statement};
-use parse::token::{ParseToken, ParseTokenKind};
+use common::token::{block::BlockHeader, stmt::Stmt};
+use parse::token::{AstToken, AstTokenKind};
 
 pub struct BlockAnalyzer<'a> {
     context: &'a mut AnalyzeContext,
@@ -10,7 +10,7 @@ impl<'a> BlockAnalyzer<'a> {
     /// Takes in a the root of the AST and walks the whole tree to find information
     /// related to blocks and their scopes. It gets the parent for all blocks,
     /// if they contain any instructions related to control flow (return, branch etc.).
-    pub fn analyze(context: &'a mut AnalyzeContext, ast_root: &mut ParseToken) {
+    pub fn analyze(context: &'a mut AnalyzeContext, ast_root: &mut AstToken) {
         let mut block_analyzer = BlockAnalyzer::new(context);
         block_analyzer.analyze_block(ast_root);
     }
@@ -21,8 +21,8 @@ impl<'a> BlockAnalyzer<'a> {
         Self { context }
     }
 
-    fn analyze_block(&mut self, token: &mut ParseToken) -> Option<BlockInfo> {
-        if let ParseTokenKind::Block(ref header, id, ref mut body) = token.kind {
+    fn analyze_block(&mut self, token: &mut AstToken) -> Option<BlockInfo> {
+        if let AstTokenKind::Block(ref header, id, ref mut body) = token.kind {
             let is_root_block = self.analyze_is_root(header);
             let is_branchable_block = self.analyze_is_branchable(header);
             let mut block_info = BlockInfo::new(id, is_root_block, is_branchable_block);
@@ -43,15 +43,15 @@ impl<'a> BlockAnalyzer<'a> {
                 self.context.cur_block_id = id;
 
                 match token.kind {
-                    ParseTokenKind::Block(BlockHeader::If, ..)
-                    | ParseTokenKind::Block(BlockHeader::IfCase(_), ..)
-                    | ParseTokenKind::Block(BlockHeader::Function(_), ..)
-                    | ParseTokenKind::Block(BlockHeader::Match(_), ..)
-                    | ParseTokenKind::Block(BlockHeader::MatchCase(_), ..)
-                    | ParseTokenKind::Block(BlockHeader::For(..), ..)
-                    | ParseTokenKind::Block(BlockHeader::While(..), ..)
-                    | ParseTokenKind::Block(BlockHeader::Test(_), ..)
-                    | ParseTokenKind::Block(BlockHeader::Anonymous, ..) => {
+                    AstTokenKind::Block(BlockHeader::If, ..)
+                    | AstTokenKind::Block(BlockHeader::IfCase(_), ..)
+                    | AstTokenKind::Block(BlockHeader::Function(_), ..)
+                    | AstTokenKind::Block(BlockHeader::Match(_), ..)
+                    | AstTokenKind::Block(BlockHeader::MatchCase(_), ..)
+                    | AstTokenKind::Block(BlockHeader::For(..), ..)
+                    | AstTokenKind::Block(BlockHeader::While(..), ..)
+                    | AstTokenKind::Block(BlockHeader::Test(_), ..)
+                    | AstTokenKind::Block(BlockHeader::Anonymous, ..) => {
                         if let Some(child_block_info) = self.analyze_block(token) {
                             if !child_block_info.all_children_contains_returns {
                                 all_children_contains_returns = false;
@@ -60,17 +60,17 @@ impl<'a> BlockAnalyzer<'a> {
                         child_count += 1;
                     }
 
-                    ParseTokenKind::Block(BlockHeader::Default, ..)
-                    | ParseTokenKind::Block(BlockHeader::Struct(_), ..)
-                    | ParseTokenKind::Block(BlockHeader::Enum(_), ..)
-                    | ParseTokenKind::Block(BlockHeader::Interface(_), ..)
-                    | ParseTokenKind::Block(BlockHeader::Implement(..), ..) => {
+                    AstTokenKind::Block(BlockHeader::Default, ..)
+                    | AstTokenKind::Block(BlockHeader::Struct(_), ..)
+                    | AstTokenKind::Block(BlockHeader::Enum(_), ..)
+                    | AstTokenKind::Block(BlockHeader::Interface(_), ..)
+                    | AstTokenKind::Block(BlockHeader::Implement(..), ..) => {
                         self.analyze_block(token)?;
                     }
 
-                    ParseTokenKind::Statement(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
+                    AstTokenKind::Statement(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
 
-                    ParseTokenKind::Expression(_) | ParseTokenKind::EndOfFile => (),
+                    AstTokenKind::Expression(_) | AstTokenKind::EndOfFile => (),
                 }
             }
 
@@ -115,21 +115,21 @@ impl<'a> BlockAnalyzer<'a> {
     }
 
     /// Sets the information about if a statement exists in `block_info`.
-    fn analyze_stmt(&self, stmt: &Statement, block_info: &mut BlockInfo) {
+    fn analyze_stmt(&self, stmt: &Stmt, block_info: &mut BlockInfo) {
         match stmt {
-            Statement::Return(_) => block_info.contains_return = true,
-            Statement::Yield(_) => block_info.contains_yield = true,
-            Statement::Break => block_info.contains_break = true,
-            Statement::Continue => block_info.contains_continue = true,
-            Statement::Defer(_) => block_info.contains_defer = true,
+            Stmt::Return(_) => block_info.contains_return = true,
+            Stmt::Yield(_) => block_info.contains_yield = true,
+            Stmt::Break => block_info.contains_break = true,
+            Stmt::Continue => block_info.contains_continue = true,
+            Stmt::Defer(_) => block_info.contains_defer = true,
 
-            Statement::Use(_)
-            | Statement::Package(_)
-            | Statement::Assignment(..)
-            | Statement::VariableDecl(..)
-            | Statement::ExternalDecl(_)
-            | Statement::Modifier(_)
-            | Statement::DeferExecution(_) => (),
+            Stmt::Use(_)
+            | Stmt::Package(_)
+            | Stmt::Assignment(..)
+            | Stmt::VariableDecl(..)
+            | Stmt::ExternalDecl(_)
+            | Stmt::Modifier(_)
+            | Stmt::DeferExecution(_) => (),
         }
     }
 }

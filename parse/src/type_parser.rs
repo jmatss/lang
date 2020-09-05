@@ -1,7 +1,7 @@
 use crate::parser::ParseTokenIter;
 use common::{
     error::CustomResult,
-    variable_type::{Type, TypeStruct},
+    types::{GenericableType, Type},
 };
 use lex::token::{LexTokenKind, Sym};
 
@@ -13,7 +13,7 @@ pub struct TypeParser<'a> {
 //       implemented.
 
 impl<'a> TypeParser<'a> {
-    pub fn parse(iter: &'a mut ParseTokenIter) -> CustomResult<TypeStruct> {
+    pub fn parse(iter: &'a mut ParseTokenIter) -> CustomResult<GenericableType> {
         let mut type_parser = Self { iter };
         type_parser.parse_type()
     }
@@ -31,15 +31,14 @@ impl<'a> TypeParser<'a> {
     ///   C                     Lang
     ///   uint32_t *(*x)[]      x: {[{u32}]}
     ///   char *x               x: {char}
-    fn parse_type(&mut self) -> CustomResult<TypeStruct> {
+    fn parse_type(&mut self) -> CustomResult<GenericableType> {
         if let Some(lex_token) = self.iter.next_skip_space() {
             match lex_token.kind {
                 // Ident.
                 LexTokenKind::Ident(ident) => {
                     let type_enum = Type::ident_to_type(&ident);
                     let generics = self.parse_type_generics()?;
-                    let inferred = false;
-                    Ok(TypeStruct::new(type_enum, generics, inferred))
+                    Ok(GenericableType::Type(type_enum, generics))
                 }
 
                 // Pointer.
@@ -60,7 +59,7 @@ impl<'a> TypeParser<'a> {
     /// Parses a list of types inside a generic "tag" (<..>).
     ///   X<T>      // Type with generic argument.
     ///   X<T, V>   // Type with multiple generic arguments.
-    fn parse_type_generics(&mut self) -> CustomResult<Option<Vec<TypeStruct>>> {
+    fn parse_type_generics(&mut self) -> CustomResult<Option<Vec<GenericableType>>> {
         // If the next token isn't a "PointyBracketBegin" there are no generic
         // list, just return None.
         if let Some(lex_token) = self.iter.next_skip_space() {
@@ -114,18 +113,18 @@ impl<'a> TypeParser<'a> {
 
     /// Parses a pointer type.
     ///   {X}       // Pointer to type (is the {X} syntax be weird/ambiguous?)
-    fn parse_type_pointer(&mut self) -> CustomResult<TypeStruct> {
+    fn parse_type_pointer(&mut self) -> CustomResult<GenericableType> {
         // The "CurlyBracketBegin" has already been skipped.
-        let mut type_struct = self.parse_type()?;
-
-        // Wrap the parsed type into the Pointer enum.
-        type_struct.ty = Type::Pointer(Box::new(type_struct.clone()));
+        // Parse the type and then wrap it into a Pointer type.
+        let gen_ty = self.parse_type()?;
+        let ptr_ty = Type::Pointer(Box::new(gen_ty));
+        let ptr_gen_ty = GenericableType::Type(ptr_ty, None);
 
         // At this point the token should be a "CurlyBracketEnd" since this is
         // the end of the pointer.
         if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Sym(Sym::CurlyBracketEnd) = lex_token.kind {
-                Ok(type_struct)
+                Ok(ptr_gen_ty)
             } else {
                 Err(self.iter.err(format!(
                     "Expected curlybrace at end of pointer type, got: {:?}.",
@@ -143,62 +142,60 @@ impl<'a> TypeParser<'a> {
     ///   [X]       // Array of type X with unknown size (slice).
     ///   [X: 3]    // Array of type X with size 3.
     ///   [X: _]    // Array of type X with infered size.
-    fn parse_type_array(&mut self) -> CustomResult<TypeStruct> {
+    fn parse_type_array(&mut self) -> CustomResult<GenericableType> {
         // The "SquareBracketBegin" has already been skipped.
-        let mut type_struct = self.parse_type()?;
+        let gen_ty = self.parse_type()?;
 
         // At this point the token can either be a "Colon" to indicate that this
         // array type has a size specificed or it can be a "SquareBracketEnd"
         // which indicates the end of this array.
-        if let Some(lex_token) = self.iter.next_skip_space() {
+        let size = if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Sym(Sym::SquareBracketEnd) = lex_token.kind {
-                // Wrap the inner type into the Array enum and set the size
-                // to None to indicate that it is unknown.
-                type_struct.ty = Type::Array(Box::new(type_struct.clone()), None);
-                Ok(type_struct)
+                None
             } else if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
                 if let Some(lex_tok) = self.iter.peek_skip_space() {
                     // If the symbol is a underscore, the size of the array
-                    // should be infered (currently the parse output doesn
+                    // should be infered (currently the parse output doesn't
                     // differ between this and just not having a size at all (?)).
                     if let LexTokenKind::Sym(Sym::UnderScore) = lex_tok.kind {
-                        type_struct.ty = Type::Array(Box::new(type_struct.clone()), None);
+                        None
                     } else {
-                        // Parse the next expression and assume it is the size of the
-                        // array. Wrap the inner type into the Array enum and set the
-                        // parsed expression as the size.
                         let stop_conds = [Sym::SquareBracketEnd];
-                        let size = Box::new(self.iter.parse_expr(&stop_conds)?);
-                        type_struct.ty = Type::Array(Box::new(type_struct.clone()), Some(size));
+                        Some(Box::new(self.iter.parse_expr(&stop_conds)?))
                     }
                 } else {
-                    unreachable!();
-                }
-
-                // The next token must be a "SquareBracketEnd" or something has
-                // gone wrong.
-                if let Some(next_lex_token) = self.iter.next_skip_space() {
-                    if let LexTokenKind::Sym(Sym::SquareBracketEnd) = next_lex_token.kind {
-                        Ok(type_struct)
-                    } else {
-                        Err(self.iter.err(format!(
-                            "Received invalid token in end of array type: {:?}.",
-                            next_lex_token
-                        )))
-                    }
-                } else {
-                    Err(self
-                        .iter
-                        .err("Received None at end of array type with size.".into()))
+                    return Err(self.iter.err(
+                        "Received None when looking at symbol after colon in array type.".into(),
+                    ));
                 }
             } else {
-                Err(self.iter.err(format!(
+                return Err(self.iter.err(format!(
                     "Received invalid token in array type: {:?}.",
                     lex_token
+                )));
+            }
+        } else {
+            return Err(self.iter.err("Received None at end of array type.".into()));
+        };
+
+        let array_ty = Type::Array(Box::new(gen_ty), size);
+        let array_gen_ty = GenericableType::Type(array_ty, None);
+
+        // The next token must be a "SquareBracketEnd" or something has
+        // gone wrong.
+        if let Some(next_lex_token) = self.iter.next_skip_space() {
+            if let LexTokenKind::Sym(Sym::SquareBracketEnd) = next_lex_token.kind {
+                Ok(array_gen_ty)
+            } else {
+                Err(self.iter.err(format!(
+                    "Received invalid token in end of array type: {:?}.",
+                    next_lex_token
                 )))
             }
         } else {
-            Err(self.iter.err("Received None at end of array type.".into()))
+            Err(self
+                .iter
+                .err("Received None at end of array type with size.".into()))
         }
     }
 }

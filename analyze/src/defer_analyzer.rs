@@ -1,10 +1,10 @@
 use crate::AnalyzeContext;
 use common::{
     error::LangError,
-    token::{expr::Expression, stmt::Statement},
+    token::{expr::Expr, stmt::Stmt},
     BlockId,
 };
-use parse::token::{ParseToken, ParseTokenKind};
+use parse::token::{AstToken, AstTokenKind};
 use std::collections::HashMap;
 
 pub struct DeferAnalyzer<'a> {
@@ -15,7 +15,7 @@ pub struct DeferAnalyzer<'a> {
     /// to this map continuously during codegen when the statement is seen. This
     /// means that all defer-statements for a specific block might not be in this
     /// map at a certain point during the codegen of this block.
-    pub defer_statements: HashMap<BlockId, Vec<Expression>>,
+    pub defer_statements: HashMap<BlockId, Vec<Expr>>,
 }
 
 impl<'a> DeferAnalyzer<'a> {
@@ -24,7 +24,7 @@ impl<'a> DeferAnalyzer<'a> {
     /// expression(s) should be executed.
     pub fn analyze(
         context: &'a mut AnalyzeContext,
-        ast_root: &mut ParseToken,
+        ast_root: &mut AstToken,
     ) -> Result<(), Vec<LangError>> {
         let mut defer_analyzer = DeferAnalyzer::new(context);
         defer_analyzer.analyze_block(ast_root);
@@ -44,25 +44,25 @@ impl<'a> DeferAnalyzer<'a> {
         }
     }
 
-    fn analyze_block(&mut self, token: &mut ParseToken) {
+    fn analyze_block(&mut self, token: &mut AstToken) {
         self.context.cur_line_nr = token.line_nr;
         self.context.cur_column_nr = token.column_nr;
 
         match &mut token.kind {
-            ParseTokenKind::Block(_, id, body) => {
+            AstTokenKind::Block(_, id, body) => {
                 let mut i = 0;
                 while let Some(token) = body.get_mut(i) {
                     self.context.cur_block_id = *id;
 
                     match &mut token.kind {
-                        ParseTokenKind::Block(..) => self.analyze_block(token),
-                        ParseTokenKind::Statement(stmt) => match stmt {
+                        AstTokenKind::Block(..) => self.analyze_block(token),
+                        AstTokenKind::Statement(stmt) => match stmt {
                             // If a defer statement is found, inser it into the
                             // `defer_statement` map. Since this is update
                             // continuously during this analyzing, all defers
                             // might not exists in the map when a "DefereExecution"
                             // is added (which is the expected behaviour).
-                            Statement::Defer(expr) => {
+                            Stmt::Defer(expr) => {
                                 if let Some(defer_vec) = self.defer_statements.get_mut(&id) {
                                     defer_vec.push(expr.clone());
                                 } else {
@@ -74,39 +74,39 @@ impl<'a> DeferAnalyzer<'a> {
 
                             // TODO: Only get all defers all the way up to the
                             //       function.
-                            Statement::Return(_) => {
+                            Stmt::Return(_) => {
                                 if let Some(defers) = self.get_all_defers(*id) {
                                     for expr in defers.iter() {
-                                        let kind = ParseTokenKind::Statement(
-                                            Statement::DeferExecution(expr.clone()),
+                                        let kind = AstTokenKind::Statement(
+                                            Stmt::DeferExecution(expr.clone()),
                                         );
-                                        body.insert(i, ParseToken::new(kind, 0, 0));
+                                        body.insert(i, AstToken::new(kind, 0, 0));
                                         i += 1;
                                     }
                                 }
                             }
 
-                            Statement::Yield(_) | Statement::Break | Statement::Continue => {
+                            Stmt::Yield(_) | Stmt::Break | Stmt::Continue => {
                                 if let Some(defers) = self.get_branchable_defers(*id) {
                                     for expr in defers.iter() {
-                                        let kind = ParseTokenKind::Statement(
-                                            Statement::DeferExecution(expr.clone()),
+                                        let kind = AstTokenKind::Statement(
+                                            Stmt::DeferExecution(expr.clone()),
                                         );
-                                        body.insert(i, ParseToken::new(kind, 0, 0));
+                                        body.insert(i, AstToken::new(kind, 0, 0));
                                         i += 1;
                                     }
                                 }
                             }
 
-                            Statement::Use(_)
-                            | Statement::Package(_)
-                            | Statement::DeferExecution(_)
-                            | Statement::Assignment(_, _, _)
-                            | Statement::VariableDecl(_, _)
-                            | Statement::ExternalDecl(_)
-                            | Statement::Modifier(_) => (),
+                            Stmt::Use(_)
+                            | Stmt::Package(_)
+                            | Stmt::DeferExecution(_)
+                            | Stmt::Assignment(_, _, _)
+                            | Stmt::VariableDecl(_, _)
+                            | Stmt::ExternalDecl(_)
+                            | Stmt::Modifier(_) => (),
                         },
-                        ParseTokenKind::Expression(_) | ParseTokenKind::EndOfFile => (),
+                        AstTokenKind::Expression(_) | AstTokenKind::EndOfFile => (),
                     }
 
                     i += 1;
@@ -124,19 +124,19 @@ impl<'a> DeferAnalyzer<'a> {
                     {
                         if let Some(defers) = self.get_block_defers(*id) {
                             for expr in defers.iter() {
-                                let kind = ParseTokenKind::Statement(Statement::DeferExecution(
+                                let kind = AstTokenKind::Statement(Stmt::DeferExecution(
                                     expr.clone(),
                                 ));
-                                body.push(ParseToken::new(kind, 0, 0));
+                                body.push(AstToken::new(kind, 0, 0));
                             }
                         }
                     }
                 }
             }
 
-            ParseTokenKind::Statement(_)
-            | ParseTokenKind::Expression(_)
-            | ParseTokenKind::EndOfFile => {
+            AstTokenKind::Statement(_)
+            | AstTokenKind::Expression(_)
+            | AstTokenKind::EndOfFile => {
                 self.errors.push(self.context.err(format!(
                     "Got unexpected token when expecting block during defer analyzing: {:?}",
                     token
@@ -146,7 +146,7 @@ impl<'a> DeferAnalyzer<'a> {
     }
 
     /// Given a block ID `id`, returns every deferred expression for this block.
-    fn get_block_defers(&mut self, id: BlockId) -> Option<Vec<Expression>> {
+    fn get_block_defers(&mut self, id: BlockId) -> Option<Vec<Expr>> {
         let mut defers = Vec::new();
         if let Some(cur_defers) = self.defer_statements.get(&id) {
             for defer in cur_defers.iter().rev() {
@@ -163,7 +163,7 @@ impl<'a> DeferAnalyzer<'a> {
 
     /// Given a block ID `id`, returns every deferred expression for this block
     /// AND all its parent blocks.
-    fn get_all_defers(&mut self, id: BlockId) -> Option<Vec<Expression>> {
+    fn get_all_defers(&mut self, id: BlockId) -> Option<Vec<Expr>> {
         let mut defers = Vec::new();
         let mut cur_id = id;
         while let Some(cur_block_info) = self.context.block_info.get(&cur_id) {
@@ -185,7 +185,7 @@ impl<'a> DeferAnalyzer<'a> {
     /// Given a block ID `id`, returns every deferred expression for this block
     /// and all parent blocks up to the first "branchable" block (ex. "while"
     /// and "for" blocks).
-    fn get_branchable_defers(&mut self, id: BlockId) -> Option<Vec<Expression>> {
+    fn get_branchable_defers(&mut self, id: BlockId) -> Option<Vec<Expr>> {
         let mut defers = Vec::new();
         let mut cur_id = id;
         while let Some(cur_block_info) = self.context.block_info.get(&cur_id) {

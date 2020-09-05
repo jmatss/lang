@@ -9,12 +9,12 @@ use common::{
     error::LangError,
     token::{
         block::BlockHeader,
-        expr::{AccessInstruction, Expression, FuncCall, RootVariable, StructInit},
+        expr::{AccessInstruction, Expr, FuncCall, RootVariable, StructInit},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
-        stmt::Statement,
+        stmt::Stmt,
     },
 };
-use parse::token::{ParseToken, ParseTokenKind};
+use parse::token::{AstToken, AstTokenKind};
 
 pub struct IndexingAnalyzer<'a> {
     context: &'a mut AnalyzeContext,
@@ -27,7 +27,7 @@ impl<'a> IndexingAnalyzer<'a> {
     /// struct indexing.
     pub fn analyze(
         context: &'a mut AnalyzeContext,
-        ast_root: &mut ParseToken,
+        ast_root: &mut AstToken,
     ) -> Result<(), Vec<LangError>> {
         let mut block_analyzer = IndexingAnalyzer::new(context);
         block_analyzer.analyze_indexing(ast_root);
@@ -47,12 +47,12 @@ impl<'a> IndexingAnalyzer<'a> {
         }
     }
 
-    fn analyze_indexing(&mut self, token: &mut ParseToken) {
+    fn analyze_indexing(&mut self, token: &mut AstToken) {
         self.context.cur_line_nr = token.line_nr;
         self.context.cur_column_nr = token.column_nr;
 
         match token.kind {
-            ParseTokenKind::Block(ref mut block_header, id, ref mut body) => {
+            AstTokenKind::Block(ref mut block_header, id, ref mut body) => {
                 self.context.cur_block_id = id;
 
                 match block_header {
@@ -82,53 +82,53 @@ impl<'a> IndexingAnalyzer<'a> {
                     self.analyze_indexing(token);
                 }
             }
-            ParseTokenKind::Statement(ref mut stmt) => self.analyze_stmt(stmt),
-            ParseTokenKind::Expression(ref mut expr) => self.analyze_expr(expr),
-            ParseTokenKind::EndOfFile => (),
+            AstTokenKind::Statement(ref mut stmt) => self.analyze_stmt(stmt),
+            AstTokenKind::Expression(ref mut expr) => self.analyze_expr(expr),
+            AstTokenKind::EndOfFile => (),
         }
     }
 
-    fn analyze_stmt(&mut self, stmt: &mut Statement) {
+    fn analyze_stmt(&mut self, stmt: &mut Stmt) {
         match stmt {
-            Statement::Yield(expr) => self.analyze_expr(expr),
-            Statement::Defer(expr) => self.analyze_expr(expr),
-            Statement::DeferExecution(expr) => self.analyze_expr(expr),
-            Statement::Assignment(_, lhs, rhs) => {
+            Stmt::Yield(expr) => self.analyze_expr(expr),
+            Stmt::Defer(expr) => self.analyze_expr(expr),
+            Stmt::DeferExecution(expr) => self.analyze_expr(expr),
+            Stmt::Assignment(_, lhs, rhs) => {
                 self.analyze_expr(lhs);
                 self.analyze_expr(rhs);
             }
-            Statement::Return(expr_opt) => {
+            Stmt::Return(expr_opt) => {
                 if let Some(expr) = expr_opt {
                     self.analyze_expr(expr);
                 }
             }
-            Statement::VariableDecl(_, expr_opt) => {
+            Stmt::VariableDecl(_, expr_opt) => {
                 if let Some(expr) = expr_opt {
                     self.analyze_expr(expr);
                 }
             }
 
-            Statement::Break
-            | Statement::Continue
-            | Statement::Use(_)
-            | Statement::Package(_)
-            | Statement::ExternalDecl(_)
-            | Statement::Modifier(_) => (),
+            Stmt::Break
+            | Stmt::Continue
+            | Stmt::Use(_)
+            | Stmt::Package(_)
+            | Stmt::ExternalDecl(_)
+            | Stmt::Modifier(_) => (),
         }
     }
 
-    fn analyze_expr(&mut self, expr: &mut Expression) {
+    fn analyze_expr(&mut self, expr: &mut Expr) {
         match expr {
-            Expression::FuncCall(func_call) => self.analyze_func_call(func_call),
-            Expression::StructInit(struct_init) => self.analyze_struct_init(struct_init),
-            Expression::ArrayInit(args, _) => {
+            Expr::FuncCall(func_call) => self.analyze_func_call(func_call),
+            Expr::StructInit(struct_init) => self.analyze_struct_init(struct_init),
+            Expr::ArrayInit(args, _) => {
                 for arg in args {
                     self.analyze_expr(&mut arg.value);
                 }
             }
-            Expression::Op(op) => self.analyze_op(op),
+            Expr::Op(op) => self.analyze_op(op),
 
-            Expression::Lit(..) | Expression::Type(_) | Expression::Var(_) => (),
+            Expr::Lit(..) | Expr::Type(_) | Expr::Var(_) => (),
         }
     }
 

@@ -2,34 +2,34 @@ use crate::generator::CodeGen;
 use common::{
     error::CustomResult,
     token::{
-        expr::{AccessType, Expression},
+        expr::{AccessType, Expr},
         op::AssignOperator,
-        stmt::{Modifier, Path, Statement},
+        stmt::{Modifier, Path, Stmt},
     },
-    variable_type::{Type, TypeStruct},
+    types::{Type, TypeStruct},
 };
 use inkwell::{module::Linkage, types::AnyTypeEnum, values::InstructionValue};
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    pub(super) fn compile_stmt(&mut self, stmt: &mut Statement) -> CustomResult<()> {
+    pub(super) fn compile_stmt(&mut self, stmt: &mut Stmt) -> CustomResult<()> {
         match stmt {
-            Statement::Return(expr_opt) => self.compile_return(expr_opt),
-            Statement::Yield(expr) => self.compile_yield(expr),
-            Statement::Break => self.compile_break(),
-            Statement::Continue => self.compile_continue(),
-            Statement::Use(path) => self.compile_use(path),
-            Statement::Package(path) => self.compile_package(path),
-            Statement::Modifier(modifier) => self.compile_modifier(modifier),
+            Stmt::Return(expr_opt) => self.compile_return(expr_opt),
+            Stmt::Yield(expr) => self.compile_yield(expr),
+            Stmt::Break => self.compile_break(),
+            Stmt::Continue => self.compile_continue(),
+            Stmt::Use(path) => self.compile_use(path),
+            Stmt::Package(path) => self.compile_package(path),
+            Stmt::Modifier(modifier) => self.compile_modifier(modifier),
 
             // Only the "DeferExecution" are compiled into code, the "Defer" is
             // only used during analyzing.
-            Statement::Defer(_) => Ok(()),
-            Statement::DeferExecution(expr) => {
+            Stmt::Defer(_) => Ok(()),
+            Stmt::DeferExecution(expr) => {
                 self.compile_expr(expr)?;
                 Ok(())
             }
 
-            Statement::VariableDecl(var, expr_opt) => {
+            Stmt::VariableDecl(var, expr_opt) => {
                 self.compile_var_decl(var)?;
                 if let Some(expr) = expr_opt {
                     let any_value = self.compile_expr(expr)?;
@@ -45,19 +45,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Ok(())
             }
             // TODO: Add other external declares other than func (var, struct etc.)
-            Statement::ExternalDecl(func) => {
+            Stmt::ExternalDecl(func) => {
                 let linkage = Linkage::External;
                 self.compile_func_proto(func, Some(linkage))?;
                 Ok(())
             }
-            Statement::Assignment(assign_op, lhs, rhs) => {
+            Stmt::Assignment(assign_op, lhs, rhs) => {
                 self.compile_assign(assign_op, lhs, rhs)?;
                 Ok(())
             }
         }
     }
 
-    fn compile_return(&mut self, expr_opt: &mut Option<Expression>) -> CustomResult<()> {
+    fn compile_return(&mut self, expr_opt: &mut Option<Expr>) -> CustomResult<()> {
         if let Some(expr) = expr_opt {
             let any_value = self.compile_expr(expr)?;
             let basic_value = CodeGen::any_into_basic_value(any_value)?;
@@ -68,7 +68,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    fn compile_yield(&mut self, expr: &Expression) -> CustomResult<()> {
+    fn compile_yield(&mut self, expr: &Expr) -> CustomResult<()> {
         Err(self.err("TODO: Implement \"yield\" statement.".into()))
     }
 
@@ -104,8 +104,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_assign(
         &mut self,
         assign_op: &AssignOperator,
-        lhs: &mut Expression,
-        rhs: &mut Expression,
+        lhs: &mut Expr,
+        rhs: &mut Expr,
     ) -> CustomResult<InstructionValue<'ctx>> {
         let access_type = if let Some(access_type) = lhs.get_access_type() {
             access_type

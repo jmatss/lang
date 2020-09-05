@@ -1,18 +1,17 @@
 use crate::{
-    expr_parser::ExprParser,
-    keyword_parser::KeyworkParser,
-    token::{ParseToken, ParseTokenKind},
+    expr_parser::ExprParser, keyword_parser::KeyworkParser, token::get_if_stmt_op,
     type_parser::TypeParser,
 };
 use common::{
     error::{CustomResult, LangError, LangErrorKind::ParseError},
     iter::TokenIter,
     token::{
+        ast::AstToken,
         block::BlockHeader,
-        expr::{Argument, Expression, Var},
-        stmt::{Path, Statement},
+        expr::{Argument, Expr, Var},
+        stmt::{Path, Stmt},
     },
-    variable_type::TypeStruct,
+    types::GenericableType,
     BlockId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
@@ -70,7 +69,7 @@ pub struct ParseTokenIter {
     pub uses: Vec<Path>,
 
     /// Contains the blocks that are children of the "root" block.
-    pub root_block_body: Vec<ParseToken>,
+    pub root_block_body: Vec<AstToken>,
     pub root_block_id: BlockId,
 }
 
@@ -99,14 +98,13 @@ impl ParseTokenIter {
         self.iter = TokenIter::new(lex_tokens);
     }
 
-    pub fn take_root_block(&mut self) -> ParseToken {
+    pub fn take_root_block(&mut self) -> AstToken {
         let header = BlockHeader::Default;
-        let kind = ParseTokenKind::Block(
+        AstToken::Block(
             header,
             self.root_block_id,
             std::mem::take(&mut self.root_block_body),
-        );
-        ParseToken::new(kind, 0, 0)
+        )
     }
 
     pub fn parse(&mut self) -> Result<(), Vec<LangError>> {
@@ -121,9 +119,9 @@ impl ParseTokenIter {
         loop {
             match self.next_token() {
                 Ok(parse_token) => {
-                    match parse_token.kind {
-                        ParseTokenKind::EndOfFile => break,
-                        ParseTokenKind::Statement(Statement::Use(ref path)) => {
+                    match parse_token {
+                        AstToken::EOF => break,
+                        AstToken::Stmt(Stmt::Use(ref path)) => {
                             self.uses.push(path.clone());
                         }
                         _ => (),
@@ -155,7 +153,7 @@ impl ParseTokenIter {
     }
 
     /// Returns the next ParseToken from the iterator.
-    pub fn next_token(&mut self) -> CustomResult<ParseToken> {
+    pub fn next_token(&mut self) -> CustomResult<AstToken> {
         if let Some(lex_token) = self.iter.next() {
             // TODO: Clean up this mess with a mix of ParseToken/ParseTokenKind
             //       (some arms returns ParseTokens, others cascades ParseTokenKinds).
@@ -171,7 +169,7 @@ impl ParseTokenIter {
                 return self.next_token();
             }
 
-            let kind = match lex_token.kind {
+            Ok(match lex_token.kind {
                 LexTokenKind::Kw(keyword) => {
                     return self.parse_keyword(keyword, lex_token.line_nr, lex_token.column_nr);
                 }
@@ -200,18 +198,18 @@ impl ParseTokenIter {
                     // If the next token after the expr is a assign operator,
                     // this is a assignment. Otherwise, this is just a "regular" expr.
                     if let Some(next) = self.peek_skip_space() {
-                        if let Some(assign_op) = ParseToken::get_if_stmt_op(&next) {
+                        if let Some(assign_op) = get_if_stmt_op(&next) {
                             self.next_skip_space(); // Consume the assign op.
                             let rhs = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                            let stmt = Statement::Assignment(assign_op, expr, rhs);
-                            ParseTokenKind::Statement(stmt)
+                            let stmt = Stmt::Assignment(assign_op, expr, rhs);
+                            AstToken::Stmt(stmt)
                         } else {
-                            ParseTokenKind::Expression(expr)
+                            AstToken::Expr(expr)
                         }
                     } else {
                         // If there are no more tokens after this expr has been
                         // parsed, there can be no rhs, this is NOT a assignment.
-                        ParseTokenKind::Expression(expr)
+                        AstToken::Expr(expr)
                     }
                 }
 
@@ -244,22 +242,19 @@ impl ParseTokenIter {
                     // everything together as an expression.
                     self.rewind()?;
                     let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                    ParseTokenKind::Expression(expr)
+                    AstToken::Expr(expr)
                 }
 
-                LexTokenKind::EOF => ParseTokenKind::EndOfFile,
-            };
-
-            Ok(ParseToken::new(kind, self.cur_line_nr, self.cur_column_nr))
+                LexTokenKind::EOF => AstToken::EOF,
+            })
         } else {
-            let kind = ParseTokenKind::EndOfFile;
-            Ok(ParseToken::new(kind, 0, 0))
+            Ok(AstToken::EOF)
         }
     }
 
     /// Returns the next block containing all its ParseTokens. A block is always
     /// started withh "CurlyBracketBegin" and ended with "CurlyBracketEnd".
-    pub fn next_block(&mut self, header: BlockHeader) -> CustomResult<ParseToken> {
+    pub fn next_block(&mut self, header: BlockHeader) -> CustomResult<AstToken> {
         let mut block_tokens = Vec::new();
         let block_id = self.reserve_block_id();
         let line_nr: u64;
@@ -294,11 +289,7 @@ impl ParseTokenIter {
             block_tokens.push(token);
         }
 
-        Ok(ParseToken {
-            kind: ParseTokenKind::Block(header, block_id, block_tokens),
-            line_nr,
-            column_nr,
-        })
+        Ok(AstToken::Block(header, block_id, block_tokens))
     }
 
     pub fn parse_keyword(
@@ -306,15 +297,15 @@ impl ParseTokenIter {
         keyword: Kw,
         line_nr: u64,
         column_nr: u64,
-    ) -> CustomResult<ParseToken> {
+    ) -> CustomResult<AstToken> {
         KeyworkParser::parse(self, keyword, line_nr, column_nr)
     }
 
-    pub fn parse_expr(&mut self, stop_conds: &[Sym]) -> CustomResult<Expression> {
+    pub fn parse_expr(&mut self, stop_conds: &[Sym]) -> CustomResult<Expr> {
         ExprParser::parse(self, stop_conds)
     }
 
-    pub fn parse_type(&mut self) -> CustomResult<TypeStruct> {
+    pub fn parse_type(&mut self) -> CustomResult<GenericableType> {
         TypeParser::parse(self)
     }
 
@@ -560,7 +551,7 @@ impl ParseTokenIter {
     }
 
     /// Parses a type including the starting colon.
-    fn parse_colon_type(&mut self) -> CustomResult<TypeStruct> {
+    fn parse_colon_type(&mut self) -> CustomResult<GenericableType> {
         if let Some(lex_token) = self.next_skip_space() {
             if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
                 self.parse_type()

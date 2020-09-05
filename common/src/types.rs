@@ -1,38 +1,28 @@
-// TODO: Make Int & Uint unbounded? But then what about pointer sized int?
+use crate::token::expr::Expr;
 
-use crate::token::expr::Expression;
-
+/// A type that can contain generics. All types can contain generics.
 #[derive(Debug, Clone, PartialEq)]
-pub struct TypeStruct {
-    // None == void
-    pub ty: Type,
-    pub generics: Option<Vec<TypeStruct>>,
-    pub is_inferred: bool,
-}
+pub enum GenericableType {
+    /// The first Type is the actual type. The second vector of GenericableType
+    /// will be set if this type contains generics.
+    Type(Type, Option<Vec<GenericableType>>),
 
-impl TypeStruct {
-    pub fn new(t: Type, generics: Option<Vec<TypeStruct>>, is_inferred: bool) -> Self {
-        TypeStruct {
-            ty: t,
-            generics,
-            is_inferred,
-        }
-    }
+    /// A type that is to be inferred. This is used during the type inference
+    /// stage. Every expr must have a type, so this is used for expr that doesn't
+    /// have a known type. The int will be a unique number.
+    Unknown(u32),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    Pointer(Box<TypeStruct>),
+    Pointer(Box<GenericableType>),
     // The Option in the "Array" enum indicates the size. If it is None, assume
     // size is unknown (probably slice).
-    Array(Box<TypeStruct>, Option<Box<Expression>>),
+    Array(Box<GenericableType>, Option<Box<Expr>>),
     Void,
     Character,
     String, // TODO: String type (?)
     Boolean,
-    Int,
-    Uint,
-    Float,
     I8,
     U8,
     I16,
@@ -55,9 +45,6 @@ impl Type {
             "char" => Type::Character,
             "String" => Type::String,
             "bool" => Type::Boolean,
-            "int" => Type::Int,
-            "uint" => Type::Uint,
-            "float" => Type::Float,
             "i8" => Type::I8,
             "u8" => Type::U8,
             "i16" => Type::I16,
@@ -76,9 +63,7 @@ impl Type {
 
     pub fn is_int(&self) -> bool {
         match self {
-            Type::Int
-            | Type::Uint
-            | Type::I8
+            Type::I8
             | Type::U8
             | Type::I16
             | Type::U16
@@ -94,7 +79,7 @@ impl Type {
 
     pub fn is_float(&self) -> bool {
         match self {
-            Type::Float | Type::F32 | Type::F64 => true,
+            Type::F32 | Type::F64 => true,
             _ => false,
         }
     }

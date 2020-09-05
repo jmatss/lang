@@ -1,11 +1,11 @@
 use crate::{
     parser::ParseTokenIter,
-    token::{Fix, Operator, Output, ParseToken},
+    token::{get_if_expr_op, Fix, Operator, Output},
 };
 use common::{
     error::CustomResult,
     token::{
-        expr::{Expression, FuncCall, StructInit},
+        expr::{Expr, FuncCall, StructInit},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
 };
@@ -49,10 +49,7 @@ pub struct ExprParser<'a> {
 }
 
 impl<'a> ExprParser<'a> {
-    pub fn parse(
-        iter: &'a mut ParseTokenIter,
-        stop_conds: &'a [Sym],
-    ) -> CustomResult<Expression> {
+    pub fn parse(iter: &'a mut ParseTokenIter, stop_conds: &'a [Sym]) -> CustomResult<Expr> {
         let mut expr_parser = Self {
             iter,
             token_count: 0,
@@ -110,7 +107,7 @@ impl<'a> ExprParser<'a> {
                 }
 
                 LexTokenKind::Lit(lit) => {
-                    let expr = Expression::Lit(lit, None);
+                    let expr = Expr::Lit(lit, None);
                     self.shunt_operand(expr)?;
                 }
 
@@ -137,7 +134,7 @@ impl<'a> ExprParser<'a> {
                     let end_symbol = Sym::SquareBracketEnd;
                     let args = self.iter.parse_arg_list(start_symbol, end_symbol)?;
 
-                    let expr = Expression::ArrayInit(args, None);
+                    let expr = Expr::ArrayInit(args, None);
                     self.shunt_operand(expr)?;
                 }
 
@@ -145,9 +142,9 @@ impl<'a> ExprParser<'a> {
                 LexTokenKind::Sym(symbol @ Sym::Is)
                 | LexTokenKind::Sym(symbol @ Sym::As)
                 | LexTokenKind::Sym(symbol @ Sym::Of) => {
-                    if let Some(op) = ParseToken::get_if_expr_op(&symbol) {
+                    if let Some(op) = get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
-                        let expr = Expression::Type(self.iter.parse_type()?);
+                        let expr = Expr::Type(self.iter.parse_type()?);
 
                         self.shunt_operand(expr)?;
                     } else {
@@ -159,7 +156,7 @@ impl<'a> ExprParser<'a> {
                 }
 
                 LexTokenKind::Sym(symbol) => {
-                    if let Some(op) = ParseToken::get_if_expr_op(&symbol) {
+                    if let Some(op) = get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
                     } else {
                         return Err(self.iter.err(format!(
@@ -187,7 +184,7 @@ impl<'a> ExprParser<'a> {
     }
 
     /// Adds a operand into the "shunting".
-    fn shunt_operand(&mut self, expr: Expression) -> CustomResult<()> {
+    fn shunt_operand(&mut self, expr: Expr) -> CustomResult<()> {
         if !self.prev_was_operand {
             self.outputs.push(Output::Operand(expr));
             self.prev_was_operand = true;
@@ -313,7 +310,7 @@ impl<'a> ExprParser<'a> {
 
     // TODO: Should empty expression be allowed?
     /// Converts the given "outputs" in reverse polsih notation to an expression.
-    fn rev_polish_to_expr(&mut self) -> CustomResult<Expression> {
+    fn rev_polish_to_expr(&mut self) -> CustomResult<Expr> {
         let mut expr_stack = Vec::new();
 
         for output in std::mem::take(&mut self.outputs) {
@@ -325,7 +322,7 @@ impl<'a> ExprParser<'a> {
                 Output::Operator(Operator::UnaryOperator(un_op)) => {
                     if let Some(expr) = expr_stack.pop() {
                         let op = UnOp::new(un_op, Box::new(expr));
-                        expr_stack.push(Expression::Op(Op::UnOp(op)));
+                        expr_stack.push(Expr::Op(Op::UnOp(op)));
                     } else {
                         return Err(self
                             .iter
@@ -337,7 +334,7 @@ impl<'a> ExprParser<'a> {
                     if let Some(right) = expr_stack.pop() {
                         if let Some(left) = expr_stack.pop() {
                             let op = BinOp::new(bin_op, Box::new(left), Box::new(right));
-                            expr_stack.push(Expression::Op(Op::BinOp(op)));
+                            expr_stack.push(Expr::Op(Op::BinOp(op)));
                         } else {
                             return Err(self.iter.err(
                                 "Empty expr in expr_stack when popping (binary left).".into(),
@@ -372,7 +369,7 @@ impl<'a> ExprParser<'a> {
     }
 
     // TODO: Seems like this gives incorrect column when parsed in some way.
-    fn parse_expr_ident(&mut self, ident: &str) -> CustomResult<Expression> {
+    fn parse_expr_ident(&mut self, ident: &str) -> CustomResult<Expr> {
         // TODO: The peek doesn't skip line break, so can't ex. do a struct
         //       init with a line break at the start.
         // The identifier will be either a function call or a reference to
@@ -385,7 +382,7 @@ impl<'a> ExprParser<'a> {
                     let end_symbol = Sym::ParenthesisEnd;
                     let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
                     let func_call = FuncCall::new(ident.into(), arguments);
-                    Ok(Expression::FuncCall(func_call))
+                    Ok(Expr::FuncCall(func_call))
                 }
 
                 // Struct construction.
@@ -394,7 +391,7 @@ impl<'a> ExprParser<'a> {
                     let end_symbol = Sym::CurlyBracketEnd;
                     let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
                     let struct_init = StructInit::new(ident.into(), arguments);
-                    Ok(Expression::StructInit(struct_init))
+                    Ok(Expr::StructInit(struct_init))
                 }
 
                 _ => {
@@ -410,20 +407,20 @@ impl<'a> ExprParser<'a> {
                                 // identifier and parse as type.
                                 self.iter.rewind()?;
                                 let ty = self.iter.parse_type()?;
-                                return Ok(Expression::Type(ty));
+                                return Ok(Expr::Type(ty));
                             }
                             _ => (),
                         }
                     }
 
                     let var = self.iter.parse_var_type(ident)?;
-                    Ok(Expression::Var(var))
+                    Ok(Expr::Var(var))
                 }
             }
         } else {
             // TODO: Merge with logic above, same stuff.
             let var = self.iter.parse_var_type(ident)?;
-            Ok(Expression::Var(var))
+            Ok(Expr::Var(var))
         }
     }
 }

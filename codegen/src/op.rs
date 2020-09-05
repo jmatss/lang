@@ -5,7 +5,7 @@ use crate::generator::CodeGen;
 use common::{
     error::CustomResult,
     token::{
-        expr::{Expression, Var},
+        expr::{Expr, Var},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
 };
@@ -857,7 +857,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
         left: BasicValueEnum<'ctx>,
-        right_expr: &mut Expression,
+        right_expr: &mut Expr,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         // TODO: Const.
         Ok(match ret_type {
@@ -924,7 +924,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
         left: BasicValueEnum<'ctx>,
-        right_expr: &mut Expression,
+        right_expr: &mut Expr,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         // TODO: Const.
         Ok(match ret_type {
@@ -1061,7 +1061,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
-    fn compile_un_op_deref(&mut self, value: &mut Expression) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_un_op_deref(&mut self, value: &mut Expr) -> CustomResult<AnyValueEnum<'ctx>> {
         if let Some(var) = value.eval_to_var() {
             Ok(self.compile_var_load(var)?.into())
         } else {
