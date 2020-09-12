@@ -26,6 +26,7 @@ pub enum LangErrorKind {
     AnalyzeError { line_nr: u64, column_nr: u64 },
     CodeGenError { line_nr: u64, column_nr: u64 },
     CompileError,
+    TraversalError,
 }
 
 impl LangError {

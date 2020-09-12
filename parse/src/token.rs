@@ -1,7 +1,6 @@
 use common::{
     error::{CustomResult, LangError, LangErrorKind::ParseError},
     token::{
-        ast::AstToken,
         expr::Expr,
         op::{AssignOperator, BinOperator, UnOperator},
     },
@@ -62,7 +61,6 @@ pub fn get_if_expr_op(symbol: &lex::token::Sym) -> Option<Operator> {
         lex::token::Sym::Multiplication => Operator::BinaryOperator(BinOperator::Multiplication),
         lex::token::Sym::Division => Operator::BinaryOperator(BinOperator::Division),
         lex::token::Sym::Modulus => Operator::BinaryOperator(BinOperator::Modulus),
-        lex::token::Sym::Power => Operator::BinaryOperator(BinOperator::Power),
 
         lex::token::Sym::BitAnd => Operator::BinaryOperator(BinOperator::BitAnd),
         lex::token::Sym::BitOr => Operator::BinaryOperator(BinOperator::BitOr),
@@ -95,17 +93,16 @@ pub fn get_if_stmt_op(lex_token: &lex::token::LexToken) -> Option<AssignOperator
     if let lex::token::LexTokenKind::Sym(ref symbol) = lex_token.kind {
         Some(match symbol {
             lex::token::Sym::Equals => AssignOperator::Assignment,
-            lex::token::Sym::AssignAddition => AssignOperator::AssignAddition,
-            lex::token::Sym::AssignSubtraction => AssignOperator::AssignSubtraction,
-            lex::token::Sym::AssignMultiplication => AssignOperator::AssignMultiplication,
-            lex::token::Sym::AssignDivision => AssignOperator::AssignDivision,
-            lex::token::Sym::AssignModulus => AssignOperator::AssignModulus,
-            lex::token::Sym::AssignPower => AssignOperator::AssignPower,
+            lex::token::Sym::AssignAddition => AssignOperator::AssignAdd,
+            lex::token::Sym::AssignSubtraction => AssignOperator::AssignSub,
+            lex::token::Sym::AssignMultiplication => AssignOperator::AssignMul,
+            lex::token::Sym::AssignDivision => AssignOperator::AssignDiv,
+            lex::token::Sym::AssignModulus => AssignOperator::AssignMod,
             lex::token::Sym::AssignBitAnd => AssignOperator::AssignBitAnd,
             lex::token::Sym::AssignBitOr => AssignOperator::AssignBitOr,
             lex::token::Sym::AssignBitXor => AssignOperator::AssignBitXor,
-            lex::token::Sym::AssignShiftLeft => AssignOperator::AssignShiftLeft,
-            lex::token::Sym::AssignShiftRight => AssignOperator::AssignShiftRight,
+            lex::token::Sym::AssignShiftLeft => AssignOperator::AssignShl,
+            lex::token::Sym::AssignShiftRight => AssignOperator::AssignShr,
 
             _ => return None,
         })
@@ -165,29 +162,28 @@ impl Operator {
     /*
         Precedence:
             0   ( )          (precedence for parenthesis always highest)
-            1   . .* .& .[]  (function calls, deref, address, indexing etc.)
+            1   . .* .& .[]  (func/method calls, deref, address, indexing etc.)
             2   +x -x
             3   x++ x--      (only postfix)
             4   ~
             5   as
-            6   **           (power)
-            7   * / %
-            8   + -
-            9   << >>
-            10  < > <= >= is of
-            11  == !=
-            12  &
-            13  ^
-            14  |
-            15  not          (!)
-            16  and          (bool)
-            17  or           (bool)
-            18  .. ..=
-            19  in
+            6   * / %
+            7   + -
+            8   << >>
+            9   < > <= >= is of
+            10  == !=
+            11  &
+            12  ^
+            13  |
+            14  not          (!)
+            15  and          (bool)
+            16  or           (bool)
+            17  .. ..=
+            18  in
 
             (Currently assignments aren't counted as expression, but they would
             have the lowest precedence if they were)
-            20  = += -= *= /= %= **= &= |= ^= <<= >>=
+            19  = += -= *= /= %= **= &= |= ^= <<= >>=
     */
     fn lookup(&self) -> Option<(bool, usize, Fix)> {
         if let Operator::ParenthesisBegin = self {
@@ -202,45 +198,43 @@ impl Operator {
                 UnOperator::Decrement => (true, 3, Fix::Postfix),
 
                 UnOperator::BitComplement => (true, 4, Fix::Prefix),
-                UnOperator::BoolNot => (true, 15, Fix::Prefix),
+                UnOperator::BoolNot => (true, 14, Fix::Prefix),
                 UnOperator::Deref => (true, 1, Fix::Postfix),
                 UnOperator::Address => (true, 1, Fix::Postfix),
                 UnOperator::ArrayAccess(_) => (true, 1, Fix::Postfix),
+                UnOperator::StructAccess(..) => (true, 1, Fix::Postfix),
             })
         } else if let Operator::BinaryOperator(binary_op) = self {
             Some(match binary_op {
-                BinOperator::In => (false, 19, Fix::Dummy),
-                BinOperator::Is => (true, 10, Fix::Dummy),
+                BinOperator::In => (false, 18, Fix::Dummy),
+                BinOperator::Is => (true, 9, Fix::Dummy),
                 BinOperator::As => (true, 5, Fix::Dummy),
-                BinOperator::Of => (true, 10, Fix::Dummy),
-                BinOperator::Range => (true, 18, Fix::Dummy),
-                BinOperator::RangeInclusive => (true, 18, Fix::Dummy),
+                BinOperator::Of => (true, 9, Fix::Dummy),
+                BinOperator::Range => (true, 17, Fix::Dummy),
+                BinOperator::RangeInclusive => (true, 17, Fix::Dummy),
                 BinOperator::Dot => (true, 1, Fix::Dummy),
 
-                BinOperator::Equals => (true, 11, Fix::Dummy),
-                BinOperator::NotEquals => (true, 11, Fix::Dummy),
-                BinOperator::LessThan => (true, 10, Fix::Dummy),
-                BinOperator::GreaterThan => (true, 10, Fix::Dummy),
-                BinOperator::LessThanOrEquals => (true, 10, Fix::Dummy),
-                BinOperator::GreaterThanOrEquals => (true, 10, Fix::Dummy),
+                BinOperator::Equals => (true, 10, Fix::Dummy),
+                BinOperator::NotEquals => (true, 10, Fix::Dummy),
+                BinOperator::LessThan => (true, 9, Fix::Dummy),
+                BinOperator::GreaterThan => (true, 9, Fix::Dummy),
+                BinOperator::LessThanOrEquals => (true, 9, Fix::Dummy),
+                BinOperator::GreaterThanOrEquals => (true, 9, Fix::Dummy),
 
-                BinOperator::Addition => (true, 8, Fix::Dummy),
-                BinOperator::Subtraction => (true, 8, Fix::Dummy),
-                BinOperator::Multiplication => (true, 7, Fix::Dummy),
-                BinOperator::Division => (true, 7, Fix::Dummy),
-                BinOperator::Modulus => (true, 7, Fix::Dummy),
-                BinOperator::Power => (false, 6, Fix::Dummy),
+                BinOperator::Addition => (true, 7, Fix::Dummy),
+                BinOperator::Subtraction => (true, 7, Fix::Dummy),
+                BinOperator::Multiplication => (true, 6, Fix::Dummy),
+                BinOperator::Division => (true, 6, Fix::Dummy),
+                BinOperator::Modulus => (true, 6, Fix::Dummy),
 
-                BinOperator::BitAnd => (true, 12, Fix::Dummy),
-                BinOperator::BitOr => (true, 14, Fix::Dummy),
-                BinOperator::BitXor => (true, 13, Fix::Dummy),
-                BinOperator::ShiftLeft => (true, 9, Fix::Dummy),
-                BinOperator::ShiftRight => (true, 9, Fix::Dummy),
+                BinOperator::BitAnd => (true, 11, Fix::Dummy),
+                BinOperator::BitOr => (true, 13, Fix::Dummy),
+                BinOperator::BitXor => (true, 12, Fix::Dummy),
+                BinOperator::ShiftLeft => (true, 8, Fix::Dummy),
+                BinOperator::ShiftRight => (true, 8, Fix::Dummy),
 
-                BinOperator::BoolAnd => (true, 16, Fix::Dummy),
-                BinOperator::BoolOr => (true, 17, Fix::Dummy),
-
-                _ => return None,
+                BinOperator::BoolAnd => (true, 15, Fix::Dummy),
+                BinOperator::BoolOr => (true, 16, Fix::Dummy),
             })
         } else {
             None

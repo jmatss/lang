@@ -2,10 +2,10 @@ use crate::generator::CodeGen;
 use common::{
     error::CustomResult,
     token::{
-        expr::{Argument, Expr, FuncCall, StructInit},
+        expr::{ArrayInit, Expr, FuncCall, StructInit},
         lit::Lit,
     },
-    types::{Type, TypeStruct},
+    types::Type,
 };
 use inkwell::{
     types::{AnyTypeEnum, BasicTypeEnum},
@@ -13,30 +13,48 @@ use inkwell::{
     AddressSpace,
 };
 
+#[derive(Debug, Copy, Clone)]
+pub enum ExprTy {
+    LValue,
+    RValue,
+}
+
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    /// Compiles a expression. If this expression is a regular rvalue expression,
+    /// it should be evaluated to a "value". If this expression is a lvalue,
+    /// the "last" recurisve call to this function should return a pointer to
+    /// the value so that the rhs can be assigned to it.
+    ///
+    /// Example:
+    /// ```
+    /// var x = 3
+    /// var y = 5
+    /// x.* = y.*
+    /// ```
+    /// In this example the rvalue "y.*" needs to be evaulated to the literal 5
+    /// so that it can be assigned to the lhs. The lvalue should be evalutaed
+    /// to a pointer to the x memory which will be assined the new value, it
+    /// should NOT be evaluated to the literal 3.  
     pub(super) fn compile_expr(
         &mut self,
         expr: &mut Expr,
+        expr_ty: ExprTy,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        match expr {
+        let any_value = match expr {
             Expr::Lit(lit, ty_opt) => self.compile_lit(lit, ty_opt),
-            Expr::Var(var) => {
-                // TODO: Will this always be regular?
-                Ok(self.compile_var_load(var)?.into())
-            }
             Expr::FuncCall(func_call) => {
-                // There will be no difference compiling a function call and a
-                // method call. The method call will during the analyzing have
-                // been given a new name containing the "struct_name/..." and
-                // the func name to make it uniqe. "this" will always have been
-                // inserted as the first argument.
+                // Since this is a method call, the function will have been renamed
+                // so that its name is unique for the struct instead of unqiue
+                // for the whole program. Rename this method call to the same
+                // name as the method.
+                if let Some(struct_name) = &func_call.method_struct {
+                    func_call.name = common::util::to_method_name(struct_name, &func_call.name)
+                }
                 self.compile_func_call(func_call)
             }
-            Expr::Op(op) => self.compile_op(op),
+            Expr::Op(op) => self.compile_op(op, expr_ty),
             Expr::StructInit(struct_init) => self.compile_struct_init(struct_init),
-            Expr::ArrayInit(args, type_struct_opt) => {
-                self.compile_array_init(args, type_struct_opt)
-            }
+            Expr::ArrayInit(array_init) => self.compile_array_init(array_init),
             Expr::Type(ty) => {
                 // TODO: Does something need to be done here? Does a proper value
                 //       need to be returned? For now just return a dummy value.
@@ -51,13 +69,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     AnyTypeEnum::VoidType(ty) => panic!("TODO: compile_exr void type?"),
                 })
             }
-        }
+            Expr::Var(var) => match expr_ty {
+                ExprTy::LValue => self.get_var_ptr(var).map(|x| x.into()),
+                ExprTy::RValue => self.compile_var_load(var).map(|x| x.into()),
+            },
+        }?;
+
+        self.prev_expr = Some(any_value);
+        Ok(any_value)
     }
 
-    fn compile_lit(
+    pub fn compile_lit(
         &mut self,
         lit: &Lit,
-        ty_opt: &Option<TypeStruct>,
+        ty_opt: &Option<Type>,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         match lit {
             Lit::String(str_lit) => {
@@ -114,13 +139,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_lit_int(
         &mut self,
         lit: &str,
-        ty_opt: &Option<TypeStruct>,
+        gen_ty_opt: &Option<Type>,
         radix: u32,
     ) -> CustomResult<IntValue<'ctx>> {
         // TODO: Where should the integer literal conversion be made?
 
-        Ok(match ty_opt {
-            Some(type_struct) => match type_struct.ty {
+        Ok(match gen_ty_opt {
+            Some(ty) => match ty {
                 Type::I8 => {
                     let val = i8::from_str_radix(lit, radix)? as u64;
                     self.context.i8_type().const_int(val, true)
@@ -161,21 +186,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let val = u128::from_str_radix(lit, radix)? as u64;
                     self.context.i128_type().const_int(val, false)
                 }
-                // TODO: What should the default inte size be?
-                Type::Int => {
-                    let val = i32::from_str_radix(lit, radix)? as u64;
-                    self.context.i32_type().const_int(val, true)
-                }
-                Type::Uint => {
-                    let val = u32::from_str_radix(lit, radix)? as u64;
-                    self.context.i32_type().const_int(val, false)
-                }
-                _ => {
-                    return Err(self.err(format!(
-                        "Invalid literal integer type: {:?}",
-                        type_struct.ty
-                    )))
-                }
+                _ => return Err(self.err(format!("Invalid literal integer type: {:?}", ty))),
             },
             // TODO: What should the default int size be? Signed 32 atm.
             None => {
@@ -190,19 +201,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_lit_float(
         &mut self,
         lit: &str,
-        ty_opt: &Option<TypeStruct>,
+        gen_ty_opt: &Option<Type>,
     ) -> CustomResult<FloatValue<'ctx>> {
-        Ok(match ty_opt {
-            Some(type_struct) => match type_struct.ty {
+        Ok(match gen_ty_opt {
+            Some(ty) => match ty {
                 Type::F32 => self.context.f32_type().const_float(lit.parse()?),
                 Type::F64 => self.context.f64_type().const_float(lit.parse()?),
                 // TODO: What should the default float size be?
-                Type::Float => self.context.f32_type().const_float(lit.parse()?),
-                _ => {
-                    return Err(
-                        self.err(format!("Invalid literal float type: {:?}", type_struct.ty))
-                    )
-                }
+                _ => return Err(self.err(format!("Invalid literal float type: {:?}", ty))),
             },
             // TODO: What should the default float size be? F32 atm.
             None => self.context.f32_type().const_float(lit.parse()?),
@@ -213,7 +219,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     //       Should make a custom value ex rusts "()" instead.
     /// Generates a function call. Returns the return value of the compiled
     /// function.
-    fn compile_func_call(&mut self, func_call: &mut FuncCall) -> CustomResult<AnyValueEnum<'ctx>> {
+    pub fn compile_func_call(
+        &mut self,
+        func_call: &mut FuncCall,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
         if let Some(func_ptr) = self.module.get_function(&func_call.name) {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
@@ -229,7 +238,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             let mut args = Vec::with_capacity(func_call.arguments.len());
             for arg in &mut func_call.arguments {
-                let any_value = self.compile_expr(&mut arg.value)?;
+                let any_value = self.compile_expr(&mut arg.value, ExprTy::RValue)?;
                 let basic_value = CodeGen::any_into_basic_value(any_value)?;
                 args.push(basic_value);
             }
@@ -263,7 +272,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     /// Generates a struct creation/initialization.
-    fn compile_struct_init(
+    pub fn compile_struct_init(
         &mut self,
         struct_init: &mut StructInit,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
@@ -288,7 +297,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // struct members).
         let mut args = Vec::with_capacity(struct_init.arguments.len());
         for arg in &mut struct_init.arguments {
-            let any_value = self.compile_expr(&mut arg.value)?;
+            let any_value = self.compile_expr(&mut arg.value, ExprTy::RValue)?;
             let basic_value = CodeGen::any_into_basic_value(any_value)?;
             args.push(basic_value);
         }
@@ -340,11 +349,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     /// Generates a array creation/initialization.
-    fn compile_array_init(
+    pub fn compile_array_init(
         &mut self,
-        args: &mut Vec<Argument>,
-        type_struct_opt: &Option<TypeStruct>,
+        array_init: &mut ArrayInit,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
+        let args = &mut array_init.arguments;
+
         if args.is_empty() {
             return Err(self.err("Array init with zero arguments.".into()));
         }
@@ -354,11 +364,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // be used to deduce the type of the whole array.
         let mut compiled_args = Vec::with_capacity(args.len());
 
-        // TODO: Use the type in `type_struct_opt` to decide type.
         // Dummy arg_type to start with. If it is never set, it will never be used.
         let mut arg_type = self.context.i8_type().into();
         for arg in args.iter_mut() {
-            let any_value = self.compile_expr(&mut arg.value)?;
+            let any_value = self.compile_expr(&mut arg.value, ExprTy::RValue)?;
             let basic_value = CodeGen::any_into_basic_value(any_value)?;
             arg_type = basic_value.get_type();
             compiled_args.push(basic_value);

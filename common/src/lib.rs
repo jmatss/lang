@@ -8,9 +8,11 @@ pub type BlockId = usize;
 /// This will be used to resolve the std lib.
 pub const ENV_VAR: &str = "LANG_HOME";
 
+pub mod empty_visitor;
 pub mod error;
 pub mod iter;
 pub mod token;
+pub mod traverser;
 pub mod types;
 pub mod util;
 pub mod visitor;

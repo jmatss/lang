@@ -1,104 +1,102 @@
-use crate::token::ast::AstToken;
+use crate::{
+    error::LangError,
+    token::{
+        ast::AstToken,
+        expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
+        op::{BinOp, UnOp},
+        stmt::Stmt,
+    },
+};
 
 pub trait Visitor {
-    /*
-        TOP LEVEL
-    */
-    fn visit_block(ast_token: AstToken);
-    fn visit_expr();
-    fn visit_stmt();
+    fn take_errors(&mut self) -> Option<Vec<LangError>>;
 
-    /*
-        BLOCKS
-    */
-    fn visit_default_block();
-    fn visit_func();
-    fn visit_struct();
-    fn visit_enum();
-    fn visit_interface();
-    fn visit_impl();
-    fn visit_anon();
-    fn visit_if();
-    fn visit_if_case();
-    fn visit_match();
-    fn visist_match_case();
-    fn visit_for();
-    fn visit_while();
-    fn visit_test();
+    /* TOP LEVEL */
+    fn visit_block(&mut self, ast_token: &mut AstToken);
+    fn visit_expr(&mut self, expr: &mut Expr);
+    fn visit_stmt(&mut self, stmt: &mut Stmt);
+    fn visit_eof(&mut self, ast_token: &mut AstToken);
 
-    /*
-        STATEMENTS
-    */
-    fn visit_return();
-    fn visit_yield();
-    fn visit_break();
-    fn visit_contine();
-    fn visit_use();
-    fn visit_package();
-    fn visit_defer();
-    fn visit_defer_exec();
-    fn visit_assignment();
-    fn visit_var_decl();
-    fn visit_extern_decl();
-    fn visit_modifier();
+    /* BLOCKS */
+    fn visit_default_block(&mut self, ast_token: &mut AstToken);
+    fn visit_func(&mut self, ast_token: &mut AstToken);
+    fn visit_struct(&mut self, ast_token: &mut AstToken);
+    fn visit_enum(&mut self, ast_token: &mut AstToken);
+    fn visit_interface(&mut self, ast_token: &mut AstToken);
+    fn visit_impl(&mut self, ast_token: &mut AstToken);
+    fn visit_anon(&mut self, ast_token: &mut AstToken);
+    fn visit_if(&mut self, ast_token: &mut AstToken);
+    fn visit_if_case(&mut self, ast_token: &mut AstToken);
+    fn visit_match(&mut self, ast_token: &mut AstToken);
+    fn visit_match_case(&mut self, ast_token: &mut AstToken);
+    fn visit_for(&mut self, ast_token: &mut AstToken);
+    fn visit_while(&mut self, ast_token: &mut AstToken);
+    fn visit_test(&mut self, ast_token: &mut AstToken);
 
-    /*
-        EXPRESSIONS
-    */
-    fn visist_lit();
-    fn visist_type();
-    fn visit_var();
-    fn visist_func_call();
-    fn visit_struct_init();
-    fn visist_array_init();
-    fn visit_op();
+    /* STATEMENTS */
+    fn visit_return(&mut self, stmt: &mut Stmt);
+    fn visit_yield(&mut self, stmt: &mut Stmt);
+    fn visit_break(&mut self, stmt: &mut Stmt);
+    fn visit_continue(&mut self, stmt: &mut Stmt);
+    fn visit_use(&mut self, stmt: &mut Stmt);
+    fn visit_package(&mut self, stmt: &mut Stmt);
+    fn visit_defer(&mut self, stmt: &mut Stmt);
+    fn visit_defer_exec(&mut self, stmt: &mut Stmt);
+    fn visit_assignment(&mut self, stmt: &mut Stmt);
+    fn visit_var_decl(&mut self, stmt: &mut Stmt);
+    fn visit_extern_decl(&mut self, stmt: &mut Stmt);
+    fn visit_modifier(&mut self, stmt: &mut Stmt);
 
-    /*
-        OPERATIONS
-    */
-    fn visit_bin_op();
-    fn visit_un_op();
+    /* EXPRESSIONS */
+    fn visit_lit(&mut self, expr: &mut Expr);
+    //fn visit_type(&mut self, expr: &mut Expr);
+    fn visit_var(&mut self, var: &mut Var);
+    fn visit_func_call(&mut self, func_call: &mut FuncCall);
+    fn visit_struct_init(&mut self, struct_init: &mut StructInit);
+    fn visit_array_init(&mut self, array_init: &mut ArrayInit);
 
-    /*
-        BINARY OPERATIONS
-    */
-    fn visit_bin_in();
-    fn visit_bin_is();
-    fn visit_bin_as();
-    fn visit_bin_of();
-    fn visit_bin_range();
-    fn visit_bin_range_incl();
-    fn visit_bin_dot();
-    fn visit_bin_eq();
-    fn visit_bin_neq();
-    fn visit_bin_lt();
-    fn visit_bin_gt();
-    fn visit_bin_lte();
-    fn visit_bin_gte();
-    fn visit_bin_add();
-    fn visit_bin_sub();
-    fn visit_bin_mul();
-    fn visit_bin_div();
-    fn visit_bin_mod();
-    fn visit_bin_pow();
-    fn visit_bin_bit_and();
-    fn visit_bin_bit_or();
-    fn visit_bin_bit_xor();
-    fn visit_bin_shl();
-    fn visit_bin_shr();
-    fn visit_bin_bool_and();
-    fn visit_bin_bool_or();
+    /* OPERATIONS */
+    fn visit_bin_op(&mut self, bin_op: &mut BinOp);
+    fn visit_un_op(&mut self, un_op: &mut UnOp);
 
+    /* BINARY OPERATIONS */
     /*
-        UNARY OPERATIONS
+    fn visit_bin_in(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_is(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_as(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_of(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_range(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_range_incl(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_dot(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_eq(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_neq(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_lt(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_gt(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_lte(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_gte(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_add(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_sub(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_mul(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_div(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_mod(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_pow(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_bit_and(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_bit_or(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_bit_xor(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_shl(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_shr(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_bool_and(&mut self, bin_op: &mut BinOp);
+    fn visit_bin_bool_or(&mut self, bin_op: &mut BinOp);
+
+    /* UNARY OPERATIONS */
+    fn visit_un_inc(&mut self, un_op: &mut UnOp);
+    fn visit_un_dec(&mut self, un_op: &mut UnOp);
+    fn visit_un_deref(&mut self, un_op: &mut UnOp);
+    fn visit_un_address(&mut self, un_op: &mut UnOp);
+    fn visit_un_pos(&mut self, un_op: &mut UnOp);
+    fn visit_un_neg(&mut self, un_op: &mut UnOp);
+    fn visit_un_array_access(&mut self, un_op: &mut UnOp);
+    fn visit_un_bit_compliment(&mut self, un_op: &mut UnOp);
+    fn visit_un_bool_not(&mut self, un_op: &mut UnOp);
     */
-    fn visit_un_inc();
-    fn visit_un_dec();
-    fn visit_un_deref();
-    fn visit_un_address();
-    fn visit_un_pos();
-    fn visit_un_neg();
-    fn visit_un_array_access();
-    fn visit_un_bit_compliment();
-    fn visit_un_bool_not();
 }

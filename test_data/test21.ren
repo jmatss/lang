@@ -1,0 +1,19 @@
+use std.assert
+
+struct TestStruct
+{
+    a: i32,
+    b: f64,
+}
+
+function main() -> i32
+{
+    var test_struct = TestStruct { 123, 456.789 }
+    var x = test_struct.a
+    test_struct.b = 3.4
+
+    assert(x == 123)
+    assert(test_struct.b == 3.4)
+
+    return 0
+}

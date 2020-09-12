@@ -9,7 +9,7 @@ use crate::{
 };
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Stmt {
     Return(Option<Expr>),
     // Yield ~= Break with a value
@@ -22,11 +22,13 @@ pub enum Stmt {
     Package(Path),
 
     // Defer -> Run this expression at the end of the current block scope.
-    /// The "Defer" is the place in the code where the "defer <expr>" was written.
-    /// "DeferExecution" statements will be added during the analyzing stage
-    /// at places in the AST where the deferred expression should be executed.
+    /// The "Defer" is the place in the code where the "defer <expr>" was written
+    /// in the actual source code.
+    /// "DeferExec" statements will be added during the analyzing stage
+    /// at places in the AST where the deferred expression should be executed,
+    /// i.e. when the block ends or when it branches away.
     Defer(Expr),
-    DeferExecution(Expr),
+    DeferExec(Expr),
 
     // The lhs can't be a "Variable" directly since it needs to support
     // ex. array indexing and dereferencing. But evaluationg the lhs expressions
@@ -53,7 +55,7 @@ pub enum Stmt {
     Modifier(Modifier),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Modifier {
     Var,
     Const,
@@ -62,7 +64,7 @@ pub enum Modifier {
     Public,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Path {
     pub idents: Vec<String>,
 }

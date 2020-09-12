@@ -1,14 +1,16 @@
-use crate::generator::CodeGen;
+use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::CustomResult,
     token::{
-        expr::{AccessType, Expr},
+        expr::Expr,
         op::AssignOperator,
         stmt::{Modifier, Path, Stmt},
     },
-    types::{Type, TypeStruct},
 };
-use inkwell::{module::Linkage, types::AnyTypeEnum, values::InstructionValue};
+use inkwell::{
+    module::Linkage, values::AnyValueEnum, values::BasicValueEnum, values::InstructionValue,
+};
+use log::debug;
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_stmt(&mut self, stmt: &mut Stmt) -> CustomResult<()> {
@@ -24,17 +26,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // Only the "DeferExecution" are compiled into code, the "Defer" is
             // only used during analyzing.
             Stmt::Defer(_) => Ok(()),
-            Stmt::DeferExecution(expr) => {
-                self.compile_expr(expr)?;
+            Stmt::DeferExec(expr) => {
+                self.compile_expr(expr, ExprTy::RValue)?;
                 Ok(())
             }
 
             Stmt::VariableDecl(var, expr_opt) => {
                 self.compile_var_decl(var)?;
                 if let Some(expr) = expr_opt {
-                    let any_value = self.compile_expr(expr)?;
+                    let any_value = self.compile_expr(expr, ExprTy::RValue)?;
                     let basic_value = CodeGen::any_into_basic_value(any_value)?;
-                    // TODO: Will this always be regular?
                     self.compile_var_store(var, basic_value)?;
                 } else if var.is_const {
                     return Err(self.err(format!(
@@ -59,7 +60,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_return(&mut self, expr_opt: &mut Option<Expr>) -> CustomResult<()> {
         if let Some(expr) = expr_opt {
-            let any_value = self.compile_expr(expr)?;
+            let any_value = self.compile_expr(expr, ExprTy::RValue)?;
             let basic_value = CodeGen::any_into_basic_value(any_value)?;
             self.builder.build_return(Some(&basic_value));
         } else {
@@ -107,316 +108,235 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         lhs: &mut Expr,
         rhs: &mut Expr,
     ) -> CustomResult<InstructionValue<'ctx>> {
-        let access_type = if let Some(access_type) = lhs.get_access_type() {
-            access_type
-        } else {
-            return Err(self.err(format!(
-                "Left hand side in assignment not a valid type lhs: {:?}.",
-                lhs
-            )));
+        let lhs_ptr = {
+            let lhs_any = self.compile_expr(lhs, ExprTy::LValue)?;
+            if lhs_any.is_pointer_value() {
+                lhs_any.into_pointer_value()
+            } else {
+                return Err(self.err(format!(
+                    "Lhs not a pointer when compiling assignment, lhs: {:?}, rhs: {:?}",
+                    lhs, rhs
+                )));
+            }
         };
+        let lhs_val = self.builder.build_load(lhs_ptr, "assign.lhs.val");
 
-        let var = if let Some(var) = lhs.eval_to_var() {
-            var
-        } else {
-            return Err(self.err(format!(
-                "Left hand side in assignment doesn't expand to a variable: {:?}",
-                lhs
-            )));
-        };
-
-        // The return type of the evaluated variable. This might not be the actual
-        // return type since it might ex. be dereferenced or indexed. Use this
-        // `ret_type` and then figure out the actual correct return type by
-        // looking at the AccessType.
-        let var_ret_type = if let Some(ref ret_type) = var.ret_type {
-            ret_type
-        } else {
-            return Err(self.err(format!(
-                "Type of variable \"{}\" not know when compiling assignment.",
-                &var.name
-            )));
-        };
-
-        // TODO: Probably move this logic into "Expression" together with the
-        //       other functions like "is_var", "eval_to_var" etc.
-        // Figure out the actual return type.
-        let ret_type = match access_type {
-            AccessType::Regular => self.compile_type(var_ret_type)?,
-            AccessType::Deref => match &var_ret_type.ty {
-                Type::Pointer(inner) => self.compile_type(&inner)?,
-                _ => {
-                    return Err(self.err(format!(
-                        "Tried to dereference variable \"{}\" that isn't a pointer. Is: {:?}.",
-                        &var.name, var_ret_type.ty
-                    )))
-                }
-            },
-            AccessType::Address => self.compile_type(&TypeStruct::new(
-                Type::Pointer(Box::new(var_ret_type.clone())),
-                None,
-                false,
-            ))?,
-            AccessType::ArrayAccess => match &var_ret_type.ty {
-                Type::Array(inner, _) => self.compile_type(&inner)?,
-                _ => {
-                    return Err(self.err(format!(
-                        "Tried to array index variable \"{}\" that isn't a array. Is: {:?}.",
-                        &var.name, var_ret_type.ty
-                    )))
-                }
-            },
-        };
-
-        let right_any_value = self.compile_expr(rhs)?;
-        let right = CodeGen::any_into_basic_value(right_any_value)?;
-
-        let left = self.compile_var_load(var)?;
-
-        // TODO: Need to check the size(8,16,32...) and also signness for the
-        //       left and right to choose the correct instruction.
-
+        let rhs_val = self.compile_expr(rhs, ExprTy::RValue)?;
         let value = match assign_op {
-            AssignOperator::Assignment => right,
-
-            AssignOperator::AssignAddition => match ret_type {
-                AnyTypeEnum::FloatType(_) => self
-                    .builder
-                    .build_float_add(
-                        left.into_float_value(),
-                        right.into_float_value(),
-                        "assign.add.float",
-                    )
-                    .into(),
-                AnyTypeEnum::IntType(_) => self
+            AssignOperator::Assignment => rhs_val,
+            AssignOperator::AssignAdd => match lhs_val {
+                BasicValueEnum::IntValue(_) => self
                     .builder
                     .build_int_add(
-                        left.into_int_value(),
-                        right.into_int_value(),
+                        lhs_val.into_int_value(),
+                        rhs_val.into_int_value(),
                         "assign.add.int",
                     )
                     .into(),
-                AnyTypeEnum::PointerType(_)
-                | AnyTypeEnum::StructType(_)
-                | AnyTypeEnum::VectorType(_)
-                | AnyTypeEnum::VoidType(_)
-                | AnyTypeEnum::ArrayType(_)
-                | AnyTypeEnum::FunctionType(_) => {
-                    return Err(self.err(format!("Invalid type for AssignAddition: {:?}", ret_type)))
-                }
-            },
-
-            AssignOperator::AssignSubtraction => match ret_type {
-                AnyTypeEnum::FloatType(_) => self
+                BasicValueEnum::FloatValue(_) => self
                     .builder
-                    .build_float_sub(
-                        left.into_float_value(),
-                        right.into_float_value(),
-                        "assign.sub.float",
+                    .build_float_add(
+                        lhs_val.into_float_value(),
+                        rhs_val.into_float_value(),
+                        "assign.add.float",
                     )
                     .into(),
-                AnyTypeEnum::IntType(_) => self
+                _ => {
+                    return Err(self.err(format!(
+                        "Invalid type for AssignAddition: {:?}",
+                        lhs_val.get_type()
+                    )))
+                }
+            },
+            AssignOperator::AssignSub => match lhs_val {
+                BasicValueEnum::IntValue(_) => self
                     .builder
-                    .build_int_add(
-                        left.into_int_value(),
-                        right.into_int_value(),
+                    .build_int_sub(
+                        lhs_val.into_int_value(),
+                        rhs_val.into_int_value(),
                         "assign.sub.int",
                     )
                     .into(),
-                AnyTypeEnum::PointerType(_)
-                | AnyTypeEnum::StructType(_)
-                | AnyTypeEnum::VectorType(_)
-                | AnyTypeEnum::VoidType(_)
-                | AnyTypeEnum::ArrayType(_)
-                | AnyTypeEnum::FunctionType(_) => {
+                BasicValueEnum::FloatValue(_) => self
+                    .builder
+                    .build_float_sub(
+                        lhs_val.into_float_value(),
+                        rhs_val.into_float_value(),
+                        "assign.sub.float",
+                    )
+                    .into(),
+                _ => {
                     return Err(self.err(format!(
                         "Invalid type for AssignSubtraction: {:?}",
-                        ret_type
+                        lhs_val.get_type()
                     )))
                 }
             },
-
-            AssignOperator::AssignMultiplication => match ret_type {
-                AnyTypeEnum::FloatType(_) => self
-                    .builder
-                    .build_float_mul(
-                        left.into_float_value(),
-                        right.into_float_value(),
-                        "assign.mul.float",
-                    )
-                    .into(),
-                AnyTypeEnum::IntType(_) => self
+            AssignOperator::AssignMul => match lhs_val {
+                BasicValueEnum::IntValue(_) => self
                     .builder
                     .build_int_mul(
-                        left.into_int_value(),
-                        right.into_int_value(),
+                        lhs_val.into_int_value(),
+                        rhs_val.into_int_value(),
                         "assign.mul.int",
                     )
                     .into(),
-                AnyTypeEnum::PointerType(_)
-                | AnyTypeEnum::StructType(_)
-                | AnyTypeEnum::VectorType(_)
-                | AnyTypeEnum::VoidType(_)
-                | AnyTypeEnum::ArrayType(_)
-                | AnyTypeEnum::FunctionType(_) => {
+                BasicValueEnum::FloatValue(_) => self
+                    .builder
+                    .build_float_mul(
+                        lhs_val.into_float_value(),
+                        rhs_val.into_float_value(),
+                        "assign.mul.float",
+                    )
+                    .into(),
+                _ => {
                     return Err(self.err(format!(
                         "Invalid type for AssignMultiplication: {:?}",
-                        ret_type
+                        lhs_val.get_type()
                     )))
                 }
             },
-
-            AssignOperator::AssignDivision => match ret_type {
-                AnyTypeEnum::FloatType(_) => self
-                    .builder
-                    .build_float_div(
-                        left.into_float_value(),
-                        right.into_float_value(),
-                        "assign.div.float",
-                    )
-                    .into(),
-                AnyTypeEnum::IntType(_) => self
+            AssignOperator::AssignDiv => match lhs_val {
+                // TODO: Check signess.
+                BasicValueEnum::IntValue(_) => self
                     .builder
                     .build_int_signed_div(
-                        left.into_int_value(),
-                        right.into_int_value(),
+                        lhs_val.into_int_value(),
+                        rhs_val.into_int_value(),
                         "assign.div.int",
                     )
                     .into(),
-                AnyTypeEnum::PointerType(_)
-                | AnyTypeEnum::StructType(_)
-                | AnyTypeEnum::VectorType(_)
-                | AnyTypeEnum::VoidType(_)
-                | AnyTypeEnum::ArrayType(_)
-                | AnyTypeEnum::FunctionType(_) => {
-                    return Err(self.err(format!("Invalid type for AssignDivision: {:?}", ret_type)))
-                }
-            },
-
-            AssignOperator::AssignModulus => match ret_type {
-                AnyTypeEnum::FloatType(_) => self
+                BasicValueEnum::FloatValue(_) => self
                     .builder
-                    .build_float_rem(
-                        left.into_float_value(),
-                        right.into_float_value(),
-                        "assign.mod.float",
+                    .build_float_div(
+                        lhs_val.into_float_value(),
+                        rhs_val.into_float_value(),
+                        "assign.div.float",
                     )
                     .into(),
-                AnyTypeEnum::IntType(_) => self
+                _ => {
+                    return Err(self.err(format!(
+                        "Invalid type for AssignDivision: {:?}",
+                        lhs_val.get_type()
+                    )))
+                }
+            },
+            AssignOperator::AssignMod => match lhs_val {
+                // TODO: Check signess.
+                BasicValueEnum::IntValue(_) => self
                     .builder
                     .build_int_signed_rem(
-                        left.into_int_value(),
-                        right.into_int_value(),
+                        lhs_val.into_int_value(),
+                        rhs_val.into_int_value(),
                         "assign.mod.int",
                     )
                     .into(),
-                AnyTypeEnum::PointerType(_)
-                | AnyTypeEnum::StructType(_)
-                | AnyTypeEnum::VectorType(_)
-                | AnyTypeEnum::VoidType(_)
-                | AnyTypeEnum::ArrayType(_)
-                | AnyTypeEnum::FunctionType(_) => {
-                    return Err(self.err(format!("Invalid type for AssignModulus: {:?}", ret_type)))
-                }
-            },
-
-            AssignOperator::AssignPower => return Err(self.err("TODO: AssignPower.".into())),
-            AssignOperator::AssignBitAnd => match ret_type {
-                AnyTypeEnum::IntType(_) => self
+                BasicValueEnum::FloatValue(_) => self
                     .builder
-                    .build_and(left.into_int_value(), right.into_int_value(), "assign.and")
+                    .build_float_rem(
+                        lhs_val.into_float_value(),
+                        rhs_val.into_float_value(),
+                        "assign.rem.float",
+                    )
                     .into(),
-                AnyTypeEnum::FloatType(_)
-                | AnyTypeEnum::PointerType(_)
-                | AnyTypeEnum::StructType(_)
-                | AnyTypeEnum::VectorType(_)
-                | AnyTypeEnum::VoidType(_)
-                | AnyTypeEnum::ArrayType(_)
-                | AnyTypeEnum::FunctionType(_) => {
-                    return Err(self.err(format!("Invalid type for AssignBitAnd: {:?}", ret_type)))
+                _ => {
+                    return Err(self.err(format!(
+                        "Invalid type for AssignModulus: {:?}",
+                        lhs_val.get_type()
+                    )))
                 }
             },
-
-            AssignOperator::AssignBitOr => match ret_type {
-                AnyTypeEnum::IntType(_) => self
+            AssignOperator::AssignBitAnd => match lhs_val {
+                BasicValueEnum::IntValue(_) => self
                     .builder
-                    .build_or(left.into_int_value(), right.into_int_value(), "assign.or")
+                    .build_and(
+                        lhs_val.into_int_value(),
+                        rhs_val.into_int_value(),
+                        "assign.bit.and",
+                    )
                     .into(),
-                AnyTypeEnum::FloatType(_)
-                | AnyTypeEnum::PointerType(_)
-                | AnyTypeEnum::StructType(_)
-                | AnyTypeEnum::VectorType(_)
-                | AnyTypeEnum::VoidType(_)
-                | AnyTypeEnum::ArrayType(_)
-                | AnyTypeEnum::FunctionType(_) => {
-                    return Err(self.err(format!("Invalid type for AssignBitOr: {:?}", ret_type)))
+                _ => {
+                    return Err(self.err(format!(
+                        "Invalid type for AssignBitAnd: {:?}",
+                        lhs_val.get_type()
+                    )))
                 }
             },
-
-            AssignOperator::AssignBitXor => match ret_type {
-                AnyTypeEnum::IntType(_) => self
+            AssignOperator::AssignBitOr => match lhs_val {
+                BasicValueEnum::IntValue(_) => self
                     .builder
-                    .build_xor(left.into_int_value(), right.into_int_value(), "assign.xor")
+                    .build_or(
+                        lhs_val.into_int_value(),
+                        rhs_val.into_int_value(),
+                        "assign.bit.or",
+                    )
                     .into(),
-                AnyTypeEnum::FloatType(_)
-                | AnyTypeEnum::PointerType(_)
-                | AnyTypeEnum::StructType(_)
-                | AnyTypeEnum::VectorType(_)
-                | AnyTypeEnum::VoidType(_)
-                | AnyTypeEnum::ArrayType(_)
-                | AnyTypeEnum::FunctionType(_) => {
-                    return Err(self.err(format!("Invalid type for AssignBitXor: {:?}", ret_type)))
+                _ => {
+                    return Err(self.err(format!(
+                        "Invalid type for AssignBitOr: {:?}",
+                        lhs_val.get_type()
+                    )))
                 }
             },
-
-            AssignOperator::AssignShiftLeft => match ret_type {
-                AnyTypeEnum::IntType(_) => self
+            AssignOperator::AssignBitXor => match lhs_val {
+                BasicValueEnum::IntValue(_) => self
+                    .builder
+                    .build_xor(
+                        lhs_val.into_int_value(),
+                        rhs_val.into_int_value(),
+                        "assign.bit.xor",
+                    )
+                    .into(),
+                _ => {
+                    return Err(self.err(format!(
+                        "Invalid type for AssignBitXor: {:?}",
+                        lhs_val.get_type()
+                    )))
+                }
+            },
+            AssignOperator::AssignShl => match lhs_val {
+                BasicValueEnum::IntValue(_) => self
                     .builder
                     .build_left_shift(
-                        left.into_int_value(),
-                        right.into_int_value(),
+                        lhs_val.into_int_value(),
+                        rhs_val.into_int_value(),
                         "assign.lshift",
                     )
                     .into(),
-                AnyTypeEnum::FloatType(_)
-                | AnyTypeEnum::PointerType(_)
-                | AnyTypeEnum::StructType(_)
-                | AnyTypeEnum::VectorType(_)
-                | AnyTypeEnum::VoidType(_)
-                | AnyTypeEnum::ArrayType(_)
-                | AnyTypeEnum::FunctionType(_) => {
-                    return Err(
-                        self.err(format!("Invalid type for AssignShiftLeft: {:?}", ret_type))
-                    )
+                _ => {
+                    return Err(self.err(format!(
+                        "Invalid type for AssignLeftShift: {:?}",
+                        lhs_val.get_type()
+                    )))
                 }
             },
-
-            AssignOperator::AssignShiftRight => match ret_type {
-                AnyTypeEnum::IntType(_) => {
-                    let sign_extend = true;
-                    self.builder
-                        .build_right_shift(
-                            left.into_int_value(),
-                            right.into_int_value(),
-                            sign_extend,
-                            "assign.rshift",
-                        )
-                        .into()
-                }
-                AnyTypeEnum::FloatType(_)
-                | AnyTypeEnum::PointerType(_)
-                | AnyTypeEnum::StructType(_)
-                | AnyTypeEnum::VectorType(_)
-                | AnyTypeEnum::VoidType(_)
-                | AnyTypeEnum::ArrayType(_)
-                | AnyTypeEnum::FunctionType(_) => {
-                    return Err(
-                        self.err(format!("Invalid type for AssignShiftRight: {:?}", ret_type))
+            AssignOperator::AssignShr => match lhs_val {
+                // TODO: Signess.
+                BasicValueEnum::IntValue(_) => self
+                    .builder
+                    .build_right_shift(
+                        lhs_val.into_int_value(),
+                        rhs_val.into_int_value(),
+                        true,
+                        "assign.lshift",
                     )
+                    .into(),
+                _ => {
+                    return Err(self.err(format!(
+                        "Invalid type for AssignRightShift: {:?}",
+                        lhs_val.get_type()
+                    )))
                 }
             },
         };
 
-        self.compile_var_store(var, value)
+        debug!(
+            "Assigning, op: {:?}, lhs_ptr: {:?}, val: {:?}",
+            assign_op, lhs_ptr, value
+        );
+
+        Ok(self
+            .builder
+            .build_store(lhs_ptr, CodeGen::any_into_basic_value(value)?))
     }
 }

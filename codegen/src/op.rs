@@ -1,30 +1,38 @@
 // TODO: Check constness for operators. Ex. adding two consts should use a
 //       const add instruction so that the result also is const.
 
-use crate::generator::CodeGen;
+use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::CustomResult,
     token::{
-        expr::{Expr, Var},
+        expr::Expr,
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
 };
 use inkwell::{
     types::{AnyTypeEnum, BasicTypeEnum},
+    values::PointerValue,
     values::{AnyValueEnum, BasicValueEnum},
     FloatPredicate, IntPredicate,
 };
+use log::debug;
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    pub(super) fn compile_op(&mut self, op: &mut Op) -> CustomResult<AnyValueEnum<'ctx>> {
+    pub(super) fn compile_op(
+        &mut self,
+        op: &mut Op,
+        expr_ty: ExprTy,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
         match op {
-            Op::BinOp(ref mut bin_op) => self.compile_bin_op(bin_op),
-            Op::UnOp(ref mut un_op) => self.compile_un_op(un_op),
+            Op::BinOp(ref mut bin_op) => match expr_ty {
+                ExprTy::LValue => Err(self.err(format!("Bin op not allowed in lvalue: {:?}", op))),
+                ExprTy::RValue => self.compile_bin_op(bin_op),
+            },
+            Op::UnOp(ref mut un_op) => self.compile_un_op(un_op, expr_ty),
         }
     }
 
     fn compile_bin_op(&mut self, bin_op: &mut BinOp) -> CustomResult<AnyValueEnum<'ctx>> {
-        // TODO: Can one always assume that the `ret_type` will be set at this point?
         let ret_type = if let Some(ref ret_type) = bin_op.ret_type {
             self.compile_type(&ret_type)?
         } else {
@@ -34,7 +42,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             )));
         };
 
-        let left_any_value = self.compile_expr(&mut bin_op.left)?;
+        let left_any_value = self.compile_expr(&mut bin_op.lhs, ExprTy::RValue)?;
         let left = CodeGen::any_into_basic_value(left_any_value)?;
 
         // Bool "and" and "or" should be short circuit, so they need to be
@@ -43,15 +51,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // compiled. This logic should be merged better with the other operators.
         match bin_op.operator {
             BinOperator::BoolAnd => {
-                return self.compile_bin_op_bool_and(ret_type, left, &mut bin_op.right)
+                return self.compile_bin_op_bool_and(ret_type, left, &mut bin_op.rhs)
             }
             BinOperator::BoolOr => {
-                return self.compile_bin_op_bool_or(ret_type, left, &mut bin_op.right)
+                return self.compile_bin_op_bool_or(ret_type, left, &mut bin_op.rhs)
             }
             _ => (),
         }
 
-        let right_any_value = self.compile_expr(&mut bin_op.right)?;
+        let right_any_value = self.compile_expr(&mut bin_op.rhs, ExprTy::RValue)?;
         let right = CodeGen::any_into_basic_value(right_any_value)?;
 
         bin_op.is_const = self.is_const(&[&left, &right]);
@@ -73,7 +81,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if !self.is_same_base_type(left_type, right_type) {
                     return Err(self.err(
                     format!(
-                        "Left & right type different base types during bin op. left_type: {:?}, right_type: {:?}",
+                        "Left & right type different base types during bin op. Op: {:?}\nleft_type: {:?}\nright_type: {:?}",
+                        bin_op.operator,
                         left_type,
                         right_type,
                     ),
@@ -121,7 +130,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BinOperator::Modulus => {
                 self.compile_bin_op_modulus(ret_type, bin_op.is_const, left, right)?
             }
-            BinOperator::Power => panic!("TODO: Power"),
             BinOperator::BitAnd => {
                 self.compile_bin_op_bit_and(ret_type, bin_op.is_const, left, right)?
             }
@@ -143,12 +151,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BinOperator::BoolOr => {
                 panic!("Unexpected BoolOr to late in func.");
             }
-            BinOperator::ExpressionAnd => panic!("TODO: ExpressionAnd"),
         })
     }
 
-    fn compile_un_op(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
-        // TODO: Can one always assume that the `ret_type` will be set at this point?
+    fn compile_un_op(
+        &mut self,
+        un_op: &mut UnOp,
+        expr_ty: ExprTy,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
         let ret_type = if let Some(ref ret_type) = un_op.ret_type {
             self.compile_type(&ret_type)?
         } else {
@@ -158,64 +168,56 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             )));
         };
 
-        let any_value = self.compile_expr(&mut un_op.value)?;
-        let basic_value = CodeGen::any_into_basic_value(any_value)?;
+        if let ExprTy::LValue = expr_ty {
+            match &un_op.operator {
+                UnOperator::Address
+                | UnOperator::Positive
+                | UnOperator::Negative
+                | UnOperator::BitComplement
+                | UnOperator::BoolNot => {
+                    return Err(self.err(format!("Invalid un op in lvalue: {:?}", un_op)))
+                }
+                _ => (),
+            }
+        }
 
-        un_op.is_const = self.is_const(&[&basic_value]);
-
-        Ok(match un_op.operator {
-            UnOperator::Increment => {
-                if let Some(var) = un_op.value.eval_to_var() {
-                    self.compile_un_op_increment(ret_type, un_op.is_const, basic_value, var)?
-                } else {
-                    return Err(self.err(format!(
-                        "Trying to increment something that is a variable: {:?}",
-                        &un_op.value
-                    )));
+        match &mut un_op.operator {
+            UnOperator::Increment => panic!("TODO: Inc not implemented, to be removed."),
+            UnOperator::Decrement => panic!("TODO: Dec not implemented, to be removed."),
+            UnOperator::Deref => {
+                let ptr = self.compile_un_op_deref(un_op)?;
+                match expr_ty {
+                    ExprTy::LValue => Ok(ptr.into()),
+                    ExprTy::RValue => Ok(self.builder.build_load(ptr, "deref.rval").into()),
                 }
             }
-            UnOperator::Decrement => {
-                if let Some(var) = un_op.value.eval_to_var() {
-                    self.compile_un_op_decrement(ret_type, un_op.is_const, basic_value, var)?
-                } else {
-                    return Err(self.err(format!(
-                        "Trying to decrement something that is a variable: {:?}",
-                        &un_op.value
-                    )));
-                }
-            }
-            UnOperator::Deref => self.compile_un_op_deref(&mut un_op.value)?,
             UnOperator::Address => {
-                if let Some(var) = un_op.value.eval_to_var() {
-                    self.compile_un_op_address(var)?
-                } else {
-                    return Err(self.err(format!(
-                        "Trying to dereference invalid type: {:?}",
-                        &un_op.value
-                    )));
-                }
+                // TODO: Does address need lval/rval logic?
+                self.compile_un_op_address(un_op).map(|x| x.into())
             }
             UnOperator::ArrayAccess(_) => {
-                if let Some(var) = un_op.value.eval_to_var() {
-                    self.compile_un_op_array_access(var)?
-                } else {
-                    return Err(
-                        self.err(format!("Trying to index invalid type: {:?}", &un_op.value))
-                    );
+                // TODO: Does array access need lval/rval logic?
+                self.compile_un_op_array_access(un_op)
+            }
+            UnOperator::StructAccess(..) => {
+                let ptr = self.compile_un_op_struct_access(un_op)?;
+                match expr_ty {
+                    ExprTy::LValue => Ok(ptr.into()),
+                    ExprTy::RValue => Ok(self.builder.build_load(ptr, "struct.gep.rval").into()),
                 }
             }
             UnOperator::Positive => {
+                let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
+                let basic_value = CodeGen::any_into_basic_value(any_value)?;
+                un_op.is_const = self.is_const(&[&basic_value]);
+
                 // Do nothing.
-                basic_value.into()
+                Ok(any_value)
             }
-            UnOperator::Negative => {
-                self.compile_un_op_negative(ret_type, un_op.is_const, basic_value)?
-            }
+            UnOperator::Negative => self.compile_un_op_negative(ret_type, un_op),
             UnOperator::BitComplement => panic!("TODO: Bit complement"),
-            UnOperator::BoolNot => {
-                self.compile_un_op_bool_not(ret_type, un_op.is_const, basic_value)?
-            }
-        })
+            UnOperator::BoolNot => self.compile_un_op_bool_not(ret_type, un_op),
+        }
     }
 
     fn compile_bin_op_as(
@@ -884,7 +886,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     //       this eval block only exists to compile the expr and
                     //       then jump into a phi-block.
                     self.builder.position_at_end(eval_block);
-                    let right = self.compile_expr(right_expr)?;
+                    let right = self.compile_expr(right_expr, ExprTy::RValue)?;
                     self.builder.build_unconditional_branch(phi_block);
 
                     let bool_type = self.context.bool_type();
@@ -951,7 +953,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     //       this eval block only exists to compile the expr and
                     //       then jump into a phi-block.
                     self.builder.position_at_end(eval_block);
-                    let right = self.compile_expr(right_expr)?;
+                    let right = self.compile_expr(right_expr, ExprTy::RValue)?;
                     self.builder.build_unconditional_branch(phi_block);
 
                     let bool_type = self.context.bool_type();
@@ -992,36 +994,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ret_type: AnyTypeEnum<'ctx>,
         is_const: bool,
         value: BasicValueEnum<'ctx>,
-        var: &mut Var,
+        expr: &mut Expr,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        Ok(match ret_type {
-            AnyTypeEnum::IntType(_) => {
-                let sign_extend = false;
-                let one = ret_type.into_int_type().const_int(1, sign_extend);
-                let new_value = if is_const {
-                    value.into_int_value().const_add(one).into()
-                } else {
-                    self.builder
-                        .build_int_add(value.into_int_value(), one, "inc")
-                        .into()
-                };
-
-                self.compile_var_store(var, new_value)?;
-                new_value.into()
-            }
-            AnyTypeEnum::FloatType(_)
-            | AnyTypeEnum::ArrayType(_)
-            | AnyTypeEnum::FunctionType(_)
-            | AnyTypeEnum::PointerType(_)
-            | AnyTypeEnum::StructType(_)
-            | AnyTypeEnum::VectorType(_)
-            | AnyTypeEnum::VoidType(_) => {
-                return Err(self.err(format!(
-                    "Invalid type for UnaryOperator::Increment: {:?}",
-                    ret_type
-                )))
-            }
-        })
+        panic!("Increment not implemented, to be removed.")
     }
 
     fn compile_un_op_decrement(
@@ -1029,110 +1004,166 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ret_type: AnyTypeEnum<'ctx>,
         is_const: bool,
         value: BasicValueEnum<'ctx>,
-        var: &mut Var,
+        expr: &mut Expr,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        Ok(match ret_type {
-            AnyTypeEnum::IntType(_) => {
-                let sign_extend = false;
-                let one = ret_type.into_int_type().const_int(1, sign_extend);
-                let new_value = if is_const {
-                    value.into_int_value().const_sub(one).into()
-                } else {
-                    self.builder
-                        .build_int_sub(value.into_int_value(), one, "dec")
-                        .into()
-                };
+        panic!("Decrement not implemented, to be removed.")
+    }
 
-                self.compile_var_store(var, new_value)?;
-                new_value.into()
-            }
-            AnyTypeEnum::FloatType(_)
-            | AnyTypeEnum::ArrayType(_)
-            | AnyTypeEnum::FunctionType(_)
-            | AnyTypeEnum::PointerType(_)
-            | AnyTypeEnum::StructType(_)
-            | AnyTypeEnum::VectorType(_)
-            | AnyTypeEnum::VoidType(_) => {
-                return Err(self.err(format!(
-                    "Invalid type for UnaryOperator::Decrement: {:?}",
-                    ret_type
+    /// Dereferences the given expression. This function will return a pointer
+    /// to a allocation containing the actual value. If one wants the pointer
+    /// to the value or the value itself is up to the caller.
+    fn compile_un_op_deref(&mut self, un_op: &mut UnOp) -> CustomResult<PointerValue<'ctx>> {
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
+        let basic_value = CodeGen::any_into_basic_value(any_value)?;
+        un_op.is_const = self.is_const(&[&basic_value]);
+
+        if any_value.is_pointer_value() {
+            let basic_value = self
+                .builder
+                .build_load(any_value.into_pointer_value(), "deref");
+
+            if basic_value.is_pointer_value() {
+                Ok(basic_value.into_pointer_value())
+            } else {
+                Err(self.err(format!(
+                    "Value after deref not a ptr to allocation: {:?}",
+                    un_op
                 )))
             }
+        } else {
+            Err(self.err(format!("Tried to deref non pointer type expr: {:?}", un_op)))
+        }
+    }
+
+    fn compile_un_op_address(&mut self, un_op: &mut UnOp) -> CustomResult<PointerValue<'ctx>> {
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
+        let basic_value = CodeGen::any_into_basic_value(any_value)?;
+        un_op.is_const = self.is_const(&[&basic_value]);
+
+        if any_value.is_pointer_value() {
+            Ok(any_value.into_pointer_value())
+        } else {
+            Err(self.err(format!("Expr in \"Address\" not a pointer: {:?}", un_op)))
+        }
+    }
+
+    fn compile_un_op_array_access(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
+        let dim = if let UnOperator::ArrayAccess(dim) = &mut un_op.operator {
+            dim
+        } else {
+            return Err(self.err(format!(
+                "Un op not array access when compilig array access: {:?}",
+                un_op
+            )));
+        };
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
+        let basic_value = CodeGen::any_into_basic_value(any_value)?;
+        un_op.is_const = self.is_const(&[&basic_value]);
+
+        let ptr = if any_value.is_pointer_value() {
+            any_value.into_pointer_value()
+        } else {
+            return Err(self.err(format!("Expr in array access not a pointer: {:?}", un_op)));
+        };
+
+        debug!(
+            "Compilng array access -- expr: {:#?}\nptr: {:#?}\ndim: {:?}",
+            un_op.value, ptr, dim
+        );
+
+        let compiled_dim = self.compile_expr(dim, ExprTy::RValue)?;
+        if !compiled_dim.is_int_value() {
+            return Err(self.err(format!(
+                "Dim in array access didn't eval to int: {:?}",
+                un_op
+            )));
+        }
+
+        // Need to index the pointer to the array first, so add a extra zero
+        // before the actual indexing (2d index).
+        let sign_extend = false;
+        let zero = self.context.i32_type().const_int(0, sign_extend);
+
+        Ok(unsafe {
+            self.builder
+                .build_gep(ptr, &[zero, compiled_dim.into_int_value()], "array.gep")
+                .into()
         })
     }
 
-    fn compile_un_op_deref(&mut self, value: &mut Expr) -> CustomResult<AnyValueEnum<'ctx>> {
-        if let Some(var) = value.eval_to_var() {
-            Ok(self.compile_var_load(var)?.into())
-        } else {
-            Err(self.err(format!("Value didn't eval to var in deref: {:?}", value)))
-        }
-    }
-
-    fn compile_un_op_address(&mut self, var: &mut Var) -> CustomResult<AnyValueEnum<'ctx>> {
-        Ok(self.compile_var_load(var)?.into())
-    }
-
-    fn compile_un_op_array_access(
+    /// This function accessed the member at index `idx_opt` for the struct in
+    /// expression `expr`. The returned value will be a pointer to the allocated
+    /// member, so the caller would have to do a load if they want the actual value.
+    fn compile_un_op_struct_access(
         &mut self,
-        var: &mut Var,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
-        Ok(self.compile_var_load(var)?.into())
-        /*
-        let block_id = self.cur_block_id;
-        let decl_block_id = self
-            .analyze_context
-            .get_var_decl_scope(&var.name, block_id)?;
-        let key = (var.name.clone(), decl_block_id);
-
-        let compiled_dim = self.compile_expr(dim)?;
-        if !compiled_dim.is_int_value() {
-            return Err(self.err(
-                format!("Dim in array didn't compile to int: {:?}", &dim),
-            ));
-        }
-
-        if let Some(var_ptr) = self.variables.get(&key) {
-            unsafe {
-                Ok(self
-                    .builder
-                    .build_gep(*var_ptr, &[compiled_dim.into_int_value()], "array.gep")
-                    .into())
+        un_op: &mut UnOp,
+    ) -> CustomResult<PointerValue<'ctx>> {
+        let idx = if let UnOperator::StructAccess(_, idx_opt, _) = un_op.operator {
+            if let Some(idx) = idx_opt {
+                idx
+            } else {
+                return Err(self.err(format!(
+                    "No index set when compiling struct access: {:?}",
+                    un_op
+                )));
             }
         } else {
-            Err(self.err(
-                format!(
-                    "Unable to find var \"{}\" in decl block id {}.",
-                    &var.name, decl_block_id
-                ),
+            return Err(self.err(format!(
+                "Un op not struct access when compilig struct access: {:?}",
+                un_op
+            )));
+        };
 
-            ))
-        }
-        */
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
+        let basic_value = CodeGen::any_into_basic_value(any_value)?;
+        un_op.is_const = self.is_const(&[&basic_value]);
+
+        let ptr = if any_value.is_pointer_value() {
+            any_value.into_pointer_value()
+        } else {
+            return Err(self.err(format!("Expr in struct access not a pointer: {:?}", un_op)));
+        };
+
+        debug!(
+            "Compilng struct access -- expr: {:#?}\nptr: {:#?}\nidx: {:?}",
+            un_op.value, ptr, idx
+        );
+
+        self.builder
+            .build_struct_gep(ptr, idx as u32, "struct.gep")
+            .map_err(|_| {
+                self.err(format!(
+                    "Unable to gep for struct member index: {:?}.",
+                    un_op
+                ))
+            })
     }
 
     fn compile_un_op_negative(
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
-        is_const: bool,
-        value: BasicValueEnum<'ctx>,
+        un_op: &mut UnOp,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
+        let basic_value = CodeGen::any_into_basic_value(any_value)?;
+        un_op.is_const = self.is_const(&[&basic_value]);
+
         Ok(match ret_type {
             AnyTypeEnum::FloatType(_) => {
-                if is_const {
-                    value.into_float_value().const_neg().into()
+                if un_op.is_const {
+                    any_value.into_float_value().const_neg().into()
                 } else {
                     self.builder
-                        .build_float_neg(value.into_float_value(), "neg.float")
+                        .build_float_neg(any_value.into_float_value(), "neg.float")
                         .into()
                 }
             }
             AnyTypeEnum::IntType(_) => {
-                if is_const {
-                    value.into_int_value().const_neg().into()
+                if un_op.is_const {
+                    any_value.into_int_value().const_neg().into()
                 } else {
                     self.builder
-                        .build_int_neg(value.into_int_value(), "neg.int")
+                        .build_int_neg(any_value.into_int_value(), "neg.int")
                         .into()
                 }
             }
@@ -1153,15 +1184,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_un_op_bool_not(
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
-        is_const: bool,
-        value: BasicValueEnum<'ctx>,
+        un_op: &mut UnOp,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
+        let basic_value = CodeGen::any_into_basic_value(any_value)?;
+        un_op.is_const = self.is_const(&[&basic_value]);
+
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
-                if is_const {
-                    value.into_int_value().const_not().into()
+                if un_op.is_const {
+                    any_value.into_int_value().const_not().into()
                 } else {
-                    self.builder.build_not(value.into_int_value(), "not").into()
+                    self.builder
+                        .build_not(any_value.into_int_value(), "not")
+                        .into()
                 }
             }
             AnyTypeEnum::FloatType(_)

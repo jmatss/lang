@@ -11,7 +11,7 @@ use common::{
         expr::{Argument, Expr, Var},
         stmt::{Path, Stmt},
     },
-    types::GenericableType,
+    types::Type,
     BlockId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
@@ -28,7 +28,7 @@ pub const DEFAULT_STOP_CONDS: [Sym; 4] = [
 /// expressions or a expression that is the lhs of a assignment.
 /// Other that the `DEFAULT_STOP_CONDS` this array will contains all assignment
 /// symbols plus the Colon symbol to stop on types.
-pub const DEFAULT_ASSIGN_STOP_CONDS: [Sym; 17] = [
+pub const DEFAULT_ASSIGN_STOP_CONDS: [Sym; 16] = [
     Sym::LineBreak,
     Sym::SemiColon,
     Sym::Comma,
@@ -40,7 +40,6 @@ pub const DEFAULT_ASSIGN_STOP_CONDS: [Sym; 17] = [
     Sym::AssignMultiplication,
     Sym::AssignDivision,
     Sym::AssignModulus,
-    Sym::AssignPower,
     Sym::AssignBitAnd,
     Sym::AssignBitOr,
     Sym::AssignBitXor,
@@ -120,7 +119,10 @@ impl ParseTokenIter {
             match self.next_token() {
                 Ok(parse_token) => {
                     match parse_token {
-                        AstToken::EOF => break,
+                        AstToken::EOF => {
+                            cur_block_body.push(parse_token);
+                            break;
+                        }
                         AstToken::Stmt(Stmt::Use(ref path)) => {
                             self.uses.push(path.clone());
                         }
@@ -305,7 +307,7 @@ impl ParseTokenIter {
         ExprParser::parse(self, stop_conds)
     }
 
-    pub fn parse_type(&mut self) -> CustomResult<GenericableType> {
+    pub fn parse_type(&mut self) -> CustomResult<Type> {
         TypeParser::parse(self)
     }
 
@@ -551,7 +553,7 @@ impl ParseTokenIter {
     }
 
     /// Parses a type including the starting colon.
-    fn parse_colon_type(&mut self) -> CustomResult<GenericableType> {
+    fn parse_colon_type(&mut self) -> CustomResult<Type> {
         if let Some(lex_token) = self.next_skip_space() {
             if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
                 self.parse_type()

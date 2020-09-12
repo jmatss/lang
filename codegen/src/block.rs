@@ -1,11 +1,12 @@
-use crate::generator::CodeGen;
+use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
     token::{
+        ast::AstToken,
         block::{BlockHeader, Function, Struct},
         expr::{Expr, Var},
     },
-    util, BlockId,
+    BlockId,
 };
 use inkwell::{
     basic_block::BasicBlock,
@@ -13,7 +14,6 @@ use inkwell::{
     types::AnyTypeEnum,
     values::{FunctionValue, PointerValue},
 };
-use parse::token::{AstToken, AstTokenKind};
 
 /// Contains information related to branches in either a if-statement or a
 /// match-statement. This will then be sent around to all if-cases so that
@@ -83,19 +83,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         match header {
             BlockHeader::Default => {
                 for token in body {
-                    self.cur_line_nr = token.line_nr;
-                    self.cur_column_nr = token.column_nr;
                     self.compile(token)?
                 }
             }
             BlockHeader::Function(func) => {
                 self.compile_func(func, id, body)?;
             }
-            BlockHeader::Implement(_) => {
+            BlockHeader::Implement(struct_name) => {
                 for token in body {
-                    if let AstTokenKind::Block(BlockHeader::Function(func), func_id, func_body) =
-                        &mut token.kind
+                    if let AstToken::Block(BlockHeader::Function(func), func_id, func_body) = token
                     {
+                        // Since this is a method, rename it so that its name is
+                        // "unique per struct" instead of unqiue for the whole
+                        // program. One also has to rename the method calls to
+                        // this specific method. This will be done when compiling
+                        // the method call.
+                        func.name = common::util::to_method_name(struct_name, &func.name);
                         self.compile_func(func, *func_id, func_body)?;
                     }
                 }
@@ -140,7 +143,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             //       entry block. Can this be a problem? Will this function ever
             //       be called when other instructions have been added?
             self.builder.position_at_end(entry);
-            self.compile_alloca(var)
+            self.alloca_var(var)
         } else {
             Err(self.err(format!(
                 "No active cur func when creating var: {}",
@@ -189,10 +192,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         // Compile the tokens in the body of the function.
         for token in body {
-            self.cur_line_nr = token.line_nr;
-            self.cur_column_nr = token.column_nr;
             self.cur_block_id = func_id;
-
             self.compile(token)?;
         }
 
@@ -219,6 +219,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
+    /// Compoles a function prototype.
     pub(super) fn compile_func_proto(
         &self,
         func: &Function,
@@ -263,15 +264,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .fn_type(param_types.as_slice(), func.is_var_arg)
         };
 
-        // True if this is a method tied to struct (first arg "this"/"self").
-        // False if this is just a regular func.
-        let name = if let Some(struct_name) = &func.method_struct {
-            util::to_method_name(struct_name, &func.name)
-        } else {
-            func.name.clone()
-        };
-
-        Ok(self.module.add_function(&name, fn_type, linkage_opt))
+        Ok(self.module.add_function(&func.name, fn_type, linkage_opt))
 
         // TODO: Set names?
         /*
@@ -303,9 +296,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
 
         for token in body.iter_mut() {
-            self.cur_line_nr = token.line_nr;
-            self.cur_column_nr = token.column_nr;
-
             self.cur_block_id = id;
             cur_block = self
                 .cur_basic_block
@@ -356,7 +346,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let mut branch_info = BranchInfo::new();
         branch_info.if_branches.push(cur_block);
         for (i, if_case) in body.iter().enumerate() {
-            if let AstTokenKind::Block(BlockHeader::IfCase(expr_opt), _, _) = &if_case.kind {
+            if let AstToken::Block(BlockHeader::IfCase(expr_opt), _, _) = &if_case {
                 // Skip adding a branch block if this is the first case (since it
                 // has the branch block `cur_block`). Also only add a branch block
                 // if this `if_case` contains a expression that can be "branched on".
@@ -374,7 +364,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             } else {
                 return Err(self.err(format!(
                     "Token in \"If\" block wasn't a \"IfCase\": {:?}",
-                    if_case.kind
+                    &if_case
                 )));
             }
         }
@@ -402,15 +392,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         // Iterate through all "if cases" in this if-statement and compile them.
         for (index, if_case) in body.iter_mut().enumerate() {
-            self.cur_line_nr = if_case.line_nr;
-            self.cur_column_nr = if_case.column_nr;
             self.cur_block_id = id;
 
-            if let AstTokenKind::Block(
+            if let AstToken::Block(
                 BlockHeader::IfCase(ref mut expr_opt),
                 inner_id,
                 ref mut inner_body,
-            ) = &mut if_case.kind
+            ) = if_case
             {
                 self.compile_if_case(
                     expr_opt,
@@ -425,11 +413,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         // The if statement has been compiled complete. If a merge block was
-        // created, set it as the current block. Otherwise set the current block
-        // to None. The reason being that all branches in this if-statements
-        // contains a return, so the function will(should) end after this statement.
-        self.cur_basic_block = merge_block_opt;
+        // created, set it as the current block. Otherwise just keep the old
+        // cur block.
         if let Some(merge_block) = merge_block_opt {
+            self.cur_basic_block = merge_block_opt;
             self.builder.position_at_end(merge_block);
         }
         Ok(())
@@ -468,7 +455,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             //       "into_int_value()" function.
             self.cur_basic_block = Some(branch_block);
             self.builder.position_at_end(branch_block);
-            let expr = self.compile_expr(br_expr)?.into_int_value();
+            let expr = self.compile_expr(br_expr, ExprTy::RValue)?.into_int_value();
             self.builder
                 .build_conditional_branch(expr, if_case_block, next_branch_block);
         }
@@ -477,9 +464,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.cur_basic_block = Some(if_case_block);
         self.builder.position_at_end(if_case_block);
         for token in body {
-            self.cur_line_nr = token.line_nr;
-            self.cur_column_nr = token.column_nr;
-
             self.cur_block_id = id;
             self.compile(token)?;
         }
@@ -555,7 +539,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // If expression is NOT set, treat this as a infinite while loop.
         self.builder.position_at_end(while_branch_block);
         if let Some(ref mut expr) = expr_opt {
-            let value = self.compile_expr(expr)?;
+            let value = self.compile_expr(expr, ExprTy::RValue)?;
             if value.is_int_value() {
                 self.builder.build_conditional_branch(
                     value.into_int_value(),
@@ -575,9 +559,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // Iterate through all "tokens" in this while-loop and compile them.
         self.cur_basic_block = Some(while_body_block);
         for token in body.iter_mut() {
-            self.cur_line_nr = token.line_nr;
-            self.cur_column_nr = token.column_nr;
-
             self.cur_block_id = id;
             self.cur_branch_block = Some(while_branch_block);
             cur_block = self

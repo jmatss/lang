@@ -2,10 +2,11 @@ use analyze::AnalyzeContext;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
     token::{
-        expr::{AccessInstruction, Expr, Var},
+        ast::AstToken,
+        expr::{Expr, Var},
         lit::Lit,
     },
-    types::{Type, TypeStruct},
+    types::Type,
     BlockId,
 };
 use inkwell::{
@@ -15,12 +16,13 @@ use inkwell::{
     module::Module,
     targets::TargetMachine,
     types::{AnyTypeEnum, BasicTypeEnum},
-    values::{BasicValueEnum, FunctionValue, InstructionValue, PointerValue},
+    values::{AnyValueEnum, BasicValueEnum, FunctionValue, InstructionValue, PointerValue},
     AddressSpace,
 };
 use log::debug;
-use parse::token::{AstToken, AstTokenKind};
 use std::collections::HashMap;
+
+use crate::expr::ExprTy;
 
 pub(super) struct CodeGen<'a, 'ctx> {
     pub context: &'ctx Context,
@@ -47,6 +49,23 @@ pub(super) struct CodeGen<'a, 'ctx> {
     /// true for "while" and "for" blocks. This branch block will then be
     /// used when a continue call is done to find the start of the loop.
     pub cur_branch_block: Option<BasicBlock<'ctx>>,
+
+    /// Contains the latest compiled expression. This will be used when compiling
+    /// unary operations for expressions. This allows the cur expression that is
+    /// being compiled to know about the previous expressions which will allow
+    /// for chainining operations.
+    pub prev_expr: Option<AnyValueEnum<'ctx>>,
+
+    // TODO: Remove this weird variable. Its only purpose is to be used if a
+    //       deref is found in the lhs of a assignment. Then the pointer to the
+    //       derefed value will be stored in this variable. Do this some other
+    //       way. It gets assigned when compiling a un op deref and read when
+    //       compiling a assignment.
+    /// Contains the pointer of the last dereferenced expression.
+    /// This will be used for expressions in the lhs of a assignment. In those
+    /// cases one doesn't want the value of the deref, one wannts the pointer
+    /// to the value.
+    pub prev_deref_ptr: Option<PointerValue<'ctx>>,
 
     /// Merge blocks created for different if and match statements.
     /// Is stored in this struct so that it can be accessable from everywhere
@@ -134,6 +153,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             cur_func: None,
             cur_branch_block: None,
 
+            prev_expr: None,
+            prev_deref_ptr: None,
+
             merge_blocks: HashMap::default(),
             variables: HashMap::default(),
             constants: HashMap::default(),
@@ -141,32 +163,29 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub(super) fn compile(&mut self, token: &'ctx mut AstToken) -> CustomResult<()> {
-        self.cur_line_nr = token.line_nr;
-        self.cur_column_nr = token.column_nr;
-
-        match &mut token.kind {
-            AstTokenKind::Block(header, id, ref mut body) => {
+        match token {
+            AstToken::Block(header, id, ref mut body) => {
                 self.compile_block(header, *id, body)?;
             }
-            AstTokenKind::Statement(ref mut stmt) => {
+            AstToken::Stmt(ref mut stmt) => {
                 self.compile_stmt(stmt)?;
             }
-            AstTokenKind::Expression(ref mut expr) => {
-                self.compile_expr(expr)?;
+            AstToken::Expr(ref mut expr) => {
+                self.compile_expr(expr, ExprTy::RValue)?;
             }
-            AstTokenKind::EndOfFile => (),
+            AstToken::EOF => (),
         }
         Ok(())
     }
 
-    pub(super) fn compile_alloca(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
+    pub(super) fn alloca_var(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
         if let Some(var_type) = &var.ret_type {
             Ok(match self.compile_type(&var_type)? {
                 AnyTypeEnum::ArrayType(ty) => {
                     let sign_extend = false;
                     let dim = self
                         .context
-                        .i32_type()
+                        .i64_type()
                         .const_int(ty.len() as u64, sign_extend);
                     self.builder.build_array_alloca(ty, dim, &var.name)
                 }
@@ -195,12 +214,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let key = (var.name.clone(), decl_block_id);
 
         if let Some(var_decl) = self.analyze_context.variables.get(&key) {
-            debug!("Compiling var decl. Key: {:?}", &key);
+            debug!(
+                "Compiling var decl. var_decl: {:?}, key: {:?}",
+                &var_decl, &key
+            );
 
             // Constants are never "compiled" into instructions, they are handled
             // "internaly" in this code during compilation.
             if !var.is_const {
-                let ptr = self.compile_alloca(var_decl)?;
+                let ptr = self.alloca_var(var_decl)?;
                 self.variables.insert(key, ptr);
             }
 
@@ -219,12 +241,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         basic_value: BasicValueEnum<'ctx>,
     ) -> CustomResult<InstructionValue<'ctx>> {
         debug!(
-            "Compile var_store, var name: {:?}, basic_value: {:?}.",
-            &var.name, &basic_value
+            "Compile var_store, var name: {:?}, ret_type: {:?}, basic_value: {:?}.",
+            &var.name, &var.ret_type, &basic_value
         );
 
-        // TODO: Const isn't working atm. Need to treat const struct member and
-        //       regular variables differently.
+        // TODO: Const isn't working atm.
         if var.is_const {
             let block_id = self.cur_block_id;
             let decl_block_id = self
@@ -235,149 +256,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.constants.insert(key, basic_value);
         }
 
-        let ptr = if var.access_instrs.is_some() {
-            self.get_var_ptr_access_instrs(var)?
-        } else {
-            self.get_var_ptr(var)?
-        };
+        let ptr = self.get_var_ptr(var)?;
+        debug!("ptr value: {:?}", ptr);
 
         Ok(self.builder.build_store(ptr, basic_value))
     }
 
-    pub(super) fn compile_var_load(&mut self, var: &mut Var) -> CustomResult<BasicValueEnum<'ctx>> {
+    pub(super) fn compile_var_load(&mut self, var: &Var) -> CustomResult<BasicValueEnum<'ctx>> {
         if var.is_const {
-            return self.get_const_value(var);
-        }
-
-        let ptr = if var.access_instrs.is_some() {
-            self.get_var_ptr_access_instrs(var)?
+            self.get_const_value(var)
         } else {
-            self.get_var_ptr(var)?
-        };
-
-        // TODO: Need a speical case if the last access instructions is a "Address"
-        //       since then you don't want to load the value in the ptr, you
-        //       want to return the ptr itself. Try to find a better way to
-        //       do this.
-        if let Some(AccessInstruction::Address) =
-            var.access_instrs.as_ref().and_then(|x| x.1.last())
-        {
-            Ok(ptr.into())
-        } else {
+            let ptr = self.get_var_ptr(var)?;
             Ok(self.builder.build_load(ptr, "load"))
-        }
-    }
-
-    fn get_var_ptr(&mut self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
-        let block_id = self.cur_block_id;
-        let decl_block_id = self
-            .analyze_context
-            .get_var_decl_scope(&var.name, block_id)?;
-        let key = (var.name.clone(), decl_block_id);
-        debug!(
-            "Loading variable pointer. Key: {:?}, cur_block_id: {}",
-            &key, block_id
-        );
-
-        if let Some(var_ptr) = self.variables.get(&key) {
-            Ok(*var_ptr)
-        } else {
-            Err(self.err(format!(
-                "Unable to find ptr for variable \"{}\" in decl block ID {}.",
-                &var.name, decl_block_id
-            )))
-        }
-    }
-
-    /// This function assumes that the caller have made sure that the given `var`
-    /// contains "AccessInstruction"s.
-    fn get_var_ptr_access_instrs(&mut self, var: &mut Var) -> CustomResult<PointerValue<'ctx>> {
-        let (root_var, access_instrs) =
-            if let Some((ref root_var, ref mut access_instrs)) = var.access_instrs {
-                (root_var, access_instrs)
-            } else {
-                return Err(self.err(format!(
-                    "No access access instructions found for child var \"{}\".",
-                    &var.name
-                )));
-            };
-
-        debug!(
-            "Loading pointer for child var \"{}\" in `access_instrs`: {:?}",
-            &var.name, &access_instrs
-        );
-
-        let key = (root_var.name.clone(), root_var.decl_block_id);
-        if let Some(base_ptr) = self.variables.get(&key) {
-            let mut current_ptr = *base_ptr;
-
-            // Iterate throw the hierachy of AccessInstruction to end up with
-            // a pointer to the sought after variable.
-            for access_instr in access_instrs.iter_mut() {
-                current_ptr = match access_instr {
-                    AccessInstruction::StructMember(
-                        member_struct,
-                        member_name,
-                        member_index_opt,
-                    ) => {
-                        let member_index = if let Some(member_index) = member_index_opt {
-                            member_index
-                        } else {
-                            return Err(self.err(format!(
-                                "Member index not set for member \"{:?}\" in struct var: {}.",
-                                member_name, &member_struct
-                            )));
-                        };
-
-                        self.builder
-                            .build_struct_gep(current_ptr, *member_index, "struct.gep")
-                            .map_err(|_| {
-                                self.err(format!(
-                                    "Unable to gep from struct {}. Member name: {}, index {}.",
-                                    &member_struct, member_name, member_index
-                                ))
-                            })?
-                    }
-                    AccessInstruction::Deref => {
-                        let tmp = self.builder.build_load(current_ptr, "access.instr.load");
-                        if !tmp.is_pointer_value() {
-                            return Err(self.err(format!(
-                                "Deref of member {:#?} didn't return pointer.",
-                                &access_instr
-                            )));
-                        }
-                        tmp.into_pointer_value()
-                    }
-                    AccessInstruction::Address => current_ptr,
-                    AccessInstruction::ArrayAccess(dim) => {
-                        let compiled_dim = self.compile_expr(dim)?;
-                        if !compiled_dim.is_int_value() {
-                            return Err(
-                                self.err(format!("Dim in array didn't compile to int: {:?}", &dim))
-                            );
-                        }
-
-                        // Need to index the pointer to the array first.
-                        let sign_extend = false;
-                        let zero = self.context.i32_type().const_int(0, sign_extend);
-
-                        unsafe {
-                            self.builder.build_gep(
-                                current_ptr,
-                                &[zero, compiled_dim.into_int_value()],
-                                "array.gep",
-                            )
-                        }
-                    }
-                };
-            }
-
-            Ok(current_ptr)
-        } else {
-            Err(self.err(format!(
-                "Unable to find ptr to variable with key: {:?}",
-                &key
-            )))
         }
     }
 
@@ -401,11 +291,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile_type(&self, type_struct: &TypeStruct) -> CustomResult<AnyTypeEnum<'ctx>> {
+    pub(crate) fn get_var_ptr(&mut self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
+        let block_id = self.cur_block_id;
+        let decl_block_id = self
+            .analyze_context
+            .get_var_decl_scope(&var.name, block_id)?;
+        let key = (var.name.clone(), decl_block_id);
+        debug!(
+            "Loading variable pointer. Key: {:?}, cur_block_id: {}",
+            &key, block_id
+        );
+
+        if let Some(var_ptr) = self.variables.get(&key) {
+            Ok(*var_ptr)
+        } else {
+            Err(self.err(format!(
+                "Unable to find ptr for variable \"{}\" in decl block ID {}.",
+                &var.name, decl_block_id
+            )))
+        }
+    }
+
+    pub(super) fn compile_type(&self, ty: &Type) -> CustomResult<AnyTypeEnum<'ctx>> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Generic;
 
-        Ok(match &type_struct.ty {
+        Ok(match ty {
             Type::Pointer(ref ptr) => {
                 // Get the type of the inner type and wrap into a "PointerType".
                 match self.compile_type(ptr)? {
@@ -471,9 +382,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 AnyTypeEnum::PointerType(self.context.i8_type().ptr_type(address_space))
             }
             Type::Boolean => AnyTypeEnum::IntType(self.context.bool_type()),
-            Type::Int => AnyTypeEnum::IntType(self.context.i32_type()),
-            Type::Uint => AnyTypeEnum::IntType(self.context.i32_type()),
-            Type::Float => AnyTypeEnum::FloatType(self.context.f32_type()),
             Type::I8 => AnyTypeEnum::IntType(self.context.i8_type()),
             Type::U8 => AnyTypeEnum::IntType(self.context.i8_type()),
             Type::I16 => AnyTypeEnum::IntType(self.context.i16_type()),
@@ -493,6 +401,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     return Err(self.err(format!("Unable to find custom type: {}", ident)));
                 }
             }
+            _ => return Err(self.err(format!("Invalid type during type codegen: {:?}", ty))),
         })
     }
 

@@ -1,37 +1,37 @@
 use super::expr::Expr;
-use crate::types::GenericableType;
+use crate::types::Type;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Op {
     BinOp(BinOp),
     UnOp(UnOp),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BinOp {
     pub operator: BinOperator,
-    pub ret_type: Option<GenericableType>,
+    pub ret_type: Option<Type>,
     pub is_const: bool,
-    pub left: Box<Expr>,
-    pub right: Box<Expr>,
+    pub lhs: Box<Expr>,
+    pub rhs: Box<Expr>,
 }
 
 impl BinOp {
-    pub fn new(operator: BinOperator, left: Box<Expr>, right: Box<Expr>) -> Self {
+    pub fn new(operator: BinOperator, lhs: Box<Expr>, rhs: Box<Expr>) -> Self {
         BinOp {
             operator,
             ret_type: None,
             is_const: false,
-            left,
-            right,
+            lhs,
+            rhs,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnOp {
     pub operator: UnOperator,
-    pub ret_type: Option<GenericableType>,
+    pub ret_type: Option<Type>,
     pub is_const: bool,
     pub value: Box<Expr>,
 }
@@ -47,7 +47,7 @@ impl UnOp {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BinOperator {
     /* GENERAL */
     // Used in for loops etc.
@@ -77,7 +77,6 @@ pub enum BinOperator {
     Multiplication,
     Division,
     Modulus,
-    Power,
     /* NUMBERS (BIT) */
     BitAnd,
     BitOr,
@@ -90,9 +89,8 @@ pub enum BinOperator {
     BoolOr,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UnOperator {
-    /* NUMBERS */
     Increment,
     Decrement,
 
@@ -105,29 +103,31 @@ pub enum UnOperator {
     Negative,
 
     // TODO: Slice/slicing.
-    // The expression is the dimension.
+    /// The expression is the dimension.
     ArrayAccess(Box<Expr>),
 
-    /* NUMBERS (BIT) */
+    /// The string is the name of the member. The u64 is the index of the struct
+    /// member being accessed and the Type is the type of the member as declared
+    /// in the struct.
+    StructAccess(String, Option<u64>, Option<Type>),
+
     BitComplement,
 
-    /* BOOL */
     BoolNot,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AssignOperator {
     Assignment, // "Normal" assignment ("x = y").
-    AssignAddition,
-    AssignSubtraction,
-    AssignMultiplication,
-    AssignDivision,
-    AssignModulus,
-    AssignPower,
+    AssignAdd,
+    AssignSub,
+    AssignMul,
+    AssignDiv,
+    AssignMod,
 
     AssignBitAnd,
     AssignBitOr,
     AssignBitXor,
-    AssignShiftLeft,
-    AssignShiftRight,
+    AssignShl,
+    AssignShr,
 }

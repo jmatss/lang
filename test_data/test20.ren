@@ -1,0 +1,33 @@
+use std.assert
+use std.mem
+
+function test_func(a: i32, b: i32) -> i64
+{
+    var tmp: i32 = a + b
+    return (a + b) as i64
+}
+
+function main() -> i32
+{
+    var a = 3
+    var b = 5
+    var c = a + b
+    assert(c == 8)
+
+    var d = test_func(a, b)
+    assert(d == 8)
+    
+    var e = 3
+    var f = e.&
+    var g = f.*
+    f.* = 5
+    assert(e == 5)
+    assert(g == 3)
+
+    var h = malloc(1) as {i8}
+    defer free(h as {i8})
+    h.* = 3
+    assert(h.* == 3)
+
+    return 0
+}

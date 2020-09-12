@@ -1,8 +1,5 @@
 use crate::parser::ParseTokenIter;
-use common::{
-    error::CustomResult,
-    types::{GenericableType, Type},
-};
+use common::{error::CustomResult, types::Type};
 use lex::token::{LexTokenKind, Sym};
 
 pub struct TypeParser<'a> {
@@ -13,7 +10,7 @@ pub struct TypeParser<'a> {
 //       implemented.
 
 impl<'a> TypeParser<'a> {
-    pub fn parse(iter: &'a mut ParseTokenIter) -> CustomResult<GenericableType> {
+    pub fn parse(iter: &'a mut ParseTokenIter) -> CustomResult<Type> {
         let mut type_parser = Self { iter };
         type_parser.parse_type()
     }
@@ -31,14 +28,13 @@ impl<'a> TypeParser<'a> {
     ///   C                     Lang
     ///   uint32_t *(*x)[]      x: {[{u32}]}
     ///   char *x               x: {char}
-    fn parse_type(&mut self) -> CustomResult<GenericableType> {
+    fn parse_type(&mut self) -> CustomResult<Type> {
         if let Some(lex_token) = self.iter.next_skip_space() {
             match lex_token.kind {
                 // Ident.
                 LexTokenKind::Ident(ident) => {
-                    let type_enum = Type::ident_to_type(&ident);
                     let generics = self.parse_type_generics()?;
-                    Ok(GenericableType::Type(type_enum, generics))
+                    Ok(Type::ident_to_type(&ident))
                 }
 
                 // Pointer.
@@ -59,7 +55,7 @@ impl<'a> TypeParser<'a> {
     /// Parses a list of types inside a generic "tag" (<..>).
     ///   X<T>      // Type with generic argument.
     ///   X<T, V>   // Type with multiple generic arguments.
-    fn parse_type_generics(&mut self) -> CustomResult<Option<Vec<GenericableType>>> {
+    fn parse_type_generics(&mut self) -> CustomResult<Option<Vec<Type>>> {
         // If the next token isn't a "PointyBracketBegin" there are no generic
         // list, just return None.
         if let Some(lex_token) = self.iter.next_skip_space() {
@@ -113,18 +109,17 @@ impl<'a> TypeParser<'a> {
 
     /// Parses a pointer type.
     ///   {X}       // Pointer to type (is the {X} syntax be weird/ambiguous?)
-    fn parse_type_pointer(&mut self) -> CustomResult<GenericableType> {
+    fn parse_type_pointer(&mut self) -> CustomResult<Type> {
         // The "CurlyBracketBegin" has already been skipped.
         // Parse the type and then wrap it into a Pointer type.
-        let gen_ty = self.parse_type()?;
-        let ptr_ty = Type::Pointer(Box::new(gen_ty));
-        let ptr_gen_ty = GenericableType::Type(ptr_ty, None);
+        let ty = self.parse_type()?;
+        let ptr_ty = Type::Pointer(Box::new(ty));
 
         // At this point the token should be a "CurlyBracketEnd" since this is
         // the end of the pointer.
         if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Sym(Sym::CurlyBracketEnd) = lex_token.kind {
-                Ok(ptr_gen_ty)
+                Ok(ptr_ty)
             } else {
                 Err(self.iter.err(format!(
                     "Expected curlybrace at end of pointer type, got: {:?}.",
@@ -142,7 +137,7 @@ impl<'a> TypeParser<'a> {
     ///   [X]       // Array of type X with unknown size (slice).
     ///   [X: 3]    // Array of type X with size 3.
     ///   [X: _]    // Array of type X with infered size.
-    fn parse_type_array(&mut self) -> CustomResult<GenericableType> {
+    fn parse_type_array(&mut self) -> CustomResult<Type> {
         // The "SquareBracketBegin" has already been skipped.
         let gen_ty = self.parse_type()?;
 
@@ -179,13 +174,12 @@ impl<'a> TypeParser<'a> {
         };
 
         let array_ty = Type::Array(Box::new(gen_ty), size);
-        let array_gen_ty = GenericableType::Type(array_ty, None);
 
         // The next token must be a "SquareBracketEnd" or something has
         // gone wrong.
         if let Some(next_lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Sym(Sym::SquareBracketEnd) = next_lex_token.kind {
-                Ok(array_gen_ty)
+                Ok(array_ty)
             } else {
                 Err(self.iter.err(format!(
                     "Received invalid token in end of array type: {:?}.",

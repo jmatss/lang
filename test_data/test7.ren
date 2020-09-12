@@ -1,7 +1,7 @@
 external function printf(format: {u8}, ...) -> i32
 external function malloc(size: i32) -> {void}     // TODO: How should a "void*" be represented?
 external function free(ptr: {void})
-external function itoa(value: i32, s: {u8}, radix: i32) -> {u8}
+//external function itoa(value: i32, s: {u8}, radix: i32) -> {u8}
 
 function fac(n: i32) -> i32
 {
@@ -30,7 +30,7 @@ function main() -> i32
     printf("n: %d, result: %d", n, fac(n))
     
     var buf: {u8} = malloc(20)
-    printf("\nitoa: %s", itoa(n, buf, 10))
+    //printf("\nitoa: %s", itoa(n, buf, 10))
     
     free(buf)
     return 0

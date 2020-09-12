@@ -5,13 +5,13 @@ external function printf(format: {u8}, ...) -> i32
 
 struct NestedStruct
 {
-    z: i32,
-    b: {i32},
+    z: f64,
+    b: {u32},
 }
 
 struct TestStruct
 {
-    x: i32,
+    x: u32,
     y: {NestedStruct},
 }
 
@@ -20,7 +20,7 @@ function double(n: {i32})
     n.* *= 2
 }
 
-function main() -> int
+function main() -> i32
 {
     //var buf: {u8} = malloc(16)
     //itoa(123, buf, 10)
@@ -30,8 +30,10 @@ function main() -> int
     //test_struct.z = test_struct.b
     //printf("output: %d", test_struct.z * test_struct.b)
     
+    // TODO: `i` currently evals to type i32 but is should be
+    //       u32 since NestedStruct::b is a ptr to u32.
     var i = 3
-    var s = NestedStruct { 123, i.& }
+    var s = NestedStruct { 123.321, i.& }
     var k = TestStruct { 456, s.& }
     double(k.y.*.b)
     k.y.*.b.* += 2

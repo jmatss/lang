@@ -110,7 +110,6 @@ pub enum Sym {
     Multiplication,
     Division,
     Modulus,
-    Power,
 
     BitAnd,
     BitOr,
@@ -124,7 +123,6 @@ pub enum Sym {
     AssignMultiplication,
     AssignDivision,
     AssignModulus,
-    AssignPower,
 
     AssignBitAnd,
     AssignBitOr,
@@ -378,9 +376,7 @@ impl LexToken {
                 vec![
                     ("*", Sym::Multiplication),
                     ("*/", Sym::CommentMultiLineEnd),
-                    ("**", Sym::Power),
                     ("*=", Sym::AssignMultiplication),
-                    ("**=", Sym::AssignPower),
                 ],
             ),
 

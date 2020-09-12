@@ -1,7 +1,7 @@
 use super::expr::{Expr, Var};
-use crate::types::GenericableType;
+use crate::types::Type;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BlockHeader {
     // TODO: Make If(/else/elseif), match, while and loop expression.
     //  So that they can return values and be used in sub expressions.
@@ -81,19 +81,19 @@ pub enum BlockHeader {
     Test(Function),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Struct {
     pub name: String,
-    pub generics: Option<Vec<GenericableType>>,
-    pub implements: Option<Vec<GenericableType>>,
+    pub generics: Option<Vec<Type>>,
+    pub implements: Option<Vec<Type>>,
     pub members: Option<Vec<Var>>, // TODO: extends: Vec<Type>
 }
 
 impl Struct {
     pub fn new(
         name: String,
-        generics: Option<Vec<GenericableType>>,
-        implements: Option<Vec<GenericableType>>,
+        generics: Option<Vec<Type>>,
+        implements: Option<Vec<Type>>,
         members: Option<Vec<Var>>,
     ) -> Self {
         Self {
@@ -105,25 +105,26 @@ impl Struct {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Function {
     pub name: String,
-    pub generics: Option<Vec<GenericableType>>,
+    pub generics: Option<Vec<Type>>,
     pub parameters: Option<Vec<Var>>,
-    pub ret_type: Option<GenericableType>,
+    pub ret_type: Option<Type>,
     pub is_var_arg: bool,
 
     /// Will be set if this is a function in a "impl" block which means that
-    /// this is a function tied to a struct. The string will be the struct name.
+    /// this is a function tied to a struct. The string will be the struct name
+    /// (or the "ident" of the impl block if other than struct are allowed).
     pub method_struct: Option<String>,
 }
 
 impl Function {
     pub fn new(
         name: String,
-        generics: Option<Vec<GenericableType>>,
+        generics: Option<Vec<Type>>,
         parameters: Option<Vec<Var>>,
-        ret_type: Option<GenericableType>,
+        ret_type: Option<Type>,
         is_var_arg: bool,
     ) -> Self {
         Function {
@@ -137,26 +138,26 @@ impl Function {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Enum {
     pub name: String,
-    pub generics: Vec<GenericableType>,
+    pub generics: Vec<Type>,
 }
 
 impl Enum {
-    pub fn new(name: String, generics: Vec<GenericableType>) -> Self {
+    pub fn new(name: String, generics: Vec<Type>) -> Self {
         Enum { name, generics }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Interface {
     pub name: String,
-    pub generics: Vec<GenericableType>,
+    pub generics: Vec<Type>,
 }
 
 impl Interface {
-    pub fn new(name: String, generics: Vec<GenericableType>) -> Self {
+    pub fn new(name: String, generics: Vec<Type>) -> Self {
         Interface { name, generics }
     }
 }

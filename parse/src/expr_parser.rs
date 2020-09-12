@@ -5,7 +5,7 @@ use crate::{
 use common::{
     error::CustomResult,
     token::{
-        expr::{Expr, FuncCall, StructInit},
+        expr::{ArrayInit, Expr, FuncCall, StructInit},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
 };
@@ -134,7 +134,7 @@ impl<'a> ExprParser<'a> {
                     let end_symbol = Sym::SquareBracketEnd;
                     let args = self.iter.parse_arg_list(start_symbol, end_symbol)?;
 
-                    let expr = Expr::ArrayInit(args, None);
+                    let expr = Expr::ArrayInit(ArrayInit::new(args));
                     self.shunt_operand(expr)?;
                 }
 
