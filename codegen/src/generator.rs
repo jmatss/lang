@@ -1,6 +1,7 @@
 use analyze::AnalyzeContext;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
+    token::ast::Token,
     token::{
         ast::AstToken,
         expr::{Expr, Var},
@@ -162,18 +163,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile(&mut self, token: &'ctx mut AstToken) -> CustomResult<()> {
-        match token {
-            AstToken::Block(header, id, ref mut body) => {
+    pub(super) fn compile(&mut self, ast_token: &'ctx mut AstToken) -> CustomResult<()> {
+        self.cur_line_nr = ast_token.line_nr;
+        self.cur_column_nr = ast_token.column_nr;
+
+        match &mut ast_token.token {
+            Token::Block(header, id, ref mut body) => {
                 self.compile_block(header, *id, body)?;
             }
-            AstToken::Stmt(ref mut stmt) => {
+            Token::Stmt(ref mut stmt) => {
                 self.compile_stmt(stmt)?;
             }
-            AstToken::Expr(ref mut expr) => {
+            Token::Expr(ref mut expr) => {
                 self.compile_expr(expr, ExprTy::RValue)?;
             }
-            AstToken::EOF => (),
+            Token::EOF => (),
         }
         Ok(())
     }

@@ -1,6 +1,7 @@
 use crate::type_context::TypeContext;
 use common::{
     error::LangError,
+    token::ast::Token,
     token::op::UnOperator,
     token::{
         ast::AstToken,
@@ -43,8 +44,13 @@ impl<'a> Visitor for TypeSolver<'a> {
         // TODO: How to check that all types have been inferred?
     }
 
+    fn visit_token(&mut self, ast_token: &mut AstToken) {
+        self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
+        self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
+    }
+
     fn visit_block(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(_, id, _) = ast_token {
+        if let Token::Block(_, id, _) = &ast_token.token {
             self.type_context.analyze_context.cur_block_id = *id;
         }
     }

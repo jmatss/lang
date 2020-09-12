@@ -1,6 +1,7 @@
 use crate::AnalyzeContext;
 use common::{
     error::LangError,
+    token::ast::Token,
     token::{
         ast::AstToken,
         block::{BlockHeader, Function},
@@ -175,9 +176,14 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
         }
     }
 
+    fn visit_token(&mut self, ast_token: &mut AstToken) {
+        self.analyze_context.cur_line_nr = ast_token.line_nr;
+        self.analyze_context.cur_column_nr = ast_token.column_nr;
+    }
+
     fn visit_block(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(_, id, _) = ast_token {
-            self.analyze_context.cur_block_id = *id;
+        if let Token::Block(_, id, _) = ast_token.token {
+            self.analyze_context.cur_block_id = id;
         }
     }
 
@@ -186,7 +192,9 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
     /// This lets the functions when they are visited to know that they are
     /// methods.
     fn visit_impl(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(BlockHeader::Implement(struct_name), impl_id, body) = ast_token {
+        if let Token::Block(BlockHeader::Implement(struct_name), impl_id, body) =
+            &mut ast_token.token
+        {
             let struct_parent_id = match self
                 .analyze_context
                 .get_struct_parent_id(struct_name.clone(), *impl_id)
@@ -201,7 +209,7 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
             self.analyze_context.methods.insert(key, HashMap::default());
 
             for body_token in body {
-                if let AstToken::Block(BlockHeader::Function(func), ..) = body_token {
+                if let Token::Block(BlockHeader::Function(func), ..) = &mut body_token.token {
                     func.method_struct = Some(struct_name.clone());
                 } else {
                     let err = self.analyze_context.err(format!(
@@ -215,7 +223,7 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
     }
 
     fn visit_func(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(BlockHeader::Function(func), func_id, ..) = ast_token {
+        if let Token::Block(BlockHeader::Function(func), func_id, ..) = &mut ast_token.token {
             if let Some(struct_name) = func.method_struct.clone() {
                 self.analyze_method_header(&struct_name, func, *func_id);
             } else {
@@ -225,7 +233,7 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
     }
 
     fn visit_struct(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(BlockHeader::Struct(struct_), struct_id, ..) = ast_token {
+        if let Token::Block(BlockHeader::Struct(struct_), struct_id, ..) = &ast_token.token {
             // Add the struct in the scope of its root parent (`root_parent_id`).
             let root_parent_id = match self.analyze_context.get_next_root_parent(*struct_id) {
                 Ok(id) => id,
@@ -253,7 +261,7 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
     }
 
     fn visit_enum(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(BlockHeader::Enum(enum_), enum_id, ..) = ast_token {
+        if let Token::Block(BlockHeader::Enum(enum_), enum_id, ..) = &ast_token.token {
             // Add the enum in the scope of its root parent (`root_parent_id`).
             let root_parent_id = match self.analyze_context.get_next_root_parent(*enum_id) {
                 Ok(id) => id,
@@ -281,7 +289,8 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
     }
 
     fn visit_interface(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(BlockHeader::Interface(interface), interface_id, ..) = ast_token {
+        if let Token::Block(BlockHeader::Interface(interface), interface_id, ..) = &ast_token.token
+        {
             // Add the interface in the scope of its root parent (`root_parent_id`).
             let root_parent_id = match self.analyze_context.get_next_root_parent(*interface_id) {
                 Ok(id) => id,

@@ -1,16 +1,16 @@
 use crate::AnalyzeContext;
 use common::{
-    error::{LangError, LangErrorKind::AnalyzeError},
+    error::LangError,
+    token::ast::Token,
     token::{
         ast::AstToken,
         expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
         stmt::Stmt,
     },
-    types::Type,
     visitor::Visitor,
 };
-use log::{debug, info, trace};
+use log::debug;
 
 /// Gathers information about indexing of variables. This includes array indexing,
 /// struct indexing and method calls etc. This analyzer traverses through all
@@ -18,29 +18,26 @@ use log::{debug, info, trace};
 /// inserted into the AST.
 pub struct IndexingAnalyzer<'a> {
     analyze_context: &'a mut AnalyzeContext,
-    errors: Vec<LangError>,
 }
 
 impl<'a> IndexingAnalyzer<'a> {
     pub fn new(analyze_context: &'a mut AnalyzeContext) -> Self {
-        Self {
-            analyze_context,
-            errors: Vec::default(),
-        }
+        Self { analyze_context }
     }
 }
 
 impl<'a> Visitor for IndexingAnalyzer<'a> {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
-        if self.errors.is_empty() {
-            None
-        } else {
-            Some(std::mem::take(&mut self.errors))
-        }
+        None
+    }
+
+    fn visit_token(&mut self, ast_token: &mut AstToken) {
+        self.analyze_context.cur_line_nr = ast_token.line_nr;
+        self.analyze_context.cur_column_nr = ast_token.column_nr;
     }
 
     fn visit_block(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(_, id, _) = ast_token {
+        if let Token::Block(_, id, _) = &ast_token.token {
             self.analyze_context.cur_block_id = *id;
         }
     }

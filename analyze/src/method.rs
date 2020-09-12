@@ -1,6 +1,7 @@
 use crate::AnalyzeContext;
 use common::{
     error::{LangError, LangErrorKind::AnalyzeError},
+    token::ast::Token,
     token::{
         ast::AstToken,
         expr::{Argument, ArrayInit, Expr, FuncCall, StructInit, Var},
@@ -31,11 +32,20 @@ impl<'a> MethodAnalyzer<'a> {
 
 impl<'a> Visitor for MethodAnalyzer<'a> {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
-        None
+        if self.errors.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.errors))
+        }
+    }
+
+    fn visit_token(&mut self, ast_token: &mut AstToken) {
+        self.analyze_context.cur_line_nr = ast_token.line_nr;
+        self.analyze_context.cur_column_nr = ast_token.column_nr;
     }
 
     fn visit_block(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(_, id, _) = ast_token {
+        if let Token::Block(_, id, _) = &ast_token.token {
             self.analyze_context.cur_block_id = *id;
         }
     }
@@ -56,8 +66,8 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
                             let err = LangError::new(
                                 format!("Lhs of Dot method call wasn't struct, type: {:?}", ty),
                                 AnalyzeError {
-                                    line_nr: 0,
-                                    column_nr: 0,
+                                    line_nr: self.analyze_context.cur_line_nr,
+                                    column_nr: self.analyze_context.cur_column_nr,
                                 },
                             );
                             self.errors.push(err);

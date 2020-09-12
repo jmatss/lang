@@ -1,6 +1,7 @@
 use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
+    token::ast::Token,
     token::{
         ast::AstToken,
         block::{BlockHeader, Function, Struct},
@@ -90,8 +91,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.compile_func(func, id, body)?;
             }
             BlockHeader::Implement(struct_name) => {
-                for token in body {
-                    if let AstToken::Block(BlockHeader::Function(func), func_id, func_body) = token
+                for ast_token in body {
+                    if let Token::Block(BlockHeader::Function(func), func_id, func_body) =
+                        &mut ast_token.token
                     {
                         // Since this is a method, rename it so that its name is
                         // "unique per struct" instead of unqiue for the whole
@@ -346,7 +348,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let mut branch_info = BranchInfo::new();
         branch_info.if_branches.push(cur_block);
         for (i, if_case) in body.iter().enumerate() {
-            if let AstToken::Block(BlockHeader::IfCase(expr_opt), _, _) = &if_case {
+            if let Token::Block(BlockHeader::IfCase(expr_opt), _, _) = &if_case.token {
                 // Skip adding a branch block if this is the first case (since it
                 // has the branch block `cur_block`). Also only add a branch block
                 // if this `if_case` contains a expression that can be "branched on".
@@ -394,11 +396,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for (index, if_case) in body.iter_mut().enumerate() {
             self.cur_block_id = id;
 
-            if let AstToken::Block(
+            if let Token::Block(
                 BlockHeader::IfCase(ref mut expr_opt),
                 inner_id,
                 ref mut inner_body,
-            ) = if_case
+            ) = &mut if_case.token
             {
                 self.compile_if_case(
                     expr_opt,

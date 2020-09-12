@@ -20,6 +20,10 @@ impl Visitor for DummyVisitor {
         unreachable!()
     }
 
+    fn visit_token(&mut self, ast_token: &mut AstToken) {
+        unreachable!()
+    }
+
     fn visit_block(&mut self, ast_token: &mut AstToken) {
         unreachable!()
     }

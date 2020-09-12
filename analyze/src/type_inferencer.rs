@@ -2,6 +2,7 @@ use crate::type_context::TypeContext;
 use common::{
     error::CustomResult,
     error::{LangError, LangErrorKind::AnalyzeError},
+    token::ast::Token,
     token::{
         ast::AstToken,
         block::{BlockHeader, Function},
@@ -15,6 +16,9 @@ use common::{
 };
 use log::debug;
 use std::collections::hash_map::Entry;
+
+// TODO: Better error messages. Ex. if two types arent't compatible,
+//       print information about where the types "came" from.
 
 /// Infers types for exprs that doesn't have a type explicitly set.
 /// For more information about the algorithm, see:
@@ -56,15 +60,13 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
         }
     }
 
-    fn new_unknown_type(&mut self) -> Type {
-        let type_id = self.get_type_id();
-        Type::Unknown(type_id)
-    }
-
-    fn get_type_id(&mut self) -> usize {
-        let type_id = self.type_id;
+    // TODO: Should this be given as three numbers instead of a concatenated String?
+    fn new_unknown_ident(&mut self) -> String {
+        let cur_line_nr = self.type_context.analyze_context.cur_line_nr;
+        let cur_column_nr = self.type_context.analyze_context.cur_column_nr;
+        let type_ident = format!("{}-{}:{}", self.type_id, cur_line_nr, cur_column_nr);
         self.type_id += 1;
-        type_id
+        type_ident
     }
 
     /// Takes in two types and sorts them in the correct "mapping order" i.e.
@@ -77,10 +79,16 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
         //       recursion. Probably; how can it be prevented?
 
         if !lhs.is_compatible(&rhs) {
-            return Err(self.type_context.analyze_context.err(format!(
-                "Tried to map incompatible types. Lhs: {:?}, rhs: {:?}",
-                lhs, rhs
-            )));
+            return Err(LangError::new(
+                format!(
+                    "Tried to map incompatible types. Lhs: {:?}, rhs: {:?}",
+                    lhs, rhs
+                ),
+                AnalyzeError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
+            ));
         }
 
         Ok(if lhs == rhs {
@@ -271,96 +279,6 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
             i += 1;
         }
     }
-
-    fn analyze_struct_access(&mut self, un_op: &mut UnOp) {
-        if let UnOperator::StructAccess(name, idx, ty_opt) = &mut un_op.operator {
-            let struct_name = match un_op.value.get_expr_type() {
-                Ok(Type::Custom(struct_name)) => struct_name,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-                _ => {
-                    let err = self.type_context.analyze_context.err(format!(
-                        "Invalid type for struct access. Expected struct, got: {:?}",
-                        un_op.value.get_expr_type()
-                    ));
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            let struct_ = match self.type_context.analyze_context.get_struct(struct_name) {
-                Ok(struct_) => struct_,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            let mut i = 0;
-            let mut found = false;
-            if let Some(struct_members) = &struct_.members {
-                for member in struct_members.iter() {
-                    if name == &member.name {
-                        *idx = Some(i);
-                        *ty_opt = member.ret_type.clone();
-
-                        found = true;
-                        break;
-                    }
-                    i += 1;
-                }
-            } else {
-                let err = LangError::new(
-                    format!(
-                        "Struct \"{}\" had no members, expected member with name: {}",
-                        struct_.name, &name
-                    ),
-                    AnalyzeError {
-                        line_nr: 0,
-                        column_nr: 0,
-                    },
-                );
-                self.errors.push(err);
-                return;
-            }
-
-            // If the member was found, add a constraint from the member to the
-            // un op return type.
-            if found {
-                let ret_ty = match self.type_context.get_ret_type(un_op.ret_type.as_mut()) {
-                    Ok(ty) => ty.clone(),
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
-                };
-
-                if let Some(member_ty) = ty_opt {
-                    self.insert_constraint(ret_ty, member_ty.clone());
-                } else {
-                    let err = self
-                        .type_context
-                        .analyze_context
-                        .err(format!("Member type not set. Member name: {:?}.", name));
-                    self.errors.push(err);
-                }
-            } else {
-                let err = LangError::new(
-                    format!(
-                        "Unable to find member with name \"{}\" in struct \"{}\".",
-                        &name, struct_.name
-                    ),
-                    AnalyzeError {
-                        line_nr: 0,
-                        column_nr: 0,
-                    },
-                );
-                self.errors.push(err);
-            }
-        }
-    }
 }
 
 impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
@@ -372,8 +290,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
+    fn visit_token(&mut self, ast_token: &mut AstToken) {
+        self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
+        self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
+    }
+
     fn visit_block(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(_, id, _) = ast_token {
+        if let Token::Block(_, id, _) = &ast_token.token {
             self.type_context.analyze_context.cur_block_id = *id;
         }
     }
@@ -381,6 +304,9 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Do one last solve before exiting to make sure that everything than can
     /// be solved are solved. Also debug log the results.
     fn visit_eof(&mut self, ast_token: &mut AstToken) {
+        self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
+        self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
+
         self.solve_constraints();
         debug!(
             "Type inference Done.\nConstraints: {:#?}\nSubs: {:#?}",
@@ -398,11 +324,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         if let Expr::Lit(lit, gen_ty_opt) = expr {
             if gen_ty_opt.is_none() {
                 let new_gen_ty = match lit {
-                    Lit::String(_) => Type::String,
+                    // TODO: Have a custom struct "String" instead of "*u8"?
+                    Lit::String(_) => Type::Pointer(Box::new(Type::U8)),
                     Lit::Char(_) => Type::Character,
                     Lit::Bool(_) => Type::Boolean,
-                    Lit::Integer(_, radix) => Type::UnknownInt(self.get_type_id(), *radix),
-                    Lit::Float(_) => Type::UnknownFloat(self.get_type_id()),
+                    Lit::Integer(_, radix) => Type::UnknownInt(self.new_unknown_ident(), *radix),
+                    Lit::Float(_) => Type::UnknownFloat(self.new_unknown_ident()),
                 };
                 *gen_ty_opt = Some(new_gen_ty);
             }
@@ -561,8 +488,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         &struct_.name, members.len(), struct_init.arguments.len()
                     ),
                     AnalyzeError {
-                        line_nr: 0,
-                        column_nr: 0,
+                        line_nr: self.type_context.analyze_context.cur_line_nr,
+                        column_nr: self.type_context.analyze_context.cur_column_nr,
                     },
                 );
                 self.errors.push(err);
@@ -655,7 +582,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     fn visit_array_init(&mut self, array_init: &mut ArrayInit) {
         if array_init.ret_type.is_none() {
-            array_init.ret_type = Some(self.new_unknown_type());
+            array_init.ret_type = Some(Type::Unknown(self.new_unknown_ident()));
         }
     }
 
@@ -669,7 +596,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let ret_ty = if let Some(ty) = &bin_op.ret_type {
             ty.clone()
         } else {
-            let new_type = self.new_unknown_type();
+            let new_type = Type::Unknown(self.new_unknown_ident());
             bin_op.ret_type = Some(new_type.clone());
             new_type
         };
@@ -727,8 +654,18 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | BinOperator::LessThan
             | BinOperator::GreaterThan
             | BinOperator::LessThanOrEquals
-            | BinOperator::GreaterThanOrEquals
-            | BinOperator::Addition
+            | BinOperator::GreaterThanOrEquals => {
+                self.insert_constraint(ret_ty, Type::Boolean);
+                self.insert_constraint(lhs_ty, rhs_ty);
+            }
+
+            BinOperator::BoolAnd | BinOperator::BoolOr => {
+                self.insert_constraint(ret_ty, Type::Boolean);
+                self.insert_constraint(lhs_ty, Type::Boolean);
+                self.insert_constraint(rhs_ty, Type::Boolean);
+            }
+
+            BinOperator::Addition
             | BinOperator::Subtraction
             | BinOperator::Multiplication
             | BinOperator::Division
@@ -737,9 +674,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | BinOperator::BitOr
             | BinOperator::BitXor
             | BinOperator::ShiftLeft
-            | BinOperator::ShiftRight
-            | BinOperator::BoolAnd
-            | BinOperator::BoolOr => {
+            | BinOperator::ShiftRight => {
                 self.insert_constraint(ret_ty.clone(), lhs_ty.clone());
                 self.insert_constraint(ret_ty, rhs_ty.clone());
                 self.insert_constraint(lhs_ty, rhs_ty);
@@ -753,7 +688,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         // The "ret_type" of this un op will also be given a ret_type if it
         // doesn't already have a type set.
         if un_op.ret_type.is_none() {
-            un_op.ret_type = Some(self.new_unknown_type());
+            un_op.ret_type = Some(Type::Unknown(self.new_unknown_ident()));
         }
 
         let ret_ty = match self.type_context.get_ret_type(un_op.ret_type.as_mut()) {
@@ -802,7 +737,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Save the current function in a place so that the stmts/exprs in the body
     /// can access the types of the parameters and the return type of the func.
     fn visit_func(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(BlockHeader::Function(func), ..) = ast_token {
+        if let Token::Block(BlockHeader::Function(func), ..) = &ast_token.token {
             self.cur_func = Some(func.clone());
         }
     }
@@ -843,7 +778,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Save the current match expr in a place so that the match cases in the body
     /// can access the type of the expr.
     fn visit_match(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(BlockHeader::Match(expr), ..) = ast_token {
+        if let Token::Block(BlockHeader::Match(expr), ..) = &ast_token.token {
             self.cur_match_expr = Some(expr.clone());
         }
     }
@@ -851,7 +786,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Need to make sure that the match expr and the match case exprs have the
     /// same type. Add it as a constraint.
     fn visit_match_case(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(BlockHeader::MatchCase(match_case_expr), ..) = ast_token {
+        if let Token::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token.token {
             if let Some(mut match_expr) = self.cur_match_expr.clone() {
                 let match_expr_ty = match match_expr.get_expr_type() {
                     Ok(expr_ty) => expr_ty,
@@ -928,7 +863,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let new_type = if var.ret_type.is_some() {
                 var.ret_type.clone()
             } else {
-                Some(self.new_unknown_type())
+                Some(Type::Unknown(self.new_unknown_ident()))
             };
 
             var.ret_type = new_type.clone();

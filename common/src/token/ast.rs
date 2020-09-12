@@ -3,8 +3,14 @@ use crate::BlockId;
 
 /// Top level token that wraps all other kind of token types.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum AstToken {
-    /// The first u64 is the line number annd the second is thte column number.
+pub struct AstToken {
+    pub token: Token,
+    pub line_nr: u64,
+    pub column_nr: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Token {
     // TODO: Rust/C block (statement/expression (?)).
     Expr(Expr),
     Stmt(Stmt),

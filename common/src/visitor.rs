@@ -12,6 +12,7 @@ pub trait Visitor {
     fn take_errors(&mut self) -> Option<Vec<LangError>>;
 
     /* TOP LEVEL */
+    fn visit_token(&mut self, ast_token: &mut AstToken);
     fn visit_block(&mut self, ast_token: &mut AstToken);
     fn visit_expr(&mut self, expr: &mut Expr);
     fn visit_stmt(&mut self, stmt: &mut Stmt);

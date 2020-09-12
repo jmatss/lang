@@ -1,6 +1,7 @@
 use crate::AnalyzeContext;
 use common::{
     error::LangError,
+    token::ast::Token,
     token::{
         ast::AstToken,
         expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
@@ -46,8 +47,14 @@ impl<'a> DeferAnalyzer<'a> {
 
     fn insert_defers(&mut self, i: &mut usize, body: &mut Vec<AstToken>, defers: Vec<Expr>) {
         for expr in defers.into_iter() {
-            let defer_exec = AstToken::Stmt(Stmt::DeferExec(expr));
-            body.insert(*i, defer_exec);
+            body.insert(
+                *i,
+                AstToken {
+                    token: Token::Stmt(Stmt::DeferExec(expr)),
+                    line_nr: 0,
+                    column_nr: 0,
+                },
+            );
             *i += 1;
         }
     }
@@ -112,29 +119,34 @@ impl<'a> Visitor for DeferAnalyzer<'a> {
         None
     }
 
+    fn visit_token(&mut self, ast_token: &mut AstToken) {
+        self.analyze_context.cur_line_nr = ast_token.line_nr;
+        self.analyze_context.cur_column_nr = ast_token.column_nr;
+    }
+
     fn visit_block(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(_, id, body) = ast_token {
+        if let Token::Block(_, id, body) = &mut ast_token.token {
             self.analyze_context.cur_block_id = *id;
 
             let mut i = 0;
             while i < body.len() {
-                match &body[i] {
+                match &body[i].token {
                     // If the token is a "Defer" statement, store the defer
                     // in the `self.defer_stmts`.
-                    AstToken::Stmt(Stmt::Defer(expr)) => {
+                    Token::Stmt(Stmt::Defer(expr)) => {
                         self.store_defer(expr.clone(), *id);
                     }
 
                     // This is a branch instruction, insert the stored defers
                     // as instructions before this branch.
-                    AstToken::Stmt(Stmt::Return(_)) => {
+                    Token::Stmt(Stmt::Return(_)) => {
                         if let Some(defers) = self.get_defers_all_parents(*id) {
                             self.insert_defers(&mut i, body, defers);
                         }
                     }
-                    AstToken::Stmt(Stmt::Yield(_))
-                    | AstToken::Stmt(Stmt::Break)
-                    | AstToken::Stmt(Stmt::Continue) => {
+                    Token::Stmt(Stmt::Yield(_))
+                    | Token::Stmt(Stmt::Break)
+                    | Token::Stmt(Stmt::Continue) => {
                         if let Some(defers) = self.get_defers_until_branchable(*id) {
                             self.insert_defers(&mut i, body, defers);
                         }

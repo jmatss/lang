@@ -7,7 +7,7 @@ struct TestStruct
     msg: {u8},
 }
 
-function main() -> int
+function main() -> i32
 {
     var test_struct = TestStruct { 0 , malloc(6) }
     
@@ -22,7 +22,7 @@ function main() -> int
 
     while test_struct.i < 3
     {
-        test_struct.i++
+        test_struct.i += 1
     }
     
     printf("i: %d, msg: %s", test_struct.i, test_struct.msg)

@@ -27,19 +27,21 @@ pub enum Type {
     Custom(String),
 
     /// This is used during the type inference stage. Every expr must have a type,
-    /// so this is used for expr that doesn't have a known type. The int will be
-    /// a unique number that will be used when ti unknown type is to be "converted"
+    /// so this is used for expr that doesn't have a known type. The String will be
+    /// a unique ID that will be used when the unknown type is to be "converted"
     /// into a real type at the end of the type inference step.
-    Unknown(usize),
+    /// The unique String will be a "random" number concatenated with the line
+    /// number and column numbers where the type was "declared".
+    Unknown(String),
 
     /// A int type used during type inferece. It is known that it is of a int
     /// type, but the bit size isn't known.
-    /// The first usize is the unique number and the second u32 is the radix.
-    UnknownInt(usize, u32),
+    /// The first String is the unique ID and the second u32 is the radix.
+    UnknownInt(String, u32),
 
     /// A float type used during type inferece. It is known that it is of a float
     /// type, but the bit size isn't known.
-    UnknownFloat(usize),
+    UnknownFloat(String),
 
     /// Unknown member of the struct type "Type" with the member name "String".
     UnknownStructMember(Box<Type>, String),

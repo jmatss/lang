@@ -1,6 +1,7 @@
 use crate::{AnalyzeContext, BlockInfo};
 use common::{
     error::LangError,
+    token::ast::Token,
     token::{
         ast::AstToken,
         block::BlockHeader,
@@ -72,7 +73,10 @@ impl<'a> BlockAnalyzer<'a> {
     }
 
     fn analyze_block(&mut self, ast_token: &AstToken) {
-        if let AstToken::Block(ref header, id, body) = ast_token {
+        self.analyze_context.cur_line_nr = ast_token.line_nr;
+        self.analyze_context.cur_column_nr = ast_token.column_nr;
+
+        if let Token::Block(ref header, id, body) = &ast_token.token {
             let is_root_block = self.analyze_is_root(header);
             let is_branchable_block = self.analyze_is_branchable(header);
             let mut block_info = BlockInfo::new(*id, is_root_block, is_branchable_block);
@@ -92,21 +96,16 @@ impl<'a> BlockAnalyzer<'a> {
                 // block to the be the "parent" (`self.context.cur_block_id`).
                 self.analyze_context.cur_block_id = *id;
 
-                match child_token {
-                    // TODO: Don't want a reference to `child_id` since it prevents
-                    //       the "visit_block(token)" to borrow token since it
-                    //       will be a duplicate mutable reference borrow.
-                    //       Adding mut during the pattern matching prevents this,
-                    //       is there a way to do this without mut?
-                    AstToken::Block(BlockHeader::If, mut child_id, _)
-                    | AstToken::Block(BlockHeader::IfCase(_), mut child_id, _)
-                    | AstToken::Block(BlockHeader::Function(_), mut child_id, _)
-                    | AstToken::Block(BlockHeader::Match(_), mut child_id, _)
-                    | AstToken::Block(BlockHeader::MatchCase(_), mut child_id, _)
-                    | AstToken::Block(BlockHeader::For(..), mut child_id, _)
-                    | AstToken::Block(BlockHeader::While(..), mut child_id, _)
-                    | AstToken::Block(BlockHeader::Test(_), mut child_id, _)
-                    | AstToken::Block(BlockHeader::Anonymous, mut child_id, _) => {
+                match child_token.token {
+                    Token::Block(BlockHeader::If, child_id, _)
+                    | Token::Block(BlockHeader::IfCase(_), child_id, _)
+                    | Token::Block(BlockHeader::Function(_), child_id, _)
+                    | Token::Block(BlockHeader::Match(_), child_id, _)
+                    | Token::Block(BlockHeader::MatchCase(_), child_id, _)
+                    | Token::Block(BlockHeader::For(..), child_id, _)
+                    | Token::Block(BlockHeader::While(..), child_id, _)
+                    | Token::Block(BlockHeader::Test(_), child_id, _)
+                    | Token::Block(BlockHeader::Anonymous, child_id, _) => {
                         self.analyze_block(child_token);
 
                         if let Some(child_block_info) =
@@ -126,17 +125,17 @@ impl<'a> BlockAnalyzer<'a> {
                         child_count += 1;
                     }
 
-                    AstToken::Block(BlockHeader::Default, ..)
-                    | AstToken::Block(BlockHeader::Struct(_), ..)
-                    | AstToken::Block(BlockHeader::Enum(_), ..)
-                    | AstToken::Block(BlockHeader::Interface(_), ..)
-                    | AstToken::Block(BlockHeader::Implement(..), ..) => {
+                    Token::Block(BlockHeader::Default, ..)
+                    | Token::Block(BlockHeader::Struct(_), ..)
+                    | Token::Block(BlockHeader::Enum(_), ..)
+                    | Token::Block(BlockHeader::Interface(_), ..)
+                    | Token::Block(BlockHeader::Implement(..), ..) => {
                         self.analyze_block(child_token);
                     }
 
-                    AstToken::Stmt(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
+                    Token::Stmt(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
 
-                    AstToken::Expr(_) | AstToken::EOF => (),
+                    Token::Expr(_) | Token::EOF => (),
                 }
             }
 
@@ -163,15 +162,24 @@ impl<'a> Visitor for BlockAnalyzer<'a> {
         }
     }
 
+    fn visit_token(&mut self, ast_token: &mut AstToken) {
+        self.analyze_context.cur_line_nr = ast_token.line_nr;
+        self.analyze_context.cur_column_nr = ast_token.column_nr;
+    }
+
     /// All traversing is done from the default block, no other visit function
     /// will be used. The reason being that this needs to be called recursively
     /// on blocks, which currently isn't possible to do with the regular traverser.
     fn visit_default_block(&mut self, ast_token: &mut AstToken) {
-        if let AstToken::Block(_, id, _) = ast_token {
-            self.analyze_context.cur_block_id = *id;
+        if let Token::Block(_, id, _) = ast_token.token {
+            self.analyze_context.cur_block_id = id;
         }
 
         self.analyze_block(ast_token);
+    }
+
+    fn visit_eof(&mut self, ast_token: &mut AstToken) {
+        debug!("BLOCK_INFO --\n{:#?}", self.analyze_context.block_info);
     }
 
     fn visit_block(&mut self, ast_token: &mut AstToken) {}
@@ -179,10 +187,6 @@ impl<'a> Visitor for BlockAnalyzer<'a> {
     fn visit_expr(&mut self, expr: &mut Expr) {}
 
     fn visit_stmt(&mut self, stmt: &mut Stmt) {}
-
-    fn visit_eof(&mut self, ast_token: &mut AstToken) {
-        debug!("BLOCK_INFO --\n{:#?}", self.analyze_context.block_info);
-    }
 
     fn visit_func(&mut self, ast_token: &mut AstToken) {}
 

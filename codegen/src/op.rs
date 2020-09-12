@@ -338,21 +338,34 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
-    /*
-    token::BinaryOperator::GreaterThanOrEquals
-    */
-
     fn compile_bin_op_compare(
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
         is_const: bool,
         op: &BinOperator,
-        left: BasicValueEnum<'ctx>,
-        right: BasicValueEnum<'ctx>,
+        lhs: BasicValueEnum<'ctx>,
+        rhs: BasicValueEnum<'ctx>,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
+        // Ensure that lhs and rhs has the same type.
+        match (lhs.get_type(), rhs.get_type()) {
+            (BasicTypeEnum::ArrayType(_), BasicTypeEnum::ArrayType(_))
+            | (BasicTypeEnum::FloatType(_), BasicTypeEnum::FloatType(_))
+            | (BasicTypeEnum::IntType(_), BasicTypeEnum::IntType(_))
+            | (BasicTypeEnum::PointerType(_), BasicTypeEnum::PointerType(_))
+            | (BasicTypeEnum::StructType(_), BasicTypeEnum::StructType(_))
+            | (BasicTypeEnum::VectorType(_), BasicTypeEnum::VectorType(_)) => {}
+
+            _ => {
+                return Err(self.err(format!(
+                    "Lhs and rhs of bin op compare not same type. Lhs: {:?}, rhs: {:?}",
+                    lhs, rhs
+                )))
+            }
+        }
+
         // TODO: Add compares for more types.
-        Ok(match ret_type {
-            AnyTypeEnum::FloatType(_) => {
+        Ok(match lhs.get_type() {
+            BasicTypeEnum::FloatType(_) => {
                 let predicate = match op {
                     BinOperator::Equals => FloatPredicate::OEQ,
                     BinOperator::NotEquals => FloatPredicate::ONE,
@@ -368,15 +381,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 };
 
                 if is_const {
-                    left.into_float_value()
-                        .const_compare(predicate, right.into_float_value())
+                    lhs.into_float_value()
+                        .const_compare(predicate, rhs.into_float_value())
                         .into()
                 } else {
                     self.builder
                         .build_float_compare(
                             predicate,
-                            left.into_float_value(),
-                            right.into_float_value(),
+                            lhs.into_float_value(),
+                            rhs.into_float_value(),
                             "compare.float",
                         )
                         .into()
@@ -384,7 +397,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
 
             // TODO: Signness
-            AnyTypeEnum::IntType(_) => {
+            BasicTypeEnum::IntType(_) => {
                 let predicate = match op {
                     BinOperator::Equals => IntPredicate::EQ,
                     BinOperator::NotEquals => IntPredicate::NE,
@@ -400,30 +413,25 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 };
 
                 if is_const {
-                    left.into_int_value()
-                        .const_int_compare(predicate, right.into_int_value())
+                    lhs.into_int_value()
+                        .const_int_compare(predicate, rhs.into_int_value())
                         .into()
                 } else {
                     self.builder
                         .build_int_compare(
                             predicate,
-                            left.into_int_value(),
-                            right.into_int_value(),
+                            lhs.into_int_value(),
+                            rhs.into_int_value(),
                             "compare.int",
                         )
                         .into()
                 }
             }
 
-            AnyTypeEnum::ArrayType(_)
-            | AnyTypeEnum::FunctionType(_)
-            | AnyTypeEnum::PointerType(_)
-            | AnyTypeEnum::StructType(_)
-            | AnyTypeEnum::VectorType(_)
-            | AnyTypeEnum::VoidType(_) => {
+            _ => {
                 return Err(self.err(format!(
-                    "Invalid type for BinaryOperator::Equals: {:?}",
-                    ret_type
+                    "Invalid type used in bin op compare: {:?}",
+                    lhs.get_type()
                 )))
             }
         })

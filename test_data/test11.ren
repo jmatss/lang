@@ -1,4 +1,4 @@
-external function printf(format: {u8}, ...) -> i32
+use std.assert
 
 struct TestStruct
 {
@@ -6,13 +6,13 @@ struct TestStruct
     msg: i32,
 }
 
-function main() -> int
+function main() -> i32
 {
     var integer = 123
     var ptr = integer.&
-    
+
     var ret = ptr.* + ptr.*
-    printf("Result: %d", ret)
+    assert(ret == 246)
     
     return ret
 }

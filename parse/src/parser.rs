@@ -5,6 +5,7 @@ use crate::{
 use common::{
     error::{CustomResult, LangError, LangErrorKind::ParseError},
     iter::TokenIter,
+    token::ast::Token,
     token::{
         ast::AstToken,
         block::BlockHeader,
@@ -98,12 +99,16 @@ impl ParseTokenIter {
     }
 
     pub fn take_root_block(&mut self) -> AstToken {
-        let header = BlockHeader::Default;
-        AstToken::Block(
-            header,
+        let token = Token::Block(
+            BlockHeader::Default,
             self.root_block_id,
             std::mem::take(&mut self.root_block_body),
-        )
+        );
+        AstToken {
+            token,
+            line_nr: 1,
+            column_nr: 1,
+        }
     }
 
     pub fn parse(&mut self) -> Result<(), Vec<LangError>> {
@@ -118,12 +123,12 @@ impl ParseTokenIter {
         loop {
             match self.next_token() {
                 Ok(parse_token) => {
-                    match parse_token {
-                        AstToken::EOF => {
+                    match parse_token.token {
+                        Token::EOF => {
                             cur_block_body.push(parse_token);
                             break;
                         }
-                        AstToken::Stmt(Stmt::Use(ref path)) => {
+                        Token::Stmt(Stmt::Use(ref path)) => {
                             self.uses.push(path.clone());
                         }
                         _ => (),
@@ -173,7 +178,7 @@ impl ParseTokenIter {
 
             Ok(match lex_token.kind {
                 LexTokenKind::Kw(keyword) => {
-                    return self.parse_keyword(keyword, lex_token.line_nr, lex_token.column_nr);
+                    self.parse_keyword(keyword, lex_token.line_nr, lex_token.column_nr)?
                 }
 
                 // Skip line breaks, white spaces and semi colons. Just return
@@ -181,9 +186,7 @@ impl ParseTokenIter {
                 // Call this function recursively to get an "actual" token.
                 LexTokenKind::Sym(Sym::LineBreak)
                 | LexTokenKind::Sym(Sym::WhiteSpace(_))
-                | LexTokenKind::Sym(Sym::SemiColon) => {
-                    return self.next_token();
-                }
+                | LexTokenKind::Sym(Sym::SemiColon) => self.next_token()?,
 
                 // If a "line" starts with a identifier this can either be a
                 // assignment to a variable (assignment aren't treated as
@@ -199,19 +202,25 @@ impl ParseTokenIter {
 
                     // If the next token after the expr is a assign operator,
                     // this is a assignment. Otherwise, this is just a "regular" expr.
-                    if let Some(next) = self.peek_skip_space() {
+                    let token = if let Some(next) = self.peek_skip_space() {
                         if let Some(assign_op) = get_if_stmt_op(&next) {
                             self.next_skip_space(); // Consume the assign op.
                             let rhs = self.parse_expr(&DEFAULT_STOP_CONDS)?;
                             let stmt = Stmt::Assignment(assign_op, expr, rhs);
-                            AstToken::Stmt(stmt)
+                            Token::Stmt(stmt)
                         } else {
-                            AstToken::Expr(expr)
+                            Token::Expr(expr)
                         }
                     } else {
                         // If there are no more tokens after this expr has been
                         // parsed, there can be no rhs, this is NOT a assignment.
-                        AstToken::Expr(expr)
+                        Token::Expr(expr)
+                    };
+
+                    AstToken {
+                        token,
+                        line_nr: lex_token.line_nr,
+                        column_nr: lex_token.column_nr,
                     }
                 }
 
@@ -220,8 +229,7 @@ impl ParseTokenIter {
                     // Put back the CurlyBracketBegin, it is expected to be the
                     // first symbol found in the `self.next_block` function.
                     self.rewind()?;
-
-                    return self.next_block(BlockHeader::Anonymous);
+                    self.next_block(BlockHeader::Anonymous)?
                 }
 
                 // Error if the iterator finds a lonely symbol of these types:
@@ -244,13 +252,27 @@ impl ParseTokenIter {
                     // everything together as an expression.
                     self.rewind()?;
                     let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                    AstToken::Expr(expr)
+                    let token = Token::Expr(expr);
+
+                    AstToken {
+                        token,
+                        line_nr: lex_token.line_nr,
+                        column_nr: lex_token.column_nr,
+                    }
                 }
 
-                LexTokenKind::EOF => AstToken::EOF,
+                LexTokenKind::EOF => AstToken {
+                    token: Token::EOF,
+                    line_nr: lex_token.line_nr,
+                    column_nr: lex_token.column_nr,
+                },
             })
         } else {
-            Ok(AstToken::EOF)
+            Ok(AstToken {
+                token: Token::EOF,
+                line_nr: self.cur_line_nr,
+                column_nr: self.cur_column_nr,
+            })
         }
     }
 
@@ -291,7 +313,12 @@ impl ParseTokenIter {
             block_tokens.push(token);
         }
 
-        Ok(AstToken::Block(header, block_id, block_tokens))
+        let token = Token::Block(header, block_id, block_tokens);
+        Ok(AstToken {
+            token,
+            line_nr,
+            column_nr,
+        })
     }
 
     pub fn parse_keyword(

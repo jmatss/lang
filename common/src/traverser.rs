@@ -1,5 +1,6 @@
 use crate::{
     error::{LangError, LangErrorKind::TraversalError},
+    token::ast::Token,
     token::{
         ast::AstToken,
         block::BlockHeader,
@@ -47,19 +48,23 @@ impl<'a> AstTraverser<'a> {
     }
 
     pub fn traverse(&mut self, ast_token: &mut AstToken) -> &mut Self {
-        if let AstToken::Block(..) = ast_token {
+        self.visitor.visit_token(ast_token);
+
+        // TODO: Can i move this into the match block? Currently needed since
+        //       can't borrow mut twice.
+        if let Token::Block(..) = ast_token.token {
             self.traverse_block(ast_token);
         }
 
-        match ast_token {
-            AstToken::Block(_, _, body) => {
+        match &mut ast_token.token {
+            Token::Block(_, _, body) => {
                 for body_token in body {
                     self.traverse(body_token);
                 }
             }
-            AstToken::Expr(expr) => self.traverse_expr(expr),
-            AstToken::Stmt(stmt) => self.traverse_stmt(stmt),
-            AstToken::EOF => {
+            Token::Expr(expr) => self.traverse_expr(expr),
+            Token::Stmt(stmt) => self.traverse_stmt(stmt),
+            Token::EOF => {
                 debug!("Visiting EOF");
                 self.visitor.visit_eof(ast_token);
             }
@@ -72,8 +77,8 @@ impl<'a> AstTraverser<'a> {
         debug!("Visiting block -- {:#?}", ast_token);
         self.visitor.visit_block(ast_token);
 
-        match ast_token {
-            AstToken::Block(header, ..) => match header {
+        match &mut ast_token.token {
+            Token::Block(header, ..) => match header {
                 BlockHeader::Default => {
                     debug!("Visiting default block");
                     self.visitor.visit_default_block(ast_token);
