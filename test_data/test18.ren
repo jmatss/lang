@@ -3,7 +3,7 @@ use std.assert
 struct TestStruct
 {
     a: i32,
-    b: {f64},
+    b: {f32},
     c: i32,
 }
 
@@ -17,16 +17,19 @@ implement TestStruct
     }
 }
 
-function main() -> int
+function main() -> i32
 {
     var b = 1.0
     var test_struct = TestStruct { 10, b.&, 2 }
 
     var actual_result = test_struct.add(8)
 
+    printf("b: %f", b as f64)
+    printf("\ntest_struct.a: %d, test_struct.b.*: %f, test_struct.c: %d", test_struct.a, test_struct.b.*, test_struct.c)
+    printf("\nactual_result: %d", actual_result)
+    assert(b == 2.0)
+    assert(test_struct.a == 20 and test_struct.b.* == 2.0 and test_struct.c == 2)
     assert(actual_result == 30)
-    assert(test_struct.b.* == 2.0)
-    printf("actual_result: %d, test_struct.b.*: %lf", actual_result, test_struct.b.*)
     
     return 0
 }

@@ -16,6 +16,7 @@ use common::{
     BlockId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
+use log::debug;
 
 /// The common stop conditions used when parsing expressions.
 pub const DEFAULT_STOP_CONDS: [Sym; 4] = [
@@ -367,6 +368,11 @@ impl ParseTokenIter {
     ) -> CustomResult<Vec<Argument>> {
         let mut arguments = Vec::new();
 
+        debug!(
+            "Parsing arg list, start symbol: {:?}, end symbol: {:?}",
+            start_symbol, end_symbol
+        );
+
         // Skip the first symbol and ensure that it is the `start_symbol`.
         if let Some(start_token) = self.next_skip_space_line() {
             match start_token.kind {
@@ -408,16 +414,16 @@ impl ParseTokenIter {
             let mut name = None;
 
             let first_opt = self.peek_skip_space_line();
-            let second_opt = self.peek_skip_space_line();
+            let second_opt = self.peek_skip_space_line_n(1);
             if let (Some(first), Some(second)) = (first_opt, second_opt) {
-                if let LexTokenKind::Ident(ident) = first.kind {
+                if let LexTokenKind::Ident(ident) = &first.kind {
                     if let LexTokenKind::Sym(Sym::Equals) = second.kind {
                         // 1. Named argument.
                         // skip the ident and equals.
                         self.next_skip_space_line();
                         self.next_skip_space_line();
 
-                        name = Some(ident);
+                        name = Some(ident.clone());
                     }
                 }
 
@@ -693,13 +699,27 @@ impl ParseTokenIter {
     /// white space/line break is found.
     #[inline]
     pub fn peek_skip_space_line(&mut self) -> Option<LexToken> {
+        self.peek_skip_space_line_n(0)
+    }
+
+    /// Peeks and clones the item `peek_count` items from the current iterator
+    /// position. This count does NOT include the space/lines/semiColin. Will
+    /// loop until a non white space/line break is found.
+    #[inline]
+    pub fn peek_skip_space_line_n(&mut self, peek_count: usize) -> Option<LexToken> {
         let mut i = 0;
+        let mut cur_count = 0;
         while let Some(current) = self.iter.peek_at_n(i) {
             match current.kind {
                 LexTokenKind::Sym(Sym::WhiteSpace(_))
                 | LexTokenKind::Sym(Sym::LineBreak)
                 | LexTokenKind::Sym(Sym::SemiColon) => (),
-                _ => return Some(current),
+                _ => {
+                    if cur_count == peek_count {
+                        return Some(current);
+                    }
+                    cur_count += 1;
+                }
             }
             i += 1;
         }

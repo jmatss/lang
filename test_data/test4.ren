@@ -6,6 +6,6 @@ function test_func(a: i32, b: i32) -> i32
 function main() -> i32
 {
     const a: i32 = 5
-    const b: i32 = 123
+    const b: i32 = 123    
     return 10 * test_func(a, b)
 }

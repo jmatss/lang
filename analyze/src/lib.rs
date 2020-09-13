@@ -42,27 +42,23 @@ use type_solver::TypeSolver;
 
 /// Updates the AST with information about function prototypes and declarations
 /// of structures.
-/// The "defer" and "indexing" should be ran before all other analyzers since
-/// they rewrite the AST which might affect the other stages of the analyzing.
-/// The "method" also rewrites the AST, but it requires information from the
-/// "type analyzing", so it needs to be ran at the end, but it should not be
-/// a problem.
-///
+/// The "defer analyzing" depends on being able to lookup block info, so it needs
+/// to be ran after "block analyzing".
 /// The "TypeInference/TypeSolve" depends on the "DeclAnalyzer" to figure out types
 /// for function calls and function parameters used in expressions, so the
 /// "DeclAnalyzer" needs to be ran before "Type...".
 /// The "IndexingAnalyzer" should be ran before the "Type..." since the "Type..."
 /// will fail if the indexing analyzing doesn't rewrite the AST before that.
-/// The "MethodAnalyzer" should be ran after "Type..." since it will use
-/// the type of the lhs to figure out the struct that it belongs to.
+/// The "MethodAnalyzer" should be ran before "Type..." since it rewrites the AST
+/// so that the "type analyzing" can know that it is a method vs function.
 pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>> {
     let analyze_context = RefCell::new(AnalyzeContext::new());
 
     let mut indexing_analyzer = IndexingAnalyzer::new();
-    let mut defer_analyzer = DeferAnalyzer::new(&analyze_context);
+    let mut method_analyzer = MethodAnalyzer::new();
     AstTraverser::new()
         .add_visitor(&mut indexing_analyzer)
-        .add_visitor(&mut defer_analyzer)
+        .add_visitor(&mut method_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
@@ -71,6 +67,12 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
     AstTraverser::new()
         .add_visitor(&mut block_analyzer)
         .add_visitor(&mut decl_analyzer)
+        .traverse(ast_root)
+        .take_errors()?;
+
+    let mut defer_analyzer = DeferAnalyzer::new(&analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut defer_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
@@ -86,12 +88,6 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
     let mut type_solver = TypeSolver::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut type_solver)
-        .traverse(ast_root)
-        .take_errors()?;
-
-    let mut method_analyzer = MethodAnalyzer::new(&mut analyze_context);
-    AstTraverser::new()
-        .add_visitor(&mut method_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
@@ -175,9 +171,8 @@ pub struct AnalyzeContext {
     pub block_info: HashMap<BlockId, BlockInfo>,
     pub use_paths: Vec<Path>,
 
-    /// The block and line/column where the `analyzer` currently is. When the
-    /// analyzing is done, these variable will not be used and will be invalid.
-    pub cur_block_id: BlockId,
+    /// The line/column where the `analyzer` currently is. When the analyzing is
+    /// done, these variable will not be used and will be invalid.
     pub cur_line_nr: u64,
     pub cur_column_nr: u64,
 }
@@ -201,7 +196,6 @@ impl AnalyzeContext {
             block_info: HashMap::default(),
             use_paths: Vec::default(),
 
-            cur_block_id: 0,
             cur_line_nr: 0,
             cur_column_nr: 0,
         }
@@ -352,11 +346,10 @@ impl AnalyzeContext {
         self.get_root_parent(parent_id)
     }
 
-    /// Finds the struct with the name `ident` in a scope containing the current
-    /// block that is being analyzed (with id `self.cur_block_id`).
-    /// The struct can ex. be declared in parent block scope.
-    pub fn get_struct(&self, struct_name: &str) -> CustomResult<&Struct> {
-        let parent_block_id = self.get_struct_parent_id(struct_name.into(), self.cur_block_id)?;
+    /// Finds the struct with the name `ident` in a scope containing the block
+    /// with ID `id`. The struct can ex. be declared in parent block scope.
+    pub fn get_struct(&self, struct_name: &str, id: BlockId) -> CustomResult<&Struct> {
+        let parent_block_id = self.get_struct_parent_id(struct_name.into(), id)?;
         let key = (struct_name.into(), parent_block_id);
 
         if let Some(struct_) = self.structs.get(&key) {
@@ -365,7 +358,7 @@ impl AnalyzeContext {
             Err(LangError::new(
                 format!(
                     "Unable to find struct with name \"{}\" with child block ID {}.",
-                    &struct_name, self.cur_block_id
+                    &struct_name, id
                 ),
                 AnalyzeError {
                     line_nr: 0,
@@ -375,12 +368,16 @@ impl AnalyzeContext {
         }
     }
 
-    /// Finds the struct with the name `ident` in a scope containing the current
-    /// block that is being analyzed (with id `self.cur_block_id`) and returns
-    /// the member with name `member_name`.
+    /// Finds the struct with the name `ident` in a scope containing the block
+    /// with ID `id` and returns the member with name `member_name`.
     /// The struct can ex. be declared in parent block scope.
-    pub fn get_struct_member(&self, struct_name: &str, member_name: &str) -> CustomResult<&Var> {
-        let struct_ = self.get_struct(struct_name)?;
+    pub fn get_struct_member(
+        &self,
+        struct_name: &str,
+        member_name: &str,
+        id: BlockId,
+    ) -> CustomResult<&Var> {
+        let struct_ = self.get_struct(struct_name, id)?;
         if let Some(members) = &struct_.members {
             if let Some(var) = members.iter().find(|member| member.name == member_name) {
                 Ok(var)
@@ -410,16 +407,16 @@ impl AnalyzeContext {
         }
     }
 
-    /// Finds the struct with the name `ident` in a scope containing the current
-    /// block that is being analyzed (with id `self.cur_block_id`) and returns
-    /// the index of the member with name `member_name`.
+    /// Finds the struct with the name `ident` in a scope containing the block
+    /// with ID `id` and returns the index of the member with name `member_name`.
     /// The struct can ex. be declared in parent block scope.
     pub fn get_struct_member_index(
         &self,
         struct_name: &str,
         member_name: &str,
+        id: BlockId,
     ) -> CustomResult<u64> {
-        let struct_ = self.get_struct(struct_name)?;
+        let struct_ = self.get_struct(struct_name, id)?;
         if let Some(members) = &struct_.members {
             let mut idx = 0;
             for member in members.iter() {
@@ -452,6 +449,62 @@ impl AnalyzeContext {
             ))
         }
     }
+
+    /// Finds the struct with the name `ident` in a scope containing the block
+    /// with ID `id` and returns the method with name `method_name`.
+    /// The struct can ex. be declared in parent block scope.
+    pub fn get_struct_method(
+        &self,
+        struct_name: &str,
+        method_name: &str,
+        id: BlockId,
+    ) -> CustomResult<&Function> {
+        let struct_parent_id = match self.get_struct_parent_id(struct_name.into(), id) {
+            Ok(id) => id,
+            Err(err) => return Err(err),
+        };
+
+        let key = (struct_name.into(), struct_parent_id);
+        if let Some(struct_methods) = self.methods.get(&key) {
+            if let Some(method) = struct_methods.get(method_name) {
+                Ok(method)
+            } else {
+                Err(LangError::new(
+                    format!(
+                        "Unable to find method \"{}\" in struct \"{}\" with parent ID {}.",
+                        &method_name, &struct_name, &id
+                    ),
+                    AnalyzeError {
+                        line_nr: 0,
+                        column_nr: 0,
+                    },
+                ))
+            }
+        } else {
+            Err(LangError::new(
+                format!(
+                    "Unable to find methods for struct \"{}\" with parent ID {}.",
+                    &struct_name, &id
+                ),
+                AnalyzeError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
+            ))
+        }
+    }
+
+    /*
+    // Add the methods in the scope of the structs root parent.
+        let struct_parent_id =
+            match analyze_context.get_struct_parent_id(struct_name.into(), func_id) {
+                Ok(id) => id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+    */
 
     /// Used when returing errors to include current line/column number.
     pub fn err(&self, msg: String) -> LangError {

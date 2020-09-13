@@ -46,6 +46,9 @@ pub enum Type {
     /// Unknown member of the struct type "Type" with the member name "String".
     UnknownStructMember(Box<Type>, String),
 
+    /// Unknown method of the struct struct type "Type" with the name "String".
+    UnknownStructMethod(Box<Type>, String),
+
     /// Unknown type of array member of array with type "Type".
     UnknownArrayMember(Box<Type>),
 }
@@ -150,21 +153,61 @@ impl Type {
         }
     }
 
-    /// Returns true for unknowns that can be any type. This isn't true for the
-    /// int/float unknowns.
-    pub fn is_unknown_any(&self) -> bool {
-        match self {
-            Type::Unknown(_) | Type::UnknownStructMember(..) | Type::UnknownArrayMember(_) => true,
-            _ => false,
+    pub fn is_unknown(&self) -> bool {
+        if let Type::Unknown(_) = self {
+            true
+        } else {
+            false
         }
     }
 
-    pub fn is_unknown(&self) -> bool {
+    pub fn is_unknown_int(&self) -> bool {
+        if let Type::UnknownInt(..) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_unknown_float(&self) -> bool {
+        if let Type::UnknownFloat(..) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_unknown_struct_member(&self) -> bool {
+        if let Type::UnknownStructMember(..) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_unknown_struct_method(&self) -> bool {
+        if let Type::UnknownStructMethod(..) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_unknown_array_member(&self) -> bool {
+        if let Type::UnknownArrayMember(..) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_unknown_any(&self) -> bool {
         match self {
             Type::Unknown(_)
             | Type::UnknownInt(..)
             | Type::UnknownFloat(_)
             | Type::UnknownStructMember(..)
+            | Type::UnknownStructMethod(..)
             | Type::UnknownArrayMember(_) => true,
             _ => false,
         }
@@ -174,35 +217,31 @@ impl Type {
     //       true. Should this be the case?
     pub fn is_compatible(&self, other: &Type) -> bool {
         // Handles all cases with "Unknown" types.
-        if let Type::UnknownInt(..) = self {
-            if let Type::UnknownFloat(_) = other {
+        if self.is_unknown_int() {
+            if other.is_unknown_float() {
                 return false;
-            }
-            if other.is_int() || other.is_unknown() {
+            } else if other.is_int() || other.is_unknown_any() {
                 return true;
             }
-        } else if let Type::UnknownInt(..) = other {
-            if let Type::UnknownFloat(_) = self {
+        } else if other.is_unknown_int() {
+            if self.is_unknown_float() {
                 return false;
-            }
-            if self.is_int() || self.is_unknown() {
+            } else if self.is_int() || self.is_unknown_any() {
                 return true;
             }
-        } else if let Type::UnknownFloat(_) = self {
-            if let Type::UnknownInt(..) = self {
+        } else if self.is_unknown_float() {
+            if self.is_unknown_int() {
                 return false;
-            }
-            if other.is_float() || other.is_unknown() {
+            } else if other.is_float() || other.is_unknown_any() {
                 return true;
             }
-        } else if let Type::UnknownFloat(_) = other {
-            if let Type::UnknownInt(..) = self {
+        } else if other.is_unknown_float() {
+            if self.is_unknown_int() {
                 return false;
-            }
-            if self.is_float() || self.is_unknown() {
+            } else if self.is_float() || self.is_unknown_any() {
                 return true;
             }
-        } else if self.is_unknown() || other.is_unknown() {
+        } else if self.is_unknown_any() || other.is_unknown_any() {
             return true;
         }
 

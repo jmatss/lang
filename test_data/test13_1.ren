@@ -2,7 +2,7 @@ use test_data.test13_2
 
 external function printf(format: {u8}, ...) -> i32
 
-function main() -> int
+function main() -> i32
 {
     var i = 3
 

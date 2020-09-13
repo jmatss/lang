@@ -9,13 +9,13 @@ function main() -> i32
         {
             if i == 0
             {
-                i++
+                i += 1
                 continue
             }
 
             break
         }
-        i++
+        i += 1
     }
     
     assert(i == 5)

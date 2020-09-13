@@ -8,6 +8,10 @@ use std::collections::HashMap;
 
 use crate::AnalyzeContext;
 
+// TODO: Remove `analyze_context` from here, makes no sense to have it nested
+//       in this TypeContext. The TypeCOntexct currently needs to look up
+//       struct declaration when solving substitutions.
+
 /// "Stand-alone" struct that will contain all the important state/context
 /// after the type inference have been ran. This struct will then be used by
 /// the "TypeSolver" to make sure that everything has gone as expected and
@@ -133,16 +137,25 @@ impl<'a> TypeContext<'a> {
                                 );
                                 struct_ty
                             }
-                            SubResult::UnSolved(_) => return SubResult::UnSolved(cur_ty),
+                            SubResult::UnSolved(un_sub_ty) => {
+                                return SubResult::UnSolved(Type::UnknownStructMember(
+                                    Box::new(un_sub_ty),
+                                    member_name.clone(),
+                                ))
+                            }
                             err => return err,
                         };
 
                         match &struct_ty {
                             Type::Custom(struct_name) => {
-                                let var = match self
-                                    .analyze_context
-                                    .get_struct_member(struct_name, member_name)
-                                {
+                                // TODO: Fix this. Move `analyze_context` out
+                                //       of `type_context` and don't hardcode
+                                //       the default block ID.
+                                let var = match self.analyze_context.get_struct_member(
+                                    struct_name,
+                                    member_name,
+                                    0,
+                                ) {
                                     Ok(var) => var,
                                     Err(err) => {
                                         return SubResult::Err(err);
@@ -191,13 +204,93 @@ impl<'a> TypeContext<'a> {
                         }
                     }
 
+                    Type::UnknownStructMethod(ref struct_ty, ref method_name) => {
+                        let struct_ty = match self.get_substitution(struct_ty, finalize) {
+                            SubResult::Solved(struct_ty) => {
+                                cur_ty = Type::UnknownStructMethod(
+                                    Box::new(struct_ty.clone()),
+                                    method_name.clone(),
+                                );
+                                struct_ty
+                            }
+                            SubResult::UnSolved(un_sub_ty) => {
+                                return SubResult::UnSolved(Type::UnknownStructMethod(
+                                    Box::new(un_sub_ty),
+                                    method_name.clone(),
+                                ))
+                            }
+                            err => return err,
+                        };
+
+                        match &struct_ty {
+                            Type::Custom(struct_name) => {
+                                // TODO: Fix this. Move `analyze_context` out
+                                //       of `type_context` and don't hardcode
+                                //       the default block ID.
+                                let method = match self.analyze_context.get_struct_method(
+                                    struct_name,
+                                    method_name,
+                                    0,
+                                ) {
+                                    Ok(method) => method,
+                                    Err(err) => {
+                                        return SubResult::Err(err);
+                                    }
+                                };
+
+                                if let Some(ret_type) = &method.ret_type {
+                                    match self.get_substitution(ret_type, finalize) {
+                                        SubResult::Solved(sub_ty) => {
+                                            return SubResult::Solved(sub_ty)
+                                        }
+                                        SubResult::UnSolved(_) => {
+                                            return SubResult::UnSolved(cur_ty)
+                                        }
+                                        err => return err,
+                                    }
+                                } else {
+                                    return SubResult::Err(LangError::new(
+                                        format!(
+                                            "Return type not set for method \"{}\" in struct \"{}\"",
+                                            method_name, struct_name
+                                        ),
+                                        AnalyzeError {
+                                            line_nr: 0,
+                                            column_nr: 0,
+                                        },
+                                    ));
+                                }
+                            }
+                            _ => {
+                                if finalize {
+                                    return SubResult::Err(LangError::new(
+                                        format!(
+                                        "Method call (method name \"{}\") on non struct type: {:?}",
+                                        method_name, cur_ty
+                                    ),
+                                        AnalyzeError {
+                                            line_nr: 0,
+                                            column_nr: 0,
+                                        },
+                                    ));
+                                } else {
+                                    return SubResult::UnSolved(cur_ty);
+                                }
+                            }
+                        }
+                    }
+
                     Type::UnknownArrayMember(array_ty) => {
                         let sub_ty = match self.get_substitution(&array_ty, finalize) {
                             SubResult::Solved(sub_ty) => {
                                 cur_ty = Type::UnknownArrayMember(Box::new(sub_ty.clone()));
                                 sub_ty
                             }
-                            SubResult::UnSolved(_) => return SubResult::UnSolved(cur_ty),
+                            SubResult::UnSolved(un_sub_ty) => {
+                                return SubResult::UnSolved(Type::UnknownArrayMember(Box::new(
+                                    un_sub_ty,
+                                )))
+                            }
                             err => return err,
                         };
 

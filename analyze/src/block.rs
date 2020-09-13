@@ -11,6 +11,7 @@ use common::{
         op::{BinOp, UnOp},
         stmt::Stmt,
     },
+    traverser::TraverseContext,
     visitor::Visitor,
 };
 use log::debug;
@@ -79,6 +80,7 @@ impl<'a> BlockAnalyzer<'a> {
         &mut self,
         ast_token: &AstToken,
         analyze_context: &mut RefMut<AnalyzeContext>,
+        parent_id: usize,
     ) {
         analyze_context.cur_line_nr = ast_token.line_nr;
         analyze_context.cur_column_nr = ast_token.column_nr;
@@ -91,7 +93,7 @@ impl<'a> BlockAnalyzer<'a> {
             // Update the mapping from this block to its parent.
             // Do not set a parent for the default block.
             if *id != 0 {
-                block_info.parent_id = analyze_context.cur_block_id;
+                block_info.parent_id = parent_id;
             }
 
             // When iterating through all tokens, look at the If and Ifcases
@@ -99,10 +101,6 @@ impl<'a> BlockAnalyzer<'a> {
             let mut all_children_contains_returns = true;
             let mut child_count = 0;
             for child_token in body.iter() {
-                // Since `analyze_token` recurses, need to re-set the current
-                // block to the be the "parent" (`self.context.cur_block_id`).
-                analyze_context.cur_block_id = *id;
-
                 match child_token.token {
                     Token::Block(BlockHeader::If, child_id, _)
                     | Token::Block(BlockHeader::IfCase(_), child_id, _)
@@ -113,7 +111,7 @@ impl<'a> BlockAnalyzer<'a> {
                     | Token::Block(BlockHeader::While(..), child_id, _)
                     | Token::Block(BlockHeader::Test(_), child_id, _)
                     | Token::Block(BlockHeader::Anonymous, child_id, _) => {
-                        self.analyze_block(child_token, analyze_context);
+                        self.analyze_block(child_token, analyze_context, *id);
 
                         if let Some(child_block_info) = analyze_context.block_info.get(&child_id) {
                             if !child_block_info.all_children_contains_returns {
@@ -135,7 +133,7 @@ impl<'a> BlockAnalyzer<'a> {
                     | Token::Block(BlockHeader::Enum(_), ..)
                     | Token::Block(BlockHeader::Interface(_), ..)
                     | Token::Block(BlockHeader::Implement(..), ..) => {
-                        self.analyze_block(child_token, analyze_context);
+                        self.analyze_block(child_token, analyze_context, *id);
                     }
 
                     Token::Stmt(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
@@ -167,7 +165,7 @@ impl<'a> Visitor for BlockAnalyzer<'a> {
         }
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken) {
+    fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         let mut analyze_context = self.analyze_context.borrow_mut();
         analyze_context.cur_line_nr = ast_token.line_nr;
         analyze_context.cur_column_nr = ast_token.column_nr;
@@ -176,90 +174,85 @@ impl<'a> Visitor for BlockAnalyzer<'a> {
     /// All traversing is done from the default block, no other visit function
     /// will be used. The reason being that this needs to be called recursively
     /// on blocks, which currently isn't possible to do with the regular traverser.
-    fn visit_default_block(&mut self, ast_token: &mut AstToken) {
+    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         let mut analyze_context = self.analyze_context.borrow_mut();
-
-        if let Token::Block(_, id, _) = ast_token.token {
-            analyze_context.cur_block_id = id;
-        }
-
-        self.analyze_block(ast_token, &mut analyze_context);
+        self.analyze_block(ast_token, &mut analyze_context, usize::MAX);
     }
 
-    fn visit_eof(&mut self, ast_token: &mut AstToken) {
+    fn visit_eof(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         debug!(
             "BLOCK_INFO --\n{:#?}",
             self.analyze_context.borrow_mut().block_info
         );
     }
 
-    fn visit_block(&mut self, ast_token: &mut AstToken) {}
+    fn visit_block(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_expr(&mut self, expr: &mut Expr) {}
+    fn visit_expr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {}
 
-    fn visit_stmt(&mut self, stmt: &mut Stmt) {}
+    fn visit_stmt(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_func(&mut self, ast_token: &mut AstToken) {}
+    fn visit_func(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_struct(&mut self, ast_token: &mut AstToken) {}
+    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_enum(&mut self, ast_token: &mut AstToken) {}
+    fn visit_enum(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_interface(&mut self, ast_token: &mut AstToken) {}
+    fn visit_interface(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken) {}
+    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_anon(&mut self, ast_token: &mut AstToken) {}
+    fn visit_anon(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_if(&mut self, ast_token: &mut AstToken) {}
+    fn visit_if(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_if_case(&mut self, ast_token: &mut AstToken) {}
+    fn visit_if_case(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_match(&mut self, ast_token: &mut AstToken) {}
+    fn visit_match(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_match_case(&mut self, ast_token: &mut AstToken) {}
+    fn visit_match_case(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_for(&mut self, ast_token: &mut AstToken) {}
+    fn visit_for(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_while(&mut self, ast_token: &mut AstToken) {}
+    fn visit_while(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_test(&mut self, ast_token: &mut AstToken) {}
+    fn visit_test(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_return(&mut self, stmt: &mut Stmt) {}
+    fn visit_return(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_yield(&mut self, stmt: &mut Stmt) {}
+    fn visit_yield(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_break(&mut self, stmt: &mut Stmt) {}
+    fn visit_break(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_continue(&mut self, stmt: &mut Stmt) {}
+    fn visit_continue(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_use(&mut self, stmt: &mut Stmt) {}
+    fn visit_use(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_package(&mut self, stmt: &mut Stmt) {}
+    fn visit_package(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_defer(&mut self, stmt: &mut Stmt) {}
+    fn visit_defer(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_defer_exec(&mut self, stmt: &mut Stmt) {}
+    fn visit_defer_exec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_assignment(&mut self, stmt: &mut Stmt) {}
+    fn visit_assignment(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_var_decl(&mut self, stmt: &mut Stmt) {}
+    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_extern_decl(&mut self, stmt: &mut Stmt) {}
+    fn visit_extern_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_modifier(&mut self, stmt: &mut Stmt) {}
+    fn visit_modifier(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_lit(&mut self, expr: &mut Expr) {}
+    fn visit_lit(&mut self, expr: &mut Expr, ctx: &TraverseContext) {}
 
-    fn visit_var(&mut self, var: &mut Var) {}
+    fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {}
 
-    fn visit_func_call(&mut self, func_call: &mut FuncCall) {}
+    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {}
 
-    fn visit_struct_init(&mut self, struct_init: &mut StructInit) {}
+    fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {}
 
-    fn visit_array_init(&mut self, expr: &mut ArrayInit) {}
+    fn visit_array_init(&mut self, expr: &mut ArrayInit, ctx: &TraverseContext) {}
 
-    fn visit_bin_op(&mut self, bin_op: &mut BinOp) {}
+    fn visit_bin_op(&mut self, bin_op: &mut BinOp, ctx: &TraverseContext) {}
 
-    fn visit_un_op(&mut self, un_op: &mut UnOp) {}
+    fn visit_un_op(&mut self, un_op: &mut UnOp, ctx: &TraverseContext) {}
 }

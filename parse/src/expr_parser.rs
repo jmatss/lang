@@ -60,15 +60,20 @@ impl<'a> ExprParser<'a> {
             parenthesis_count: 0,
         };
 
+        debug!("BEFORE!");
+
         expr_parser.shunting_yard()?;
         debug!("Outputs: {:#?}", &expr_parser.outputs);
 
-        expr_parser.rev_polish_to_expr()
+        let res = expr_parser.rev_polish_to_expr();
+        debug!("Rev to polish DONE");
+        res
     }
 
     /// See https://www.andr.mu/logs/the-shunting-yard-algorithm/ for a good
     /// explanation of the algorithm.
     fn shunting_yard(&mut self) -> CustomResult<()> {
+        debug!("HELLO?");
         while let Some(lex_token) = self.iter.next_skip_space() {
             debug!("SHUNTING: {:?}", &lex_token);
 
@@ -137,6 +142,10 @@ impl<'a> ExprParser<'a> {
                     let expr = Expr::ArrayInit(ArrayInit::new(args));
                     self.shunt_operand(expr)?;
                 }
+
+                // Skip any linebreaks if the linbreaks aren't a part of the
+                // stop conditions.
+                LexTokenKind::Sym(Sym::LineBreak) => self.token_count -= 1,
 
                 // Special case for operators that takes a "type" as rhs.
                 LexTokenKind::Sym(symbol @ Sym::Is)

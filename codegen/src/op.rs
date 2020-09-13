@@ -1090,6 +1090,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             )));
         }
 
+        debug!("Compiled dim: {:?}", compiled_dim);
+
         // Need to index the pointer to the array first, so add a extra zero
         // before the actual indexing (2d index).
         let sign_extend = false;
@@ -1098,7 +1100,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(unsafe {
             self.builder
                 .build_gep(ptr, &[zero, compiled_dim.into_int_value()], "array.gep")
-                .into()
         })
     }
 

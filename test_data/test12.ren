@@ -1,7 +1,7 @@
 use std.assert
 
 //external function printf(format: {u8}, ...) -> i32
-//external function malloc(size: i32) -> {void}
+external function malloc(size: i32) -> {void}
 
 function double(n: {i32})
 {
@@ -14,24 +14,24 @@ struct TestStruct
     b: f64,
 }
 
-//struct TestArrayStruct
-//{
-//    a: i32,
-//    b: {[i32: 2]},
-//}
+struct TestArrayStruct
+{
+    a: i32,
+    b: {[i32: 2]},
+}
 
 function main() -> i32
 {
-    var x1 = [1, 2, 3]
-    var x1_1 = x1.[1]
-    x1.[1] = 10
-    assert(x1_1 == 2)
-    assert(x1.[1] == 10)
-
     var x2 = [[1.1, 2.2], [3.3, 4.4]]
     x2.[1].[0] = 5.5
     assert(x2.[0].[0] == 1.1 and x2.[0].[1] == 2.2 and x2.[1].[0] == 5.5 and x2.[1].[1] == 4.4)
-    
+    printf(
+        "\nx2.[0].[0]: %f, x2.[0].[1]: %f, x2.[1].[0]: %f, x2.[1].[1]: %f",
+        x2.[0].[0] as f64,
+        x2.[0].[1] as f64,
+        x2.[1].[0] as f64,
+        x2.[1].[1] as f64,
+    )
 
     var x3 = [1, 2, 3]
     var i = 0
@@ -41,21 +41,21 @@ function main() -> i32
         i += 1
     }
     assert(x3.[0] == 2 and x3.[1] == 4 and x3.[2] == 6)
+    printf("\nx3.[0]: %d, x3.[1] %d, x3.[2]: %d", x3.[0], x3.[1], x3.[2])
 
-    // TODO: This causes a error:
-    //         "[AnalyzeError { line_nr: 55, column_nr: 2 }] Unable to find var decl for "x4" in scope of root block 3."
-    //       Looks like it related to the block scope and that after the while loop, the block scope is incorrect for
-    //       finding the variable. If the variable is declared before the while loop, it works correctly.
-    //       It fails during codegen.
     var x4 = [ TestStruct{ 12, 34.5 } ]
-    //x4.[0].b = 123.456
-    //assert(x4.[0].b == 123.456)
+    x4.[0].b = 123.456
+    var tmp_var = x4.[0].b
+    assert(x4.[0].b == 123.456)
 
-    //var heap_array = malloc(8) as {[i32: 2]}
-    //heap_array.* = [12, 24]
-    //printf("\nfirst: %d - %d", heap_array.*.[0], (heap_array.*).[1])
-    //var abc = TestArrayStruct { 456, heap_array }
-    //printf("a: %d\nb: %d - %d", abc.a, abc.b.*.[0], abc.b.*.[1])
+    var heap_array = malloc(8) as {[i32: 2]}
+    heap_array.* = [12, 24]
+    assert(heap_array.*.[0] == 12 and (heap_array.*).[1] == 24)
+    printf("\nheap_array.*.[0]: %d, (heap_array.*).[1]: %d", heap_array.*.[0], (heap_array.*).[1])
+
+    var abc = TestArrayStruct { 456, heap_array }
+    assert(abc.a == 456 and abc.b.*.[0] == 12 and abc.b.*.[1] == 24)
+    printf("\nabc.a: %d, abc.b.*.[0]: %d, abc.b.*.[1]: %d", abc.a, abc.b.*.[0], abc.b.*.[1])
 
     return 123
 }

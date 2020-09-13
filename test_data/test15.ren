@@ -5,6 +5,12 @@ function return_short_circuit(a: i32, b: i32) -> bool
     return a == 3 and b == 4
 }
 
+function inc(ten: {i32}) -> i32
+{
+    ten.* += 1
+    return ten.*
+}
+
 function main() -> i32
 {
     var ten = 3
@@ -12,7 +18,8 @@ function main() -> i32
 
     while one < 10
     {
-        if one++ % 10 == 0 and ten++ == 4
+        one += 1
+        if one % 10 == 0 and inc(ten.&) == 4
         {
         }
     }

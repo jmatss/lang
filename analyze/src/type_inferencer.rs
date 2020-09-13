@@ -3,6 +3,7 @@ use common::{
     error::CustomResult,
     error::{LangError, LangErrorKind::AnalyzeError},
     token::ast::Token,
+    token::op::Op,
     token::{
         ast::AstToken,
         block::{BlockHeader, Function},
@@ -11,6 +12,7 @@ use common::{
         op::{BinOp, BinOperator, UnOp, UnOperator},
         stmt::Stmt,
     },
+    traverser::TraverseContext,
     types::Type,
     visitor::Visitor,
 };
@@ -91,28 +93,11 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
             ));
         }
 
-        Ok(if lhs == rhs {
-            // If they are equal, the order doesn't matter.
-            // This case should only happen if this is a member of a aggregate type,
-            // this should happen if this function hasn't recursed at least one
-            // level deep.
+        Ok(if lhs == rhs || lhs.is_unknown() {
             (lhs, rhs)
-        } else if let Type::Unknown(_) = lhs {
-            (lhs, rhs)
-        } else if let Type::Unknown(_) = rhs {
+        } else if rhs.is_unknown() {
             (rhs, lhs)
-        } else if rhs.is_unknown_any() {
-            (rhs, lhs) // Unknown struct or array.
-        } else if lhs.is_unknown_any() {
-            (lhs, rhs) // Unknown struct or array.
-        } else if !lhs.is_unknown() && rhs.is_unknown() {
-            // True if `lhs` is known and `rhs` is a int/float unknown.
-            (rhs, lhs)
-        } else if lhs.is_unknown() {
-            // True if `lhs` is a int/float unknown and `rhs` is known or
-            // int/float unkown.
-            (lhs, rhs)
-        } else {
+        } else if !lhs.is_unknown_any() && !rhs.is_unknown_any() {
             // True if both are known, but they aren't equal and they are still
             // compatible. This means that both are aggregates of the same type.
             // Structs will have been filtered earlier in this function.
@@ -125,6 +110,24 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
                 }
                 _ => unreachable!(format!("lhs: {:?}, rhs: {:?}", lhs, rhs)),
             }
+        } else if !lhs.is_unknown_any() {
+            (rhs, lhs) // Only lhs known.
+        } else if !rhs.is_unknown_any() {
+            (lhs, rhs) // Only rhs known.
+        } else if lhs.is_unknown_struct_member() {
+            // Prefer struct member unknowns over int/float/array unknowns since
+            // it will always have its type set in the struct definition.
+            (rhs, lhs)
+        } else if rhs.is_unknown_struct_member() {
+            (lhs, rhs)
+        } else if lhs.is_unknown_int() || lhs.is_unknown_float() {
+            // Prefer int/float unknowns over array member unknowns.
+            (rhs, lhs)
+        } else if rhs.is_unknown_int() || rhs.is_unknown_float() {
+            (lhs, rhs)
+        } else {
+            // Both are array member unknowns, direction doesn't matter.
+            (rhs, lhs)
         })
     }
 
@@ -182,23 +185,6 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
             }
             Err(err) => self.errors.push(err),
         };
-    }
-
-    fn solve_subtitution(&mut self, i: usize, from: &Type, to: &Type, finalize: bool) {
-        match self.type_context.get_substitution(to, finalize) {
-            SubResult::Solved(sub_ty) => {
-                self.insert_substitution(from.clone(), sub_ty);
-                self.type_context.constraints.swap_remove(i);
-            }
-            SubResult::UnSolved(_) => {
-                // Keep the constraint if it is unresolvable.
-                // Might become resolvable at a later iteration.
-            }
-            SubResult::Err(err) => {
-                self.errors.push(err);
-                self.type_context.constraints.swap_remove(i);
-            }
-        }
     }
 
     /// Inserts a constraint. This function sorts the lhs and rhs in order of:
@@ -314,19 +300,15 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken) {
+    fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
         self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
     }
 
-    fn visit_block(&mut self, ast_token: &mut AstToken) {
-        if let Token::Block(_, id, _) = &ast_token.token {
-            self.type_context.analyze_context.cur_block_id = *id;
-        }
-    }
+    fn visit_block(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
     /// Solve the constraints at the EOF. Also debug log the results.
-    fn visit_eof(&mut self, ast_token: &mut AstToken) {
+    fn visit_eof(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
         self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
 
@@ -341,9 +323,9 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// explicitly set. This new type will then be temporarilty used during this
     /// stage and should be converted/subtituted into a "real" type before this
     /// analyzing step is done.
-    fn visit_expr(&mut self, expr: &mut Expr) {}
+    fn visit_expr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {}
 
-    fn visit_lit(&mut self, expr: &mut Expr) {
+    fn visit_lit(&mut self, expr: &mut Expr, ctx: &TraverseContext) {
         if let Expr::Lit(lit, gen_ty_opt) = expr {
             if gen_ty_opt.is_none() {
                 let new_gen_ty = match lit {
@@ -359,12 +341,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_var(&mut self, var: &mut Var) {
-        let block_id = self.type_context.analyze_context.cur_block_id;
+    fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {
         let context_var_ty = match self
             .type_context
             .analyze_context
-            .get_var(&var.name, block_id)
+            .get_var(&var.name, ctx.block_id)
         {
             Ok(context_var) => {
                 if let Some(ty) = &context_var.ret_type {
@@ -402,14 +383,98 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     // TODO: Clean up.
     /// Assign the return type of the function to the function call expr.
-    fn visit_func_call(&mut self, func_call: &mut FuncCall) {
-        let cur_block_id = self.type_context.analyze_context.cur_block_id;
+    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
+        let func_ty = if func_call.is_method {
+            // If this is a method call, the first argument will be the address
+            // of "this". So "unwrap" it to get the actual type of the struct
+            // that will be used in type constraints.
+            let struct_ty = if let Some(this_arg) = func_call.arguments.first_mut() {
+                if let Expr::Op(Op::UnOp(un_op)) = &mut this_arg.value {
+                    if let UnOperator::Address = un_op.operator {
+                        match un_op.value.get_expr_type() {
+                            Ok(struct_ty) => struct_ty.clone(),
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        }
+                    } else {
+                        let err = LangError::new(
+                            format!(
+                                "Expected \"this\" for method call \"{}\" to be \"address\" of struct, was: \"{:?}\"",
+                                &func_call.name, this_arg.value
+                            ),
+                            AnalyzeError {
+                                line_nr: 0,
+                                column_nr: 0,
+                            },
+                        );
+                        self.errors.push(err);
+                        return;
+                    }
+                } else {
+                    let err = LangError::new(
+                        format!(
+                            "Expected \"this\" for method call \"{}\" to be \"address\" of struct, was: \"{:?}\"",
+                            &func_call.name, this_arg.value
+                        ),
+                        AnalyzeError {
+                            line_nr: 0,
+                            column_nr: 0,
+                        },
+                    );
+                    self.errors.push(err);
+                    return;
+                }
+            } else {
+                let err = LangError::new(
+                    format!(
+                        "Method call \"{}\" has no arguments, expected atleast \"this\"/\"self\".",
+                        &func_call.name
+                    ),
+                    AnalyzeError {
+                        line_nr: 0,
+                        column_nr: 0,
+                    },
+                );
+                self.errors.push(err);
+                return;
+            };
 
+            Type::UnknownStructMethod(Box::new(struct_ty), func_call.name.clone())
+        } else {
+            // TODO: FIXME: For now all functions will be defined in the root
+            //              block, so just hardcode zero. Must change later.
+            let func_decl_block = 0;
+            let key = (func_call.name.clone(), func_decl_block);
+            if let Some(func) = self.type_context.analyze_context.functions.get(&key) {
+                if let Some(ty) = &func.ret_type {
+                    ty.clone()
+                } else {
+                    Type::Void
+                }
+            } else {
+                let err = LangError::new(
+                    format!(
+                        "Unable to find function \"{}\" in block {}.",
+                        &func_call.name, func_decl_block
+                    ),
+                    AnalyzeError {
+                        line_nr: 0,
+                        column_nr: 0,
+                    },
+                );
+                self.errors.push(err);
+                return;
+            }
+        };
+
+        /*
         let func_ty = if let Some(struct_name) = &func_call.method_struct {
             let struct_parent_id = match self
                 .type_context
                 .analyze_context
-                .get_struct_parent_id(struct_name.clone(), cur_block_id)
+                .get_struct_parent_id(struct_name.clone(), ctx.block_id)
             {
                 Ok(id) => id,
                 Err(err) => {
@@ -480,13 +545,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 return;
             }
         };
+        */
 
         func_call.ret_type = Some(func_ty);
     }
 
     /// Adds the correct type for the struct init and ties the types of the struct
     /// members with the type of the struct init arguments.
-    fn visit_struct_init(&mut self, struct_init: &mut StructInit) {
+    fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
         if struct_init.ret_type.is_none() {
             struct_init.ret_type = Some(Type::Custom(struct_init.name.clone()));
         }
@@ -494,9 +560,9 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let struct_ = match self
             .type_context
             .analyze_context
-            .get_struct(&struct_init.name)
+            .get_struct(&struct_init.name, ctx.block_id)
         {
-            Ok(struct_) => struct_,
+            Ok(struct_) => struct_.clone(),
             Err(err) => {
                 self.errors.push(err);
                 return;
@@ -553,24 +619,47 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     i
                 };
 
-                // TODO: Make sure that the struct init arugment is compatible
+                // TODO: Make sure that the struct init argument is compatible
                 //       with the member struct type. Currently this doesn't
                 //       get caught until the codegen stage.
 
+                // Add constraints mapping the type of the struct init argument
+                // to the corresponding actual struct member type.
                 match arg.value.get_expr_type() {
                     Ok(ty) => {
-                        if let Some(ret_type) = members
-                            .get(index)
-                            .map(|var| var.ret_type.as_ref())
-                            .flatten()
-                        {
-                            *ty = ret_type.clone();
+                        if let Some(member) = members.get(index) {
+                            if let Some(ret_type) = &member.ret_type {
+                                // Bind init member to actual type in struct definition.
+                                self.insert_constraint(ty.clone(), ret_type.clone());
+
+                                // Bind type to any array accessing of this member.
+                                self.insert_constraint(
+                                    ty.clone(),
+                                    Type::UnknownStructMember(
+                                        Box::new(Type::Custom(struct_init.name.clone())),
+                                        member.name.clone(),
+                                    ),
+                                );
+                            } else {
+                                let err = LangError::new(
+                                    format!(
+                                        "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
+                                        members.get(index),
+                                        &struct_.name
+                                    ),
+                                    AnalyzeError {
+                                        line_nr: self.type_context.analyze_context.cur_line_nr,
+                                        column_nr: self.type_context.analyze_context.cur_column_nr,
+                                    },
+                                );
+                                self.errors.push(err);
+                                return;
+                            }
                         } else {
                             let err = LangError::new(
                                 format!(
-                                    "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
-                                    members.get(index),
-                                    &struct_.name
+                                    "Unable to get member at index {} in struct \"{:?}\".",
+                                    index, &struct_.name
                                 ),
                                 AnalyzeError {
                                     line_nr: self.type_context.analyze_context.cur_line_nr,
@@ -603,7 +692,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_array_init(&mut self, array_init: &mut ArrayInit) {
+    fn visit_array_init(&mut self, array_init: &mut ArrayInit, ctx: &TraverseContext) {
         let ret_ty = if let Some(ret_ty) = &array_init.ret_type {
             ret_ty.clone()
         } else {
@@ -650,7 +739,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Adds constraints for binary operations. Most of the bin ops requires
     /// that the lhs and rhs has the same type.
-    fn visit_bin_op(&mut self, bin_op: &mut BinOp) {
+    fn visit_bin_op(&mut self, bin_op: &mut BinOp, ctx: &TraverseContext) {
         // The lhs and rhs exprs will already have been traversed and should
         // have been given a "unknown" type if they didn't have a type already.
         // The "ret_type" of this bin op will also be given a ret_type if it
@@ -744,7 +833,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_un_op(&mut self, un_op: &mut UnOp) {
+    fn visit_un_op(&mut self, un_op: &mut UnOp, ctx: &TraverseContext) {
         // The expr value of this un op will already have been traversed and should
         // have been given a "unknown" type if it didn't have one type already.
         // The "ret_type" of this un op will also be given a ret_type if it
@@ -794,7 +883,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Save the current function in a place so that the stmts/exprs in the body
     /// can access the types of the parameters and the return type of the func.
-    fn visit_func(&mut self, ast_token: &mut AstToken) {
+    fn visit_func(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Function(func), ..) = &ast_token.token {
             self.cur_func = Some(func.clone());
         }
@@ -802,7 +891,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Need to make sure that a return statement has the same type as the
     /// function return type. Add it as a constraint.
-    fn visit_return(&mut self, stmt: &mut Stmt) {
+    fn visit_return(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
         if let Stmt::Return(expr_opt) = stmt {
             if let Some(func) = &self.cur_func {
                 let func_ret_ty = if let Some(ty) = &func.ret_type {
@@ -831,11 +920,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     }
 
     // TODO: Write when yield gets implemented.
-    fn visit_yield(&mut self, stmt: &mut Stmt) {}
+    fn visit_yield(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
     /// Save the current match expr in a place so that the match cases in the body
     /// can access the type of the expr.
-    fn visit_match(&mut self, ast_token: &mut AstToken) {
+    fn visit_match(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Match(expr), ..) = &ast_token.token {
             self.cur_match_expr = Some(expr.clone());
         }
@@ -843,7 +932,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Need to make sure that the match expr and the match case exprs have the
     /// same type. Add it as a constraint.
-    fn visit_match_case(&mut self, ast_token: &mut AstToken) {
+    fn visit_match_case(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token.token {
             if let Some(mut match_expr) = self.cur_match_expr.clone() {
                 let match_expr_ty = match match_expr.get_expr_type() {
@@ -875,8 +964,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// The types of the lhs and rhs of a assignment should be of the same type.
     /// Add it as a constraint.
-    fn visit_assignment(&mut self, stmt: &mut Stmt) {
+    fn visit_assignment(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
         if let Stmt::Assignment(_, lhs, rhs) = stmt {
+            debug!("ASSIGNMENT\nlhs: {:#?}\nrhs: {:#?}", lhs, rhs);
+
             let lhs_ty = match lhs.get_expr_type() {
                 Ok(lhs_ty) => lhs_ty,
                 Err(err) => {
@@ -900,7 +991,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// The types of the lhs and rhs of a variable declaration with a init value
     /// should be of the same type. The variable in `variables` in `analyze_context`
     /// should also have the same type. Add as constraints.
-    fn visit_var_decl(&mut self, stmt: &mut Stmt) {
+    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
         if let Stmt::VariableDecl(var, expr_opt) = stmt {
             // No way to do type inference of rhs on var decl with no init value.
             let rhs_ty_opt = if expr_opt.is_some() {
@@ -934,11 +1025,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             };
 
             // Set the type for the variable in the `analyze_context` as well.
-            let block_id = self.type_context.analyze_context.cur_block_id;
             let context_var_ty = match self
                 .type_context
                 .analyze_context
-                .get_var(&var.name, block_id)
+                .get_var(&var.name, ctx.block_id)
             {
                 Ok(context_var) => {
                     context_var.ret_type = new_type;
@@ -972,43 +1062,43 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_struct(&mut self, ast_token: &mut AstToken) {}
+    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_enum(&mut self, ast_token: &mut AstToken) {}
+    fn visit_enum(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_interface(&mut self, ast_token: &mut AstToken) {}
+    fn visit_interface(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken) {}
+    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_stmt(&mut self, stmt: &mut Stmt) {}
+    fn visit_stmt(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_default_block(&mut self, ast_token: &mut AstToken) {}
+    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_anon(&mut self, ast_token: &mut AstToken) {}
+    fn visit_anon(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_if(&mut self, ast_token: &mut AstToken) {}
+    fn visit_if(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_if_case(&mut self, ast_token: &mut AstToken) {}
+    fn visit_if_case(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_for(&mut self, ast_token: &mut AstToken) {}
+    fn visit_for(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_while(&mut self, ast_token: &mut AstToken) {}
+    fn visit_while(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_test(&mut self, ast_token: &mut AstToken) {}
+    fn visit_test(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
 
-    fn visit_break(&mut self, stmt: &mut Stmt) {}
+    fn visit_break(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_continue(&mut self, stmt: &mut Stmt) {}
+    fn visit_continue(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_use(&mut self, stmt: &mut Stmt) {}
+    fn visit_use(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_package(&mut self, stmt: &mut Stmt) {}
+    fn visit_package(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_defer(&mut self, stmt: &mut Stmt) {}
+    fn visit_defer(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_defer_exec(&mut self, stmt: &mut Stmt) {}
+    fn visit_defer_exec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_extern_decl(&mut self, stmt: &mut Stmt) {}
+    fn visit_extern_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
-    fn visit_modifier(&mut self, stmt: &mut Stmt) {}
+    fn visit_modifier(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 }

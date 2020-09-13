@@ -260,9 +260,15 @@ pub struct FuncCall {
     pub arguments: Vec<Argument>,
     pub ret_type: Option<Type>,
 
+    // TODO: Is this needed? Currently set in type solver and the used when
+    //       renaming the method call in codegen. The codegen could get the
+    //       name of the struct from the ret type of the first argument in the
+    //       method call, but would be more work.
     /// Will be set if this is a method call i.e. a function being a member of
     /// a struct. The String will be the name of the struct.
     pub method_struct: Option<String>,
+
+    pub is_method: bool,
 }
 
 impl FuncCall {
@@ -272,6 +278,7 @@ impl FuncCall {
             arguments,
             ret_type: None,
             method_struct: None,
+            is_method: false,
         }
     }
 }
