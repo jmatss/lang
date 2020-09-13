@@ -53,43 +53,48 @@ use type_solver::TypeSolver;
 /// information from the declared struct that it belongs to.
 pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>> {
     let mut analyze_context = AnalyzeContext::new();
-    //let mut dummy_visitor = DummyVisitor {};
-    //let mut traverser = AstTraverser::new(&mut dummy_visitor);
 
     let mut block_analyzer = BlockAnalyzer::new(&mut analyze_context);
-    AstTraverser::new(&mut block_analyzer)
+    AstTraverser::new()
+        .add_visitor(&mut block_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
     let mut decl_analyzer = DeclAnalyzer::new(&mut analyze_context);
-    AstTraverser::new(&mut decl_analyzer)
+    AstTraverser::new()
+        .add_visitor(&mut decl_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
     let mut defer_analyzer = DeferAnalyzer::new(&mut analyze_context);
-    AstTraverser::new(&mut defer_analyzer)
+    AstTraverser::new()
+        .add_visitor(&mut defer_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
     let mut indexing_analyzer = IndexingAnalyzer::new(&mut analyze_context);
-    AstTraverser::new(&mut indexing_analyzer)
+    AstTraverser::new()
+        .add_visitor(&mut indexing_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
     let mut type_context = TypeContext::new(&mut analyze_context);
 
     let mut type_inferencer = TypeInferencer::new(&mut type_context);
-    AstTraverser::new(&mut type_inferencer)
+    AstTraverser::new()
+        .add_visitor(&mut type_inferencer)
         .traverse(ast_root)
         .take_errors()?;
 
     let mut type_solver = TypeSolver::new(&mut type_context);
-    AstTraverser::new(&mut type_solver)
+    AstTraverser::new()
+        .add_visitor(&mut type_solver)
         .traverse(ast_root)
         .take_errors()?;
 
     let mut method_analyzer = MethodAnalyzer::new(&mut analyze_context);
-    AstTraverser::new(&mut method_analyzer)
+    AstTraverser::new()
+        .add_visitor(&mut method_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
