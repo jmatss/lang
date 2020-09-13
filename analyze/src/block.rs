@@ -1,3 +1,5 @@
+use std::cell::{RefCell, RefMut};
+
 use crate::{AnalyzeContext, BlockInfo};
 use common::{
     error::LangError,
@@ -17,12 +19,12 @@ use log::debug;
 /// "BlockInfo"s into the analyze context containing information about block
 /// parent, specific branch statements the block contains etc.
 pub struct BlockAnalyzer<'a> {
-    analyze_context: &'a mut AnalyzeContext,
+    analyze_context: &'a RefCell<AnalyzeContext>,
     errors: Vec<LangError>,
 }
 
 impl<'a> BlockAnalyzer<'a> {
-    pub fn new(analyze_context: &'a mut AnalyzeContext) -> Self {
+    pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
         Self {
             analyze_context,
             errors: Vec::default(),
@@ -72,9 +74,14 @@ impl<'a> BlockAnalyzer<'a> {
         }
     }
 
-    fn analyze_block(&mut self, ast_token: &AstToken) {
-        self.analyze_context.cur_line_nr = ast_token.line_nr;
-        self.analyze_context.cur_column_nr = ast_token.column_nr;
+    // TODO: Do this borrowing of analyze_context in a less ugly way.
+    fn analyze_block(
+        &mut self,
+        ast_token: &AstToken,
+        analyze_context: &mut RefMut<AnalyzeContext>,
+    ) {
+        analyze_context.cur_line_nr = ast_token.line_nr;
+        analyze_context.cur_column_nr = ast_token.column_nr;
 
         if let Token::Block(ref header, id, body) = &ast_token.token {
             let is_root_block = self.analyze_is_root(header);
@@ -84,7 +91,7 @@ impl<'a> BlockAnalyzer<'a> {
             // Update the mapping from this block to its parent.
             // Do not set a parent for the default block.
             if *id != 0 {
-                block_info.parent_id = self.analyze_context.cur_block_id;
+                block_info.parent_id = analyze_context.cur_block_id;
             }
 
             // When iterating through all tokens, look at the If and Ifcases
@@ -94,7 +101,7 @@ impl<'a> BlockAnalyzer<'a> {
             for child_token in body.iter() {
                 // Since `analyze_token` recurses, need to re-set the current
                 // block to the be the "parent" (`self.context.cur_block_id`).
-                self.analyze_context.cur_block_id = *id;
+                analyze_context.cur_block_id = *id;
 
                 match child_token.token {
                     Token::Block(BlockHeader::If, child_id, _)
@@ -106,16 +113,14 @@ impl<'a> BlockAnalyzer<'a> {
                     | Token::Block(BlockHeader::While(..), child_id, _)
                     | Token::Block(BlockHeader::Test(_), child_id, _)
                     | Token::Block(BlockHeader::Anonymous, child_id, _) => {
-                        self.analyze_block(child_token);
+                        self.analyze_block(child_token, analyze_context);
 
-                        if let Some(child_block_info) =
-                            self.analyze_context.block_info.get(&child_id)
-                        {
+                        if let Some(child_block_info) = analyze_context.block_info.get(&child_id) {
                             if !child_block_info.all_children_contains_returns {
                                 all_children_contains_returns = false;
                             }
                         } else {
-                            let err = self.analyze_context.err(format!(
+                            let err = analyze_context.err(format!(
                                 "Unable to get block info for ID {} when in ID {}.",
                                 child_id, id
                             ));
@@ -130,7 +135,7 @@ impl<'a> BlockAnalyzer<'a> {
                     | Token::Block(BlockHeader::Enum(_), ..)
                     | Token::Block(BlockHeader::Interface(_), ..)
                     | Token::Block(BlockHeader::Implement(..), ..) => {
-                        self.analyze_block(child_token);
+                        self.analyze_block(child_token, analyze_context);
                     }
 
                     Token::Stmt(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
@@ -148,7 +153,7 @@ impl<'a> BlockAnalyzer<'a> {
                 block_info.contains_return
             };
 
-            self.analyze_context.block_info.insert(*id, block_info);
+            analyze_context.block_info.insert(*id, block_info);
         }
     }
 }
@@ -163,23 +168,29 @@ impl<'a> Visitor for BlockAnalyzer<'a> {
     }
 
     fn visit_token(&mut self, ast_token: &mut AstToken) {
-        self.analyze_context.cur_line_nr = ast_token.line_nr;
-        self.analyze_context.cur_column_nr = ast_token.column_nr;
+        let mut analyze_context = self.analyze_context.borrow_mut();
+        analyze_context.cur_line_nr = ast_token.line_nr;
+        analyze_context.cur_column_nr = ast_token.column_nr;
     }
 
     /// All traversing is done from the default block, no other visit function
     /// will be used. The reason being that this needs to be called recursively
     /// on blocks, which currently isn't possible to do with the regular traverser.
     fn visit_default_block(&mut self, ast_token: &mut AstToken) {
+        let mut analyze_context = self.analyze_context.borrow_mut();
+
         if let Token::Block(_, id, _) = ast_token.token {
-            self.analyze_context.cur_block_id = id;
+            analyze_context.cur_block_id = id;
         }
 
-        self.analyze_block(ast_token);
+        self.analyze_block(ast_token, &mut analyze_context);
     }
 
     fn visit_eof(&mut self, ast_token: &mut AstToken) {
-        debug!("BLOCK_INFO --\n{:#?}", self.analyze_context.block_info);
+        debug!(
+            "BLOCK_INFO --\n{:#?}",
+            self.analyze_context.borrow_mut().block_info
+        );
     }
 
     fn visit_block(&mut self, ast_token: &mut AstToken) {}

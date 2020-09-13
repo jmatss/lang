@@ -11,13 +11,16 @@ use common::{
     visitor::Visitor,
     BlockId,
 };
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+};
 
 /// Iterates through all "Defer" stmts and inserts new "DeferExec" stmts in the
 /// AST where needed. This will for example be before branching away from the
 /// current block or if the block is ending.
 pub struct DeferAnalyzer<'a> {
-    analyze_context: &'a mut AnalyzeContext,
+    analyze_context: &'a RefCell<AnalyzeContext>,
 
     /// Contains defer-statements for a specific block. Expressions will be added
     /// to this map continuously during "defer analyzing" when the statement is
@@ -27,7 +30,7 @@ pub struct DeferAnalyzer<'a> {
 }
 
 impl<'a> DeferAnalyzer<'a> {
-    pub fn new(analyze_context: &'a mut AnalyzeContext) -> Self {
+    pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
         Self {
             analyze_context,
             defer_stmts: HashMap::default(),
@@ -71,10 +74,11 @@ impl<'a> DeferAnalyzer<'a> {
     where
         F: Fn(bool) -> bool,
     {
+        let analyze_context = self.analyze_context.borrow();
         let mut defers = Vec::new();
 
         let mut cur_id = id;
-        while let Some(cur_block_info) = self.analyze_context.block_info.get(&cur_id) {
+        while let Some(cur_block_info) = analyze_context.block_info.get(&cur_id) {
             if let Some(cur_defers) = self.defer_stmts.get(&cur_id) {
                 for defer in cur_defers.iter().rev() {
                     defers.push(defer.clone());
@@ -119,15 +123,8 @@ impl<'a> Visitor for DeferAnalyzer<'a> {
         None
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken) {
-        self.analyze_context.cur_line_nr = ast_token.line_nr;
-        self.analyze_context.cur_column_nr = ast_token.column_nr;
-    }
-
     fn visit_block(&mut self, ast_token: &mut AstToken) {
         if let Token::Block(_, id, body) = &mut ast_token.token {
-            self.analyze_context.cur_block_id = *id;
-
             let mut i = 0;
             while i < body.len() {
                 match &body[i].token {
@@ -159,6 +156,8 @@ impl<'a> Visitor for DeferAnalyzer<'a> {
             }
         }
     }
+
+    fn visit_token(&mut self, ast_token: &mut AstToken) {}
 
     fn visit_defer(&mut self, stmt: &mut Stmt) {}
 

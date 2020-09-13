@@ -1,7 +1,5 @@
-use crate::AnalyzeContext;
 use common::{
     error::LangError,
-    token::ast::Token,
     token::{
         ast::AstToken,
         expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
@@ -16,30 +14,17 @@ use log::debug;
 /// struct indexing and method calls etc. This analyzer traverses through all
 /// expressions and tried to deduce the correct indexing. "Markers" will be
 /// inserted into the AST.
-pub struct IndexingAnalyzer<'a> {
-    analyze_context: &'a mut AnalyzeContext,
-}
+pub struct IndexingAnalyzer {}
 
-impl<'a> IndexingAnalyzer<'a> {
-    pub fn new(analyze_context: &'a mut AnalyzeContext) -> Self {
-        Self { analyze_context }
+impl IndexingAnalyzer {
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
-impl<'a> Visitor for IndexingAnalyzer<'a> {
+impl Visitor for IndexingAnalyzer {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         None
-    }
-
-    fn visit_token(&mut self, ast_token: &mut AstToken) {
-        self.analyze_context.cur_line_nr = ast_token.line_nr;
-        self.analyze_context.cur_column_nr = ast_token.column_nr;
-    }
-
-    fn visit_block(&mut self, ast_token: &mut AstToken) {
-        if let Token::Block(_, id, _) = &ast_token.token {
-            self.analyze_context.cur_block_id = *id;
-        }
     }
 
     /// Wraps struct accesses into a new un op that replaces the old binary
@@ -63,6 +48,10 @@ impl<'a> Visitor for IndexingAnalyzer<'a> {
             }
         }
     }
+
+    fn visit_token(&mut self, ast_token: &mut AstToken) {}
+
+    fn visit_block(&mut self, ast_token: &mut AstToken) {}
 
     fn visit_bin_op(&mut self, bin_op: &mut BinOp) {}
 

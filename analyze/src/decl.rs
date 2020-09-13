@@ -13,18 +13,21 @@ use common::{
     visitor::Visitor,
     BlockId,
 };
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+};
 
 /// Gathers information about all declarations found in the AST and inserts
 /// them into the `analyze_context`. This includes variables, external declarations,
 /// functions, structs, enums and interfaces.
 pub struct DeclAnalyzer<'a> {
-    analyze_context: &'a mut AnalyzeContext,
+    analyze_context: &'a RefCell<AnalyzeContext>,
     errors: Vec<LangError>,
 }
 
 impl<'a> DeclAnalyzer<'a> {
-    pub fn new(analyze_context: &'a mut AnalyzeContext) -> Self {
+    pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
         Self {
             analyze_context,
             errors: Vec::default(),
@@ -32,8 +35,10 @@ impl<'a> DeclAnalyzer<'a> {
     }
 
     fn analyze_func_header(&mut self, func: &Function, func_id: BlockId) {
+        let mut analyze_context = self.analyze_context.borrow_mut();
+
         // Add the function in the scope of its root parent (`root_parent_id`).
-        let root_parent_id = match self.analyze_context.get_next_root_parent(func_id) {
+        let root_parent_id = match analyze_context.get_next_root_parent(func_id) {
             Ok(id) => id,
             Err(err) => {
                 self.errors.push(err);
@@ -44,7 +49,7 @@ impl<'a> DeclAnalyzer<'a> {
         // If true: Function already declared somewhere, make sure that the
         // current declaration and the previous one matches.
         let key = (func.name.clone(), root_parent_id);
-        if let Some(prev_func) = self.analyze_context.functions.get(&key) {
+        if let Some(prev_func) = analyze_context.functions.get(&key) {
             let empty_vec = Vec::new();
             let cur_func_params = if let Some(params) = &func.parameters {
                 params
@@ -67,7 +72,7 @@ impl<'a> DeclAnalyzer<'a> {
                     cur_func_params.len(),
                     prev_func_params.len(),
                 );
-                let err = self.analyze_context.err(err_msg);
+                let err = analyze_context.err(err_msg);
                 self.errors.push(err);
             } else {
                 for (i, (cur_param, prev_param)) in cur_func_params
@@ -81,7 +86,7 @@ impl<'a> DeclAnalyzer<'a> {
                             Parameter at position {}. Prev name: {:?}, current name: {:?}.",
                             &func.name, i, &cur_param.name, &prev_param.name
                         );
-                        let err = self.analyze_context.err(err_msg);
+                        let err = analyze_context.err(err_msg);
                         self.errors.push(err);
                     }
                     if cur_param.ret_type != prev_param.ret_type {
@@ -96,38 +101,36 @@ impl<'a> DeclAnalyzer<'a> {
                             Prev type: {:?}, current type: {:?}",
                             &func.name, i, &param_name, cur_param.ret_type, prev_param.ret_type
                         );
-                        let err = self.analyze_context.err(err_msg);
+                        let err = analyze_context.err(err_msg);
                         self.errors.push(err);
                     }
                 }
             }
         } else {
-            self.analyze_context.functions.insert(key, func.clone());
+            analyze_context.functions.insert(key, func.clone());
 
             // Add the parameters as variables in the function scope.
             if let Some(ref params) = func.parameters {
                 for param in params {
                     let param_key = (param.name.clone(), func_id);
-                    self.analyze_context
-                        .variables
-                        .insert(param_key, param.clone());
+                    analyze_context.variables.insert(param_key, param.clone());
                 }
             }
         }
     }
 
     fn analyze_method_header(&mut self, struct_name: &str, func: &mut Function, func_id: BlockId) {
+        let mut analyze_context = self.analyze_context.borrow_mut();
+
         // Add the methods in the scope of the structs root parent.
-        let struct_parent_id = match self
-            .analyze_context
-            .get_struct_parent_id(struct_name.into(), func_id)
-        {
-            Ok(id) => id,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
+        let struct_parent_id =
+            match analyze_context.get_struct_parent_id(struct_name.into(), func_id) {
+                Ok(id) => id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
         // Since this is a method, the first parameters should be "this"/"self".
         // TODO: Where should the name of "this"/"self" be specified?
@@ -142,12 +145,12 @@ impl<'a> DeclAnalyzer<'a> {
 
         // Insert this method into `methods` in the analyze context.
         let key = (struct_name.into(), struct_parent_id);
-        match self.analyze_context.methods.entry(key) {
+        match analyze_context.methods.entry(key) {
             Entry::Occupied(ref mut v) => {
                 v.get_mut().insert(func.name.clone(), func.clone());
             }
             Entry::Vacant(_) => {
-                let err = self.analyze_context.err(format!(
+                let err = analyze_context.err(format!(
                     "Unable to find decl methods for struct \"{}\" in block with id {}.",
                     struct_name, struct_parent_id
                 ));
@@ -159,9 +162,7 @@ impl<'a> DeclAnalyzer<'a> {
         if let Some(ref params) = func.parameters {
             for param in params {
                 let param_key = (param.name.clone(), func_id);
-                self.analyze_context
-                    .variables
-                    .insert(param_key, param.clone());
+                analyze_context.variables.insert(param_key, param.clone());
             }
         }
     }
@@ -177,13 +178,13 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
     }
 
     fn visit_token(&mut self, ast_token: &mut AstToken) {
-        self.analyze_context.cur_line_nr = ast_token.line_nr;
-        self.analyze_context.cur_column_nr = ast_token.column_nr;
+        self.analyze_context.borrow_mut().cur_line_nr = ast_token.line_nr;
+        self.analyze_context.borrow_mut().cur_column_nr = ast_token.column_nr;
     }
 
     fn visit_block(&mut self, ast_token: &mut AstToken) {
         if let Token::Block(_, id, _) = ast_token.token {
-            self.analyze_context.cur_block_id = id;
+            self.analyze_context.borrow_mut().cur_block_id = id;
         }
     }
 
@@ -192,27 +193,27 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
     /// This lets the functions when they are visited to know that they are
     /// methods.
     fn visit_impl(&mut self, ast_token: &mut AstToken) {
+        let mut analyze_context = self.analyze_context.borrow_mut();
+
         if let Token::Block(BlockHeader::Implement(struct_name), impl_id, body) =
             &mut ast_token.token
         {
-            let struct_parent_id = match self
-                .analyze_context
-                .get_struct_parent_id(struct_name.clone(), *impl_id)
-            {
-                Ok(id) => id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+            let struct_parent_id =
+                match analyze_context.get_struct_parent_id(struct_name.clone(), *impl_id) {
+                    Ok(id) => id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
             let key = (struct_name.clone(), struct_parent_id);
-            self.analyze_context.methods.insert(key, HashMap::default());
+            analyze_context.methods.insert(key, HashMap::default());
 
             for body_token in body {
                 if let Token::Block(BlockHeader::Function(func), ..) = &mut body_token.token {
                     func.method_struct = Some(struct_name.clone());
                 } else {
-                    let err = self.analyze_context.err(format!(
+                    let err = analyze_context.err(format!(
                         "AST token in impl block with name \"{}\" not a function: {:?}",
                         struct_name, body_token
                     ));
@@ -233,9 +234,11 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
     }
 
     fn visit_struct(&mut self, ast_token: &mut AstToken) {
+        let mut analyze_context = self.analyze_context.borrow_mut();
+
         if let Token::Block(BlockHeader::Struct(struct_), struct_id, ..) = &ast_token.token {
             // Add the struct in the scope of its root parent (`root_parent_id`).
-            let root_parent_id = match self.analyze_context.get_next_root_parent(*struct_id) {
+            let root_parent_id = match analyze_context.get_next_root_parent(*struct_id) {
                 Ok(id) => id,
                 Err(err) => {
                     self.errors.push(err);
@@ -244,26 +247,28 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
             };
 
             let key = (struct_.name.clone(), root_parent_id);
-            if let Some(prev_struct) = self.analyze_context.structs.get(&key) {
+            if let Some(prev_struct) = analyze_context.structs.get(&key) {
                 // TODO: Should this be done in the same way as function, that
                 //       one just checks that the declarations are equals and doesn't
                 //       throw a exception? This would allow for "extern" declarations
                 //       but might be problematic if it two defines.
-                let err = self.analyze_context.err(format!(
+                let err = analyze_context.err(format!(
                     "A struct with name \"{}\" already defined.",
                     prev_struct.name
                 ));
                 self.errors.push(err);
             } else {
-                self.analyze_context.structs.insert(key, struct_.clone());
+                analyze_context.structs.insert(key, struct_.clone());
             }
         }
     }
 
     fn visit_enum(&mut self, ast_token: &mut AstToken) {
+        let mut analyze_context = self.analyze_context.borrow_mut();
+
         if let Token::Block(BlockHeader::Enum(enum_), enum_id, ..) = &ast_token.token {
             // Add the enum in the scope of its root parent (`root_parent_id`).
-            let root_parent_id = match self.analyze_context.get_next_root_parent(*enum_id) {
+            let root_parent_id = match analyze_context.get_next_root_parent(*enum_id) {
                 Ok(id) => id,
                 Err(err) => {
                     self.errors.push(err);
@@ -272,27 +277,29 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
             };
 
             let key = (enum_.name.clone(), root_parent_id);
-            if let Some(prev_enum) = self.analyze_context.enums.get(&key) {
+            if let Some(prev_enum) = analyze_context.enums.get(&key) {
                 // TODO: Should this be done in the same way as function, that
                 //       one just checks that the declarations are equals and doesn't
                 //       throw a exception? This would allow for "extern" declarations
                 //       but might be problematic if it two defines.
-                let err = self.analyze_context.err(format!(
+                let err = analyze_context.err(format!(
                     "A enum with name \"{}\" already defined.",
                     prev_enum.name
                 ));
                 self.errors.push(err);
             } else {
-                self.analyze_context.enums.insert(key, enum_.clone());
+                analyze_context.enums.insert(key, enum_.clone());
             }
         }
     }
 
     fn visit_interface(&mut self, ast_token: &mut AstToken) {
+        let mut analyze_context = self.analyze_context.borrow_mut();
+
         if let Token::Block(BlockHeader::Interface(interface), interface_id, ..) = &ast_token.token
         {
             // Add the interface in the scope of its root parent (`root_parent_id`).
-            let root_parent_id = match self.analyze_context.get_next_root_parent(*interface_id) {
+            let root_parent_id = match analyze_context.get_next_root_parent(*interface_id) {
                 Ok(id) => id,
                 Err(err) => {
                     self.errors.push(err);
@@ -301,42 +308,44 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
             };
 
             let key = (interface.name.clone(), root_parent_id);
-            if let Some(prev_interface) = self.analyze_context.interfaces.get(&key) {
+            if let Some(prev_interface) = analyze_context.interfaces.get(&key) {
                 // TODO: Should this be done in the same way as function, that
                 //       one just checks that the declarations are equals and doesn't
                 //       throw a exception? This would allow for "extern" declarations
                 //       but might be problematic if it two defines.
-                let err = self.analyze_context.err(format!(
+                let err = analyze_context.err(format!(
                     "A interface with name \"{}\" already defined.",
                     prev_interface.name
                 ));
                 self.errors.push(err);
             } else {
-                self.analyze_context
-                    .interfaces
-                    .insert(key, interface.clone());
+                analyze_context.interfaces.insert(key, interface.clone());
             }
         }
     }
 
     fn visit_var_decl(&mut self, stmt: &mut Stmt) {
-        if let Stmt::VariableDecl(var, _) = stmt {
-            let key = (var.name.clone(), self.analyze_context.cur_block_id);
+        let mut analyze_context = self.analyze_context.borrow_mut();
 
-            if let Entry::Vacant(v) = self.analyze_context.variables.entry(key) {
+        if let Stmt::VariableDecl(var, _) = stmt {
+            let key = (var.name.clone(), analyze_context.cur_block_id);
+
+            if let Entry::Vacant(v) = analyze_context.variables.entry(key) {
                 v.insert(var.clone());
             } else {
                 let err_msg = format!(
                     "A variable with name \"{}\" already declared in this scope ({}).",
-                    &var.name, self.analyze_context.cur_block_id
+                    &var.name, analyze_context.cur_block_id
                 );
-                let err = self.analyze_context.err(err_msg);
+                let err = analyze_context.err(err_msg);
                 self.errors.push(err);
             }
         }
     }
 
     fn visit_extern_decl(&mut self, stmt: &mut Stmt) {
+        let mut analyze_context = self.analyze_context.borrow_mut();
+
         if let Stmt::ExternalDecl(func) = stmt {
             // TODO: Don't hardcode zeros for the default block everywhere.
             // TODO: Should probably check that if there are multiple extern
@@ -344,7 +353,7 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
             //       parameters & return type.
             // External declarations should always be in the default block.
             let key = (func.name.clone(), 0);
-            self.analyze_context.functions.insert(key, func.clone());
+            analyze_context.functions.insert(key, func.clone());
         }
     }
 

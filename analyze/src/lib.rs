@@ -23,7 +23,7 @@ use decl::DeclAnalyzer;
 use defer::DeferAnalyzer;
 use indexing::IndexingAnalyzer;
 use method::MethodAnalyzer;
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap};
 use type_context::TypeContext;
 use type_inferencer::TypeInferencer;
 use type_solver::TypeSolver;
@@ -36,48 +36,45 @@ use type_solver::TypeSolver;
 //       whole life of the traverser. And since the analyzer contains a mut ref
 //       to the `analyze_context`, rust will assume that the `analyze_context`
 //       will live for the while "analyze" function inside the analyzer object.
+// TODO: Since the "defer" copies expressions in the AST, is there a possiblity
+//       that the corresponding "DeferExec" and its contents gets different types
+//       during type analyzing? Would that be a problem if it is true?
 
 /// Updates the AST with information about function prototypes and declarations
 /// of structures.
+/// The "defer" and "indexing" should be ran before all other analyzers since
+/// they rewrite the AST which might affect the other stages of the analyzing.
+/// The "method" also rewrites the AST, but it requires information from the
+/// "type analyzing", so it needs to be ran at the end, but it should not be
+/// a problem.
+///
 /// The "TypeInference/TypeSolve" depends on the "DeclAnalyzer" to figure out types
 /// for function calls and function parameters used in expressions, so the
 /// "DeclAnalyzer" needs to be ran before "Type...".
-/// The "Type..." will also set the var types in "AnalyzeContext.variables".
-/// The "DeclAnalyzer" needs to be ran before "IndexingAnalyzer" since it will need
-/// to access declared variables/structs to set the idnexing correctly.
-/// The "DeferAnalyzer" will copy Expressions, so it should not be ran before
-/// the analyzing (type, indexing etc.) on Expressions are done.
 /// The "IndexingAnalyzer" should be ran before the "Type..." since the "Type..."
 /// will fail if the indexing analyzing doesn't rewrite the AST before that.
-/// The "MethodAnalyzer" should also be ran after "Type..." since it will use
-/// information from the declared struct that it belongs to.
+/// The "MethodAnalyzer" should be ran after "Type..." since it will use
+/// the type of the lhs to figure out the struct that it belongs to.
 pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>> {
-    let mut analyze_context = AnalyzeContext::new();
+    let analyze_context = RefCell::new(AnalyzeContext::new());
 
-    let mut block_analyzer = BlockAnalyzer::new(&mut analyze_context);
+    let mut indexing_analyzer = IndexingAnalyzer::new();
+    let mut defer_analyzer = DeferAnalyzer::new(&analyze_context);
     AstTraverser::new()
-        .add_visitor(&mut block_analyzer)
-        .traverse(ast_root)
-        .take_errors()?;
-
-    let mut decl_analyzer = DeclAnalyzer::new(&mut analyze_context);
-    AstTraverser::new()
-        .add_visitor(&mut decl_analyzer)
-        .traverse(ast_root)
-        .take_errors()?;
-
-    let mut defer_analyzer = DeferAnalyzer::new(&mut analyze_context);
-    AstTraverser::new()
+        .add_visitor(&mut indexing_analyzer)
         .add_visitor(&mut defer_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
-    let mut indexing_analyzer = IndexingAnalyzer::new(&mut analyze_context);
+    let mut block_analyzer = BlockAnalyzer::new(&analyze_context);
+    let mut decl_analyzer = DeclAnalyzer::new(&analyze_context);
     AstTraverser::new()
-        .add_visitor(&mut indexing_analyzer)
+        .add_visitor(&mut block_analyzer)
+        .add_visitor(&mut decl_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
+    let mut analyze_context = analyze_context.replace(AnalyzeContext::default());
     let mut type_context = TypeContext::new(&mut analyze_context);
 
     let mut type_inferencer = TypeInferencer::new(&mut type_context);
