@@ -1,4 +1,4 @@
-use crate::type_context::TypeContext;
+use crate::type_context::{SubResult, TypeContext};
 use common::{
     error::CustomResult,
     error::{LangError, LangErrorKind::AnalyzeError},
@@ -97,22 +97,25 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
             // this should happen if this function hasn't recursed at least one
             // level deep.
             (lhs, rhs)
-        } else if let Type::Unknown(_) = rhs {
-            (rhs, lhs)
         } else if let Type::Unknown(_) = lhs {
             (lhs, rhs)
+        } else if let Type::Unknown(_) = rhs {
+            (rhs, lhs)
+        } else if rhs.is_unknown_any() {
+            (rhs, lhs) // Unknown struct or array.
+        } else if lhs.is_unknown_any() {
+            (lhs, rhs) // Unknown struct or array.
         } else if !lhs.is_unknown() && rhs.is_unknown() {
             // True if `lhs` is known and `rhs` is a int/float unknown.
             (rhs, lhs)
         } else if lhs.is_unknown() {
-            // True if `to` is a int/float unknown and `rhs` is known or
+            // True if `lhs` is a int/float unknown and `rhs` is known or
             // int/float unkown.
             (lhs, rhs)
         } else {
             // True if both are known, but they aren't equal and they are still
             // compatible. This means that both are aggregates of the same type.
-            // Structs will either be equals and have been filtered out earlier
-            // or the will not be compatible and was filtered out above in this func.
+            // Structs will have been filtered earlier in this function.
             match (lhs.clone(), rhs.clone()) {
                 (Type::Pointer(inner_lhs), Type::Pointer(inner_rhs)) => {
                     self.get_mapping_direction(*inner_lhs, *inner_rhs)?
@@ -140,11 +143,24 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
         }
     }
 
-    fn insert_substitution(&mut self, from: Type, to: Type) {
+    /// Inserts a new substitution. The order of `first` and `second` doesn't
+    /// matter, this function will make sure that they are mapped in the correct
+    /// direction.
+    fn insert_substitution(&mut self, first: Type, second: Type) {
+        let (from, to) = match self.get_mapping_direction(first, second) {
+            Ok(types) => types,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
         debug!("Insert substitution -- from: {:?}, to: {:?}", &from, &to);
 
-        if from == to {
-            return; // Can't map to itself (infinite recursion).
+        // Can't map to itself (infinite recursion) and shouldn't cause any kind
+        // if loop.
+        if from == to || self.causes_loop(&from, &to) {
+            return;
         }
 
         // If the `from` doesn't already have a mapping, just insert the
@@ -160,17 +176,29 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
 
         match self.get_mapping_direction(to, old_to) {
             Ok((new_from, new_to)) => {
-                // See if adding a sub from `new_from` to `new_to` would cause
-                // a infinite loop. If that is the case, just don't add the
-                // sub. This is OK because if a loop is found, it means that
-                // the sub is indirectly already in the `substitution`, otherwise
-                // there would be no loop.
                 if !self.causes_loop(&new_from, &new_to) {
                     self.insert_substitution(new_from, new_to)
                 }
             }
             Err(err) => self.errors.push(err),
         };
+    }
+
+    fn solve_subtitution(&mut self, i: usize, from: &Type, to: &Type, finalize: bool) {
+        match self.type_context.get_substitution(to, finalize) {
+            SubResult::Solved(sub_ty) => {
+                self.insert_substitution(from.clone(), sub_ty);
+                self.type_context.constraints.swap_remove(i);
+            }
+            SubResult::UnSolved(_) => {
+                // Keep the constraint if it is unresolvable.
+                // Might become resolvable at a later iteration.
+            }
+            SubResult::Err(err) => {
+                self.errors.push(err);
+                self.type_context.constraints.swap_remove(i);
+            }
+        }
     }
 
     /// Inserts a constraint. This function sorts the lhs and rhs in order of:
@@ -189,94 +217,90 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
         } else {
             self.type_context.constraints.push((lhs, rhs));
         }
-        self.solve_constraints();
     }
 
     // TODO: Solve infinite recursive solves when generics get implemented.
     // TODO: Should the constraint be removed when a new substitution is added?
     //       Will that constraint every by used again?
-    fn solve_constraints(&mut self) {
-        let mut i = 0;
-        while i < self.type_context.constraints.len() {
-            // Safe to unwrap since `i` will always be less that the size
-            // of `constraints` enforced by the while loop expr.
-            let (lhs, rhs) = self.type_context.constraints.get(i).unwrap().clone();
+    fn solve_constraints(&mut self, finalize: bool) {
+        // Iterate through the constraints until all of them have been converted
+        // into substitutions in some way. If a constraint can't be solved, a
+        // error will be reported.
+        while !self.type_context.constraints.is_empty() {
+            let start_constraint_len = self.type_context.constraints.len();
 
-            debug!("Solving constraint -- lhs: {:?}, rhs: {:?}", &lhs, &rhs);
+            let mut i = 0;
+            while i < self.type_context.constraints.len() {
+                // Safe to unwrap since `i` will always be less that the size
+                // of `constraints` enforced by the while loop expr.
+                let (lhs, rhs) = self.type_context.constraints.get(i).unwrap().clone();
 
-            // If the types aren't compatible, report a error and remove the
-            // constraint. This will allow the inference to continue to do as
-            // much work as possible even though it will never be 100% solved.
-            if !lhs.is_compatible(&rhs) {
-                let err = self.type_context.analyze_context.err(format!(
-                    "Unsolvable type constraint. Lhs: {:?}, rhs: {:?}",
-                    lhs, rhs
-                ));
-                self.errors.push(err);
-                self.type_context.constraints.remove(i);
-                continue;
-            }
+                let lhs_sub = self.type_context.get_substitution(&lhs, finalize);
+                let rhs_sub = self.type_context.get_substitution(&rhs, finalize);
 
-            // OBS! The lhs will always have the "better" type, this is ensured
-            // when the types are added as a constraint. The better types are
-            // ranked according to:
-            //   1. Primitive
-            //   2. Aggregated (struct, ptr, array)
-            //   3. Unknown
-            if (lhs.is_primitive() && rhs.is_primitive())
-                || (lhs.is_aggregated() && rhs.is_aggregated())
-            {
-                // These types should never end up in constraints, but they are
-                // not hurtful. Just remove them from the constraints, they
-                // don't need any type inference.
-                self.type_context.constraints.remove(i);
-            } else if lhs.is_primitive() || lhs.is_aggregated() {
-                // The rhs is a "Unknown" type that is compatible with the lhs.
-                self.insert_substitution(rhs.clone(), lhs.clone());
-                self.type_context.constraints.remove(i);
-            } else {
-                // Both of the types are unknown. If one of them is "Unknown"
-                // and the other one are either a unknown int or float, add the
-                // mapping "unknown -> int/float" into the substitutions.
-                if let Type::Unknown(_) = lhs {
-                    if let Type::Unknown(_) = &rhs {
-                        // If lhs and rhs has the same type, just remove the
-                        // constraint since it doesn't add any value.
-                        // If one of the unknowns has a mapping in the `substitution`
-                        // map, add a mapping from the other unknown to this
-                        // unknown.
-                        if lhs == rhs {
-                            self.type_context.constraints.remove(i);
-                        } else if self.type_context.substitutions.contains_key(&lhs) {
-                            match self.type_context.get_substitution(&lhs, false) {
-                                Ok(sub_ty) => self.insert_substitution(rhs.clone(), sub_ty),
-                                Err(err) => self.errors.push(err),
-                            }
-                            self.type_context.constraints.remove(i);
-                        } else if self.type_context.substitutions.contains_key(&rhs) {
-                            match self.type_context.get_substitution(&rhs, false) {
-                                Ok(sub_ty) => self.insert_substitution(lhs.clone(), sub_ty),
-                                Err(err) => self.errors.push(err),
-                            }
-                            self.type_context.constraints.remove(i);
-                        }
-                    } else {
-                        match self.type_context.get_substitution(&rhs, false) {
-                            Ok(sub_ty) => self.insert_substitution(lhs.clone(), sub_ty),
-                            Err(err) => self.errors.push(err),
-                        }
+                debug!(
+                    "Solving constraint -- finalize: {}\nlhs: {:#?}\nlhs_sub: {:#?}\nrhs: {:#?}\nrhs_sub: {:#?}",
+                    finalize, &lhs, &lhs_sub, &rhs, &rhs_sub
+                );
+
+                // If the types aren't compatible, report a error and remove the
+                // constraint. This will allow the inference to continue to do as
+                // much work as possible even though it will never be 100% solved.
+                if !lhs.is_compatible(&rhs) {
+                    let err = self.type_context.analyze_context.err(format!(
+                        "Unsolvable type constraint. Lhs: {:?}, rhs: {:?}",
+                        lhs, rhs
+                    ));
+                    self.errors.push(err);
+                    self.type_context.constraints.remove(i);
+                    continue;
+                }
+
+                match (lhs_sub, rhs_sub) {
+                    (SubResult::Solved(_), SubResult::Solved(_)) => {
+                        self.type_context.constraints.swap_remove(i);
+                    }
+
+                    (SubResult::Solved(first), SubResult::UnSolved(second))
+                    | (SubResult::UnSolved(first), SubResult::Solved(second))
+                    | (SubResult::UnSolved(first), SubResult::UnSolved(second)) => {
+                        // The order doesn't matter(map to/from), it will be fixed
+                        // in the function that is called.
+                        self.insert_substitution(first, second);
                         self.type_context.constraints.remove(i);
                     }
-                } else if let Type::Unknown(_) = rhs {
-                    match self.type_context.get_substitution(&lhs, false) {
-                        Ok(sub_ty) => self.insert_substitution(rhs.clone(), sub_ty),
-                        Err(err) => self.errors.push(err),
+
+                    (_, SubResult::Err(err)) | (SubResult::Err(err), _) => {
+                        self.errors.push(err);
+                        self.type_context.constraints.remove(i);
                     }
-                    self.type_context.constraints.remove(i);
                 }
+
+                i += 1;
             }
 
-            i += 1;
+            // If the `finalize` flag isn't set, run this recursively with it
+            // set to make all possible substitutions.
+            // If it after the second iteration isn't able to solve all types,
+            // something has failed and a error will be reported.
+            if start_constraint_len == self.type_context.constraints.len() {
+                if finalize {
+                    let err = LangError::new(
+                        format!(
+                            "Unable to solve all type constraints: {:?}",
+                            self.type_context.constraints
+                        ),
+                        AnalyzeError {
+                            line_nr: 0,
+                            column_nr: 0,
+                        },
+                    );
+                    self.errors.push(err);
+                } else {
+                    self.solve_constraints(true);
+                }
+                return;
+            }
         }
     }
 }
@@ -301,13 +325,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    /// Do one last solve before exiting to make sure that everything than can
-    /// be solved are solved. Also debug log the results.
+    /// Solve the constraints at the EOF. Also debug log the results.
     fn visit_eof(&mut self, ast_token: &mut AstToken) {
         self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
         self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
 
-        self.solve_constraints();
+        self.solve_constraints(false);
         debug!(
             "Type inference Done.\nConstraints: {:#?}\nSubs: {:#?}",
             self.type_context.constraints, self.type_context.substitutions
@@ -519,8 +542,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                 &struct_.name, &members[i].name
                             ),
                             AnalyzeError {
-                                line_nr: 0,
-                                column_nr: 0,
+                                line_nr: self.type_context.analyze_context.cur_line_nr,
+                                column_nr: self.type_context.analyze_context.cur_column_nr,
                             },
                         );
                         self.errors.push(err);
@@ -550,8 +573,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                     &struct_.name
                                 ),
                                 AnalyzeError {
-                                    line_nr: 0,
-                                    column_nr: 0,
+                                    line_nr: self.type_context.analyze_context.cur_line_nr,
+                                    column_nr: self.type_context.analyze_context.cur_column_nr,
                                 },
                             );
                             self.errors.push(err);
@@ -571,8 +594,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     &struct_.name
                 ),
                 AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
+                    line_nr: self.type_context.analyze_context.cur_line_nr,
+                    column_nr: self.type_context.analyze_context.cur_column_nr,
                 },
             );
             self.errors.push(err);
@@ -581,8 +604,47 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     }
 
     fn visit_array_init(&mut self, array_init: &mut ArrayInit) {
-        if array_init.ret_type.is_none() {
-            array_init.ret_type = Some(Type::Unknown(self.new_unknown_ident()));
+        let ret_ty = if let Some(ret_ty) = &array_init.ret_type {
+            ret_ty.clone()
+        } else {
+            let new_ty = Type::Unknown(self.new_unknown_ident());
+            array_init.ret_type = Some(new_ty.clone());
+            new_ty
+        };
+
+        let mut arg_types = Vec::new();
+        for arg in &mut array_init.arguments {
+            match arg.value.get_expr_type() {
+                Ok(arg_ty) => {
+                    arg_types.push(arg_ty.clone());
+                }
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            }
+        }
+
+        // TODO: What should the type of the index for the array size be?
+        let array_index_type = Type::U32;
+        let dim = array_init.arguments.len();
+        let dim_expr = Expr::Lit(Lit::Integer(dim.to_string(), 10), Some(array_index_type));
+
+        // Add a constraint for all arguments that they are members of the same
+        // array type and and also add constraint between all the values in the
+        // array init.
+        for i in 0..array_init.arguments.len() {
+            let left = arg_types.get(i).cloned().unwrap();
+
+            self.insert_constraint(
+                ret_ty.clone(),
+                Type::Array(Box::new(left.clone()), Some(Box::new(dim_expr.clone()))),
+            );
+
+            for j in i + 1..array_init.arguments.len() {
+                let right = arg_types.get(j).cloned().unwrap();
+                self.insert_constraint(left.clone(), right)
+            }
         }
     }
 
@@ -687,16 +749,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         // have been given a "unknown" type if it didn't have one type already.
         // The "ret_type" of this un op will also be given a ret_type if it
         // doesn't already have a type set.
-        if un_op.ret_type.is_none() {
-            un_op.ret_type = Some(Type::Unknown(self.new_unknown_ident()));
-        }
-
-        let ret_ty = match self.type_context.get_ret_type(un_op.ret_type.as_mut()) {
-            Ok(ty) => ty.clone(),
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
+        let ret_ty = if let Some(ty) = &un_op.ret_type {
+            ty.clone()
+        } else {
+            let new_ty = Type::Unknown(self.new_unknown_ident());
+            un_op.ret_type = Some(new_ty.clone());
+            new_ty
         };
 
         let val_ty = match un_op.value.get_expr_type() {
@@ -723,7 +781,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 self.insert_constraint(ret_ty, Type::Pointer(Box::new(val_ty)));
             }
             UnOperator::ArrayAccess(_) => {
-                self.insert_constraint(ret_ty, Type::UnknownArrayAccess(Box::new(val_ty)));
+                self.insert_constraint(ret_ty, Type::UnknownArrayMember(Box::new(val_ty)));
             }
             UnOperator::StructAccess(member_name, ..) => {
                 self.insert_constraint(

@@ -42,8 +42,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             )));
         };
 
-        let left_any_value = self.compile_expr(&mut bin_op.lhs, ExprTy::RValue)?;
-        let left = CodeGen::any_into_basic_value(left_any_value)?;
+        let left_any = self.compile_expr(&mut bin_op.lhs, ExprTy::RValue)?;
+        let left = CodeGen::any_into_basic_value(left_any)?;
 
         // Bool "and" and "or" should be short circuit, so they need to be
         // compiled before the right side is compiled. This is a temporary fix
@@ -59,10 +59,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             _ => (),
         }
 
-        let right_any_value = self.compile_expr(&mut bin_op.rhs, ExprTy::RValue)?;
-        let right = CodeGen::any_into_basic_value(right_any_value)?;
+        let right_any = self.compile_expr(&mut bin_op.rhs, ExprTy::RValue)?;
+        let right = CodeGen::any_into_basic_value(right_any)?;
 
-        bin_op.is_const = self.is_const(&[&left, &right]);
+        bin_op.is_const = self.is_const(&[&left_any, &right_any]);
 
         let left_type = left.get_type();
         let right_type = right.get_type();
@@ -196,8 +196,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.compile_un_op_address(un_op).map(|x| x.into())
             }
             UnOperator::ArrayAccess(_) => {
-                // TODO: Does array access need lval/rval logic?
-                self.compile_un_op_array_access(un_op)
+                let ptr = self.compile_un_op_array_access(un_op)?;
+                match expr_ty {
+                    ExprTy::LValue => Ok(ptr.into()),
+                    ExprTy::RValue => Ok(self.builder.build_load(ptr, "array.gep.rval").into()),
+                }
             }
             UnOperator::StructAccess(..) => {
                 let ptr = self.compile_un_op_struct_access(un_op)?;
@@ -208,8 +211,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
             UnOperator::Positive => {
                 let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
-                let basic_value = CodeGen::any_into_basic_value(any_value)?;
-                un_op.is_const = self.is_const(&[&basic_value]);
+                un_op.is_const = self.is_const(&[&any_value]);
 
                 // Do nothing.
                 Ok(any_value)
@@ -1022,8 +1024,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// to the value or the value itself is up to the caller.
     fn compile_un_op_deref(&mut self, un_op: &mut UnOp) -> CustomResult<PointerValue<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
-        let basic_value = CodeGen::any_into_basic_value(any_value)?;
-        un_op.is_const = self.is_const(&[&basic_value]);
+        un_op.is_const = self.is_const(&[&any_value]);
 
         if any_value.is_pointer_value() {
             let basic_value = self
@@ -1045,8 +1046,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_un_op_address(&mut self, un_op: &mut UnOp) -> CustomResult<PointerValue<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
-        let basic_value = CodeGen::any_into_basic_value(any_value)?;
-        un_op.is_const = self.is_const(&[&basic_value]);
+        un_op.is_const = self.is_const(&[&any_value]);
 
         if any_value.is_pointer_value() {
             Ok(any_value.into_pointer_value())
@@ -1055,7 +1055,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_un_op_array_access(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
+    /// Access a member of an array. This function will return a pointer
+    /// to a allocation containing the actual value. If one wants the pointer
+    /// to the value or the value itself is up to the caller.
+    fn compile_un_op_array_access(&mut self, un_op: &mut UnOp) -> CustomResult<PointerValue<'ctx>> {
         let dim = if let UnOperator::ArrayAccess(dim) = &mut un_op.operator {
             dim
         } else {
@@ -1064,9 +1067,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 un_op
             )));
         };
+
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
-        let basic_value = CodeGen::any_into_basic_value(any_value)?;
-        un_op.is_const = self.is_const(&[&basic_value]);
+        un_op.is_const = self.is_const(&[&any_value]);
 
         let ptr = if any_value.is_pointer_value() {
             any_value.into_pointer_value()
@@ -1075,7 +1078,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         debug!(
-            "Compilng array access -- expr: {:#?}\nptr: {:#?}\ndim: {:?}",
+            "Compiling array access -- expr: {:#?}\nptr: {:#?}\ndim: {:?}",
             un_op.value, ptr, dim
         );
 
@@ -1123,8 +1126,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
-        let basic_value = CodeGen::any_into_basic_value(any_value)?;
-        un_op.is_const = self.is_const(&[&basic_value]);
+        un_op.is_const = self.is_const(&[&any_value]);
 
         let ptr = if any_value.is_pointer_value() {
             any_value.into_pointer_value()
@@ -1153,8 +1155,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         un_op: &mut UnOp,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
-        let basic_value = CodeGen::any_into_basic_value(any_value)?;
-        un_op.is_const = self.is_const(&[&basic_value]);
+        un_op.is_const = self.is_const(&[&any_value]);
 
         Ok(match ret_type {
             AnyTypeEnum::FloatType(_) => {
@@ -1195,8 +1196,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         un_op: &mut UnOp,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
-        let basic_value = CodeGen::any_into_basic_value(any_value)?;
-        un_op.is_const = self.is_const(&[&basic_value]);
+        un_op.is_const = self.is_const(&[&any_value]);
 
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
@@ -1224,14 +1224,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     /// Returns true if all basic values in `values` are const.
-    fn is_const(&self, values: &[&BasicValueEnum<'ctx>]) -> bool {
+    fn is_const(&self, values: &[&AnyValueEnum<'ctx>]) -> bool {
         for value in values.iter() {
             let is_const = match *value {
-                BasicValueEnum::ArrayValue(val) => val.is_const(),
-                BasicValueEnum::IntValue(val) => val.is_const(),
-                BasicValueEnum::FloatValue(val) => val.is_const(),
-                BasicValueEnum::PointerValue(val) => val.is_const(),
-                BasicValueEnum::StructValue(val) => {
+                AnyValueEnum::ArrayValue(val) => val.is_const(),
+                AnyValueEnum::IntValue(val) => val.is_const(),
+                AnyValueEnum::FloatValue(val) => val.is_const(),
+                AnyValueEnum::PointerValue(val) => val.is_const(),
+                AnyValueEnum::StructValue(val) => {
                     // TODO: Should probably be some way to iterate through all its member
                     //       recursively and figure out if all fields of the struct is
                     //       const. If that is the case, one can assume that the struct
@@ -1240,7 +1240,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     // according to inkwell documentation.
                     val.get_name().to_bytes().is_empty()
                 }
-                BasicValueEnum::VectorValue(val) => val.is_const(),
+                AnyValueEnum::VectorValue(val) => val.is_const(),
+
+                AnyValueEnum::PhiValue(_)
+                | AnyValueEnum::FunctionValue(_)
+                | AnyValueEnum::InstructionValue(_) => false,
             };
             if !is_const {
                 return false;

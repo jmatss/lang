@@ -11,14 +11,14 @@ use std::{
 
 pub type CustomResult<T> = Result<T, LangError>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LangError {
     pub msg: String,
     pub kind: LangErrorKind,
     pub backtrace: Option<Backtrace>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LangErrorKind {
     GeneralError,
     LexError { line_nr: u64, column_nr: u64 },

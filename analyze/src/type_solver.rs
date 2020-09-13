@@ -1,4 +1,4 @@
-use crate::type_context::TypeContext;
+use crate::type_context::{SubResult, TypeContext};
 use common::{
     error::LangError,
     token::ast::Token,
@@ -23,6 +23,24 @@ impl<'a> TypeSolver<'a> {
         Self {
             type_context,
             errors: Vec::default(),
+        }
+    }
+
+    fn subtitute_type(&mut self, ty: &mut Type, finalize: bool) {
+        match self.type_context.get_substitution(ty, finalize) {
+            SubResult::Solved(sub_ty) => {
+                *ty = sub_ty;
+            }
+            SubResult::UnSolved(un_sub_ty) => {
+                let err = self.type_context.analyze_context.err(format!(
+                    "Unable to resolve type {:?}. Got back unsolved: {:?}.",
+                    ty, un_sub_ty
+                ));
+                self.errors.push(err);
+            }
+            SubResult::Err(err) => {
+                self.errors.push(err);
+            }
         }
     }
 }
@@ -62,31 +80,13 @@ impl<'a> Visitor for TypeSolver<'a> {
         // Do the substitute for "Type" here, all other exprs will make the subs
         // in their own visit funcs.
         if let Expr::Type(ty) = expr {
-            match self.type_context.get_substitution(ty, true) {
-                Ok(syb_ty) => {
-                    *ty = syb_ty;
-                }
-                Err(mut err) => {
-                    err.msg.push_str(&format!(" Type: {:?}.", ty));
-                    self.errors.push(err);
-
-                    return;
-                }
-            }
+            self.subtitute_type(ty, true);
         }
     }
 
     fn visit_lit(&mut self, expr: &mut Expr) {
         if let Expr::Lit(_, Some(ty)) = expr {
-            // TODO: Does nested types also need to be updated?
-            //       Example can a Pointer type contain a unknown?
-            match self.type_context.get_substitution(ty, true) {
-                Ok(sub_ty) => *ty = sub_ty,
-                Err(mut err) => {
-                    err.msg.push_str(&format!(" Literal: {:?}.", expr));
-                    self.errors.push(err);
-                }
-            }
+            self.subtitute_type(ty, true);
         } else {
             let err = self
                 .type_context
@@ -98,13 +98,7 @@ impl<'a> Visitor for TypeSolver<'a> {
 
     fn visit_var(&mut self, var: &mut Var) {
         if let Some(ty) = &mut var.ret_type {
-            match self.type_context.get_substitution(ty, true) {
-                Ok(sub_ty) => *ty = sub_ty,
-                Err(mut err) => {
-                    err.msg.push_str(&format!(" Var: {:?}.", var));
-                    self.errors.push(err);
-                }
-            }
+            self.subtitute_type(ty, true);
         } else {
             let err = self
                 .type_context
@@ -116,13 +110,7 @@ impl<'a> Visitor for TypeSolver<'a> {
 
     fn visit_func_call(&mut self, func_call: &mut FuncCall) {
         if let Some(ty) = &mut func_call.ret_type {
-            match self.type_context.get_substitution(ty, true) {
-                Ok(sub_ty) => *ty = sub_ty,
-                Err(mut err) => {
-                    err.msg.push_str(&format!(" Func call: {:?}.", func_call));
-                    self.errors.push(err);
-                }
-            }
+            self.subtitute_type(ty, true);
         } else {
             let err = self.type_context.analyze_context.err(format!(
                 "Unable to find infer type for func call: {:?}",
@@ -134,14 +122,7 @@ impl<'a> Visitor for TypeSolver<'a> {
 
     fn visit_struct_init(&mut self, struct_init: &mut StructInit) {
         if let Some(ty) = &mut struct_init.ret_type {
-            match self.type_context.get_substitution(ty, true) {
-                Ok(sub_ty) => *ty = sub_ty,
-                Err(mut err) => {
-                    err.msg
-                        .push_str(&format!(" Struct init: {:?}.", struct_init));
-                    self.errors.push(err);
-                }
-            }
+            self.subtitute_type(ty, true);
         } else {
             let err = self.type_context.analyze_context.err(format!(
                 "Unable to find infer type for struct init: {:?}",
@@ -153,13 +134,7 @@ impl<'a> Visitor for TypeSolver<'a> {
 
     fn visit_array_init(&mut self, array_init: &mut ArrayInit) {
         if let Some(ty) = &mut array_init.ret_type {
-            match self.type_context.get_substitution(ty, true) {
-                Ok(sub_ty) => *ty = sub_ty,
-                Err(mut err) => {
-                    err.msg.push_str(&format!(" Array init: {:?}.", array_init));
-                    self.errors.push(err);
-                }
-            }
+            self.subtitute_type(ty, true);
         } else {
             let err = self.type_context.analyze_context.err(format!(
                 "Unable to find infer type for array init: {:?}",
@@ -171,13 +146,7 @@ impl<'a> Visitor for TypeSolver<'a> {
 
     fn visit_bin_op(&mut self, bin_op: &mut BinOp) {
         if let Some(ty) = &mut bin_op.ret_type {
-            match self.type_context.get_substitution(ty, true) {
-                Ok(sub_ty) => *ty = sub_ty,
-                Err(mut err) => {
-                    err.msg.push_str(&format!(" Bin op: {:?}.", bin_op));
-                    self.errors.push(err);
-                }
-            }
+            self.subtitute_type(ty, true);
         } else {
             let err = self.type_context.analyze_context.err(format!(
                 "Unable to find infer type for bin op ret_type: {:?}",
@@ -189,13 +158,7 @@ impl<'a> Visitor for TypeSolver<'a> {
 
     fn visit_un_op(&mut self, un_op: &mut UnOp) {
         if let Some(ty) = &mut un_op.ret_type {
-            match self.type_context.get_substitution(ty, true) {
-                Ok(sub_ty) => *ty = sub_ty,
-                Err(mut err) => {
-                    err.msg.push_str(&format!(" Un op: {:?}.", un_op));
-                    self.errors.push(err);
-                }
-            }
+            self.subtitute_type(ty, true);
         } else {
             let err = self.type_context.analyze_context.err(format!(
                 "Unable to find infer type for un op ret_type: {:?}",
@@ -245,10 +208,18 @@ impl<'a> Visitor for TypeSolver<'a> {
             if expr_opt.is_some() {
                 match self.type_context.get_expr_type_opt(expr_opt.as_mut()) {
                     Ok(expr_ty) => match self.type_context.get_substitution(expr_ty, true) {
-                        Ok(syb_ty) => {
-                            *expr_ty = syb_ty;
+                        SubResult::Solved(sub_ty) => {
+                            *expr_ty = sub_ty;
                         }
-                        Err(err) => {
+                        SubResult::UnSolved(un_sub_ty) => {
+                            let err = self.type_context.analyze_context.err(format!(
+                                "Unable to resolve type {:?} for rhs of var decl: {:?}. Got back unsolved type: {:?}.",
+                                expr_ty, var, un_sub_ty
+                            ));
+                            self.errors.push(err);
+                            return;
+                        }
+                        SubResult::Err(err) => {
                             self.errors.push(err);
                             return;
                         }
@@ -263,9 +234,21 @@ impl<'a> Visitor for TypeSolver<'a> {
             // Update type for lhs of var decl.
             if let Some(ty) = &mut var.ret_type {
                 match self.type_context.get_substitution(ty, true) {
-                    Ok(sub_ty) => *ty = sub_ty,
-                    Err(err) => {
+                    SubResult::Solved(sub_ty) => {
+                        *ty = sub_ty;
+                    }
+                    SubResult::UnSolved(un_sub_ty) => {
+                        let err = self.type_context.analyze_context.err(format!(
+                            "Unable to resolve type {:?} for lhs of var decl. Got back unsolved type: {:?}.",
+                            ty, un_sub_ty
+                        ));
                         self.errors.push(err);
+                        return;
+                    }
+                    SubResult::Err(mut err) => {
+                        err.msg.push_str(&format!(" -- {:#?}.", var));
+                        self.errors.push(err);
+                        return;
                     }
                 }
             } else {
@@ -292,32 +275,42 @@ impl<'a> Visitor for TypeSolver<'a> {
             let key = (var.name.clone(), decl_block_id);
 
             // Get the substitution type for the variable in the `analyze_context`.
-            let sub_type =
-                if let Some(context_var) = self.type_context.analyze_context.variables.get(&key) {
-                    if let Some(ty) = &context_var.ret_type {
-                        match self.type_context.get_substitution(ty, true) {
-                            Ok(sub_ty) => sub_ty,
-                            Err(err) => {
-                                self.errors.push(err);
-                                return;
-                            }
+            let sub_type = if let Some(context_var) =
+                self.type_context.analyze_context.variables.get(&key)
+            {
+                if let Some(ty) = &context_var.ret_type {
+                    match self.type_context.get_substitution(ty, true) {
+                        SubResult::Solved(sub_ty) => sub_ty,
+                        SubResult::UnSolved(un_sub_ty) => {
+                            let err = self.type_context.analyze_context.err(format!(
+                                    "Unable to resolve type {:?} for context var: {:?}. Got back unsolved type: {:?}.",
+                                    ty, context_var, un_sub_ty
+                                ));
+                            self.errors.push(err);
+                            return;
                         }
-                    } else {
-                        let err = self.type_context.analyze_context.err(format!(
-                            "Unable to get ret type for var in analyze context with key: {:?}.",
-                            &key
-                        ));
-                        self.errors.push(err);
-                        return;
+                        SubResult::Err(mut err) => {
+                            err.msg.push_str(&format!(" -- {:#?}.", stmt));
+                            self.errors.push(err);
+                            return;
+                        }
                     }
                 } else {
                     let err = self.type_context.analyze_context.err(format!(
-                        "Unable to find var with name \"{}\" in decl block {}.",
-                        &var.name, decl_block_id
+                        "Unable to get ret type for var in analyze context with key: {:?}.",
+                        &key
                     ));
                     self.errors.push(err);
                     return;
-                };
+                }
+            } else {
+                let err = self.type_context.analyze_context.err(format!(
+                    "Unable to find var with name \"{}\" in decl block {}.",
+                    &var.name, decl_block_id
+                ));
+                self.errors.push(err);
+                return;
+            };
 
             // Update the type to the var in `analyze_context`.
             if let Some(context_var) = self.type_context.analyze_context.variables.get_mut(&key) {

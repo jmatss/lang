@@ -1,16 +1,18 @@
+use std.assert
+
 //external function printf(format: {u8}, ...) -> i32
 //external function malloc(size: i32) -> {void}
 
-//function double(n: {i32})
-//{
-//    n.* *= 2
-//}
+function double(n: {i32})
+{
+   n.* *= 2
+}
 
-//struct TestStruct
-//{
-//    a: i32,
-//    b: i32,
-//}
+struct TestStruct
+{
+    a: i32,
+    b: f64,
+}
 
 //struct TestArrayStruct
 //{
@@ -21,23 +23,37 @@
 function main() -> i32
 {
     var x1 = [1, 2, 3]
-    //printf("1: %d", x1.[1])
+    var x1_1 = x1.[1]
+    x1.[1] = 10
+    assert(x1_1 == 2)
+    assert(x1.[1] == 10)
 
-    //var x2 = [1, 2, 3]
-    //var i = 0
-    //while i < 3
-    //{
-    //    double(x2.[i].&)
-    //    i++
-    //}
-    //printf("0: %d\n1: %d\n2: %d", x2.[0], x2.[1], x2.[2])
+    var x2 = [[1.1, 2.2], [3.3, 4.4]]
+    x2.[1].[0] = 5.5
+    assert(x2.[0].[0] == 1.1 and x2.[0].[1] == 2.2 and x2.[1].[0] == 5.5 and x2.[1].[1] == 4.4)
+    
 
-    //var x3 = [TestStruct{ 12, 34 }]
-    //printf("Result: %d", x3.[0].a)
+    var x3 = [1, 2, 3]
+    var i = 0
+    while i < 3
+    {
+        double(x3.[i].&)
+        i += 1
+    }
+    assert(x3.[0] == 2 and x3.[1] == 4 and x3.[2] == 6)
+
+    // TODO: This causes a error:
+    //         "[AnalyzeError { line_nr: 55, column_nr: 2 }] Unable to find var decl for "x4" in scope of root block 3."
+    //       Looks like it related to the block scope and that after the while loop, the block scope is incorrect for
+    //       finding the variable. If the variable is declared before the while loop, it works correctly.
+    //       It fails during codegen.
+    var x4 = [ TestStruct{ 12, 34.5 } ]
+    //x4.[0].b = 123.456
+    //assert(x4.[0].b == 123.456)
 
     //var heap_array = malloc(8) as {[i32: 2]}
     //heap_array.* = [12, 24]
-    //printf("first: %d - %d", heap_array.*.[0], (heap_array.*).[1])
+    //printf("\nfirst: %d - %d", heap_array.*.[0], (heap_array.*).[1])
     //var abc = TestArrayStruct { 456, heap_array }
     //printf("a: %d\nb: %d - %d", abc.a, abc.b.*.[0], abc.b.*.[1])
 

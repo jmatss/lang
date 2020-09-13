@@ -46,8 +46,8 @@ pub enum Type {
     /// Unknown member of the struct type "Type" with the member name "String".
     UnknownStructMember(Box<Type>, String),
 
-    /// Array access on expr of type "Type" that should be an array type.
-    UnknownArrayAccess(Box<Type>),
+    /// Unknown type of array member of array with type "Type".
+    UnknownArrayMember(Box<Type>),
 }
 
 impl Type {
@@ -150,13 +150,22 @@ impl Type {
         }
     }
 
+    /// Returns true for unknowns that can be any type. This isn't true for the
+    /// int/float unknowns.
+    pub fn is_unknown_any(&self) -> bool {
+        match self {
+            Type::Unknown(_) | Type::UnknownStructMember(..) | Type::UnknownArrayMember(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn is_unknown(&self) -> bool {
         match self {
             Type::Unknown(_)
             | Type::UnknownInt(..)
             | Type::UnknownFloat(_)
             | Type::UnknownStructMember(..)
-            | Type::UnknownArrayAccess(_) => true,
+            | Type::UnknownArrayMember(_) => true,
             _ => false,
         }
     }
@@ -193,9 +202,7 @@ impl Type {
             if self.is_float() || self.is_unknown() {
                 return true;
             }
-        } else if let Type::Unknown(_) = self {
-            return true;
-        } else if let Type::Unknown(_) = other {
+        } else if self.is_unknown() || other.is_unknown() {
             return true;
         }
 

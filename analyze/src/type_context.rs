@@ -40,6 +40,13 @@ pub struct TypeContext<'a> {
     pub constraints: Vec<(Type, Type)>,
 }
 
+#[derive(Debug, Clone)]
+pub enum SubResult {
+    Solved(Type),
+    UnSolved(Type),
+    Err(LangError),
+}
+
 impl<'a> TypeContext<'a> {
     pub fn new(analyze_context: &'a mut AnalyzeContext) -> Self {
         Self {
@@ -58,13 +65,13 @@ impl<'a> TypeContext<'a> {
     /// If `finalize` is set to false, the UnknownInt" or "UnknownFloat" will be
     /// kept since the type inference isn't finished yet and they might be set
     /// to something different than the default i32/f32.
-    pub fn get_substitution(&self, ty: &Type, finalize: bool) -> CustomResult<Type> {
+    pub fn get_substitution(&self, ty: &Type, finalize: bool) -> SubResult {
         let mut cur_ty = ty.clone();
 
         let mut i = 0;
         loop {
             if i > 50 {
-                return Err(LangError::new(
+                return SubResult::Err(LangError::new(
                     format!("Recursion error, #iterations: {}", i),
                     AnalyzeError {
                         line_nr: 0,
@@ -76,15 +83,24 @@ impl<'a> TypeContext<'a> {
             i += 1;
 
             if cur_ty.is_primitive() {
-                break;
+                return SubResult::Solved(cur_ty);
             } else if cur_ty.is_aggregated() {
                 match &mut cur_ty {
                     Type::Pointer(inner_ty) | Type::Array(inner_ty, _) => {
-                        *inner_ty = Box::new(self.get_substitution(&inner_ty, finalize)?);
+                        match self.get_substitution(&inner_ty, finalize) {
+                            SubResult::Solved(sub_ty) => {
+                                *inner_ty = Box::new(sub_ty);
+                                return SubResult::Solved(cur_ty);
+                            }
+                            SubResult::UnSolved(_) => return SubResult::UnSolved(cur_ty),
+                            err => return err,
+                        }
                     }
-                    _ => (),
+                    _ => {
+                        // Only possibility is Struct type, nothing to unwrap.
+                        return SubResult::Solved(cur_ty);
+                    }
                 }
-                break;
             } else if self.substitutions.contains_key(&cur_ty) {
                 if let Some(sub_ty) = self.substitutions.get(&cur_ty) {
                     cur_ty = sub_ty.clone();
@@ -92,41 +108,63 @@ impl<'a> TypeContext<'a> {
                     unreachable!()
                 }
             } else {
-                match &cur_ty.clone() {
-                    Type::Unknown(_) => {
-                        return Err(LangError::new(
-                            format!("Unable to find substitute for unknown type: {:?}.", cur_ty),
-                            AnalyzeError {
-                                line_nr: 0,
-                                column_nr: 0,
-                            },
-                        ));
-                    }
+                match cur_ty.clone() {
+                    // True if finalize is either true or false.
+                    Type::Unknown(_) => return SubResult::UnSolved(cur_ty),
 
                     // Set default type for int/float if this is to be finalized.
+                    // Don't set default int/float if this isn't to be finalized.
                     Type::UnknownInt(..) if finalize => {
-                        cur_ty = Type::I32;
+                        return SubResult::Solved(Type::I32);
                     }
                     Type::UnknownFloat(_) if finalize => {
-                        cur_ty = Type::F32;
+                        return SubResult::Solved(Type::F32);
+                    }
+                    Type::UnknownInt(..) | Type::UnknownFloat(_) if !finalize => {
+                        return SubResult::UnSolved(cur_ty)
                     }
 
-                    // Don't set default int/float if this isn't to be finalized.
-                    Type::UnknownInt(..) | Type::UnknownFloat(_) => {}
+                    Type::UnknownStructMember(ref struct_ty, ref member_name) => {
+                        let struct_ty = match self.get_substitution(struct_ty, finalize) {
+                            SubResult::Solved(struct_ty) => {
+                                cur_ty = Type::UnknownStructMember(
+                                    Box::new(struct_ty.clone()),
+                                    member_name.clone(),
+                                );
+                                struct_ty
+                            }
+                            SubResult::UnSolved(_) => return SubResult::UnSolved(cur_ty),
+                            err => return err,
+                        };
 
-                    Type::UnknownStructMember(struct_ty, member_name) => {
-                        cur_ty = self.get_substitution(struct_ty, finalize)?;
-                        match &cur_ty {
+                        match &struct_ty {
                             Type::Custom(struct_name) => {
-                                let var = self
+                                let var = match self
                                     .analyze_context
-                                    .get_struct_member(struct_name, member_name)?;
+                                    .get_struct_member(struct_name, member_name)
+                                {
+                                    Ok(var) => var,
+                                    Err(err) => {
+                                        return SubResult::Err(err);
+                                    }
+                                };
 
                                 if let Some(ret_type) = &var.ret_type {
-                                    cur_ty = self.get_substitution(ret_type, finalize)?;
+                                    match self.get_substitution(ret_type, finalize) {
+                                        SubResult::Solved(sub_ty) => {
+                                            return SubResult::Solved(sub_ty)
+                                        }
+                                        SubResult::UnSolved(_) => {
+                                            return SubResult::UnSolved(cur_ty)
+                                        }
+                                        err => return err,
+                                    }
                                 } else {
-                                    return Err(LangError::new(
-                                        format!("Array access in non Array type: {:?}", cur_ty),
+                                    return SubResult::Err(LangError::new(
+                                        format!(
+                                            "Type not set for member \"{}\" in struct \"{}\"",
+                                            member_name, struct_name
+                                        ),
                                         AnalyzeError {
                                             line_nr: 0,
                                             column_nr: 0,
@@ -135,41 +173,62 @@ impl<'a> TypeContext<'a> {
                                 }
                             }
                             _ => {
-                                return Err(LangError::new(
-                                format!("Struct access (member name \"{}\") on non struct type: {:?}", member_name,cur_ty),
-                                AnalyzeError {
-                                    line_nr: 0,
-                                    column_nr: 0,
-                                },
-                            ));
-                            }
-                        }
-                    }
-                    Type::UnknownArrayAccess(array_ty) => {
-                        cur_ty = self.get_substitution(array_ty, finalize)?;
-                        match &cur_ty {
-                            Type::Array(inner_ty, _) => {
-                                cur_ty = self.get_substitution(inner_ty, finalize)?;
-                            }
-                            _ => {
-                                return Err(LangError::new(
-                                    format!("Array access in non Array type: {:?}", cur_ty),
+                                if finalize {
+                                    return SubResult::Err(LangError::new(
+                                    format!(
+                                        "Struct access (member name \"{}\") on non struct type: {:?}",
+                                        member_name, cur_ty
+                                    ),
                                     AnalyzeError {
                                         line_nr: 0,
                                         column_nr: 0,
                                     },
                                 ));
+                                } else {
+                                    return SubResult::UnSolved(cur_ty);
+                                }
+                            }
+                        }
+                    }
+
+                    Type::UnknownArrayMember(array_ty) => {
+                        let sub_ty = match self.get_substitution(&array_ty, finalize) {
+                            SubResult::Solved(sub_ty) => {
+                                cur_ty = Type::UnknownArrayMember(Box::new(sub_ty.clone()));
+                                sub_ty
+                            }
+                            SubResult::UnSolved(_) => return SubResult::UnSolved(cur_ty),
+                            err => return err,
+                        };
+
+                        match &sub_ty {
+                            Type::Array(inner_ty, _) => {
+                                match self.get_substitution(inner_ty, finalize) {
+                                    SubResult::Solved(sub_ty) => return SubResult::Solved(sub_ty),
+                                    SubResult::UnSolved(_) => return SubResult::UnSolved(cur_ty),
+                                    err => return err,
+                                }
+                            }
+                            _ => {
+                                if finalize {
+                                    return SubResult::Err(LangError::new(
+                                        format!("Array access on non Array type: {:?}", cur_ty),
+                                        AnalyzeError {
+                                            line_nr: 0,
+                                            column_nr: 0,
+                                        },
+                                    ));
+                                } else {
+                                    return SubResult::UnSolved(cur_ty.clone());
+                                }
                             }
                         }
                     }
 
                     _ => unreachable!(),
                 }
-                break;
             }
         }
-
-        Ok(cur_ty)
     }
 
     pub fn get_expr_type_opt<'b>(
