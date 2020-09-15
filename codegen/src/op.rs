@@ -1051,7 +1051,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if any_value.is_pointer_value() {
             Ok(any_value.into_pointer_value())
         } else {
-            Err(self.err(format!("Expr in \"Address\" not a pointer: {:?}", un_op)))
+            match any_value {
+                // TODO: Move this kind of logic to into a new analyzing stage.
+                AnyValueEnum::StructValue(_) => {
+                    let ptr = self.builder.build_alloca(
+                        any_value.get_type().into_struct_type(),
+                        "struct.func.ret.alloc",
+                    );
+                    self.builder.build_store(ptr, any_value.into_struct_value());
+                    Ok(ptr)
+                }
+                _ => Err(self.err(format!(
+                    "Expr in \"Address\" not a pointer. Un op: {:#?}\nany value: {:#?}",
+                    un_op, any_value
+                ))),
+            }
         }
     }
 
@@ -1132,7 +1146,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let ptr = if any_value.is_pointer_value() {
             any_value.into_pointer_value()
         } else {
-            return Err(self.err(format!("Expr in struct access not a pointer: {:?}", un_op)));
+            return Err(self.err(format!(
+                "Expr in struct access not a pointer. Un up: {:#?}\n comp expr: {:#?}",
+                un_op, any_value
+            )));
         };
 
         debug!(
