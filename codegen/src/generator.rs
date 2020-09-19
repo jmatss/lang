@@ -245,7 +245,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         basic_value: BasicValueEnum<'ctx>,
     ) -> CustomResult<InstructionValue<'ctx>> {
         debug!(
-            "Compile var_store, var name: {:?}, ret_type: {:?}, basic_value: {:?}.",
+            "Compile var_store, var name: {:?}\nret_type: {:#?}\nbasic_value: {:#?}.",
             &var.name, &var.ret_type, &basic_value
         );
 

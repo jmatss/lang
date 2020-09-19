@@ -28,20 +28,22 @@ implement OuterStruct
     }
 }
 
-function main() -> int
+function main() -> i32
 {
     var outer = OuterStruct { 1, 2 }
-    //var inner = outer.new()
+    var inner_y = outer.new().y
 
-    // TODO: Chaining operations on a function call and chaining function call
-    //       on struct init.
-    //var inner_y: f64 = outer.new().y
+    var a = outer.new()
+    var b = a.y
+    a.y = 3.0
+    outer.new().y = 5.0
+    printf("a.y: %f, b: %f", a.y, b)
+    assert(a.y == 3.0 and b == 2.0)
+    
     var inner = OuterStruct { 1, 2 }.new()
-
     var expected_sum = 3.0
     assert_equals_f64(expected_sum, inner.sum(), 0.001)
-
-    printf("\ninner.x: %f, inner.y: %llf, sum: %llf\n", inner.x as f64, inner.y, inner.sum())
+    printf("\nsum: %f", inner.sum())
     
     return 0
 }

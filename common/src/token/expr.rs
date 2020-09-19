@@ -32,7 +32,7 @@ pub enum Expr {
 }
 
 impl Expr {
-    pub fn get_expr_type(&mut self) -> CustomResult<&mut Type> {
+    pub fn get_expr_type_mut(&mut self) -> CustomResult<&mut Type> {
         Ok(match self {
             Expr::Lit(_, Some(ty)) => ty,
             Expr::Type(ty) => ty,
@@ -73,6 +73,64 @@ impl Expr {
             }
             Expr::Op(Op::UnOp(un_op)) if un_op.ret_type.is_some() => {
                 if let Some(ty) = &mut un_op.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            _ => {
+                return Err(LangError::new(
+                    "Unable to get type of expr.".into(),
+                    AnalyzeError {
+                        line_nr: 0,
+                        column_nr: 0,
+                    },
+                ))
+            }
+        })
+    }
+
+    pub fn get_expr_type(&self) -> CustomResult<&Type> {
+        Ok(match self {
+            Expr::Lit(_, Some(ty)) => ty,
+            Expr::Type(ty) => ty,
+            Expr::Var(var) if var.ret_type.is_some() => {
+                if let Some(ty) = &var.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::FuncCall(func_call) if func_call.ret_type.is_some() => {
+                if let Some(ty) = &func_call.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::StructInit(struct_init) if struct_init.ret_type.is_some() => {
+                if let Some(ty) = &struct_init.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::ArrayInit(array_init) if array_init.ret_type.is_some() => {
+                if let Some(ty) = &array_init.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::Op(Op::BinOp(bin_op)) if bin_op.ret_type.is_some() => {
+                if let Some(ty) = &bin_op.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::Op(Op::UnOp(un_op)) if un_op.ret_type.is_some() => {
+                if let Some(ty) = &un_op.ret_type {
                     ty
                 } else {
                     unreachable!("Value already verified to be Some.");

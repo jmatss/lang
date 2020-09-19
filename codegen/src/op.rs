@@ -185,15 +185,34 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             UnOperator::Increment => panic!("TODO: Inc not implemented, to be removed."),
             UnOperator::Decrement => panic!("TODO: Dec not implemented, to be removed."),
             UnOperator::Deref => {
-                let ptr = self.compile_un_op_deref(un_op)?;
+                let any_value = self.compile_un_op_deref(un_op)?;
                 match expr_ty {
-                    ExprTy::LValue => Ok(ptr.into()),
-                    ExprTy::RValue => Ok(self.builder.build_load(ptr, "deref.rval").into()),
+                    ExprTy::LValue => Ok(any_value),
+                    ExprTy::RValue => {
+                        if any_value.is_pointer_value() {
+                            // TODO: Find better way to do this.
+                            // Edge case if this is a pointer value containing a struct value.
+                            // Struct values should ALWAYS be wrapped in a pointer, otherwise
+                            // the members can't be accessed. Prevent deref of the pointer if
+                            // this is the case.
+                            let ptr = any_value.into_pointer_value();
+                            if let AnyTypeEnum::StructType(_) = ptr.get_type().get_element_type() {
+                                Ok(any_value)
+                            } else {
+                                Ok(self.builder.build_load(ptr, "deref.rval").into())
+                            }
+                        } else {
+                            Err(self.err(format!(
+                                "Tried to deref non pointer in rvalue {:?}",
+                                any_value
+                            )))
+                        }
+                    }
                 }
             }
             UnOperator::Address => {
                 // TODO: Does address need lval/rval logic?
-                self.compile_un_op_address(un_op).map(|x| x.into())
+                self.compile_un_op_address(un_op)
             }
             UnOperator::ArrayAccess(_) => {
                 let ptr = self.compile_un_op_array_access(un_op)?;
@@ -1022,34 +1041,33 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// Dereferences the given expression. This function will return a pointer
     /// to a allocation containing the actual value. If one wants the pointer
     /// to the value or the value itself is up to the caller.
-    fn compile_un_op_deref(&mut self, un_op: &mut UnOp) -> CustomResult<PointerValue<'ctx>> {
+    fn compile_un_op_deref(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
         un_op.is_const = self.is_const(&[&any_value]);
 
         if any_value.is_pointer_value() {
-            let basic_value = self
-                .builder
-                .build_load(any_value.into_pointer_value(), "deref");
-
-            if basic_value.is_pointer_value() {
-                Ok(basic_value.into_pointer_value())
+            // TODO: Find better way to do this.
+            // Edge case if this is a pointer value containing a struct value.
+            // Struct values should ALWAYS be wrapped in a pointer, otherwise
+            // the members can't be accessed. Prevent deref of the pointer if
+            // this is the case.
+            let ptr = any_value.into_pointer_value();
+            if let AnyTypeEnum::StructType(_) = ptr.get_type().get_element_type() {
+                Ok(any_value)
             } else {
-                Err(self.err(format!(
-                    "Value after deref not a ptr to allocation: {:?}",
-                    un_op
-                )))
+                Ok(self.builder.build_load(ptr, "deref").into())
             }
         } else {
             Err(self.err(format!("Tried to deref non pointer type expr: {:?}", un_op)))
         }
     }
 
-    fn compile_un_op_address(&mut self, un_op: &mut UnOp) -> CustomResult<PointerValue<'ctx>> {
+    fn compile_un_op_address(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
         un_op.is_const = self.is_const(&[&any_value]);
 
         if any_value.is_pointer_value() {
-            Ok(any_value.into_pointer_value())
+            Ok(any_value)
         } else {
             match any_value {
                 // TODO: Move this kind of logic to into a new analyzing stage.
@@ -1059,7 +1077,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         "struct.func.ret.alloc",
                     );
                     self.builder.build_store(ptr, any_value.into_struct_value());
-                    Ok(ptr)
+                    Ok(ptr.into())
                 }
                 _ => Err(self.err(format!(
                     "Expr in \"Address\" not a pointer. Un op: {:#?}\nany value: {:#?}",
@@ -1087,6 +1105,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let ptr = if any_value.is_pointer_value() {
             any_value.into_pointer_value()
+        } else if let AnyTypeEnum::ArrayType(_) = any_value.get_type() {
+            // Need to wrap any array types with a temporary alloc to
+            // access its members.
+            let ptr = self
+                .builder
+                .build_alloca(any_value.get_type().into_array_type(), "array.type.access");
+            self.builder.build_store(ptr, any_value.into_array_value());
+            ptr
         } else {
             return Err(self.err(format!("Expr in array access not a pointer: {:?}", un_op)));
         };
@@ -1145,9 +1171,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let ptr = if any_value.is_pointer_value() {
             any_value.into_pointer_value()
+        } else if let AnyTypeEnum::StructType(_) = any_value.get_type() {
+            // Need to wrap any struct types with a temporary alloc to
+            // access its members.
+            let ptr = self.builder.build_alloca(
+                any_value.get_type().into_struct_type(),
+                "struct.type.access",
+            );
+            self.builder.build_store(ptr, any_value.into_struct_value());
+            ptr
         } else {
             return Err(self.err(format!(
-                "Expr in struct access not a pointer. Un up: {:#?}\n comp expr: {:#?}",
+                "Expr in struct access not a pointer. Un up: {:#?}\ncompiled expr: {:#?}",
                 un_op, any_value
             )));
         };

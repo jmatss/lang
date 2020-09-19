@@ -9,7 +9,6 @@ use common::{
 };
 use inkwell::{
     types::{AnyTypeEnum, BasicTypeEnum},
-    values::BasicValueEnum,
     values::{AnyValueEnum, FloatValue, IntValue},
     AddressSpace,
 };
@@ -260,18 +259,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // Left == BasicValueEnum, Right == InstructionValue.
             // Will be right if the function returns "void", left otherwise.
             Ok(if let Some(ret_val) = call.try_as_basic_value().left() {
-                match ret_val {
-                    // TODO: Do any other type also need to be a pointer at all
-                    //       times to be accessed?
-                    BasicValueEnum::StructValue(_) => {
-                        let ptr = self
-                            .builder
-                            .build_alloca(ret_val.get_type(), "struct.func.ret.alloc");
-                        self.builder.build_store(ptr, ret_val);
-                        ptr.into()
-                    }
-                    _ => ret_val.into(),
-                }
+                ret_val.into()
             } else {
                 self.context.i32_type().const_zero().into()
             })

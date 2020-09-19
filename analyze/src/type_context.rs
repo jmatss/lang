@@ -265,9 +265,140 @@ impl<'a> TypeContext<'a> {
                                 if finalize {
                                     return SubResult::Err(LangError::new(
                                         format!(
-                                        "Method call (method name \"{}\") on non struct type: {:?}",
-                                        method_name, cur_ty
-                                    ),
+                                            "Method call (method name \"{}\") on non struct type: {:?}",
+                                            method_name, cur_ty
+                                        ),
+                                        AnalyzeError {
+                                            line_nr: 0,
+                                            column_nr: 0,
+                                        },
+                                    ));
+                                } else {
+                                    return SubResult::UnSolved(cur_ty);
+                                }
+                            }
+                        }
+                    }
+
+                    Type::UnknownMethodArgument(
+                        ref struct_ty,
+                        ref method_name,
+                        ref name_opt,
+                        ref idx,
+                    ) => {
+                        let struct_sub_ty = match self.get_substitution(&struct_ty, finalize) {
+                            SubResult::Solved(sub_ty) => {
+                                cur_ty = Type::UnknownMethodArgument(
+                                    Box::new(sub_ty.clone()),
+                                    method_name.clone(),
+                                    name_opt.clone(),
+                                    *idx,
+                                );
+                                sub_ty
+                            }
+                            SubResult::UnSolved(un_sub_ty) => {
+                                return SubResult::UnSolved(Type::UnknownMethodArgument(
+                                    Box::new(un_sub_ty),
+                                    method_name.clone(),
+                                    name_opt.clone(),
+                                    *idx,
+                                ))
+                            }
+                            err => return err,
+                        };
+
+                        match &struct_sub_ty {
+                            Type::Custom(struct_name) => {
+                                // TODO: Fix this. Move `analyze_context` out
+                                //       of `type_context` and don't hardcode
+                                //       the default block ID.
+                                let method = match self.analyze_context.get_struct_method(
+                                    struct_name,
+                                    method_name,
+                                    0,
+                                ) {
+                                    Ok(method) => method,
+                                    Err(err) => {
+                                        return SubResult::Err(err);
+                                    }
+                                };
+
+                                // If this is a named argument, use that name to
+                                // identify the parameter type and then get the
+                                // index for the parameter. Otherwise use the
+                                // index of the argument directly.
+                                let actual_idx = if let Some(arg_name) = name_opt {
+                                    let params = if let Some(params) = &method.parameters {
+                                        params
+                                    } else {
+                                        return SubResult::Err(LangError::new(
+                                            format!(
+                                                "Method \"{}\" contains no parameters",
+                                                method_name
+                                            ),
+                                            AnalyzeError {
+                                                line_nr: 0,
+                                                column_nr: 0,
+                                            },
+                                        ));
+                                    };
+
+                                    if let Some((idx, _)) = params
+                                        .iter()
+                                        .enumerate()
+                                        .find(|(_, param)| &param.name == arg_name)
+                                    {
+                                        idx
+                                    } else {
+                                        return SubResult::Err(LangError::new(
+                                            format!(
+                                                "Unable to find parameter \"{}\" in method \"{}\".",
+                                                arg_name, method_name
+                                            ),
+                                            AnalyzeError {
+                                                line_nr: 0,
+                                                column_nr: 0,
+                                            },
+                                        ));
+                                    }
+                                } else {
+                                    *idx as usize
+                                };
+
+                                let arg_ty = if let Some(param_ty) = &method
+                                    .parameters
+                                    .as_ref()
+                                    .map(|params| {
+                                        params
+                                            .get(actual_idx)
+                                            .map(|param| param.ret_type.clone())
+                                            .flatten()
+                                    })
+                                    .flatten()
+                                {
+                                    param_ty.clone()
+                                } else {
+                                    return SubResult::Err(LangError::new(
+                                        format!(
+                                            "Unable to get type for method \"{}\" parameter at index \"{}\".",
+                                            method_name, actual_idx
+                                        ),
+                                        AnalyzeError {
+                                            line_nr: 0,
+                                            column_nr: 0,
+                                        },
+                                    ));
+                                };
+
+                                return SubResult::Solved(arg_ty);
+                            }
+                            _ => {
+                                if finalize {
+                                    return SubResult::Err(LangError::new(
+                                        format!(
+                                            "Method call (method name \"{}\") argument used on non struct type(???): {:?}",
+                                            method_name, cur_ty
+                                        ),
                                         AnalyzeError {
                                             line_nr: 0,
                                             column_nr: 0,
@@ -329,7 +460,7 @@ impl<'a> TypeContext<'a> {
         expr_opt: Option<&'b mut Expr>,
     ) -> CustomResult<&'b mut Type> {
         if let Some(expr) = expr_opt {
-            expr.get_expr_type()
+            expr.get_expr_type_mut()
         } else {
             Err(LangError::new(
                 "expr opt set to None.".into(),

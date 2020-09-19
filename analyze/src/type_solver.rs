@@ -1,7 +1,6 @@
 use crate::type_context::{SubResult, TypeContext};
 use common::{
     error::LangError,
-    token::ast::Token,
     token::op::UnOperator,
     token::{
         ast::AstToken,
@@ -111,7 +110,7 @@ impl<'a> Visitor for TypeSolver<'a> {
             // a method call.
             if func_call.is_method {
                 if let Some(this_arg) = func_call.arguments.first_mut() {
-                    match this_arg.value.get_expr_type() {
+                    match this_arg.value.get_expr_type_mut() {
                         Ok(Type::Pointer(struct_ty)) => {
                             if let Type::Custom(struct_name) = struct_ty.as_ref() {
                                 func_call.method_struct = Some(struct_name.clone());
@@ -209,7 +208,7 @@ impl<'a> Visitor for TypeSolver<'a> {
         if let UnOperator::StructAccess(member_name, member_idx, member_ty) = &mut un_op.operator {
             *member_ty = un_op.ret_type.clone();
 
-            match un_op.value.get_expr_type() {
+            match un_op.value.get_expr_type_mut() {
                 Ok(Type::Custom(struct_name)) => {
                     match self.type_context.analyze_context.get_struct_member_index(
                         struct_name,

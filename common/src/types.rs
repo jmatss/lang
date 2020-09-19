@@ -46,8 +46,13 @@ pub enum Type {
     /// Unknown member of the struct type "Type" with the member name "String".
     UnknownStructMember(Box<Type>, String),
 
-    /// Unknown method of the struct struct type "Type" with the name "String".
+    /// Unknown method of the struct type "Type" with the name "String".
     UnknownStructMethod(Box<Type>, String),
+
+    /// Unknown method argument of the struct type "Type" with then name "String".
+    /// The optional string is the name of the argument if specificed.
+    /// The u64 is the index of the argument in the function call.
+    UnknownMethodArgument(Box<Type>, String, Option<String>, u64),
 
     /// Unknown type of array member of array with type "Type".
     UnknownArrayMember(Box<Type>),
@@ -193,6 +198,14 @@ impl Type {
         }
     }
 
+    pub fn is_unknown_method_argument(&self) -> bool {
+        if let Type::UnknownMethodArgument(..) = self {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_unknown_array_member(&self) -> bool {
         if let Type::UnknownArrayMember(..) = self {
             true
@@ -208,6 +221,7 @@ impl Type {
             | Type::UnknownFloat(_)
             | Type::UnknownStructMember(..)
             | Type::UnknownStructMethod(..)
+            | Type::UnknownMethodArgument(..)
             | Type::UnknownArrayMember(_) => true,
             _ => false,
         }

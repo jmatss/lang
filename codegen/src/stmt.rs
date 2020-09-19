@@ -114,8 +114,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 lhs_any.into_pointer_value()
             } else {
                 return Err(self.err(format!(
-                    "Lhs not a pointer when compiling assignment, lhs: {:?}, rhs: {:?}",
-                    lhs, rhs
+                    "Lhs not a pointer when compiling assignment\nlhs: {:#?}\nlhs_any: {:#?}, rhs: {:#?}",
+                    lhs, lhs_any, rhs
                 )));
             }
         };

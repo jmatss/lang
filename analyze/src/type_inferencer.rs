@@ -383,6 +383,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     // TODO: Clean up.
     /// Assign the return type of the function to the function call expr.
+    /// Also tie the types of the function parameter to argument types.
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
         let func_ty = if func_call.is_method {
             // If this is a method call, the first argument will be the address
@@ -391,7 +392,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let struct_ty = if let Some(this_arg) = func_call.arguments.first_mut() {
                 if let Expr::Op(Op::UnOp(un_op)) = &mut this_arg.value {
                     if let UnOperator::Address = un_op.operator {
-                        match un_op.value.get_expr_type() {
+                        match un_op.value.get_expr_type_mut() {
                             Ok(struct_ty) => struct_ty.clone(),
                             Err(err) => {
                                 self.errors.push(err);
@@ -441,90 +442,82 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 return;
             };
 
+            // Insert constraints between the function call argument type and
+            // the method parameter types that will be figured out later.
+            let mut idx: u64 = 0;
+            for arg in &func_call.arguments {
+                let arg_ty = Type::UnknownMethodArgument(
+                    Box::new(struct_ty.clone()),
+                    func_call.name.clone(),
+                    arg.name.clone(),
+                    idx,
+                );
+
+                let arg_expr_ty = match arg.value.get_expr_type() {
+                    Ok(ty) => ty.clone(),
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                self.insert_constraint(arg_ty, arg_expr_ty);
+
+                idx += 1;
+            }
+
+            // The expected return type of the function call.
             Type::UnknownStructMethod(Box::new(struct_ty), func_call.name.clone())
         } else {
             // TODO: FIXME: For now all functions will be defined in the root
             //              block, so just hardcode zero. Must change later.
             let func_decl_block = 0;
             let key = (func_call.name.clone(), func_decl_block);
-            if let Some(func) = self.type_context.analyze_context.functions.get(&key) {
-                if let Some(ty) = &func.ret_type {
-                    ty.clone()
-                } else {
-                    Type::Void
-                }
-            } else {
-                let err = LangError::new(
-                    format!(
-                        "Unable to find function \"{}\" in block {}.",
-                        &func_call.name, func_decl_block
-                    ),
-                    AnalyzeError {
-                        line_nr: 0,
-                        column_nr: 0,
-                    },
-                );
-                self.errors.push(err);
-                return;
-            }
-        };
-
-        /*
-        let func_ty = if let Some(struct_name) = &func_call.method_struct {
-            let struct_parent_id = match self
+            if let Some(ref func) = self
                 .type_context
                 .analyze_context
-                .get_struct_parent_id(struct_name.clone(), ctx.block_id)
+                .functions
+                .get(&key)
+                .cloned()
             {
-                Ok(id) => id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+                // Iterate through all arguments of the function and match
+                // up their types with the parameters of the function.
+                // The amount of args/params will already have been checked before,
+                // just make sure that this doesn't break for vararg functions.
+                // The "similar" logic for methods will be done during type solving
+                // in `type_context` since at this point there is no way to know
+                // the type of the struct and indirectly the method.
+                if let Some(params) = &func.parameters {
+                    for (arg, par) in func_call.arguments.iter().zip(params) {
+                        let arg_ty = match arg.value.get_expr_type() {
+                            Ok(ty) => ty.clone(),
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        };
 
-            let key = (struct_name.clone(), struct_parent_id);
-            if let Some(methods) = self.type_context.analyze_context.methods.get(&key) {
-                if let Some(method) = methods.get(&func_call.name) {
-                    if let Some(ty) = &method.ret_type {
-                        ty.clone()
-                    } else {
-                        Type::Void
+                        let par_ty = if let Some(ty) = &par.ret_type {
+                            ty.clone()
+                        } else {
+                            let err = LangError::new(
+                                format!(
+                                    "Type for parameter \"{}\" in function \"{}\" set to None.",
+                                    par.name, func.name
+                                ),
+                                AnalyzeError {
+                                    line_nr: 0,
+                                    column_nr: 0,
+                                },
+                            );
+                            self.errors.push(err);
+                            return;
+                        };
+
+                        self.insert_constraint(arg_ty, par_ty);
                     }
-                } else {
-                    let err = LangError::new(
-                        format!(
-                            "Unable to find method \"{}\" in struct {}.",
-                            &func_call.name, &struct_name
-                        ),
-                        AnalyzeError {
-                            line_nr: 0,
-                            column_nr: 0,
-                        },
-                    );
-                    self.errors.push(err);
-                    return;
                 }
-            } else {
-                let err = LangError::new(
-                    format!(
-                        "Unable to find methods for struct \"{}\" in parent block {}.",
-                        &struct_name, struct_parent_id
-                    ),
-                    AnalyzeError {
-                        line_nr: 0,
-                        column_nr: 0,
-                    },
-                );
-                self.errors.push(err);
-                return;
-            }
-        } else {
-            // TODO: FIXME: For now all functions will be defined in the root
-            //              block, so just hardcode zero. Must change later.
-            let func_decl_block = 0;
-            let key = (func_call.name.clone(), func_decl_block);
-            if let Some(func) = self.type_context.analyze_context.functions.get(&key) {
+
                 if let Some(ty) = &func.ret_type {
                     ty.clone()
                 } else {
@@ -545,7 +538,6 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 return;
             }
         };
-        */
 
         func_call.ret_type = Some(func_ty);
     }
@@ -625,7 +617,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
                 // Add constraints mapping the type of the struct init argument
                 // to the corresponding actual struct member type.
-                match arg.value.get_expr_type() {
+                match arg.value.get_expr_type_mut() {
                     Ok(ty) => {
                         if let Some(member) = members.get(index) {
                             if let Some(ret_type) = &member.ret_type {
@@ -703,7 +695,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
         let mut arg_types = Vec::new();
         for arg in &mut array_init.arguments {
-            match arg.value.get_expr_type() {
+            match arg.value.get_expr_type_mut() {
                 Ok(arg_ty) => {
                     arg_types.push(arg_ty.clone());
                 }
@@ -752,7 +744,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             new_type
         };
 
-        let lhs_ty = match bin_op.lhs.get_expr_type() {
+        let lhs_ty = match bin_op.lhs.get_expr_type_mut() {
             Ok(lhs_ty) => lhs_ty.clone(),
             Err(err) => {
                 self.errors.push(err);
@@ -760,7 +752,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
         };
 
-        let rhs_ty = match bin_op.rhs.get_expr_type() {
+        let rhs_ty = match bin_op.rhs.get_expr_type_mut() {
             Ok(rhs_ty) => rhs_ty.clone(),
             Err(err) => {
                 self.errors.push(err);
@@ -846,7 +838,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             new_ty
         };
 
-        let val_ty = match un_op.value.get_expr_type() {
+        let val_ty = match un_op.value.get_expr_type_mut() {
             Ok(rhs_ty) => rhs_ty.clone(),
             Err(err) => {
                 self.errors.push(err);
@@ -935,7 +927,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     fn visit_match_case(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token.token {
             if let Some(mut match_expr) = self.cur_match_expr.clone() {
-                let match_expr_ty = match match_expr.get_expr_type() {
+                let match_expr_ty = match match_expr.get_expr_type_mut() {
                     Ok(expr_ty) => expr_ty,
                     Err(err) => {
                         self.errors.push(err);
@@ -943,7 +935,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     }
                 };
 
-                let case_expr_ty = match match_case_expr.get_expr_type() {
+                let case_expr_ty = match match_case_expr.get_expr_type_mut() {
                     Ok(expr_ty) => expr_ty,
                     Err(err) => {
                         self.errors.push(err);
@@ -968,7 +960,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         if let Stmt::Assignment(_, lhs, rhs) = stmt {
             debug!("ASSIGNMENT\nlhs: {:#?}\nrhs: {:#?}", lhs, rhs);
 
-            let lhs_ty = match lhs.get_expr_type() {
+            let lhs_ty = match lhs.get_expr_type_mut() {
                 Ok(lhs_ty) => lhs_ty,
                 Err(err) => {
                     self.errors.push(err);
@@ -976,7 +968,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             };
 
-            let rhs_ty = match rhs.get_expr_type() {
+            let rhs_ty = match rhs.get_expr_type_mut() {
                 Ok(rhs_ty) => rhs_ty,
                 Err(err) => {
                     self.errors.push(err);
