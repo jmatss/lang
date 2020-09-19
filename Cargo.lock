@@ -212,6 +212,7 @@ name = "lex"
 version = "0.1.0"
 dependencies = [
  "common 0.1.0",
+ "log 0.4.11 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

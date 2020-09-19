@@ -60,20 +60,15 @@ impl<'a> ExprParser<'a> {
             parenthesis_count: 0,
         };
 
-        debug!("BEFORE!");
-
         expr_parser.shunting_yard()?;
         debug!("Outputs: {:#?}", &expr_parser.outputs);
 
-        let res = expr_parser.rev_polish_to_expr();
-        debug!("Rev to polish DONE");
-        res
+        expr_parser.rev_polish_to_expr()
     }
 
     /// See https://www.andr.mu/logs/the-shunting-yard-algorithm/ for a good
     /// explanation of the algorithm.
     fn shunting_yard(&mut self) -> CustomResult<()> {
-        debug!("HELLO?");
         while let Some(lex_token) = self.iter.next_skip_space() {
             debug!("SHUNTING: {:?}", &lex_token);
 

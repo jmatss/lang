@@ -7,6 +7,7 @@ use common::{
     iter::TokenIter,
     token::lit::Lit,
 };
+use log::debug;
 use std::fs::File;
 use std::io::Read;
 
@@ -105,9 +106,13 @@ impl LexTokenIter {
                 match symbol_kind {
                     // TODO: Add multiline comments.
                     LexTokenKind::Sym(Sym::CommentSingleLine) => {
-                        let _ = self.get_comment_single(n);
-                        // TODO: Weird to be the only return statement, do this
-                        //       in a better way.
+                        let comment = self.get_comment_single(n);
+                        debug!("Single-line comment: {:?}", comment);
+                        return self.next_token();
+                    }
+                    LexTokenKind::Sym(Sym::CommentMultiLineBegin) => {
+                        let comment = self.get_comment_multi(n);
+                        debug!("Multi-line comment: {:?}", comment);
                         return self.next_token();
                     }
                     LexTokenKind::Sym(Sym::DoubleQuote) => self.get_lit_string()?,
@@ -131,7 +136,9 @@ impl LexTokenIter {
             LexTokenKind::EOF
         };
 
-        Ok(LexToken::new(kind, line_nr, column_nr))
+        let lex_token = LexToken::new(kind, line_nr, column_nr);
+        debug!("{:?}", lex_token);
+        Ok(lex_token)
     }
 
     #[inline]
@@ -446,6 +453,52 @@ impl LexTokenIter {
                 self.iter.rewind();
                 break;
             }
+            comment.push(c);
+        }
+
+        comment.iter().collect()
+    }
+
+    /// Lexes a multi line comment until the matching "CommentMultiLineEnd" is
+    /// found. Comment can be "recursive". This function returns the comment contents.
+    /// The n is the size of the "CommentMultiLineBegin" symbol.
+    fn get_comment_multi(&mut self, n: usize) -> String {
+        let mut comment = Vec::new();
+
+        // Consume the "CommentMultiLineBegin" symbol.
+        for _ in 0..n {
+            self.iter.next();
+        }
+
+        // Keep a count of all "CommentMultiLineBegin" seen. This variable is
+        // incremented for every "CommentMultiLineBegin" and decrement for every
+        // "CommentMultiLineEnd". When this variable is back to zero, the comment
+        // has been fully consumed.
+        let mut multi_line_comment_begin_count = 1;
+
+        while let Some(c) = self.iter.next() {
+            if let Some((lex_token_kind, sym_len)) = self
+                .iter
+                .peek_three()
+                .map(|(c1, c2, c3)| LexToken::get_if_symbol_three_chars(c1, c2, c3))
+                .flatten()
+            {
+                match lex_token_kind {
+                    LexTokenKind::Sym(Sym::CommentMultiLineBegin) => {
+                        multi_line_comment_begin_count += 1;
+                    }
+                    LexTokenKind::Sym(Sym::CommentMultiLineEnd) => {
+                        multi_line_comment_begin_count -= 1;
+                    }
+                    _ => (),
+                }
+
+                if multi_line_comment_begin_count == 0 {
+                    self.iter.skip(sym_len);
+                    break;
+                }
+            }
+
             comment.push(c);
         }
 

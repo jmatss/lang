@@ -1,0 +1,19 @@
+function main() -> i32
+{
+    /*
+        Mutli-line comment.
+    */
+    
+    // Single-line comment.
+    
+    /*
+        Nested multi-line comment.
+        
+        // Inner single-line comment.
+        /*
+            Inner multi-line comment.
+        */
+    */
+
+    return 0
+}
