@@ -70,11 +70,6 @@ fn main() -> CustomResult<()> {
                 std::process::exit(1);
             }
         };
-        if log_enabled!(Level::Debug) {
-            for lex_token in &lex_tokens {
-                debug!("{:?}", lex_token)
-            }
-        }
         info!("Lexing for file \"{}\" complete.", &input_file);
 
         parser.set_lex_tokens(lex_tokens);
