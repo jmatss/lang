@@ -67,6 +67,8 @@ impl<'a> BlockAnalyzer<'a> {
 
             Stmt::Use(_)
             | Stmt::Package(_)
+            | Stmt::Increment(_)
+            | Stmt::Decrement(_)
             | Stmt::Assignment(..)
             | Stmt::VariableDecl(..)
             | Stmt::ExternalDecl(_)
@@ -229,6 +231,10 @@ impl<'a> Visitor for BlockAnalyzer<'a> {
     fn visit_use(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
     fn visit_package(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
+
+    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
+
+    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
     fn visit_defer(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 

@@ -182,8 +182,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         match &mut un_op.operator {
-            UnOperator::Increment => panic!("TODO: Inc not implemented, to be removed."),
-            UnOperator::Decrement => panic!("TODO: Dec not implemented, to be removed."),
             UnOperator::Deref => {
                 let any_value = self.compile_un_op_deref(un_op)?;
                 match expr_ty {

@@ -339,6 +339,20 @@ impl<'a> AstTraverser<'a> {
                     v.visit_package(stmt, &self.traverse_context)
                 }
             }
+            Stmt::Increment(expr) => {
+                self.traverse_expr(expr);
+                debug!("Visiting increment");
+                for v in self.visitors.iter_mut() {
+                    v.visit_inc(stmt, &self.traverse_context)
+                }
+            }
+            Stmt::Decrement(expr) => {
+                self.traverse_expr(expr);
+                debug!("Visiting decrement");
+                for v in self.visitors.iter_mut() {
+                    v.visit_dec(stmt, &self.traverse_context)
+                }
+            }
             Stmt::Defer(expr) => {
                 self.traverse_expr(expr);
                 debug!("Visiting defer");

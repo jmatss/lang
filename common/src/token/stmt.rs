@@ -21,6 +21,10 @@ pub enum Stmt {
     Use(Path),
     Package(Path),
 
+    /// Inc/dec are statements so that they can't be used in other expressions.
+    Increment(Expr),
+    Decrement(Expr),
+
     // Defer -> Run this expression at the end of the current block scope.
     /// The "Defer" is the place in the code where the "defer <expr>" was written
     /// in the actual source code.

@@ -8,7 +8,8 @@ use common::{
     },
 };
 use inkwell::{
-    module::Linkage, values::AnyValueEnum, values::BasicValueEnum, values::InstructionValue,
+    module::Linkage, types::AnyTypeEnum, values::AnyValueEnum, values::BasicValueEnum,
+    values::InstructionValue,
 };
 use log::debug;
 
@@ -21,6 +22,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Stmt::Continue => self.compile_continue(),
             Stmt::Use(path) => self.compile_use(path),
             Stmt::Package(path) => self.compile_package(path),
+            Stmt::Increment(expr) => self.compile_inc(expr),
+            Stmt::Decrement(expr) => self.compile_dec(expr),
             Stmt::Modifier(modifier) => self.compile_modifier(modifier),
 
             // Only the "DeferExecution" are compiled into code, the "Defer" is
@@ -96,6 +99,70 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_package(&mut self, path: &Path) -> CustomResult<()> {
         Err(self.err("TODO: Implement \"package\" statement.".into()))
+    }
+
+    fn compile_inc(&mut self, expr: &mut Expr) -> CustomResult<()> {
+        let any_value = self.compile_expr(expr, ExprTy::LValue)?;
+
+        let ptr = if let AnyTypeEnum::PointerType(_) = any_value.get_type() {
+            any_value.into_pointer_value()
+        } else {
+            return Err(self.err(format!(
+                "Increment expr didn't eval to pointer.\nExpr: {:#?}\nany_value: {:#?}",
+                expr, any_value
+            )));
+        };
+
+        let val = self.builder.build_load(ptr, "inc.load");
+        let new_value = if let BasicValueEnum::IntValue(value) = val {
+            let sign_extend = false;
+            let one = value.get_type().const_int(1, sign_extend);
+            if value.is_const() {
+                value.const_add(one)
+            } else {
+                self.builder.build_int_add(value, one, "inc")
+            }
+        } else {
+            return Err(self.err(format!(
+                "Increment value in pointer didn't eval to int.\nExpr: {:#?}\nany_value: {:#?}",
+                expr, any_value
+            )));
+        };
+
+        self.builder.build_store(ptr, new_value);
+        Ok(())
+    }
+
+    fn compile_dec(&mut self, expr: &mut Expr) -> CustomResult<()> {
+        let any_value = self.compile_expr(expr, ExprTy::LValue)?;
+
+        let ptr = if let AnyTypeEnum::PointerType(_) = any_value.get_type() {
+            any_value.into_pointer_value()
+        } else {
+            return Err(self.err(format!(
+                "Decrement expr didn't eval to pointer.\nExpr: {:#?}\nany_value: {:#?}",
+                expr, any_value
+            )));
+        };
+
+        let val = self.builder.build_load(ptr, "dec.load");
+        let new_value = if let BasicValueEnum::IntValue(value) = val {
+            let sign_extend = false;
+            let one = value.get_type().const_int(1, sign_extend);
+            if value.is_const() {
+                value.const_sub(one)
+            } else {
+                self.builder.build_int_sub(value, one, "dec")
+            }
+        } else {
+            return Err(self.err(format!(
+                "Decrement value in pointer didn't eval to int.\nExpr: {:#?}\nany_value: {:#?}",
+                expr, any_value
+            )));
+        };
+
+        self.builder.build_store(ptr, new_value);
+        Ok(())
     }
 
     fn compile_modifier(&mut self, modifier: &Modifier) -> CustomResult<()> {

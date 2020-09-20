@@ -182,6 +182,10 @@ impl Visitor for MethodAnalyzer {
 
     fn visit_package(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
+    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
+
+    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
+
     fn visit_defer(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
     fn visit_defer_exec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}

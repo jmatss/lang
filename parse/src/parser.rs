@@ -233,6 +233,27 @@ impl ParseTokenIter {
                     self.next_block(BlockHeader::Anonymous)?
                 }
 
+                LexTokenKind::Sym(Sym::Increment) => {
+                    let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
+                    let token = Token::Stmt(Stmt::Increment(expr));
+
+                    AstToken {
+                        token,
+                        line_nr: lex_token.line_nr,
+                        column_nr: lex_token.column_nr,
+                    }
+                }
+                LexTokenKind::Sym(Sym::Decrement) => {
+                    let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
+                    let token = Token::Stmt(Stmt::Decrement(expr));
+
+                    AstToken {
+                        token,
+                        line_nr: lex_token.line_nr,
+                        column_nr: lex_token.column_nr,
+                    }
+                }
+
                 // Error if the iterator finds a lonely symbol of these types:
                 LexTokenKind::Sym(Sym::ParenthesisEnd)
                 | LexTokenKind::Sym(Sym::CurlyBracketEnd)

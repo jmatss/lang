@@ -208,6 +208,10 @@ impl<'a> Visitor for DeferAnalyzer<'a> {
 
     fn visit_package(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
+    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
+
+    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
+
     fn visit_defer_exec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 
     fn visit_assignment(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}

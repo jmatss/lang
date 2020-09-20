@@ -91,9 +91,6 @@ pub enum BinOperator {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UnOperator {
-    Increment,
-    Decrement,
-
     // Dereference pointer and take address of value (.* and .&).
     Deref,
     Address,

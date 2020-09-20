@@ -23,9 +23,6 @@ pub fn get_if_expr_op(symbol: &lex::token::Sym) -> Option<Operator> {
         lex::token::Sym::PointyBracketBegin => Operator::BinaryOperator(BinOperator::LessThan),
         lex::token::Sym::PointyBracketEnd => Operator::BinaryOperator(BinOperator::GreaterThan),
 
-        lex::token::Sym::Increment => Operator::UnaryOperator(UnOperator::Increment),
-        lex::token::Sym::Decrement => Operator::UnaryOperator(UnOperator::Decrement),
-
         lex::token::Sym::Dot => Operator::BinaryOperator(BinOperator::Dot),
         //lex::token::Symbol::Comma,
         //lex::token::Symbol::QuestionMark,
@@ -163,27 +160,26 @@ impl Operator {
         Precedence:
             0   ( )          (precedence for parenthesis always highest)
             1   . .* .& .[]  (func/method calls, deref, address, indexing etc.)
-            2   +x -x
-            3   x++ x--      (only postfix)
-            4   ~
-            5   as
-            6   * / %
-            7   + -
-            8   << >>
-            9   < > <= >= is of
-            10  == !=
-            11  &
-            12  ^
-            13  |
-            14  not          (!)
-            15  and          (bool)
-            16  or           (bool)
-            17  .. ..=
-            18  in
+            2   +x -x        (negative/positive)
+            3   ~
+            4   as
+            5   * / %
+            6   + -
+            7   << >>
+            8   < > <= >= is of
+            9   == !=
+            10  &
+            11  ^
+            12  |
+            13  not          (!)
+            14  and          (bool)
+            15  or           (bool)
+            16  .. ..=
+            17  in
 
             (Currently assignments aren't counted as expression, but they would
             have the lowest precedence if they were)
-            19  = += -= *= /= %= **= &= |= ^= <<= >>=
+            18  = += -= *= /= %= *= &= |= ^= <<= >>=
     */
     fn lookup(&self) -> Option<(bool, usize, Fix)> {
         if let Operator::ParenthesisBegin = self {
@@ -194,11 +190,9 @@ impl Operator {
             Some(match unary_op {
                 UnOperator::Positive => (true, 2, Fix::Prefix),
                 UnOperator::Negative => (true, 2, Fix::Prefix),
-                UnOperator::Increment => (true, 3, Fix::Postfix),
-                UnOperator::Decrement => (true, 3, Fix::Postfix),
 
-                UnOperator::BitComplement => (true, 4, Fix::Prefix),
-                UnOperator::BoolNot => (true, 14, Fix::Prefix),
+                UnOperator::BitComplement => (true, 3, Fix::Prefix),
+                UnOperator::BoolNot => (true, 13, Fix::Prefix),
                 UnOperator::Deref => (true, 1, Fix::Postfix),
                 UnOperator::Address => (true, 1, Fix::Postfix),
                 UnOperator::ArrayAccess(_) => (true, 1, Fix::Postfix),
@@ -206,35 +200,35 @@ impl Operator {
             })
         } else if let Operator::BinaryOperator(binary_op) = self {
             Some(match binary_op {
-                BinOperator::In => (false, 18, Fix::Dummy),
-                BinOperator::Is => (true, 9, Fix::Dummy),
-                BinOperator::As => (true, 5, Fix::Dummy),
-                BinOperator::Of => (true, 9, Fix::Dummy),
-                BinOperator::Range => (true, 17, Fix::Dummy),
-                BinOperator::RangeInclusive => (true, 17, Fix::Dummy),
+                BinOperator::In => (false, 17, Fix::Dummy),
+                BinOperator::Is => (true, 8, Fix::Dummy),
+                BinOperator::As => (true, 4, Fix::Dummy),
+                BinOperator::Of => (true, 8, Fix::Dummy),
+                BinOperator::Range => (true, 16, Fix::Dummy),
+                BinOperator::RangeInclusive => (true, 16, Fix::Dummy),
                 BinOperator::Dot => (true, 1, Fix::Dummy),
 
-                BinOperator::Equals => (true, 10, Fix::Dummy),
-                BinOperator::NotEquals => (true, 10, Fix::Dummy),
-                BinOperator::LessThan => (true, 9, Fix::Dummy),
-                BinOperator::GreaterThan => (true, 9, Fix::Dummy),
-                BinOperator::LessThanOrEquals => (true, 9, Fix::Dummy),
-                BinOperator::GreaterThanOrEquals => (true, 9, Fix::Dummy),
+                BinOperator::Equals => (true, 9, Fix::Dummy),
+                BinOperator::NotEquals => (true, 9, Fix::Dummy),
+                BinOperator::LessThan => (true, 8, Fix::Dummy),
+                BinOperator::GreaterThan => (true, 8, Fix::Dummy),
+                BinOperator::LessThanOrEquals => (true, 8, Fix::Dummy),
+                BinOperator::GreaterThanOrEquals => (true, 8, Fix::Dummy),
 
-                BinOperator::Addition => (true, 7, Fix::Dummy),
-                BinOperator::Subtraction => (true, 7, Fix::Dummy),
-                BinOperator::Multiplication => (true, 6, Fix::Dummy),
-                BinOperator::Division => (true, 6, Fix::Dummy),
-                BinOperator::Modulus => (true, 6, Fix::Dummy),
+                BinOperator::Addition => (true, 6, Fix::Dummy),
+                BinOperator::Subtraction => (true, 6, Fix::Dummy),
+                BinOperator::Multiplication => (true, 5, Fix::Dummy),
+                BinOperator::Division => (true, 5, Fix::Dummy),
+                BinOperator::Modulus => (true, 5, Fix::Dummy),
 
-                BinOperator::BitAnd => (true, 11, Fix::Dummy),
-                BinOperator::BitOr => (true, 13, Fix::Dummy),
-                BinOperator::BitXor => (true, 12, Fix::Dummy),
-                BinOperator::ShiftLeft => (true, 8, Fix::Dummy),
-                BinOperator::ShiftRight => (true, 8, Fix::Dummy),
+                BinOperator::BitAnd => (true, 10, Fix::Dummy),
+                BinOperator::BitOr => (true, 12, Fix::Dummy),
+                BinOperator::BitXor => (true, 11, Fix::Dummy),
+                BinOperator::ShiftLeft => (true, 7, Fix::Dummy),
+                BinOperator::ShiftRight => (true, 7, Fix::Dummy),
 
-                BinOperator::BoolAnd => (true, 15, Fix::Dummy),
-                BinOperator::BoolOr => (true, 16, Fix::Dummy),
+                BinOperator::BoolAnd => (true, 14, Fix::Dummy),
+                BinOperator::BoolOr => (true, 15, Fix::Dummy),
             })
         } else {
             None

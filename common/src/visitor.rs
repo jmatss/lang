@@ -42,6 +42,8 @@ pub trait Visitor {
     fn visit_continue(&mut self, stmt: &mut Stmt, ctx: &TraverseContext);
     fn visit_use(&mut self, stmt: &mut Stmt, ctx: &TraverseContext);
     fn visit_package(&mut self, stmt: &mut Stmt, ctx: &TraverseContext);
+    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &TraverseContext);
+    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext);
     fn visit_defer(&mut self, stmt: &mut Stmt, ctx: &TraverseContext);
     fn visit_defer_exec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext);
     fn visit_assignment(&mut self, stmt: &mut Stmt, ctx: &TraverseContext);

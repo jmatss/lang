@@ -849,8 +849,6 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         match &mut un_op.operator {
             UnOperator::Positive
             | UnOperator::Negative
-            | UnOperator::Increment
-            | UnOperator::Decrement
             | UnOperator::BitComplement
             | UnOperator::BoolNot => {
                 self.insert_constraint(ret_ty, val_ty);
@@ -1051,6 +1049,38 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 self.insert_constraint(lhs_ty.clone(), rhs_ty.clone());
                 self.insert_constraint(context_var_ty, rhs_ty.clone());
             }
+        }
+    }
+
+    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+        if let Stmt::Increment(expr) = stmt {
+            let expr_ty = match expr.get_expr_type() {
+                Ok(ty) => ty.clone(),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            let int_ty = Type::UnknownInt(self.new_unknown_ident(), 10);
+
+            self.insert_constraint(expr_ty, int_ty)
+        }
+    }
+
+    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+        if let Stmt::Increment(expr) = stmt {
+            let expr_ty = match expr.get_expr_type() {
+                Ok(ty) => ty.clone(),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            let int_ty = Type::UnknownInt(self.new_unknown_ident(), 10);
+
+            self.insert_constraint(expr_ty, int_ty)
         }
     }
 
