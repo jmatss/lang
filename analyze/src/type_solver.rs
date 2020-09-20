@@ -308,8 +308,12 @@ impl<'a> Visitor for TypeSolver<'a> {
             let key = (var.name.clone(), decl_block_id);
 
             // Get the substitution type for the variable in the `analyze_context`.
-            let sub_type = if let Some(context_var) =
-                self.type_context.analyze_context.variables.get(&key)
+            let sub_type = if let Some(ref context_var) = self
+                .type_context
+                .analyze_context
+                .variables
+                .get(&key)
+                .cloned()
             {
                 if let Some(ty) = &context_var.ret_type {
                     match self.type_context.get_substitution(ty, true) {

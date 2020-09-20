@@ -23,7 +23,10 @@ struct TestArrayStruct
 function main() -> i32
 {
     var x2 = [[1.1, 2.2], [3.3, 4.4]]
-    x2.[1].[0] = 5.5
+    // TODO: Uncommenting this line current crashes the code gen.
+    //       "Assertion failed: getOperand(0)->getType() == getOperand(1)->getType() && "Both operands to FCmp instruction are not of the same type!", file D:\LLVM\llvmenv\10.0.1\include\llvm/IR/Instructions.h, line 1304"
+    //x2.[0].[1] = 2.2
+    x2.[1].[0] = 5.5 as f64
     assert(x2.[0].[0] == 1.1 and x2.[0].[1] == 2.2 and x2.[1].[0] == 5.5 and x2.[1].[1] == 4.4)
     printf(
         "\nx2.[0].[0]: %f, x2.[0].[1]: %f, x2.[1].[0]: %f, x2.[1].[1]: %f",

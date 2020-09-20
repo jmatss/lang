@@ -60,6 +60,24 @@ impl<'a> TypeContext<'a> {
         }
     }
 
+    /// Inserts a constraint. This function sorts the lhs and rhs in order of:
+    ///   primitive - aggregated - unknown
+    /// This will make it easier to match the types in other parts of the code.
+    pub fn insert_constraint(&mut self, lhs: Type, rhs: Type) {
+        debug!("Insert constraint -- lhs: {:?}, rhs: {:?}", &lhs, &rhs);
+        if lhs.is_primitive() {
+            self.constraints.push((lhs, rhs));
+        } else if rhs.is_primitive() {
+            self.constraints.push((rhs, lhs));
+        } else if lhs.is_aggregated() {
+            self.constraints.push((lhs, rhs));
+        } else if rhs.is_aggregated() {
+            self.constraints.push((rhs, lhs));
+        } else {
+            self.constraints.push((lhs, rhs));
+        }
+    }
+
     /// Substitutes the given type recursively until no more substitution can
     /// be found. If the type is already known, this function will make no
     /// substitution and will not report any errors.
@@ -69,7 +87,7 @@ impl<'a> TypeContext<'a> {
     /// If `finalize` is set to false, the UnknownInt" or "UnknownFloat" will be
     /// kept since the type inference isn't finished yet and they might be set
     /// to something different than the default i32/f32.
-    pub fn get_substitution(&self, ty: &Type, finalize: bool) -> SubResult {
+    pub fn get_substitution(&mut self, ty: &Type, finalize: bool) -> SubResult {
         let mut cur_ty = ty.clone();
 
         let mut i = 0;
@@ -156,7 +174,7 @@ impl<'a> TypeContext<'a> {
                                     member_name,
                                     0,
                                 ) {
-                                    Ok(var) => var,
+                                    Ok(var) => var.clone(),
                                     Err(err) => {
                                         return SubResult::Err(err);
                                     }
@@ -232,7 +250,7 @@ impl<'a> TypeContext<'a> {
                                     method_name,
                                     0,
                                 ) {
-                                    Ok(method) => method,
+                                    Ok(method) => method.clone(),
                                     Err(err) => {
                                         return SubResult::Err(err);
                                     }
@@ -412,20 +430,31 @@ impl<'a> TypeContext<'a> {
                     }
 
                     Type::UnknownArrayMember(array_ty) => {
-                        let sub_ty = match self.get_substitution(&array_ty, finalize) {
+                        let array_sub_ty = match self.get_substitution(&array_ty, finalize) {
                             SubResult::Solved(sub_ty) => {
                                 cur_ty = Type::UnknownArrayMember(Box::new(sub_ty.clone()));
                                 sub_ty
                             }
                             SubResult::UnSolved(un_sub_ty) => {
+                                // If it is known that this is an array but the
+                                // inner type is unknown, add a constrain between
+                                // the inner type and the return type of the
+                                // current "UnknownArrayMember".
+                                // This constraint is impossible to figure
+                                // out before this point, so this is a ugly fix
+                                // to ensure that nested arrays are solvable.
+                                if let Type::Array(inner_ty, _) = &un_sub_ty {
+                                    self.insert_constraint(cur_ty, *inner_ty.clone());
+                                }
+
                                 return SubResult::UnSolved(Type::UnknownArrayMember(Box::new(
                                     un_sub_ty,
-                                )))
+                                )));
                             }
                             err => return err,
                         };
 
-                        match &sub_ty {
+                        match &array_sub_ty {
                             Type::Array(inner_ty, _) => {
                                 match self.get_substitution(inner_ty, finalize) {
                                     SubResult::Solved(sub_ty) => return SubResult::Solved(sub_ty),

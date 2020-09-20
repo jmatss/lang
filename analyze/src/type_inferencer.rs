@@ -161,7 +161,7 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
         debug!("Insert substitution -- from: {:?}, to: {:?}", &from, &to);
 
         // Can't map to itself (infinite recursion) and shouldn't cause any kind
-        // if loop.
+        // of loop.
         if from == to || self.causes_loop(&from, &to) {
             return;
         }
@@ -185,24 +185,6 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
             }
             Err(err) => self.errors.push(err),
         };
-    }
-
-    /// Inserts a constraint. This function sorts the lhs and rhs in order of:
-    ///   primitive - aggregated -- unknown
-    /// This will make it easier to match the types in other parts of the code.
-    fn insert_constraint(&mut self, lhs: Type, rhs: Type) {
-        debug!("Insert constraint -- lhs: {:?}, rhs: {:?}", &lhs, &rhs);
-        if lhs.is_primitive() {
-            self.type_context.constraints.push((lhs, rhs));
-        } else if rhs.is_primitive() {
-            self.type_context.constraints.push((rhs, lhs));
-        } else if lhs.is_aggregated() {
-            self.type_context.constraints.push((lhs, rhs));
-        } else if rhs.is_aggregated() {
-            self.type_context.constraints.push((rhs, lhs));
-        } else {
-            self.type_context.constraints.push((lhs, rhs));
-        }
     }
 
     // TODO: Solve infinite recursive solves when generics get implemented.
@@ -374,7 +356,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
         // Add type constraint between var "use" and var "decl" if they are different.
         if context_var_ty != var_ty {
-            self.insert_constraint(context_var_ty, var_ty);
+            self.type_context.insert_constraint(context_var_ty, var_ty);
         }
     }
 
@@ -458,7 +440,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     }
                 };
 
-                self.insert_constraint(arg_ty, arg_expr_ty);
+                self.type_context.insert_constraint(arg_ty, arg_expr_ty);
 
                 idx += 1;
             }
@@ -511,7 +493,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             return;
                         };
 
-                        self.insert_constraint(arg_ty, par_ty);
+                        self.type_context.insert_constraint(arg_ty, par_ty);
                     }
                 }
 
@@ -619,10 +601,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         if let Some(member) = members.get(index) {
                             if let Some(ret_type) = &member.ret_type {
                                 // Bind init member to actual type in struct definition.
-                                self.insert_constraint(ty.clone(), ret_type.clone());
+                                self.type_context
+                                    .insert_constraint(ty.clone(), ret_type.clone());
 
                                 // Bind type to any array accessing of this member.
-                                self.insert_constraint(
+                                self.type_context.insert_constraint(
                                     ty.clone(),
                                     Type::UnknownStructMember(
                                         Box::new(Type::Custom(struct_init.name.clone())),
@@ -714,14 +697,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         for i in 0..array_init.arguments.len() {
             let left = arg_types.get(i).cloned().unwrap();
 
-            self.insert_constraint(
+            self.type_context.insert_constraint(
                 ret_ty.clone(),
                 Type::Array(Box::new(left.clone()), Some(Box::new(dim_expr.clone()))),
             );
 
             for j in i + 1..array_init.arguments.len() {
                 let right = arg_types.get(j).cloned().unwrap();
-                self.insert_constraint(left.clone(), right)
+                self.type_context.insert_constraint(left.clone(), right)
             }
         }
     }
@@ -765,12 +748,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             BinOperator::As => {
                 if let Expr::Type(ty) = &*bin_op.rhs {
-                    // TODO: If lhs is a literal, just set the type directly.
-                    //       This will prevent unnecessary conversions.
-                    //       Ex: 1.0 as f64
-                    //       currently evals 1.0 to f32, and it is then converted
-                    //       to f64 during runtime.
-                    self.insert_constraint(ty.clone(), ret_ty);
+                    // TODO: The lhs and rhs needs to be checked so that they
+                    //       have compatible types but they don't need to have
+                    //       the same type.
+                    // Change the type of the bin op directly so that it takes
+                    // precedence during type inferencing.
+                    bin_op.ret_type = Some(ty.clone());
                 } else {
                     let err = self
                         .type_context
@@ -781,12 +764,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
 
             BinOperator::Dot => {
-                self.insert_constraint(ret_ty, rhs_ty);
+                self.type_context.insert_constraint(ret_ty, rhs_ty);
             }
 
             // TODO: What ret type should they have?
             BinOperator::Range | BinOperator::RangeInclusive => {
-                self.insert_constraint(lhs_ty, rhs_ty);
+                self.type_context.insert_constraint(lhs_ty, rhs_ty);
             }
 
             BinOperator::Equals
@@ -795,14 +778,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | BinOperator::GreaterThan
             | BinOperator::LessThanOrEquals
             | BinOperator::GreaterThanOrEquals => {
-                self.insert_constraint(ret_ty, Type::Boolean);
-                self.insert_constraint(lhs_ty, rhs_ty);
+                self.type_context.insert_constraint(ret_ty, Type::Boolean);
+                self.type_context.insert_constraint(lhs_ty, rhs_ty);
             }
 
             BinOperator::BoolAnd | BinOperator::BoolOr => {
-                self.insert_constraint(ret_ty, Type::Boolean);
-                self.insert_constraint(lhs_ty, Type::Boolean);
-                self.insert_constraint(rhs_ty, Type::Boolean);
+                self.type_context.insert_constraint(ret_ty, Type::Boolean);
+                self.type_context.insert_constraint(lhs_ty, Type::Boolean);
+                self.type_context.insert_constraint(rhs_ty, Type::Boolean);
             }
 
             BinOperator::Addition
@@ -815,9 +798,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | BinOperator::BitXor
             | BinOperator::ShiftLeft
             | BinOperator::ShiftRight => {
-                self.insert_constraint(ret_ty.clone(), lhs_ty.clone());
-                self.insert_constraint(ret_ty, rhs_ty.clone());
-                self.insert_constraint(lhs_ty, rhs_ty);
+                self.type_context
+                    .insert_constraint(ret_ty.clone(), lhs_ty.clone());
+                self.type_context.insert_constraint(ret_ty, rhs_ty.clone());
+                self.type_context.insert_constraint(lhs_ty, rhs_ty);
             }
         }
     }
@@ -848,19 +832,22 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | UnOperator::Negative
             | UnOperator::BitComplement
             | UnOperator::BoolNot => {
-                self.insert_constraint(ret_ty, val_ty);
+                self.type_context.insert_constraint(ret_ty, val_ty);
             }
             UnOperator::Deref => {
-                self.insert_constraint(Type::Pointer(Box::new(ret_ty)), val_ty);
+                self.type_context
+                    .insert_constraint(Type::Pointer(Box::new(ret_ty)), val_ty);
             }
             UnOperator::Address => {
-                self.insert_constraint(ret_ty, Type::Pointer(Box::new(val_ty)));
+                self.type_context
+                    .insert_constraint(ret_ty, Type::Pointer(Box::new(val_ty)));
             }
             UnOperator::ArrayAccess(_) => {
-                self.insert_constraint(ret_ty, Type::UnknownArrayMember(Box::new(val_ty)));
+                self.type_context
+                    .insert_constraint(ret_ty, Type::UnknownArrayMember(Box::new(val_ty)));
             }
             UnOperator::StructAccess(member_name, ..) => {
-                self.insert_constraint(
+                self.type_context.insert_constraint(
                     ret_ty,
                     Type::UnknownStructMember(Box::new(val_ty), member_name.clone()),
                 );
@@ -895,7 +882,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     }
                 };
 
-                self.insert_constraint(func_ret_ty, expr_ty.clone());
+                self.type_context
+                    .insert_constraint(func_ret_ty, expr_ty.clone());
             } else {
                 let err = self
                     .type_context
@@ -922,23 +910,24 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     fn visit_match_case(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token.token {
             if let Some(mut match_expr) = self.cur_match_expr.clone() {
-                let match_expr_ty = match match_expr.get_expr_type_mut() {
-                    Ok(expr_ty) => expr_ty,
+                let match_expr_ty = match match_expr.get_expr_type() {
+                    Ok(expr_ty) => expr_ty.clone(),
                     Err(err) => {
                         self.errors.push(err);
                         return;
                     }
                 };
 
-                let case_expr_ty = match match_case_expr.get_expr_type_mut() {
-                    Ok(expr_ty) => expr_ty,
+                let case_expr_ty = match match_case_expr.get_expr_type() {
+                    Ok(expr_ty) => expr_ty.clone(),
                     Err(err) => {
                         self.errors.push(err);
                         return;
                     }
                 };
 
-                self.insert_constraint(match_expr_ty.clone(), case_expr_ty.clone());
+                self.type_context
+                    .insert_constraint(match_expr_ty, case_expr_ty);
             } else {
                 let err = self
                     .type_context
@@ -955,23 +944,23 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         if let Stmt::Assignment(_, lhs, rhs) = stmt {
             debug!("ASSIGNMENT\nlhs: {:#?}\nrhs: {:#?}", lhs, rhs);
 
-            let lhs_ty = match lhs.get_expr_type_mut() {
-                Ok(lhs_ty) => lhs_ty,
+            let lhs_ty = match lhs.get_expr_type() {
+                Ok(lhs_ty) => lhs_ty.clone(),
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
             };
 
-            let rhs_ty = match rhs.get_expr_type_mut() {
-                Ok(rhs_ty) => rhs_ty,
+            let rhs_ty = match rhs.get_expr_type() {
+                Ok(rhs_ty) => rhs_ty.clone(),
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
             };
 
-            self.insert_constraint(lhs_ty.clone(), rhs_ty.clone());
+            self.type_context.insert_constraint(lhs_ty, rhs_ty);
         }
     }
 
@@ -1043,8 +1032,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // Add constraints only if this var decl has a init value.
             // The var and context_var will already have the same type.
             if let Some(rhs_ty) = rhs_ty_opt {
-                self.insert_constraint(lhs_ty.clone(), rhs_ty.clone());
-                self.insert_constraint(context_var_ty, rhs_ty.clone());
+                self.type_context
+                    .insert_constraint(lhs_ty.clone(), rhs_ty.clone());
+                self.type_context
+                    .insert_constraint(context_var_ty, rhs_ty.clone());
             }
         }
     }
@@ -1061,7 +1052,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             let int_ty = Type::UnknownInt(self.new_unknown_ident(), 10);
 
-            self.insert_constraint(expr_ty, int_ty)
+            self.type_context.insert_constraint(expr_ty, int_ty)
         }
     }
 
@@ -1077,7 +1068,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             let int_ty = Type::UnknownInt(self.new_unknown_ident(), 10);
 
-            self.insert_constraint(expr_ty, int_ty)
+            self.type_context.insert_constraint(expr_ty, int_ty)
         }
     }
 }
