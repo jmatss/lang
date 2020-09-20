@@ -58,21 +58,19 @@ impl<'a> Visitor for TypeSolver<'a> {
     /// So this code will be ran at the start only once. It will make sure that
     /// all expressions with implicit types had their types inferred correctly;
     /// otherwise a error will be reported.
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_default_block(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         // TODO: How to check that all types have been inferred?
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
         self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
     }
 
-    fn visit_block(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
     /// Iterate through all expressions and substitute all Unknown types that
     /// was used temporarily during the type inference stage. They should be
     /// now be replaced with "real" types that can be found in the `substitutions`.
-    fn visit_expr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {
+    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
         // Do the substitute for "Type" here, all other exprs will make the subs
         // in their own visit funcs.
         if let Expr::Type(ty) = expr {
@@ -80,7 +78,7 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    fn visit_lit(&mut self, expr: &mut Expr, ctx: &TraverseContext) {
+    fn visit_lit(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
         if let Expr::Lit(_, Some(ty)) = expr {
             self.subtitute_type(ty, true);
         } else {
@@ -92,7 +90,7 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {
+    fn visit_var(&mut self, var: &mut Var, _ctx: &TraverseContext) {
         if let Some(ty) = &mut var.ret_type {
             self.subtitute_type(ty, true);
         } else {
@@ -104,7 +102,7 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
+    fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
         if let Some(ty) = &mut func_call.ret_type {
             // Insert the, now known, struct name into the func call if this is
             // a method call.
@@ -156,7 +154,7 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
+    fn visit_struct_init(&mut self, struct_init: &mut StructInit, _ctx: &TraverseContext) {
         if let Some(ty) = &mut struct_init.ret_type {
             self.subtitute_type(ty, true);
         } else {
@@ -168,7 +166,7 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    fn visit_array_init(&mut self, array_init: &mut ArrayInit, ctx: &TraverseContext) {
+    fn visit_array_init(&mut self, array_init: &mut ArrayInit, _ctx: &TraverseContext) {
         if let Some(ty) = &mut array_init.ret_type {
             self.subtitute_type(ty, true);
         } else {
@@ -180,7 +178,7 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    fn visit_bin_op(&mut self, bin_op: &mut BinOp, ctx: &TraverseContext) {
+    fn visit_bin_op(&mut self, bin_op: &mut BinOp, _ctx: &TraverseContext) {
         if let Some(ty) = &mut bin_op.ret_type {
             self.subtitute_type(ty, true);
         } else {
@@ -355,60 +353,4 @@ impl<'a> Visitor for TypeSolver<'a> {
             }
         }
     }
-
-    fn visit_func(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_return(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_yield(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_match(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_match_case(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_assignment(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_enum(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_interface(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_stmt(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_eof(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_anon(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_if(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_if_case(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_for(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_while(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_test(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_break(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_continue(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_use(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_package(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_defer(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_defer_exec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_extern_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_modifier(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 }

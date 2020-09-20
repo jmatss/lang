@@ -443,7 +443,7 @@ impl<'a> TypeContext<'a> {
                                         },
                                     ));
                                 } else {
-                                    return SubResult::UnSolved(cur_ty.clone());
+                                    return SubResult::UnSolved(cur_ty);
                                 }
                             }
                         }

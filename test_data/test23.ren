@@ -1,0 +1,33 @@
+use std.assert
+
+struct TestStruct
+{
+    x: i32,
+}
+
+function main() -> i32
+{
+    // TODO: Maybe do inc/dec postfix instead of prefix.
+    //       Postfix feels more natural, but might be best
+    //       to keep the symbol at the front for clarity.
+
+    var x = 3
+    ++x
+    printf("x inc: %d", x)
+    assert(x == 4)
+
+    --x
+    printf("\nx dec: %d", x)
+    assert(x == 3)
+    
+    var test_struct = TestStruct { 3 }
+    ++test_struct.x
+    printf("\ntest_struct.x inc: %d", test_struct.x)
+    assert(test_struct.x == 4)
+
+    --test_struct.x
+    printf("\ntest_struct.x dec: %d", test_struct.x)
+    assert(test_struct.x == 3)
+
+    return 0
+}

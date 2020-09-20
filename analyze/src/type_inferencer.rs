@@ -300,15 +300,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
         self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
     }
 
-    fn visit_block(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
     /// Solve the constraints at the EOF. Also debug log the results.
-    fn visit_eof(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_eof(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
         self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
 
@@ -323,9 +321,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// explicitly set. This new type will then be temporarilty used during this
     /// stage and should be converted/subtituted into a "real" type before this
     /// analyzing step is done.
-    fn visit_expr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {}
 
-    fn visit_lit(&mut self, expr: &mut Expr, ctx: &TraverseContext) {
+    fn visit_lit(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
         if let Expr::Lit(lit, gen_ty_opt) = expr {
             if gen_ty_opt.is_none() {
                 let new_gen_ty = match lit {
@@ -384,7 +381,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     // TODO: Clean up.
     /// Assign the return type of the function to the function call expr.
     /// Also tie the types of the function parameter to argument types.
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
+    fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
         let func_ty = if func_call.is_method {
             // If this is a method call, the first argument will be the address
             // of "this". So "unwrap" it to get the actual type of the struct
@@ -684,7 +681,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_array_init(&mut self, array_init: &mut ArrayInit, ctx: &TraverseContext) {
+    fn visit_array_init(&mut self, array_init: &mut ArrayInit, _ctx: &TraverseContext) {
         let ret_ty = if let Some(ret_ty) = &array_init.ret_type {
             ret_ty.clone()
         } else {
@@ -731,7 +728,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Adds constraints for binary operations. Most of the bin ops requires
     /// that the lhs and rhs has the same type.
-    fn visit_bin_op(&mut self, bin_op: &mut BinOp, ctx: &TraverseContext) {
+    fn visit_bin_op(&mut self, bin_op: &mut BinOp, _ctx: &TraverseContext) {
         // The lhs and rhs exprs will already have been traversed and should
         // have been given a "unknown" type if they didn't have a type already.
         // The "ret_type" of this bin op will also be given a ret_type if it
@@ -825,7 +822,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_un_op(&mut self, un_op: &mut UnOp, ctx: &TraverseContext) {
+    fn visit_un_op(&mut self, un_op: &mut UnOp, _ctx: &TraverseContext) {
         // The expr value of this un op will already have been traversed and should
         // have been given a "unknown" type if it didn't have one type already.
         // The "ret_type" of this un op will also be given a ret_type if it
@@ -873,7 +870,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Save the current function in a place so that the stmts/exprs in the body
     /// can access the types of the parameters and the return type of the func.
-    fn visit_func(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Function(func), ..) = &ast_token.token {
             self.cur_func = Some(func.clone());
         }
@@ -881,7 +878,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Need to make sure that a return statement has the same type as the
     /// function return type. Add it as a constraint.
-    fn visit_return(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    fn visit_return(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         if let Stmt::Return(expr_opt) = stmt {
             if let Some(func) = &self.cur_func {
                 let func_ret_ty = if let Some(ty) = &func.ret_type {
@@ -910,11 +907,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     }
 
     // TODO: Write when yield gets implemented.
-    fn visit_yield(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
+    fn visit_yield(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {}
 
     /// Save the current match expr in a place so that the match cases in the body
     /// can access the type of the expr.
-    fn visit_match(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_match(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Match(expr), ..) = &ast_token.token {
             self.cur_match_expr = Some(expr.clone());
         }
@@ -922,7 +919,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Need to make sure that the match expr and the match case exprs have the
     /// same type. Add it as a constraint.
-    fn visit_match_case(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_match_case(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token.token {
             if let Some(mut match_expr) = self.cur_match_expr.clone() {
                 let match_expr_ty = match match_expr.get_expr_type_mut() {
@@ -954,7 +951,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// The types of the lhs and rhs of a assignment should be of the same type.
     /// Add it as a constraint.
-    fn visit_assignment(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    fn visit_assignment(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         if let Stmt::Assignment(_, lhs, rhs) = stmt {
             debug!("ASSIGNMENT\nlhs: {:#?}\nrhs: {:#?}", lhs, rhs);
 
@@ -1052,7 +1049,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    fn visit_inc(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         if let Stmt::Increment(expr) = stmt {
             let expr_ty = match expr.get_expr_type() {
                 Ok(ty) => ty.clone(),
@@ -1068,7 +1065,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    fn visit_dec(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         if let Stmt::Increment(expr) = stmt {
             let expr_ty = match expr.get_expr_type() {
                 Ok(ty) => ty.clone(),
@@ -1083,44 +1080,4 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             self.insert_constraint(expr_ty, int_ty)
         }
     }
-
-    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_enum(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_interface(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_stmt(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_anon(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_if(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_if_case(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_for(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_while(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_test(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-
-    fn visit_break(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_continue(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_use(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_package(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_defer(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_defer_exec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_extern_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
-
-    fn visit_modifier(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
 }
