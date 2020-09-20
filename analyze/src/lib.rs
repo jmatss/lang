@@ -1,5 +1,7 @@
 mod block;
-mod decl;
+mod decl_func;
+mod decl_type;
+mod decl_var;
 mod defer;
 mod indexing;
 mod method;
@@ -19,7 +21,9 @@ use common::{
     traverser::AstTraverser,
     BlockId,
 };
-use decl::DeclAnalyzer;
+use decl_func::DeclFuncAnalyzer;
+use decl_type::DeclTypeAnalyzer;
+use decl_var::DeclVarAnalyzer;
 use defer::DeferAnalyzer;
 use indexing::IndexingAnalyzer;
 use method::MethodAnalyzer;
@@ -44,9 +48,11 @@ use type_solver::TypeSolver;
 /// of structures.
 /// The "defer analyzing" depends on being able to lookup block info, so it needs
 /// to be ran after "block analyzing".
-/// The "TypeInference/TypeSolve" depends on the "DeclAnalyzer" to figure out types
-/// for function calls and function parameters used in expressions, so the
-/// "DeclAnalyzer" needs to be ran before "Type...".
+/// The "TypeInference/TypeSolve" depends on the "Decl...Analyzer"s to figure out
+/// types for function calls and function parameters used in expressions, so the
+/// "Decl...Analyzer"s needs to be ran before "Type...".
+/// The "var & func decl analyzer" depends on the "type decl analyzer" since the
+/// types might be used by variables/functions.
 /// The "IndexingAnalyzer" should be ran before the "Type..." since the "Type..."
 /// will fail if the indexing analyzing doesn't rewrite the AST before that.
 /// The "MethodAnalyzer" should be ran before "Type..." since it rewrites the AST
@@ -63,10 +69,21 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
         .take_errors()?;
 
     let mut block_analyzer = BlockAnalyzer::new(&analyze_context);
-    let mut decl_analyzer = DeclAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut block_analyzer)
-        .add_visitor(&mut decl_analyzer)
+        .traverse(ast_root)
+        .take_errors()?;
+
+    let mut decl_type_analyzer = DeclTypeAnalyzer::new(&analyze_context);
+    let mut decl_var_analyzer = DeclVarAnalyzer::new(&analyze_context);
+    let mut decl_func_analyzer = DeclFuncAnalyzer::new(&analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut decl_type_analyzer)
+        .traverse(ast_root)
+        .take_errors()?;
+    AstTraverser::new()
+        .add_visitor(&mut decl_func_analyzer)
+        .add_visitor(&mut decl_var_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 

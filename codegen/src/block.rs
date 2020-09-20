@@ -75,9 +75,9 @@ impl<'ctx> BranchInfo<'ctx> {
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_block(
         &mut self,
-        header: &'ctx mut BlockHeader,
+        header: &mut BlockHeader,
         id: BlockId,
-        body: &'ctx mut [AstToken],
+        body: &mut [AstToken],
     ) -> CustomResult<()> {
         self.cur_block_id = id;
 
@@ -90,24 +90,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BlockHeader::Function(func) => {
                 self.compile_func(func, id, body)?;
             }
-            BlockHeader::Implement(struct_name) => {
+            BlockHeader::Implement(_) => {
                 for ast_token in body {
                     if let Token::Block(BlockHeader::Function(func), func_id, func_body) =
                         &mut ast_token.token
                     {
-                        // Since this is a method, rename it so that its name is
-                        // "unique per struct" instead of unqiue for the whole
-                        // program. One also has to rename the method calls to
-                        // this specific method. This will be done when compiling
-                        // the method call.
-                        func.name = common::util::to_method_name(struct_name, &func.name);
+                        // The method will already have been renamed to be prefixed
+                        // with the struct name, so no need to do it here.
                         self.compile_func(func, *func_id, func_body)?;
                     }
                 }
             }
-            //BlockHeader::Struct(struct_) => self.compile_struct(struct_),
-            //BlockHeader::Enum(enum_) => self.compile_enum(enum_),
-            //BlockHeader::Interface(interface) => self.compile_interface(interface),
             BlockHeader::Anonymous => {
                 self.compile_anon(id, body)?;
             }
@@ -117,8 +110,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BlockHeader::IfCase(_) => {
                 return Err(self.err("Unexpected IfCase in compile_block".into()));
             }
-            BlockHeader::Struct(struct_) => {
-                self.compile_struct(struct_)?;
+
+            BlockHeader::Struct(_) | BlockHeader::Enum(_) | BlockHeader::Interface(_) => {
+                // All structs, enums and interfaces already compiled at this stage.
             }
             //BlockHeader::Match(expr) => self.compile_match(expr),
             //BlockHeader::MatchCase(expr) => self.compile_match_case(expr),
@@ -156,12 +150,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_func(
         &mut self,
-        func: &'ctx Function,
+        func: &Function,
         func_id: BlockId,
-        body: &'ctx mut [AstToken],
+        body: &mut [AstToken],
     ) -> CustomResult<()> {
-        let linkage = Linkage::External;
-        let fn_val = self.compile_func_proto(func, Some(linkage))?;
+        let fn_val = if let Some(fn_val) = self.module.get_function(&func.name) {
+            fn_val
+        } else {
+            return Err(self.err(format!(
+                "Unable to find function with name \"{}\".",
+                func.name
+            )));
+        };
+
         let entry = self.context.append_basic_block(fn_val, "entry");
 
         self.cur_basic_block = Some(entry);
@@ -288,7 +289,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         */
     }
 
-    fn compile_anon(&mut self, id: BlockId, body: &'ctx mut [AstToken]) -> CustomResult<()> {
+    fn compile_anon(&mut self, id: BlockId, body: &mut [AstToken]) -> CustomResult<()> {
         let cur_func = self
             .cur_func
             .ok_or_else(|| self.err("cur_func is None for \"If\".".into()))?;
@@ -335,7 +336,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     /// All the "ParseToken" in the body should be "IfCase"s.
-    fn compile_if(&mut self, id: BlockId, body: &'ctx mut [AstToken]) -> CustomResult<()> {
+    fn compile_if(&mut self, id: BlockId, body: &mut [AstToken]) -> CustomResult<()> {
         let cur_block = self
             .cur_basic_block
             .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
@@ -429,7 +430,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         br_expr_opt: &mut Option<Expr>,
         id: BlockId,
         index: usize,
-        body: &'ctx mut [AstToken],
+        body: &mut [AstToken],
         branch_info: &BranchInfo<'ctx>,
     ) -> CustomResult<()> {
         let if_case_block = branch_info.get_if_case(index, self.cur_line_nr, self.cur_column_nr)?;
@@ -518,7 +519,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         expr_opt: &mut Option<Expr>,
         id: BlockId,
-        body: &'ctx mut [AstToken],
+        body: &mut [AstToken],
     ) -> CustomResult<()> {
         let mut cur_block = self
             .cur_basic_block

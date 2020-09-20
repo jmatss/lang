@@ -1,0 +1,27 @@
+/*
+use std.assert
+
+struct TestStruct
+{
+    x: i32,
+}
+*/
+
+function main() -> i32
+{
+    // TODO:
+    var x = 3
+    var res = if x > 5
+    {
+        yield 123
+    }
+    else
+    {
+        yield 456
+    }
+    
+    //printf("\nres: %d", res)
+    //assert(res == 3)
+
+    return 0
+}

@@ -1,0 +1,22 @@
+function main() -> i32
+{
+    var test_struct = TestStruct { 5 }
+    var res = test_func(test_struct)
+
+    return 0
+}
+
+function test_func(x: TestStruct) -> u64
+{
+    return (x.x * 2) as u64
+}
+
+implement TestStruct
+{
+    function empty() {}
+}
+
+struct TestStruct
+{
+    x: i32,
+}

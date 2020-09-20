@@ -18,15 +18,15 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 
-/// Gathers information about all declarations found in the AST and inserts
-/// them into the `analyze_context`. This includes variables, external declarations,
-/// functions, structs, enums and interfaces.
-pub struct DeclAnalyzer<'a> {
+/// Gathers information about all function/method declarations found in the AST
+/// and inserts them into the `analyze_context`. This includes external function
+/// declarations, functions and methods (in implement block).
+pub struct DeclFuncAnalyzer<'a> {
     analyze_context: &'a RefCell<AnalyzeContext>,
     errors: Vec<LangError>,
 }
 
-impl<'a> DeclAnalyzer<'a> {
+impl<'a> DeclFuncAnalyzer<'a> {
     pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
         Self {
             analyze_context,
@@ -169,7 +169,7 @@ impl<'a> DeclAnalyzer<'a> {
     }
 }
 
-impl<'a> Visitor for DeclAnalyzer<'a> {
+impl<'a> Visitor for DeclFuncAnalyzer<'a> {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -224,116 +224,6 @@ impl<'a> Visitor for DeclAnalyzer<'a> {
                 self.analyze_method_header(&struct_name, func, *func_id);
             } else {
                 self.analyze_func_header(func, *func_id);
-            }
-        }
-    }
-
-    fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        let mut analyze_context = self.analyze_context.borrow_mut();
-
-        if let Token::Block(BlockHeader::Struct(struct_), struct_id, ..) = &ast_token.token {
-            // Add the struct in the scope of its root parent (`root_parent_id`).
-            let root_parent_id = match analyze_context.get_next_root_parent(*struct_id) {
-                Ok(id) => id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            let key = (struct_.name.clone(), root_parent_id);
-            if let Some(prev_struct) = analyze_context.structs.get(&key) {
-                // TODO: Should this be done in the same way as function, that
-                //       one just checks that the declarations are equals and doesn't
-                //       throw a exception? This would allow for "extern" declarations
-                //       but might be problematic if it two defines.
-                let err = analyze_context.err(format!(
-                    "A struct with name \"{}\" already defined.",
-                    prev_struct.name
-                ));
-                self.errors.push(err);
-            } else {
-                analyze_context.structs.insert(key, struct_.clone());
-            }
-        }
-    }
-
-    fn visit_enum(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        let mut analyze_context = self.analyze_context.borrow_mut();
-
-        if let Token::Block(BlockHeader::Enum(enum_), enum_id, ..) = &ast_token.token {
-            // Add the enum in the scope of its root parent (`root_parent_id`).
-            let root_parent_id = match analyze_context.get_next_root_parent(*enum_id) {
-                Ok(id) => id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            let key = (enum_.name.clone(), root_parent_id);
-            if let Some(prev_enum) = analyze_context.enums.get(&key) {
-                // TODO: Should this be done in the same way as function, that
-                //       one just checks that the declarations are equals and doesn't
-                //       throw a exception? This would allow for "extern" declarations
-                //       but might be problematic if it two defines.
-                let err = analyze_context.err(format!(
-                    "A enum with name \"{}\" already defined.",
-                    prev_enum.name
-                ));
-                self.errors.push(err);
-            } else {
-                analyze_context.enums.insert(key, enum_.clone());
-            }
-        }
-    }
-
-    fn visit_interface(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        let mut analyze_context = self.analyze_context.borrow_mut();
-
-        if let Token::Block(BlockHeader::Interface(interface), interface_id, ..) = &ast_token.token
-        {
-            // Add the interface in the scope of its root parent (`root_parent_id`).
-            let root_parent_id = match analyze_context.get_next_root_parent(*interface_id) {
-                Ok(id) => id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            let key = (interface.name.clone(), root_parent_id);
-            if let Some(prev_interface) = analyze_context.interfaces.get(&key) {
-                // TODO: Should this be done in the same way as function, that
-                //       one just checks that the declarations are equals and doesn't
-                //       throw a exception? This would allow for "extern" declarations
-                //       but might be problematic if it two defines.
-                let err = analyze_context.err(format!(
-                    "A interface with name \"{}\" already defined.",
-                    prev_interface.name
-                ));
-                self.errors.push(err);
-            } else {
-                analyze_context.interfaces.insert(key, interface.clone());
-            }
-        }
-    }
-
-    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
-        let mut analyze_context = self.analyze_context.borrow_mut();
-
-        if let Stmt::VariableDecl(var, _) = stmt {
-            let key = (var.name.clone(), ctx.block_id);
-
-            if let Entry::Vacant(v) = analyze_context.variables.entry(key) {
-                v.insert(var.clone());
-            } else {
-                let err_msg = format!(
-                    "A variable with name \"{}\" already declared in this scope ({}).",
-                    &var.name, ctx.block_id
-                );
-                let err = analyze_context.err(err_msg);
-                self.errors.push(err);
             }
         }
     }

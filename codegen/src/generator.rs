@@ -2,6 +2,7 @@ use analyze::AnalyzeContext;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
     token::ast::Token,
+    token::block::BlockHeader,
     token::{
         ast::AstToken,
         expr::{Expr, Var},
@@ -14,6 +15,7 @@ use inkwell::{
     basic_block::BasicBlock,
     builder::Builder,
     context::Context,
+    module::Linkage,
     module::Module,
     targets::TargetMachine,
     types::{AnyTypeEnum, BasicTypeEnum},
@@ -91,6 +93,11 @@ pub fn generate<'a, 'ctx>(
     target_machine: &'a TargetMachine,
 ) -> CustomResult<()> {
     let mut code_gen = CodeGen::new(context, analyze_context, builder, module, target_machine);
+    // Start by first compiling all types (structs/enums/inferfaces) and after
+    // that all functions/methods. This makes it so that one doesn't have to
+    // specifiy type/func prototypes above their use in the source code.
+    code_gen.compile_type_decl(ast_root)?;
+    code_gen.compile_func_decl(ast_root)?;
     code_gen.compile(ast_root)?;
 
     // TODO: Temporary solution, loop through all merge blocks and look for all
@@ -163,7 +170,85 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile(&mut self, ast_token: &'ctx mut AstToken) -> CustomResult<()> {
+    /// Compile all declarations of types: structs, enums and interfaces.
+    /// This will be done at the start of the code generation so that one
+    /// doesn't have do declare prototypes manual in the source before the use
+    /// of the type.
+    /// This function shall be ran before the function/method prototypes
+    /// are compiled since they might contains references to types.
+    pub(super) fn compile_type_decl(&mut self, ast_token: &mut AstToken) -> CustomResult<()> {
+        self.cur_line_nr = ast_token.line_nr;
+        self.cur_column_nr = ast_token.column_nr;
+
+        if let Token::Block(header, id, ref mut body) = &mut ast_token.token {
+            self.cur_block_id = *id;
+
+            match header {
+                BlockHeader::Struct(struct_) => {
+                    self.compile_struct(struct_)?;
+                }
+                BlockHeader::Enum(enum_) => {
+                    panic!("TODO: Enum");
+                    //self.compile_enum(enum_);
+                }
+                BlockHeader::Interface(interface) => {
+                    panic!("TODO: interface");
+                    //self.compile_interface(interface);
+                }
+                _ => (),
+            }
+
+            for token in body {
+                self.compile_type_decl(token)?
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Compile all declarations of functions and methods (implement blocks).
+    /// This will be done at the start of the code generation so that one doesn't
+    /// have do declare prototypes manual in the source before the use of the
+    /// function/method.
+    pub(super) fn compile_func_decl(&mut self, ast_token: &mut AstToken) -> CustomResult<()> {
+        self.cur_line_nr = ast_token.line_nr;
+        self.cur_column_nr = ast_token.column_nr;
+
+        if let Token::Block(header, id, ref mut body) = &mut ast_token.token {
+            self.cur_block_id = *id;
+
+            match header {
+                BlockHeader::Function(func) => {
+                    let linkage = Linkage::External;
+                    self.compile_func_proto(func, Some(linkage))?;
+                }
+                BlockHeader::Implement(struct_name) => {
+                    for ast_token in body.iter_mut() {
+                        if let Token::Block(BlockHeader::Function(func), ..) = &mut ast_token.token
+                        {
+                            // Since this is a method, rename it so that its name is
+                            // "unique per struct" instead of unqiue for the whole
+                            // program. One also has to rename the method calls to
+                            // this specific method. This will be done when compiling
+                            // the method call.
+                            let linkage = Linkage::External;
+                            func.name = common::util::to_method_name(struct_name, &func.name);
+                            self.compile_func_proto(func, Some(linkage))?;
+                        }
+                    }
+                }
+                _ => (),
+            }
+
+            for token in body {
+                self.compile_func_decl(token)?
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn compile(&mut self, ast_token: &mut AstToken) -> CustomResult<()> {
         self.cur_line_nr = ast_token.line_nr;
         self.cur_column_nr = ast_token.column_nr;
 
