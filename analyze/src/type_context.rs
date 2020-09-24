@@ -267,16 +267,7 @@ impl<'a> TypeContext<'a> {
                                         err => return err,
                                     }
                                 } else {
-                                    return SubResult::Err(LangError::new(
-                                        format!(
-                                            "Return type not set for method \"{}\" in struct \"{}\"",
-                                            method_name, struct_name
-                                        ),
-                                        AnalyzeError {
-                                            line_nr: 0,
-                                            column_nr: 0,
-                                        },
-                                    ));
+                                    return SubResult::Solved(Type::Void);
                                 }
                             }
                             _ => {

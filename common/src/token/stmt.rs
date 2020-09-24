@@ -61,8 +61,8 @@ pub enum Stmt {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Modifier {
-    Var,
     Const,
+    External,
     Static,
     Private,
     Public,

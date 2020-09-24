@@ -105,9 +105,13 @@ impl<'a> Visitor for TypeSolver<'a> {
     fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
         if let Some(ty) = &mut func_call.ret_type {
             // Insert the, now known, struct name into the func call if this is
-            // a method call.
+            // a method call on a instance.
             if func_call.is_method {
-                if let Some(this_arg) = func_call.arguments.first_mut() {
+                if let Some(this_arg) = func_call
+                    .arguments
+                    .first_mut()
+                    .filter(|arg| arg.name == Some("this".into()))
+                {
                     match this_arg.value.get_expr_type_mut() {
                         Ok(Type::Pointer(struct_ty)) => {
                             if let Type::Custom(struct_name) = struct_ty.as_ref() {
@@ -135,12 +139,8 @@ impl<'a> Visitor for TypeSolver<'a> {
                         }
                     }
                 } else {
-                    let err = self.type_context.analyze_context.err(format!(
-                        "Method call \"{}\" has no arguments, expected atleast \"this\"/\"self\".",
-                        &func_call.name
-                    ));
-                    self.errors.push(err);
-                    return;
+                    // If the first argument isn't called "this", this is a
+                    // static method call, so no need to do the logic above.
                 }
             }
 

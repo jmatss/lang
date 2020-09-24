@@ -57,14 +57,14 @@ use type_solver::TypeSolver;
 /// will fail if the indexing analyzing doesn't rewrite the AST before that.
 /// The "MethodAnalyzer" should be ran before "Type..." since it rewrites the AST
 /// so that the "type analyzing" can know that it is a method vs function.
+/// The "MethodAnalyzer" should be ran after "decl analyzers" since it will
+/// need struct/func information to figure out types for method calls.
 pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>> {
     let analyze_context = RefCell::new(AnalyzeContext::new());
 
     let mut indexing_analyzer = IndexingAnalyzer::new();
-    let mut method_analyzer = MethodAnalyzer::new();
     AstTraverser::new()
         .add_visitor(&mut indexing_analyzer)
-        .add_visitor(&mut method_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
@@ -75,15 +75,22 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
         .take_errors()?;
 
     let mut decl_type_analyzer = DeclTypeAnalyzer::new(&analyze_context);
-    let mut decl_var_analyzer = DeclVarAnalyzer::new(&analyze_context);
-    let mut decl_func_analyzer = DeclFuncAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut decl_type_analyzer)
         .traverse(ast_root)
         .take_errors()?;
+
+    let mut decl_var_analyzer = DeclVarAnalyzer::new(&analyze_context);
+    let mut decl_func_analyzer = DeclFuncAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut decl_func_analyzer)
         .add_visitor(&mut decl_var_analyzer)
+        .traverse(ast_root)
+        .take_errors()?;
+
+    let mut method_analyzer = MethodAnalyzer::new(&analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut method_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 

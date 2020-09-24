@@ -365,10 +365,16 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Also tie the types of the function parameter to argument types.
     fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
         let func_ty = if func_call.is_method {
-            // If this is a method call, the first argument will be the address
-            // of "this". So "unwrap" it to get the actual type of the struct
-            // that will be used in type constraints.
-            let struct_ty = if let Some(this_arg) = func_call.arguments.first_mut() {
+            // TODO: Move "this" to be a constant somewhere else.
+            // This this is a method call on a instance of the struct object,
+            // the first argument "this" will contain a reference to the struct
+            // type.
+            // If this is a static method call, the struct name will already
+            // be stored in the `func_call.method_struct`, so one can get the
+            // struct type from there.
+            let struct_ty = if let Some(struct_name) = &func_call.method_struct {
+                Type::Custom(struct_name.clone())
+            } else if let Some(this_arg) = func_call.arguments.first_mut() {
                 if let Expr::Op(Op::UnOp(un_op)) = &mut this_arg.value {
                     if let UnOperator::Address = un_op.operator {
                         match un_op.value.get_expr_type_mut() {
@@ -763,7 +769,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             }
 
-            BinOperator::Dot => {
+            BinOperator::Dot | BinOperator::DoubleColon => {
                 self.type_context.insert_constraint(ret_ty, rhs_ty);
             }
 

@@ -2,10 +2,10 @@ use crate::AnalyzeContext;
 use common::{
     error::LangError,
     token::ast::Token,
+    token::expr::Var,
     token::{
         ast::AstToken,
         block::{BlockHeader, Function},
-        expr::Var,
         stmt::Stmt,
     },
     traverser::TraverseContext,
@@ -132,16 +132,18 @@ impl<'a> DeclFuncAnalyzer<'a> {
                 }
             };
 
-        // Since this is a method, the first parameters should be a
+        // TODO: Should probably be changed to something better.
+        // If this is a non-static method, the first parameter should be a
         // reference(/pointer) to "this"/"self".
-        // TODO: Where should the name of "this"/"self" be specified?
-        const THIS_VAR_NAME: &str = "this";
-        let ty = Type::Pointer(Box::new(Type::Custom(struct_name.into())));
-        let var = Var::new(THIS_VAR_NAME.into(), Some(ty), None, false);
-        if let Some(ref mut params) = func.parameters {
-            params.insert(0, var);
-        } else {
-            func.parameters = Some(vec![var]);
+        if !func.is_static() {
+            const THIS_VAR_NAME: &str = "this";
+            let ty = Type::Pointer(Box::new(Type::Custom(struct_name.into())));
+            let var = Var::new(THIS_VAR_NAME.into(), Some(ty), None, false);
+            if let Some(ref mut params) = func.parameters {
+                params.insert(0, var);
+            } else {
+                func.parameters = Some(vec![var]);
+            }
         }
 
         // Insert this method into `methods` in the analyze context.

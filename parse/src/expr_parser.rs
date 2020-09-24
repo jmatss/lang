@@ -8,6 +8,7 @@ use common::{
         expr::{ArrayInit, Expr, FuncCall, StructInit},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
+    types::Type,
 };
 use lex::token::{LexTokenKind, Sym};
 use log::debug;
@@ -376,8 +377,8 @@ impl<'a> ExprParser<'a> {
     fn parse_expr_ident(&mut self, ident: &str) -> CustomResult<Expr> {
         // TODO: The peek doesn't skip line break, so can't ex. do a struct
         //       init with a line break at the start.
-        // The identifier will be either a function call or a reference to
-        // a variable.
+        // The identifier will be either a function call, a type or a reference
+        // to a variable.
         if let Some(lex_token) = self.iter.peek_skip_space() {
             match lex_token.kind {
                 // Function call.
@@ -397,6 +398,9 @@ impl<'a> ExprParser<'a> {
                     let struct_init = StructInit::new(ident.into(), arguments);
                     Ok(Expr::StructInit(struct_init))
                 }
+
+                // Static method call, this is the lhs type.
+                LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(Type::Custom(ident.into()))),
 
                 _ => {
                     // See if this is a type. It is a type if the previous

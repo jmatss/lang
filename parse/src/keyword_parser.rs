@@ -1,4 +1,7 @@
-use crate::parser::{ParseTokenIter, DEFAULT_STOP_CONDS};
+use crate::{
+    parser::{ParseTokenIter, DEFAULT_STOP_CONDS},
+    token::get_modifier_token,
+};
 use common::{
     error::CustomResult,
     token::ast::Token,
@@ -518,24 +521,44 @@ impl<'a> KeyworkParser<'a> {
 
     // TODO: Parsing of generics.
     /// Parses a function prototype/header.
-    ///   "function <ident> ( [<ident>: <type>], ... ) [ "->" <type> ]"
-    ///   TODO: "function <ident> [ < <generic>, ... > ] ( [<ident>: <type>], ... ) [ "->" <type> ]"
+    ///   "function [ <modifier>... ] <ident> ( [<ident>: <type>], ... ) [ "->" <type> ]"
+    ///   TODO: "function [ <modifier>... ] <ident> [ < <generic>, ... > ] ( [<ident>: <type>], ... ) [ "->" <type> ]"
     /// The "function" keyword has already been consumed when this function is called.
     fn parse_func_proto(&mut self) -> CustomResult<Function> {
-        // Start by parsing the identifier
-        let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
-            if let LexTokenKind::Ident(ident) = lex_token.kind {
-                ident
+        let mut modifiers = Vec::new();
+
+        // Start by parsing the modifiers and identifier. This will loop until
+        // the identifier/name of the function is found.
+        let ident = loop {
+            if let Some(lex_token) = self.iter.next_skip_space_line() {
+                match &lex_token.kind {
+                    LexTokenKind::Ident(ident) => {
+                        break ident.clone();
+                    }
+
+                    LexTokenKind::Kw(lex_kw) => {
+                        if let Some(modifier) = get_modifier_token(&lex_kw) {
+                            modifiers.push(modifier);
+                        } else {
+                            return Err(self.iter.err(format!(
+                                "Invalid keyword when parsing \"function\" header, got: {:?}",
+                                lex_token
+                            )));
+                        }
+                    }
+
+                    _ => {
+                        return Err(self.iter.err(format!(
+                            "Expected ident or keyword when parsing \"function\" header, got: {:?}",
+                            lex_token
+                        )))
+                    }
+                }
             } else {
-                return Err(self.iter.err(format!(
-                    "Expected ident when parsing \"function\", got: {:?}",
-                    lex_token
-                )));
+                return Err(self
+                    .iter
+                    .err("Received None when looking at tokens after \"function\".".into()));
             }
-        } else {
-            return Err(self
-                .iter
-                .err("Received None when looking at token after \"function\".".into()));
         };
 
         let start_symbol = Sym::ParenthesisBegin;
@@ -571,6 +594,7 @@ impl<'a> KeyworkParser<'a> {
             generics,
             params_opt,
             return_type,
+            modifiers,
             is_var_arg,
         ))
     }

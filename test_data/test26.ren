@@ -1,0 +1,37 @@
+use std.assert
+
+struct TestStruct
+{
+    x: i32,
+}
+
+implement TestStruct
+{
+    function conv() -> u64
+    {
+        return this.x as u64
+    }
+    
+    function static static_conv(arg: i32) -> u64
+    {
+        return arg as u64
+    }
+}
+
+function main() -> i32
+{
+    var test_struct = TestStruct { 5 }
+    
+    var first = test_struct.conv()
+    var second = TestStruct::static_conv(5)
+    
+    // TODO: Better error messages when trying to call static
+    //       method as non-static and vice versa.
+    // var first = test_struct.static_conv(5)
+    // var second = TestStruct::conv()
+    
+    printf("first: %llu, second: %llu", first, second)
+    assert(first == second)
+
+    return 0
+}

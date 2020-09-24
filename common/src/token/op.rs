@@ -63,6 +63,8 @@ pub enum BinOperator {
 
     // Access function/fields ex. list.add(), tuple.0
     Dot,
+    // Access static method.
+    DoubleColon,
 
     Equals,
     NotEquals,

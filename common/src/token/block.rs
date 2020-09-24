@@ -1,4 +1,7 @@
-use super::expr::{Expr, Var};
+use super::{
+    expr::{Expr, Var},
+    stmt::Modifier,
+};
 use crate::types::Type;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -111,6 +114,7 @@ pub struct Function {
     pub generics: Option<Vec<Type>>,
     pub parameters: Option<Vec<Var>>,
     pub ret_type: Option<Type>,
+    pub modifiers: Vec<Modifier>,
     pub is_var_arg: bool,
 
     /// Will be set if this is a function in a "impl" block which means that
@@ -125,6 +129,7 @@ impl Function {
         generics: Option<Vec<Type>>,
         parameters: Option<Vec<Var>>,
         ret_type: Option<Type>,
+        modifiers: Vec<Modifier>,
         is_var_arg: bool,
     ) -> Self {
         Function {
@@ -133,8 +138,13 @@ impl Function {
             parameters,
             ret_type,
             is_var_arg,
+            modifiers,
             method_struct: None,
         }
+    }
+
+    pub fn is_static(&self) -> bool {
+        self.modifiers.contains(&Modifier::Static)
     }
 }
 

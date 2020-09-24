@@ -229,7 +229,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // functions are supported to be compatible with C code.
             if func_call.arguments.len() < func_ptr.count_params() as usize {
                 return Err(self.err(format!(
-                    "Wrong amount of args given when calling func: {}. Expected: {}, got: {}",
+                    "Wrong amount of args given when calling func \"{}\". Expected: {}, got: {}",
                     &func_call.name,
                     func_ptr.count_params(),
                     func_call.arguments.len()

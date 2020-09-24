@@ -75,7 +75,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | BinOperator::Is
             | BinOperator::As
             | BinOperator::Of
-            | BinOperator::Dot => {}
+            | BinOperator::Dot
+            | BinOperator::DoubleColon => {}
 
             _ => {
                 if !self.is_same_base_type(left_type, right_type) {
@@ -101,6 +102,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BinOperator::Range => panic!("TODO: Range"),
             BinOperator::RangeInclusive => panic!("TODO: RangeInclusive"),
             BinOperator::Dot => self.compile_bin_op_dot(ret_type, left, right)?,
+            BinOperator::DoubleColon => self.compile_bin_op_double_colon(ret_type, left, right)?,
 
             BinOperator::Equals
             | BinOperator::NotEquals
@@ -355,6 +357,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(format!("Bad left type in Dot bin op: {:?}", left_type)))
             }
         })
+    }
+
+    fn compile_bin_op_double_colon(
+        &mut self,
+        ret_type: AnyTypeEnum<'ctx>,
+        left: BasicValueEnum<'ctx>,
+        right: BasicValueEnum<'ctx>,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
+        panic!("TODO: Implement static variables.")
     }
 
     fn compile_bin_op_compare(

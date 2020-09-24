@@ -82,6 +82,7 @@ pub enum Sym {
     DoubleQuote,
     SingleQuote,
     Colon,
+    DoubleColon,
     SemiColon,
     Pound,
     At,
@@ -274,12 +275,16 @@ impl LexToken {
             '?' => LexToken::ret_single_lookup(Sym::QuestionMark),
             '\"' => LexToken::ret_single_lookup(Sym::DoubleQuote),
             '\'' => LexToken::ret_single_lookup(Sym::SingleQuote),
-            ':' => LexToken::ret_single_lookup(Sym::Colon),
             ';' => LexToken::ret_single_lookup(Sym::SemiColon),
             '~' => LexToken::ret_single_lookup(Sym::BitCompliment),
             '#' => LexToken::ret_single_lookup(Sym::Pound),
             '@' => LexToken::ret_single_lookup(Sym::At),
             '$' => LexToken::ret_single_lookup(Sym::Dollar),
+
+            ':' => LexToken::match_symbol(
+                &real_string,
+                vec![(":", Sym::Colon), ("::", Sym::DoubleColon)],
+            ),
 
             '%' => LexToken::match_symbol(
                 &real_string,

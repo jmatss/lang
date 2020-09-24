@@ -1,10 +1,22 @@
 use common::{
     error::{CustomResult, LangError, LangErrorKind::ParseError},
+    token::stmt::Modifier,
     token::{
         expr::Expr,
         op::{AssignOperator, BinOperator, UnOperator},
     },
 };
+
+pub fn get_modifier_token(keyword: &lex::token::Kw) -> Option<Modifier> {
+    Some(match keyword {
+        lex::token::Kw::Const => Modifier::Const,
+        lex::token::Kw::External => Modifier::External,
+        lex::token::Kw::Static => Modifier::Static,
+        lex::token::Kw::Private => Modifier::Private,
+        lex::token::Kw::Public => Modifier::Public,
+        _ => return None,
+    })
+}
 
 /// Returns some Operator if the given symbol is a valid operator inside a
 /// expression, returns None otherwise.
@@ -24,6 +36,7 @@ pub fn get_if_expr_op(symbol: &lex::token::Sym) -> Option<Operator> {
         lex::token::Sym::PointyBracketEnd => Operator::BinaryOperator(BinOperator::GreaterThan),
 
         lex::token::Sym::Dot => Operator::BinaryOperator(BinOperator::Dot),
+        lex::token::Sym::DoubleColon => Operator::BinaryOperator(BinOperator::DoubleColon),
         //lex::token::Symbol::Comma,
         //lex::token::Symbol::QuestionMark,
         //lex::token::Symbol::ExclamationMark,
@@ -159,7 +172,7 @@ impl Operator {
     /*
         Precedence:
             0   ( )          (precedence for parenthesis always highest)
-            1   . .* .& .[]  (func/method calls, deref, address, indexing etc.)
+            1   . :: .* .& .[]  (func/method calls, deref, address, indexing etc.)
             2   +x -x        (negative/positive)
             3   ~
             4   as
@@ -207,6 +220,7 @@ impl Operator {
                 BinOperator::Range => (true, 16, Fix::Dummy),
                 BinOperator::RangeInclusive => (true, 16, Fix::Dummy),
                 BinOperator::Dot => (true, 1, Fix::Dummy),
+                BinOperator::DoubleColon => (true, 1, Fix::Dummy),
 
                 BinOperator::Equals => (true, 9, Fix::Dummy),
                 BinOperator::NotEquals => (true, 9, Fix::Dummy),

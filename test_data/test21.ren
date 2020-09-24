@@ -13,7 +13,8 @@ function main() -> i32
     test_struct.b = 3.4
 
     assert(x == 123)
-    assert(test_struct.b == 3.4)
+    Assert.equals_f64(test_struct.b, 3.4, 0.001)
+    //assert(test_struct.b == 3.4)
 
     return 0
 }
