@@ -1027,26 +1027,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
-    fn compile_un_op_increment(
-        &mut self,
-        ret_type: AnyTypeEnum<'ctx>,
-        is_const: bool,
-        value: BasicValueEnum<'ctx>,
-        expr: &mut Expr,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
-        panic!("Increment not implemented, to be removed.")
-    }
-
-    fn compile_un_op_decrement(
-        &mut self,
-        ret_type: AnyTypeEnum<'ctx>,
-        is_const: bool,
-        value: BasicValueEnum<'ctx>,
-        expr: &mut Expr,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
-        panic!("Decrement not implemented, to be removed.")
-    }
-
     /// Dereferences the given expression. This function will return a pointer
     /// to a allocation containing the actual value. If one wants the pointer
     /// to the value or the value itself is up to the caller.

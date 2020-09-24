@@ -268,25 +268,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         Ok(self.module.add_function(&func.name, fn_type, linkage_opt))
-
-        // TODO: Set names?
-        /*
-        // Set names for the parameters.
-        for (i, arg) in fn_val.get_param_iter().enumerate() {
-            let param = if let Some(params) = &func.parameters {
-                params
-                    .get(i)
-                    .ok_or_else(|| GenerationError(format!("Bad param at index: {}", i)))?
-            } else {
-                return Err(GenerationError(format!(
-                    "Expected no params for func: {:?}",
-                    &func.name
-                )));
-            };
-
-            arg.as_basic_value_enum().set_name(&param.name);
-        }
-        */
     }
 
     fn compile_anon(&mut self, id: BlockId, body: &mut [AstToken]) -> CustomResult<()> {

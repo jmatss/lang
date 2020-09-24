@@ -1,3 +1,4 @@
+mod arg_reorderer;
 mod block;
 mod decl_func;
 mod decl_type;
@@ -9,6 +10,7 @@ mod type_context;
 mod type_inferencer;
 mod type_solver;
 
+use arg_reorderer::ArgReorderer;
 use block::BlockAnalyzer;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
@@ -112,6 +114,12 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
     let mut type_solver = TypeSolver::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut type_solver)
+        .traverse(ast_root)
+        .take_errors()?;
+
+    let mut arg_reorderer = ArgReorderer::new(&mut analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut arg_reorderer)
         .traverse(ast_root)
         .take_errors()?;
 
@@ -370,7 +378,7 @@ impl AnalyzeContext {
         self.get_root_parent(parent_id)
     }
 
-    /// Finds the struct with the name `ident` in a scope containing the block
+    /// Finds the struct with the name `struct_name` in a scope containing the block
     /// with ID `id`. The struct can ex. be declared in parent block scope.
     pub fn get_struct(&self, struct_name: &str, id: BlockId) -> CustomResult<&Struct> {
         let parent_block_id = self.get_struct_parent_id(struct_name.into(), id)?;
@@ -392,7 +400,7 @@ impl AnalyzeContext {
         }
     }
 
-    /// Finds the struct with the name `ident` in a scope containing the block
+    /// Finds the struct with the name `struct_name` in a scope containing the block
     /// with ID `id` and returns the member with name `member_name`.
     /// The struct can ex. be declared in parent block scope.
     pub fn get_struct_member(
@@ -431,7 +439,7 @@ impl AnalyzeContext {
         }
     }
 
-    /// Finds the struct with the name `ident` in a scope containing the block
+    /// Finds the struct with the name `struct_name` in a scope containing the block
     /// with ID `id` and returns the index of the member with name `member_name`.
     /// The struct can ex. be declared in parent block scope.
     pub fn get_struct_member_index(
@@ -474,7 +482,7 @@ impl AnalyzeContext {
         }
     }
 
-    /// Finds the struct with the name `ident` in a scope containing the block
+    /// Finds the struct with the name `struct_name` in a scope containing the block
     /// with ID `id` and returns the method with name `method_name`.
     /// The struct can ex. be declared in parent block scope.
     pub fn get_struct_method(
@@ -518,17 +526,110 @@ impl AnalyzeContext {
         }
     }
 
-    /*
-    // Add the methods in the scope of the structs root parent.
-        let struct_parent_id =
-            match analyze_context.get_struct_parent_id(struct_name.into(), func_id) {
-                Ok(id) => id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
+    /// Finds the struct with the name `struct_name` in a scope containing the block
+    /// with ID `id` and returns the index of the parameter with name `param_name`
+    /// in the method with name `method_name`.
+    /// The struct can ex. be declared in parent block scope.
+    pub fn get_struct_method_param_idx(
+        &self,
+        struct_name: &str,
+        method_name: &str,
+        param_name: &str,
+        id: BlockId,
+    ) -> CustomResult<u64> {
+        let method = self.get_struct_method(struct_name, method_name, id)?;
+
+        if let Some(params) = &method.parameters {
+            let mut idx: u64 = 0;
+            for param in params {
+                if param_name == param.name {
+                    return Ok(idx);
                 }
-            };
-    */
+                idx += 1;
+            }
+
+            Err(LangError::new(
+                format!(
+                    "Unable to find param with name \"{}\" in method \"{}\" in struct \"{}\".",
+                    &param_name, &method_name, &struct_name
+                ),
+                AnalyzeError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
+            ))
+        } else {
+            Err(LangError::new(
+                format!(
+                    "Method \"{}\" in struct \"{}\" had no parameters, expected param with name: {}",
+                    &method_name, &struct_name, &param_name
+                ),
+                AnalyzeError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
+            ))
+        }
+    }
+
+    /// Finds the function with the name `func_name` in a scope containing the block
+    /// with ID `id` and returns the index of the parameter with name `param_name`.
+    pub fn get_func_param_idx(
+        &self,
+        func_name: &str,
+        param_name: &str,
+        id: BlockId,
+    ) -> CustomResult<u64> {
+        // TODO: Don't hardcode the default BlockId 0.
+        let parent_id = 0;
+        let key = (func_name.into(), parent_id);
+        let func = if let Some(func) = self.functions.get(&key) {
+            func
+        } else {
+            return Err(LangError::new(
+                format!(
+                    "Unable to find function \"{}\" in decl block ID \"{}\".",
+                    &func_name, parent_id
+                ),
+                AnalyzeError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
+            ));
+        };
+
+        if let Some(params) = &func.parameters {
+            let mut idx: u64 = 0;
+            for param in params {
+                if param_name == param.name {
+                    return Ok(idx);
+                }
+                idx += 1;
+            }
+
+            Err(LangError::new(
+                format!(
+                    "Unable to find param with name \"{}\" in function \"{}\".",
+                    &param_name, &func_name,
+                ),
+                AnalyzeError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
+            ))
+        } else {
+            Err(LangError::new(
+                format!(
+                    "Function \"{}\" had no parameters, expected param with name: {}",
+                    &func_name, &param_name
+                ),
+                AnalyzeError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
+            ))
+        }
+    }
 
     /// Used when returing errors to include current line/column number.
     pub fn err(&self, msg: String) -> LangError {

@@ -1,0 +1,38 @@
+use std.assert
+
+function two2(a: i32, b: i32)
+{
+
+}
+
+function two(a: i32, b: f32)
+{
+
+}
+
+function three(a: i32, b: f32, c: bool)
+{
+
+}
+
+function main() -> i32
+{
+    var x: i32 = 123
+    var y: f32 = 123.456
+    var z: bool = true
+
+    two(x, y)
+    two(a=x, y)
+    two(x, b=y)
+    two(b=y, a=x)
+    three(x, c=z, b=y)
+    three(c=z, y, a=x)
+    three(a=x, b=y, c=z)
+    three(b=y, c=z, a=x)
+    // TODO: Causes infinite loop if one specifies the same name
+    //       and both parameters have the same type.
+    //       Implement simple prevention.
+    //two2(b=3, b=5)
+
+    return 0
+}

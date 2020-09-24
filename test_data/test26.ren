@@ -24,14 +24,16 @@ function main() -> i32
     
     var first = test_struct.conv()
     var second = TestStruct::static_conv(5)
+    var third = TestStruct::conv(this=test_struct.&)
     
     // TODO: Better error messages when trying to call static
     //       method as non-static and vice versa.
     // var first = test_struct.static_conv(5)
     // var second = TestStruct::conv()
     
-    printf("first: %llu, second: %llu", first, second)
+    printf("first: %llu, second: %llu, third: %llu", first, second, third)
     assert(first == second)
+    assert(second == third)
 
     return 0
 }

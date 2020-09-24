@@ -363,7 +363,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     // TODO: Clean up.
     /// Assign the return type of the function to the function call expr.
     /// Also tie the types of the function parameter to argument types.
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
+    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
         let func_ty = if func_call.is_method {
             // TODO: Move "this" to be a constant somewhere else.
             // This this is a method call on a instance of the struct object,
@@ -431,11 +431,43 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // the method parameter types that will be figured out later.
             let mut idx: u64 = 0;
             for arg in &func_call.arguments {
+                // If the argument is a named argument, get the index for the
+                // named parameter instead of using the index of its position
+                // in the function call.
+                let inner_idx = if let Some(arg_name) = &arg.name {
+                    if let Type::Custom(struct_name) = &struct_ty {
+                        match self
+                            .type_context
+                            .analyze_context
+                            .get_struct_method_param_idx(
+                                struct_name,
+                                &func_call.name,
+                                arg_name,
+                                ctx.block_id,
+                            ) {
+                            Ok(idx) => idx,
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        }
+                    } else {
+                        let err = self.type_context.analyze_context.err(format!(
+                            "\"this\" in method no a struc type, was: {:?}",
+                            struct_ty
+                        ));
+                        self.errors.push(err);
+                        return;
+                    }
+                } else {
+                    idx
+                };
+
                 let arg_ty = Type::UnknownMethodArgument(
                     Box::new(struct_ty.clone()),
                     func_call.name.clone(),
                     arg.name.clone(),
-                    idx,
+                    inner_idx,
                 );
 
                 let arg_expr_ty = match arg.value.get_expr_type() {
@@ -473,7 +505,24 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 // in `type_context` since at this point there is no way to know
                 // the type of the struct and indirectly the method.
                 if let Some(params) = &func.parameters {
-                    for (arg, par) in func_call.arguments.iter().zip(params) {
+                    let mut idx: u64 = 0;
+                    for arg in &func_call.arguments {
+                        let inner_idx = if let Some(arg_name) = &arg.name {
+                            match self.type_context.analyze_context.get_func_param_idx(
+                                &func_call.name,
+                                &arg_name,
+                                ctx.block_id,
+                            ) {
+                                Ok(idx) => idx,
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    return;
+                                }
+                            }
+                        } else {
+                            idx
+                        };
+
                         let arg_ty = match arg.value.get_expr_type() {
                             Ok(ty) => ty.clone(),
                             Err(err) => {
@@ -482,13 +531,22 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             }
                         };
 
-                        let par_ty = if let Some(ty) = &par.ret_type {
+                        if func.is_var_arg && inner_idx >= params.len() as u64 {
+                            idx += 1;
+                            continue;
+                        }
+
+                        let par_ty = if let Some(ty) = &params
+                            .get(inner_idx as usize)
+                            .map(|param| param.ret_type.clone())
+                            .flatten()
+                        {
                             ty.clone()
                         } else {
                             let err = LangError::new(
                                 format!(
-                                    "Type for parameter \"{}\" in function \"{}\" set to None.",
-                                    par.name, func.name
+                                    "Type for parameter \"{:?}\" with index {} in function \"{}\" set to None.",
+                                    arg.name, inner_idx, func.name
                                 ),
                                 AnalyzeError {
                                     line_nr: 0,
@@ -500,6 +558,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         };
 
                         self.type_context.insert_constraint(arg_ty, par_ty);
+
+                        idx += 1;
                     }
                 }
 
