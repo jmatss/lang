@@ -1,0 +1,56 @@
+use std.assert
+
+struct TestStruct<T>
+{
+    inner: T,
+    two: [T: 2],
+}
+
+struct OuterTestStruct<U>
+{
+    inner_test_struct: U,
+}
+
+function main() -> i32
+{
+    var x: u64 = 123
+    var y = [1, 2]
+    var test_struct = TestStruct { x, y }
+    
+    printf(
+        "test_struct.two.[0]: %lld, test_struct.two.[1]: %lld",
+        test_struct.two.[0], test_struct.two.[1]
+    )
+    // TODO: Causes a crash. Seems like the type inference fails depending on how the variables
+    //       are used. Somethimes the `y` array gets infered to a default int array instead of
+    //       the expected u64 array. The variable `x` set as u64 should have precedence.
+    assert(test_struct.two.[1] == 2)
+    assert(test_struct.two.[1] == 2)
+    assert(test_struct.two.[0] == 1 and test_struct.two.[1] == 2 and test_struct.inner == 123)
+    //assert(test_struct.two.[0] == 1 and test_struct.two.[1] == 2 and test_struct.inner == 123)
+    
+    //test_struct.two.[1] = 3
+    
+    // TODO: Not using the "OuterTestStruct" struct will result in not finding
+    //       the type for `U`. Change so that it is allowed to not use the struct.
+    //       Also allow for multiple "OuterTestStruct" where the `U` refers to
+    //       different types.
+    var outer_test_struct = OuterTestStruct { test_struct }
+    
+    /*
+    printf(
+        "\nouter_test_struct.inner_test_struct.two.[0]: %lld, outer_test_struct.inner_test_struct.two.[1]: %lld",
+        outer_test_struct.inner_test_struct.two.[0], outer_test_struct.inner_test_struct.two.[1]
+    )
+    */
+
+    outer_test_struct.inner_test_struct.two.[1] = 3
+    /*
+    printf(
+        "\nAfter change:\ntest_struct.two.[1]: %lld, outer_test_struct.inner_test_struct.two.[1]: %lld",
+        test_struct.two.[1], outer_test_struct.inner_test_struct.two.[1]
+    )
+    */
+    
+    return 0
+}

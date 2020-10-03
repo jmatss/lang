@@ -4,6 +4,10 @@ use crate::token::expr::Expr;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
+    /// A type that contains generic types. The first boxed type if the actual
+    /// type and the vector of types are the generic types.
+    CompoundType(Box<Type>, Vec<Type>),
+
     Pointer(Box<Type>),
     // The Option in the "Array" enum indicates the size. If it is None, assume
     // size is unknown (probably slice).
@@ -24,7 +28,13 @@ pub enum Type {
     F64,
     I128,
     U128,
+
+    /// Struct type.
     Custom(String),
+
+    /// A generic type wrapping a type. Ex. a "T" on a struct would be represented
+    /// as a "Generic" wrapping a "Custom" containing the string "T".
+    Generic(Box<Type>),
 
     /// This is used during the type inference stage. Every expr must have a type,
     /// so this is used for expr that doesn't have a known type. The String will be
@@ -158,6 +168,14 @@ impl Type {
         }
     }
 
+    pub fn is_generic(&self) -> bool {
+        if let Type::Generic(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_unknown(&self) -> bool {
         if let Type::Unknown(_) = self {
             true
@@ -234,32 +252,36 @@ impl Type {
         if self.is_unknown_int() {
             if other.is_unknown_float() {
                 return false;
-            } else if other.is_int() || other.is_unknown_any() {
+            } else if other.is_int() || other.is_unknown_any() || other.is_generic() {
                 return true;
             }
         } else if other.is_unknown_int() {
             if self.is_unknown_float() {
                 return false;
-            } else if self.is_int() || self.is_unknown_any() {
+            } else if self.is_int() || self.is_unknown_any() || self.is_generic() {
                 return true;
             }
         } else if self.is_unknown_float() {
             if self.is_unknown_int() {
                 return false;
-            } else if other.is_float() || other.is_unknown_any() {
+            } else if other.is_float() || other.is_unknown_any() || other.is_generic() {
                 return true;
             }
         } else if other.is_unknown_float() {
             if self.is_unknown_int() {
                 return false;
-            } else if self.is_float() || self.is_unknown_any() {
+            } else if self.is_float() || self.is_unknown_any() || self.is_generic() {
                 return true;
             }
-        } else if self.is_unknown_any() || other.is_unknown_any() {
+        } else if self.is_unknown_any()
+            || other.is_unknown_any()
+            || self.is_generic()
+            || other.is_generic()
+        {
             return true;
         }
 
-        // Handles all cases regarding types that isn't "Unknown".
+        // Handles all cases regarding types that isn't "Unknown" or generic.
         match (self, other) {
             (Type::Pointer(_), Type::Pointer(_))
             | (Type::Array(..), Type::Array(..))

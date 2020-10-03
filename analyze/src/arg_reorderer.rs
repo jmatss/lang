@@ -1,7 +1,6 @@
 use common::{
     error::LangError, token::expr::FuncCall, traverser::TraverseContext, visitor::Visitor,
 };
-use log::warn;
 
 use crate::AnalyzeContext;
 
@@ -97,11 +96,6 @@ impl<'a> Visitor for ArgReorderer<'a> {
                     }
                     new_idx += 1;
                 }
-
-                warn!(
-                    "found: {:?} -- new_idx: {}, old_idx: {}",
-                    found, new_idx, idx
-                );
 
                 if found && idx == new_idx {
                     idx += 1;

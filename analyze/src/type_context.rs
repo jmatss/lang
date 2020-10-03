@@ -61,7 +61,7 @@ impl<'a> TypeContext<'a> {
     }
 
     /// Inserts a constraint. This function sorts the lhs and rhs in order of:
-    ///   primitive - aggregated - unknown
+    ///   primitive - aggregated - unknown - generic
     /// This will make it easier to match the types in other parts of the code.
     pub fn insert_constraint(&mut self, lhs: Type, rhs: Type) {
         debug!("Insert constraint -- lhs: {:?}, rhs: {:?}", &lhs, &rhs);
@@ -72,6 +72,10 @@ impl<'a> TypeContext<'a> {
         } else if lhs.is_aggregated() {
             self.constraints.push((lhs, rhs));
         } else if rhs.is_aggregated() {
+            self.constraints.push((rhs, lhs));
+        } else if lhs.is_unknown_any() {
+            self.constraints.push((lhs, rhs));
+        } else if rhs.is_unknown_any() {
             self.constraints.push((rhs, lhs));
         } else {
             self.constraints.push((lhs, rhs));
@@ -145,6 +149,10 @@ impl<'a> TypeContext<'a> {
                     Type::UnknownInt(..) | Type::UnknownFloat(_) if !finalize => {
                         return SubResult::UnSolved(cur_ty)
                     }
+
+                    // If a generic matches a substition, it will be done in the
+                    // else-if above. Ending up here is makes it "unsolvable".
+                    Type::Generic(_) => return SubResult::UnSolved(cur_ty),
 
                     Type::UnknownStructMember(ref struct_ty, ref member_name) => {
                         let struct_ty = match self.get_substitution(struct_ty, finalize) {

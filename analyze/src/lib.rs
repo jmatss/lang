@@ -9,6 +9,7 @@ mod method;
 mod type_context;
 mod type_inferencer;
 mod type_solver;
+//mod unitialized;
 
 use arg_reorderer::ArgReorderer;
 use block::BlockAnalyzer;

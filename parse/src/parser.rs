@@ -356,8 +356,8 @@ impl ParseTokenIter {
         ExprParser::parse(self, stop_conds)
     }
 
-    pub fn parse_type(&mut self) -> CustomResult<Type> {
-        TypeParser::parse(self)
+    pub fn parse_type(&mut self, generics: Option<&Vec<Type>>) -> CustomResult<Type> {
+        TypeParser::parse(self, generics)
     }
 
     /// Parses a variable and any type that it might have specified after which
@@ -368,7 +368,7 @@ impl ParseTokenIter {
         let var_type = if let Some(next_token) = self.peek_skip_space() {
             if let LexTokenKind::Sym(Sym::Colon) = next_token.kind {
                 self.next_skip_space(); // Skip the colon.
-                Some(self.parse_type()?)
+                Some(self.parse_type(None)?)
             } else {
                 None
             }
@@ -512,6 +512,7 @@ impl ParseTokenIter {
         &mut self,
         start_symbol: Sym,
         end_symbol: Sym,
+        generics: Option<&Vec<Type>>,
     ) -> CustomResult<(Vec<Var>, bool)> {
         let mut parameters = Vec::new();
         let mut is_var_arg = false;
@@ -550,7 +551,7 @@ impl ParseTokenIter {
                 // which is the indicator for a variadic function.
                 match lex_token.kind {
                     LexTokenKind::Ident(ident) => {
-                        let var_type = self.parse_colon_type()?;
+                        let var_type = self.parse_colon_type(generics)?;
                         let const_ = false;
                         let parameter = Var::new(ident, Some(var_type), None, const_);
 
@@ -607,10 +608,10 @@ impl ParseTokenIter {
     }
 
     /// Parses a type including the starting colon.
-    fn parse_colon_type(&mut self) -> CustomResult<Type> {
+    fn parse_colon_type(&mut self, generics: Option<&Vec<Type>>) -> CustomResult<Type> {
         if let Some(lex_token) = self.next_skip_space() {
             if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
-                self.parse_type()
+                self.parse_type(generics)
             } else {
                 Err(self.err(format!(
                     "Invalid token when parsing colon before type: {:?}",
@@ -620,6 +621,16 @@ impl ParseTokenIter {
         } else {
             Err(self.err("Received None expecting colon at start of type.".into()))
         }
+    }
+
+    /// Inserest a item at the current iterator position.
+    pub fn insert(&mut self, item: LexToken) {
+        self.iter.insert(item);
+    }
+
+    /// Removes the item at the current iterator position. Returns the removed item.
+    pub fn remove(&mut self) -> LexToken {
+        self.iter.remove()
     }
 
     #[inline]

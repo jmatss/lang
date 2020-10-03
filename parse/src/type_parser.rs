@@ -1,17 +1,25 @@
 use crate::parser::ParseTokenIter;
 use common::{error::CustomResult, types::Type};
-use lex::token::{LexTokenKind, Sym};
+use lex::token::{LexToken, LexTokenKind, Sym};
 
 pub struct TypeParser<'a> {
     iter: &'a mut ParseTokenIter,
+    generics: Option<&'a Vec<Type>>,
 }
 
 // TODO: Need to accept "right shift" (>>) as part of a type when generics are
 //       implemented.
 
 impl<'a> TypeParser<'a> {
-    pub fn parse(iter: &'a mut ParseTokenIter) -> CustomResult<Type> {
-        let mut type_parser = Self { iter };
+    pub fn new(iter: &'a mut ParseTokenIter, generics: Option<&'a Vec<Type>>) -> Self {
+        Self { iter, generics }
+    }
+
+    pub fn parse(
+        iter: &'a mut ParseTokenIter,
+        generics: Option<&'a Vec<Type>>,
+    ) -> CustomResult<Type> {
+        let mut type_parser = Self::new(iter, generics);
         type_parser.parse_type()
     }
 
@@ -33,8 +41,20 @@ impl<'a> TypeParser<'a> {
             match lex_token.kind {
                 // Ident.
                 LexTokenKind::Ident(ident) => {
-                    let generics = self.parse_type_generics()?;
-                    Ok(Type::ident_to_type(&ident))
+                    let generic_list = self.parse_type_generics()?;
+                    let mut ty = Type::ident_to_type(&ident);
+
+                    // Wrap the current type into a "Generic" if it exists in
+                    // the `self.generics` map.
+                    if let Some(true) = self.generics.map(|g| g.contains(&ty)) {
+                        ty = Type::Generic(Box::new(ty));
+                    }
+
+                    Ok(if let Some(generic_list) = generic_list {
+                        Type::CompoundType(Box::new(ty), generic_list)
+                    } else {
+                        ty
+                    })
                 }
 
                 // Pointer.
@@ -55,7 +75,7 @@ impl<'a> TypeParser<'a> {
     /// Parses a list of types inside a generic "tag" (<..>).
     ///   X<T>      // Type with generic argument.
     ///   X<T, V>   // Type with multiple generic arguments.
-    fn parse_type_generics(&mut self) -> CustomResult<Option<Vec<Type>>> {
+    pub(crate) fn parse_type_generics(&mut self) -> CustomResult<Option<Vec<Type>>> {
         // If the next token isn't a "PointyBracketBegin" there are no generic
         // list, just return None.
         if let Some(lex_token) = self.iter.next_skip_space() {
@@ -69,8 +89,11 @@ impl<'a> TypeParser<'a> {
 
         // Sanity check to see if this is a generic list with no items inside.
         if let Some(lex_token) = self.iter.peek_skip_space() {
-            if let LexTokenKind::Sym(Sym::PointyBracketEnd) = lex_token.kind {
-                return Err(self.iter.err("Empty generic list.".into()));
+            match lex_token.kind {
+                LexTokenKind::Sym(Sym::PointyBracketEnd) | LexTokenKind::Sym(Sym::ShiftRight) => {
+                    return Err(self.iter.err("Empty generic list.".into()));
+                }
+                _ => (),
             }
         }
 
@@ -83,13 +106,27 @@ impl<'a> TypeParser<'a> {
 
             // End of a type in the generic list. The next token should either
             // be a comma if there are more arguments in the list or a
-            // PointyBracketEnd if the generic list have been parsed fully.
+            // "PointyBracketEnd" if the generic list have been parsed fully.
+            // It might also be a "ShiftRight" if this it is two "PointyBracketEnd"
+            // following each other, need rewrite the tokens.
             if let Some(lex_token) = self.iter.next_skip_space() {
                 match lex_token.kind {
                     LexTokenKind::Sym(Sym::Comma) => {
                         continue;
                     }
                     LexTokenKind::Sym(Sym::PointyBracketEnd) => {
+                        return Ok(Some(generics));
+                    }
+                    LexTokenKind::Sym(Sym::ShiftRight) => {
+                        self.iter.rewind()?;
+                        self.iter.remove();
+
+                        let kind = LexTokenKind::Sym(Sym::PointyBracketEnd);
+                        let token = LexToken::new(kind, lex_token.line_nr, lex_token.column_nr);
+                        self.iter.insert(token.clone());
+                        self.iter.insert(token);
+
+                        self.iter.next_skip_space();
                         return Ok(Some(generics));
                     }
                     _ => {

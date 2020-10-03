@@ -1,3 +1,5 @@
+external function printf(format: {u8}, ...) -> i32
+
 function main() -> i32
 {
     /*

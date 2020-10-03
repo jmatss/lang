@@ -1,6 +1,7 @@
 use crate::{
     parser::{ParseTokenIter, DEFAULT_STOP_CONDS},
     token::get_modifier_token,
+    type_parser::TypeParser,
 };
 use common::{
     error::CustomResult,
@@ -11,6 +12,7 @@ use common::{
         expr::Var,
         stmt::{Path, Stmt},
     },
+    types::Type,
 };
 use lex::token::{Kw, LexTokenKind, Sym};
 
@@ -418,7 +420,7 @@ impl<'a> KeyworkParser<'a> {
         let var_type = if let Some(lex_token) = self.iter.peek_skip_space() {
             if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
                 self.iter.next_skip_space(); // Consume "Colon".
-                Some(self.iter.parse_type()?)
+                Some(self.iter.parse_type(None)?)
             } else {
                 None
             }
@@ -563,7 +565,7 @@ impl<'a> KeyworkParser<'a> {
 
         let start_symbol = Sym::ParenthesisBegin;
         let end_symbol = Sym::ParenthesisEnd;
-        let (params, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol)?;
+        let (params, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol, None)?;
 
         // If the next token is a "Arrow" ("->"), assume that the return type
         // of the function is specified afterwards. If there are no arrow,
@@ -572,7 +574,7 @@ impl<'a> KeyworkParser<'a> {
             if let LexTokenKind::Sym(Sym::Arrow) = lex_token.kind {
                 // Consume the arrow.
                 self.iter.next_skip_space_line();
-                Some(self.iter.parse_type()?)
+                Some(self.iter.parse_type(None)?)
             } else {
                 None
             }
@@ -599,9 +601,8 @@ impl<'a> KeyworkParser<'a> {
         ))
     }
 
-    // TODO: Generics
     /// Parses a struct header.
-    ///   "struct <ident> { [<ident>: <type>] [[,] ...]  }"
+    ///   "struct <ident> [ < <generic>, ... > ] { [<ident>: <type>] [[,] ...] }"
     /// The "struct" keyword has already been consumed when this function is called.
     fn parse_struct(&mut self) -> CustomResult<Token> {
         // Start by parsing the identifier
@@ -620,10 +621,16 @@ impl<'a> KeyworkParser<'a> {
                 .err("Received None when looking at token after \"struct\".".into()));
         };
 
+        let mut type_parse = TypeParser::new(self.iter, None);
+        let generics = type_parse.parse_type_generics()?;
+
         // Parse the members of the struct.
         let start_symbol = Sym::CurlyBracketBegin;
         let end_symbol = Sym::CurlyBracketEnd;
-        let (members, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol)?;
+        let (mut members, is_var_arg) =
+            self.iter
+                .parse_par_list(start_symbol, end_symbol, generics.as_ref())?;
+
         if is_var_arg {
             return Err(self.iter.err(format!(
                 "Found invalid var_arg symbol in struct with name: {}",
@@ -631,13 +638,25 @@ impl<'a> KeyworkParser<'a> {
             )));
         }
 
+        for member in &mut members {
+            if let Some(ret_ty) = &member.ret_type {
+                if let Some(true) = generics.as_ref().map(|g| g.contains(ret_ty)) {
+                    member.ret_type = Some(Type::Generic(Box::new(ret_ty.clone())));
+                }
+            } else {
+                self.iter.err(format!(
+                    "Member \"{}\" in struct \"{}\" has no type set.",
+                    &member.name, &ident
+                ));
+            }
+        }
+
         let members_opt = if !members.is_empty() {
             Some(members)
         } else {
             None
         };
-        // TODO: Generics & implements (?).
-        let generics = None;
+
         let implements = None;
         let header = BlockHeader::Struct(Struct::new(ident, generics, implements, members_opt));
 

@@ -85,4 +85,14 @@ impl<I: Clone> TokenIter<I> {
             None
         }
     }
+
+    /// Inserest a item at the current iterator position.
+    pub fn insert(&mut self, item: I) {
+        self.iter.insert(self.pos, item);
+    }
+
+    /// Removes the item at the current iterator position. Returns the removed item.
+    pub fn remove(&mut self) -> I {
+        self.iter.remove(self.pos)
+    }
 }

@@ -1,9 +1,11 @@
 use crate::type_context::{SubResult, TypeContext};
 use common::{
     error::LangError,
+    token::ast::Token,
     token::op::UnOperator,
     token::{
         ast::AstToken,
+        block::BlockHeader,
         expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
         op::{BinOp, UnOp},
         stmt::Stmt,
@@ -357,4 +359,21 @@ impl<'a> Visitor for TypeSolver<'a> {
             }
         }
     }
+
+    /// Substitue the types of struct members. This is needed if generics are used.
+    fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let Token::Block(BlockHeader::Struct(struct_), ..) = &mut ast_token.token {
+            if let Some(members) = &mut struct_.members {
+                for member in members {
+                    if let Some(ty) = &mut member.ret_type {
+                        self.subtitute_type(ty, true);
+                    }
+                }
+            }
+        }
+    }
+
+    // TODO: Implement similar generic logic as for structs.
+    fn visit_interface(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {}
+    fn visit_enum(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {}
 }

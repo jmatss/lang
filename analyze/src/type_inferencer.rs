@@ -93,9 +93,9 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
             ));
         }
 
-        Ok(if lhs == rhs || lhs.is_unknown() {
+        Ok(if lhs == rhs || lhs.is_unknown() || lhs.is_generic() {
             (lhs, rhs)
-        } else if rhs.is_unknown() {
+        } else if rhs.is_unknown() || rhs.is_generic() {
             (rhs, lhs)
         } else if !lhs.is_unknown_any() && !rhs.is_unknown_any() {
             // True if both are known, but they aren't equal and they are still

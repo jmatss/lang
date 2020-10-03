@@ -149,7 +149,7 @@ impl<'a> ExprParser<'a> {
                 | LexTokenKind::Sym(symbol @ Sym::Of) => {
                     if let Some(op) = get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
-                        let expr = Expr::Type(self.iter.parse_type()?);
+                        let expr = Expr::Type(self.iter.parse_type(None)?);
 
                         self.shunt_operand(expr)?;
                     } else {
@@ -390,6 +390,7 @@ impl<'a> ExprParser<'a> {
                     Ok(Expr::FuncCall(func_call))
                 }
 
+                // TODO: Add possiblity to specify generic types.
                 // Struct construction.
                 LexTokenKind::Sym(Sym::CurlyBracketBegin) => {
                     let start_symbol = Sym::CurlyBracketBegin;
@@ -414,7 +415,7 @@ impl<'a> ExprParser<'a> {
                                 // Put back the old `lex_token` contaning this
                                 // identifier and parse as type.
                                 self.iter.rewind()?;
-                                let ty = self.iter.parse_type()?;
+                                let ty = self.iter.parse_type(None)?;
                                 return Ok(Expr::Type(ty));
                             }
                             _ => (),
