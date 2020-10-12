@@ -376,7 +376,7 @@ impl ParseTokenIter {
             None
         };
 
-        Ok(Var::new(ident.into(), var_type, None, false))
+        Ok(Var::new(ident.into(), var_type, None, None, false))
     }
 
     /// Parses a list of arguments. This can be used on generic list containing
@@ -503,7 +503,7 @@ impl ParseTokenIter {
 
     /// Parses a list of parameters. This can be used for a generic lists
     /// contanining variables and their types, ex. function params and structs.
-    ///   "<start_symbol> [ <ident> : <type> [,]] [...] <end_symbol>"
+    ///   "<start_symbol> [ <ident> : <type> [= <default value>] [,]] [...] <end_symbol>"
     /// Using a "..." as a argument indicates that this function support
     /// var_args/is variadic.
     /// The returned bool in the tuple indicates if this list contains a
@@ -552,9 +552,29 @@ impl ParseTokenIter {
                 match lex_token.kind {
                     LexTokenKind::Ident(ident) => {
                         let var_type = self.parse_colon_type(generics)?;
-                        let const_ = false;
-                        let parameter = Var::new(ident, Some(var_type), None, const_);
 
+                        // Parse any default value for the parameter if it is
+                        // specified which is indicated with a equals sign.
+                        let default_value =
+                            if let Some(peek_lex_token) = self.peek_skip_space_line() {
+                                if let LexTokenKind::Sym(Sym::Equals) = peek_lex_token.kind {
+                                    self.next_skip_space_line();
+
+                                    // TODO: The default stop conditions stops
+                                    //       on a curly bracket begin. This will
+                                    //       prevent a struct init to be used as
+                                    //       a default value. Is this ok?
+                                    Some(Box::new(self.parse_expr(&DEFAULT_STOP_CONDS)?))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+                        let const_ = false;
+
+                        let parameter =
+                            Var::new(ident, Some(var_type), None, default_value, const_);
                         parameters.push(parameter);
                     }
 

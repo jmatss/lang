@@ -138,7 +138,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
         if !func.is_static() {
             const THIS_VAR_NAME: &str = "this";
             let ty = Type::Pointer(Box::new(Type::Custom(struct_name.into())));
-            let var = Var::new(THIS_VAR_NAME.into(), Some(ty), None, false);
+            let var = Var::new(THIS_VAR_NAME.into(), Some(ty), None, None, false);
             if let Some(ref mut params) = func.parameters {
                 params.insert(0, var);
             } else {

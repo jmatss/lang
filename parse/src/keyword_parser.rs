@@ -446,7 +446,7 @@ impl<'a> KeyworkParser<'a> {
         };
 
         let is_const = false;
-        let variable = Var::new(ident, var_type, None, is_const);
+        let variable = Var::new(ident, var_type, None, None, is_const);
         let var_decl = Stmt::VariableDecl(variable, expr_opt);
         Ok(Token::Stmt(var_decl))
     }
@@ -523,8 +523,8 @@ impl<'a> KeyworkParser<'a> {
 
     // TODO: Parsing of generics.
     /// Parses a function prototype/header.
-    ///   "function [ <modifier>... ] <ident> ( [<ident>: <type>], ... ) [ "->" <type> ]"
-    ///   TODO: "function [ <modifier>... ] <ident> [ < <generic>, ... > ] ( [<ident>: <type>], ... ) [ "->" <type> ]"
+    ///   "function [ <modifier>... ] <ident> ( [<ident>: <type>] [= <default value>], ... ) [ "->" <type> ]"
+    ///   TODO: "function [ <modifier>... ] <ident> [ < <generic>, ... > ] ( [<ident>: <type>] [= <default value>], ... ) [ "->" <type> ]"
     /// The "function" keyword has already been consumed when this function is called.
     fn parse_func_proto(&mut self) -> CustomResult<Function> {
         let mut modifiers = Vec::new();

@@ -293,6 +293,7 @@ pub struct Var {
     pub name: String,
     pub ret_type: Option<Type>,
     pub modifiers: Option<Vec<Modifier>>,
+    pub default_value: Option<Box<Expr>>,
     pub is_const: bool,
 }
 
@@ -301,12 +302,14 @@ impl Var {
         name: String,
         ret_type: Option<Type>,
         modifiers: Option<Vec<Modifier>>,
+        default_value: Option<Box<Expr>>,
         is_const: bool,
     ) -> Self {
         Var {
             name,
             ret_type,
             modifiers,
+            default_value,
             is_const,
         }
     }

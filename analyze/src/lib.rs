@@ -1,5 +1,5 @@
-mod arg_reorderer;
 mod block;
+mod call_args;
 mod decl_func;
 mod decl_type;
 mod decl_var;
@@ -11,8 +11,8 @@ mod type_inferencer;
 mod type_solver;
 //mod unitialized;
 
-use arg_reorderer::ArgReorderer;
 use block::BlockAnalyzer;
+use call_args::CallArgs;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
     token::{
@@ -62,6 +62,8 @@ use type_solver::TypeSolver;
 /// so that the "type analyzing" can know that it is a method vs function.
 /// The "MethodAnalyzer" should be ran after "decl analyzers" since it will
 /// need struct/func information to figure out types for method calls.
+/// "decl_func_analyzer"/"decl_type_analyzer" needs to be ran before the
+/// "call_args" since it needs to access structs and functions.
 pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>> {
     let analyze_context = RefCell::new(AnalyzeContext::new());
 
@@ -92,8 +94,10 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
         .take_errors()?;
 
     let mut method_analyzer = MethodAnalyzer::new(&analyze_context);
+    let mut call_args = CallArgs::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut method_analyzer)
+        .add_visitor(&mut call_args)
         .traverse(ast_root)
         .take_errors()?;
 
@@ -115,12 +119,6 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
     let mut type_solver = TypeSolver::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut type_solver)
-        .traverse(ast_root)
-        .take_errors()?;
-
-    let mut arg_reorderer = ArgReorderer::new(&mut analyze_context);
-    AstTraverser::new()
-        .add_visitor(&mut arg_reorderer)
         .traverse(ast_root)
         .take_errors()?;
 
