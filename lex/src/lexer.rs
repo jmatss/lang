@@ -14,9 +14,10 @@ use std::io::Read;
 /// Lexes the characters in the source code to LexToken's and returns a vector
 /// containing all lex tokens.
 pub fn lex(filename: &str) -> Result<Vec<LexToken>, Vec<LangError>> {
-    let mut file: File = File::open(filename).map_err(|e| vec![e.into()])?;
     let mut contents = String::new();
-    file.read_to_string(&mut contents)
+
+    File::open(filename)
+        .and_then(|mut f| f.read_to_string(&mut contents))
         .map_err(|e| vec![e.into()])?;
 
     let mut iter = LexTokenIter::new(&contents);
@@ -67,7 +68,8 @@ impl LexTokenIter {
     /// Gets the next LexToken from the iterator.
     pub fn next_token(&mut self) -> CustomResult<LexToken> {
         // A radix of 10 will match all type of numbers since non decimal numbers
-        // are prefixed with "0x", "0b" or "0o" (which starts with radix 10).
+        // are prefixed with "0x", "0b" or "0o" (which starts with valid
+        // radix 10 numbers).
         const RADIX: u32 = 10;
 
         let line_nr = self.cur_line_nr;
@@ -104,7 +106,6 @@ impl LexTokenIter {
                 // Also filter out comments. If a comment is found, debug print
                 // the comment and parse the next token after the comment.
                 match symbol_kind {
-                    // TODO: Add multiline comments.
                     LexTokenKind::Sym(Sym::CommentSingleLine) => {
                         let comment = self.get_comment_single(n);
                         debug!("Single-line comment: {:?}", comment);
@@ -193,7 +194,7 @@ impl LexTokenIter {
     /// Returns the number (int or float) at the current position of the iterator.
     fn get_number(&mut self) -> LexTokenKind {
         let radix = if let Some(('0', Some(sep_char))) = self.iter.peek_two() {
-            // Remove the assumed prefix.
+            // Move the iterator forward to skip the assumed prefix.
             self.iter.skip(2);
 
             match sep_char.to_ascii_uppercase() {
@@ -201,8 +202,9 @@ impl LexTokenIter {
                 'B' => 2,
                 'O' => 8,
                 _ => {
-                    // Put back the chars since they aren't part of a prefix,
-                    // this is just a decimal number that start with '0'.
+                    // Rewing the position of the iterator the two skipped chars
+                    // since they aren't part of a prefix, this is (most likely)
+                    // just a decimal number that start with '0'.
                     self.iter.rewind_n(2);
                     10
                 }
@@ -212,22 +214,39 @@ impl LexTokenIter {
             10
         };
 
-        let mut is_float = false;
+        // Parse the number. If the this is a integer, the whole number will
+        // be parsed. If this is a float, the number after the dot will be parsed
+        // in the logic below.
         let mut number = self.get_integer(radix);
 
-        // If this number contains a dot, assume it is a float number.
-        // FIXME: (?) might not need to check number after Dot to allow for
-        // example "1." instead of needing to write "1.0".
-        if let Some(('.', Some(next))) = self.iter.peek_two() {
-            if LexTokenIter::valid_number(next, radix) {
-                self.iter.skip(1); // Remove dot.
-                number = [number, self.get_integer(radix)].join(".");
+        // Will be set to true if the column number should be decrement with one.
+        // This is true for floats that doesn't have a number after the "dot" and
+        // have been prepended with a "0" (which shouldn't be added to the
+        // column count).
+        let mut dec_column_nr = false;
 
-                is_float = true;
+        // If this number contains a dot, assume it is a float number.
+        // Currently a float number doesn't need to have a number after the dot,
+        // ex. "1." is allowed and is treated as "1.0".
+        let is_float = if let Some(('.', Some(next))) = self.iter.peek_two() {
+            self.iter.skip(1); // Skip over the "dot" in the iterator.
+
+            if LexTokenIter::valid_number(next, radix) {
+                number = [number, self.get_integer(radix)].join(".");
+            } else {
+                number.push_str(".0");
+                dec_column_nr = true;
             }
-        }
+
+            true
+        } else {
+            false
+        };
 
         self.cur_column_nr += number.chars().count() as u64;
+        if dec_column_nr {
+            self.cur_column_nr -= 1;
+        }
 
         if is_float {
             LexTokenKind::Lit(Lit::Float(number))
