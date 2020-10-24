@@ -63,10 +63,17 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
     }
 
     // TODO: Should this be given as three numbers instead of a concatenated String?
-    fn new_unknown_ident(&mut self) -> String {
+    /// Creates a new unknown identifier that will be given to a unkown type.
+    /// The new string will containg a unique ID (ID), the line number (L),
+    /// the column number (C) and a free text to give the unkown type some more
+    /// context for readability.
+    fn new_unknown_ident(&mut self, text: &str) -> String {
         let cur_line_nr = self.type_context.analyze_context.cur_line_nr;
         let cur_column_nr = self.type_context.analyze_context.cur_column_nr;
-        let type_ident = format!("{}-{}:{}", self.type_id, cur_line_nr, cur_column_nr);
+        let type_ident = format!(
+            "ID:{}-R:{}-C:{}-{}",
+            self.type_id, cur_line_nr, cur_column_nr, text
+        );
         self.type_id += 1;
         type_ident
     }
@@ -76,15 +83,29 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
     /// The left item in the returned tuple should be mapped to the right.
     /// Returns Err if something goes wrong and returns None if the types are
     /// equal and shouldn't be mapped.
-    fn get_mapping_direction(&self, lhs: Type, rhs: Type) -> CustomResult<(Type, Type)> {
+    fn get_mapping_direction(&mut self, lhs: Type, rhs: Type) -> CustomResult<(Type, Type)> {
         // TODO: Can mapping unknowns (any/int/float) to each other cause infinite
         //       recursion. Probably; how can it be prevented?
 
-        if !lhs.is_compatible(&rhs) {
+        debug!(
+            "Getting mapping direction -- lhs: {:?}, rhs: {:?}",
+            lhs, rhs
+        );
+
+        let lhs_sub = match self.type_context.get_substitution(&lhs, false) {
+            SubResult::Solved(replaced_ty) | SubResult::UnSolved(replaced_ty) => replaced_ty,
+            SubResult::Err(err) => return Err(err),
+        };
+        let rhs_sub = match self.type_context.get_substitution(&rhs, false) {
+            SubResult::Solved(replaced_ty) | SubResult::UnSolved(replaced_ty) => replaced_ty,
+            SubResult::Err(err) => return Err(err),
+        };
+
+        if !lhs_sub.is_compatible(&rhs_sub) {
             return Err(LangError::new(
                 format!(
-                    "Tried to map incompatible types. Lhs: {:?}, rhs: {:?}",
-                    lhs, rhs
+                    "Tried to map incompatible types. Lhs_sub: {:?}, rhs_sub: {:?}",
+                    lhs_sub, rhs_sub
                 ),
                 AnalyzeError {
                     line_nr: 0,
@@ -93,42 +114,44 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
             ));
         }
 
-        Ok(if lhs == rhs || lhs.is_unknown() || lhs.is_generic() {
-            (lhs, rhs)
-        } else if rhs.is_unknown() || rhs.is_generic() {
-            (rhs, lhs)
-        } else if !lhs.is_unknown_any() && !rhs.is_unknown_any() {
-            // True if both are known, but they aren't equal and they are still
-            // compatible. This means that both are aggregates of the same type.
-            // Structs will have been filtered earlier in this function.
-            match (lhs.clone(), rhs.clone()) {
-                (Type::Pointer(inner_lhs), Type::Pointer(inner_rhs)) => {
-                    self.get_mapping_direction(*inner_lhs, *inner_rhs)?
+        Ok(
+            if lhs_sub == rhs_sub || lhs_sub.is_unknown() || lhs_sub.is_generic() {
+                (lhs, rhs)
+            } else if rhs_sub.is_unknown() || rhs_sub.is_generic() {
+                (rhs, lhs)
+            } else if !lhs_sub.is_unknown_any() && !rhs_sub.is_unknown_any() {
+                // True if both are known, but they aren't equal and they are still
+                // compatible. This means that both are aggregates of the same type.
+                // Structs will have been filtered earlier in this function.
+                match (lhs_sub.clone(), rhs_sub.clone()) {
+                    (Type::Pointer(inner_lhs), Type::Pointer(inner_rhs)) => {
+                        self.get_mapping_direction(*inner_lhs, *inner_rhs)?
+                    }
+                    (Type::Array(inner_lhs, _), Type::Array(inner_rhs, _)) => {
+                        self.get_mapping_direction(*inner_lhs, *inner_rhs)?
+                    }
+                    _ => unreachable!(format!("lhs_sub: {:?}, rhs_sub: {:?}", lhs_sub, rhs_sub)),
                 }
-                (Type::Array(inner_lhs, _), Type::Array(inner_rhs, _)) => {
-                    self.get_mapping_direction(*inner_lhs, *inner_rhs)?
-                }
-                _ => unreachable!(format!("lhs: {:?}, rhs: {:?}", lhs, rhs)),
-            }
-        } else if !lhs.is_unknown_any() {
-            (rhs, lhs) // Only lhs known.
-        } else if !rhs.is_unknown_any() {
-            (lhs, rhs) // Only rhs known.
-        } else if lhs.is_unknown_struct_member() {
-            // Prefer struct member unknowns over int/float/array unknowns since
-            // it will always have its type set in the struct definition.
-            (rhs, lhs)
-        } else if rhs.is_unknown_struct_member() {
-            (lhs, rhs)
-        } else if lhs.is_unknown_int() || lhs.is_unknown_float() {
-            // Prefer int/float unknowns over array member unknowns.
-            (rhs, lhs)
-        } else if rhs.is_unknown_int() || rhs.is_unknown_float() {
-            (lhs, rhs)
-        } else {
-            // Both are array member unknowns, direction doesn't matter.
-            (rhs, lhs)
-        })
+            } else if !lhs_sub.is_unknown_any() {
+                (rhs, lhs) // Only lhs known.
+            } else if !rhs_sub.is_unknown_any() {
+                (lhs, rhs) // Only rhs known.
+            } else if lhs_sub.is_unknown_struct_member() {
+                // Prefer struct member unknowns over int/float/array unknowns since
+                // it will always have its type set in the struct definition.
+                (rhs, lhs)
+            } else if rhs.is_unknown_struct_member() {
+                (lhs, rhs)
+            } else if lhs_sub.is_unknown_int() || lhs_sub.is_unknown_float() {
+                // Prefer int/float unknowns over array member unknowns.
+                (rhs, lhs)
+            } else if rhs.is_unknown_int() || rhs_sub.is_unknown_float() {
+                (lhs, rhs)
+            } else {
+                // Both are array member unknowns, direction doesn't matter.
+                (rhs, lhs)
+            },
+        )
     }
 
     /// Checks if adding a substitution from `from` to `type` creates a loop.
@@ -146,23 +169,17 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
         }
     }
 
-    /// Inserts a new substitution. The order of `first` and `second` doesn't
-    /// matter, this function will make sure that they are mapped in the correct
-    /// direction.
-    fn insert_substitution(&mut self, first: Type, second: Type) {
-        let (from, to) = match self.get_mapping_direction(first, second) {
-            Ok(types) => types,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
-
+    /// Inserts a new substitution, mapping `from` to `to`.
+    fn insert_substitution(&mut self, from: Type, to: Type) {
         debug!("Insert substitution -- from: {:?}, to: {:?}", &from, &to);
 
         // Can't map to itself (infinite recursion) and shouldn't cause any kind
         // of loop.
         if from == to || self.causes_loop(&from, &to) {
+            debug!(
+                "Substitution to self or causes loop -- from unsolved: {:?}, to solved: {:?}",
+                &from, &to
+            );
             return;
         }
 
@@ -220,7 +237,7 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
                         lhs, rhs
                     ));
                     self.errors.push(err);
-                    self.type_context.constraints.remove(i);
+                    self.type_context.constraints.swap_remove(i);
                     continue;
                 }
 
@@ -229,18 +246,23 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
                         self.type_context.constraints.swap_remove(i);
                     }
 
-                    (SubResult::Solved(first), SubResult::UnSolved(second))
-                    | (SubResult::UnSolved(first), SubResult::Solved(second))
-                    | (SubResult::UnSolved(first), SubResult::UnSolved(second)) => {
-                        // The order doesn't matter(map to/from), it will be fixed
-                        // in the function that is called.
-                        self.insert_substitution(first, second);
-                        self.type_context.constraints.remove(i);
+                    (SubResult::Solved(to), SubResult::UnSolved(from))
+                    | (SubResult::UnSolved(from), SubResult::Solved(to)) => {
+                        self.insert_substitution(from, to);
+                        self.type_context.constraints.swap_remove(i);
+                    }
+
+                    (SubResult::UnSolved(first), SubResult::UnSolved(second)) => {
+                        match self.get_mapping_direction(first, second) {
+                            Ok((from, to)) => self.insert_substitution(from, to),
+                            Err(err) => self.errors.push(err),
+                        };
+                        self.type_context.constraints.swap_remove(i);
                     }
 
                     (_, SubResult::Err(err)) | (SubResult::Err(err), _) => {
                         self.errors.push(err);
-                        self.type_context.constraints.remove(i);
+                        self.type_context.constraints.swap_remove(i);
                     }
                 }
 
@@ -312,8 +334,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     Lit::String(_) => Type::Pointer(Box::new(Type::U8)),
                     Lit::Char(_) => Type::Character,
                     Lit::Bool(_) => Type::Boolean,
-                    Lit::Integer(_, radix) => Type::UnknownInt(self.new_unknown_ident(), *radix),
-                    Lit::Float(_) => Type::UnknownFloat(self.new_unknown_ident()),
+                    Lit::Integer(_, radix) => {
+                        Type::UnknownInt(self.new_unknown_ident("int_literal"), *radix)
+                    }
+                    Lit::Float(_) => Type::UnknownFloat(self.new_unknown_ident("float_literal")),
                 };
                 *gen_ty_opt = Some(new_gen_ty);
             }
@@ -734,7 +758,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let ret_ty = if let Some(ret_ty) = &array_init.ret_type {
             ret_ty.clone()
         } else {
-            let new_ty = Type::Unknown(self.new_unknown_ident());
+            let new_ty = Type::Unknown(self.new_unknown_ident("array_init"));
             array_init.ret_type = Some(new_ty.clone());
             new_ty
         };
@@ -785,7 +809,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let ret_ty = if let Some(ty) = &bin_op.ret_type {
             ty.clone()
         } else {
-            let new_type = Type::Unknown(self.new_unknown_ident());
+            let new_type = Type::Unknown(self.new_unknown_ident("bin_op"));
             bin_op.ret_type = Some(new_type.clone());
             new_type
         };
@@ -880,7 +904,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let ret_ty = if let Some(ty) = &un_op.ret_type {
             ty.clone()
         } else {
-            let new_ty = Type::Unknown(self.new_unknown_ident());
+            let new_ty = Type::Unknown(self.new_unknown_ident("un_op"));
             un_op.ret_type = Some(new_ty.clone());
             new_ty
         };
@@ -975,7 +999,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// same type. Add it as a constraint.
     fn visit_match_case(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token.token {
-            if let Some(mut match_expr) = self.cur_match_expr.clone() {
+            if let Some(match_expr) = self.cur_match_expr.clone() {
                 let match_expr_ty = match match_expr.get_expr_type() {
                     Ok(expr_ty) => expr_ty.clone(),
                     Err(err) => {
@@ -1054,7 +1078,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let new_type = if var.ret_type.is_some() {
                 var.ret_type.clone()
             } else {
-                Some(Type::Unknown(self.new_unknown_ident()))
+                Some(Type::Unknown(self.new_unknown_ident("var_decl")))
             };
 
             var.ret_type = new_type.clone();
@@ -1116,7 +1140,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             };
 
-            let int_ty = Type::UnknownInt(self.new_unknown_ident(), 10);
+            let int_ty = Type::UnknownInt(self.new_unknown_ident("increment"), 10);
 
             self.type_context.insert_constraint(expr_ty, int_ty)
         }
@@ -1132,7 +1156,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             };
 
-            let int_ty = Type::UnknownInt(self.new_unknown_ident(), 10);
+            let int_ty = Type::UnknownInt(self.new_unknown_ident("decrement"), 10);
 
             self.type_context.insert_constraint(expr_ty, int_ty)
         }

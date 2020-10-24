@@ -108,7 +108,13 @@ impl<'a> TypeContext<'a> {
             debug!("Substituting, i: {} -- cur_ty: {:?}", i, cur_ty);
             i += 1;
 
-            if cur_ty.is_primitive() {
+            if self.substitutions.contains_key(&cur_ty) {
+                if let Some(sub_ty) = self.substitutions.get(&cur_ty) {
+                    cur_ty = sub_ty.clone();
+                } else {
+                    unreachable!()
+                }
+            } else if cur_ty.is_primitive() {
                 return SubResult::Solved(cur_ty);
             } else if cur_ty.is_aggregated() {
                 match &mut cur_ty {
@@ -118,7 +124,10 @@ impl<'a> TypeContext<'a> {
                                 *inner_ty = Box::new(sub_ty);
                                 return SubResult::Solved(cur_ty);
                             }
-                            SubResult::UnSolved(_) => return SubResult::UnSolved(cur_ty),
+                            SubResult::UnSolved(un_sub_ty) => {
+                                *inner_ty = Box::new(un_sub_ty);
+                                return SubResult::UnSolved(cur_ty);
+                            }
                             err => return err,
                         }
                     }
@@ -126,12 +135,6 @@ impl<'a> TypeContext<'a> {
                         // Only possibility is Struct type, nothing to unwrap.
                         return SubResult::Solved(cur_ty);
                     }
-                }
-            } else if self.substitutions.contains_key(&cur_ty) {
-                if let Some(sub_ty) = self.substitutions.get(&cur_ty) {
-                    cur_ty = sub_ty.clone();
-                } else {
-                    unreachable!()
                 }
             } else {
                 match cur_ty.clone() {
@@ -457,7 +460,9 @@ impl<'a> TypeContext<'a> {
                             Type::Array(inner_ty, _) => {
                                 match self.get_substitution(inner_ty, finalize) {
                                     SubResult::Solved(sub_ty) => return SubResult::Solved(sub_ty),
-                                    SubResult::UnSolved(_) => return SubResult::UnSolved(cur_ty),
+                                    SubResult::UnSolved(un_sub_ty) => {
+                                        return SubResult::UnSolved(un_sub_ty)
+                                    }
                                     err => return err,
                                 }
                             }
