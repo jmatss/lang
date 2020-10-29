@@ -9,7 +9,7 @@ use crate::{
 };
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
     Return(Option<Expr>),
     // Yield ~= Break with a value

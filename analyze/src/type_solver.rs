@@ -1,22 +1,29 @@
+use std::collections::{hash_map::Entry, HashMap};
+
 use crate::type_context::{SubResult, TypeContext};
 use common::{
     error::LangError,
-    token::ast::Token,
     token::op::UnOperator,
     token::{
         ast::AstToken,
-        block::BlockHeader,
+        block::Struct,
         expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
         op::{BinOp, UnOp},
         stmt::Stmt,
     },
     traverser::TraverseContext,
     types::Type,
+    util,
     visitor::Visitor,
 };
 
 pub struct TypeSolver<'a> {
     type_context: &'a mut TypeContext<'a>,
+
+    // Will contain all generic structs that have had the generic types substituted
+    // with real types. The key is the name of the struct.
+    pub generic_structs: HashMap<String, Vec<Struct>>,
+
     errors: Vec<LangError>,
 }
 
@@ -24,6 +31,7 @@ impl<'a> TypeSolver<'a> {
     pub fn new(type_context: &'a mut TypeContext<'a>) -> Self {
         Self {
             type_context,
+            generic_structs: HashMap::default(),
             errors: Vec::default(),
         }
     }
@@ -156,9 +164,67 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    fn visit_struct_init(&mut self, struct_init: &mut StructInit, _ctx: &TraverseContext) {
+    fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
         if let Some(ty) = &mut struct_init.ret_type {
             self.subtitute_type(ty, true);
+
+            // If this struct contains generics, a new struct type will be created
+            // for every struct init using different generic types.
+            let mut gen_struct_ty = match self
+                .type_context
+                .analyze_context
+                .get_struct(&struct_init.name, ctx.block_id)
+            {
+                Ok(struct_ty) if struct_ty.generic_params.is_some() => struct_ty.clone(),
+                Ok(_) => return,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            // TODO: Add so that one can specify the generic types with some
+            //       turbofish logic.
+
+            let mut generics = Vec::default();
+
+            // For every generic members of the struct, replace the type with
+            // the type of the argument for this new struct type `gen_struct_ty`.
+            if let Some(members) = &mut gen_struct_ty.members {
+                for (arg, param) in struct_init.arguments.iter().zip(members) {
+                    if let Some(Type::Generic(_)) = &param.ret_type {
+                        match arg.value.get_expr_type() {
+                            Ok(new_ty) => {
+                                param.ret_type = Some(new_ty.clone());
+                                generics.push(new_ty.clone());
+                            }
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Convert the old struct name to the new struct name containing
+            // references to the implemented generic types.
+            let old_name = gen_struct_ty.name;
+            let new_name = util::to_generic_struct_name(&old_name, &generics);
+            struct_init.name = new_name.clone();
+            gen_struct_ty.name = new_name;
+
+            // This new struct variable will be added as a new struct type stored
+            // in `self.generic_structs` and will then be inserted into the
+            // AST later on by another "class" ("type_converter").
+            match self.generic_structs.entry(old_name) {
+                Entry::Occupied(ref mut o) => {
+                    o.get_mut().push(gen_struct_ty);
+                }
+                Entry::Vacant(v) => {
+                    v.insert(vec![gen_struct_ty]);
+                }
+            }
         } else {
             let err = self.type_context.analyze_context.err(format!(
                 "Unable to find infer type for struct init: {:?}",
@@ -209,7 +275,7 @@ impl<'a> Visitor for TypeSolver<'a> {
             *member_ty = un_op.ret_type.clone();
 
             match un_op.value.get_expr_type_mut() {
-                Ok(Type::Custom(struct_name)) => {
+                Ok(Type::Custom(struct_name)) | Ok(Type::CompoundType(struct_name, ..)) => {
                     match self.type_context.analyze_context.get_struct_member_index(
                         struct_name,
                         member_name,
@@ -222,12 +288,13 @@ impl<'a> Visitor for TypeSolver<'a> {
                     }
                 }
 
+                // TODO:
                 Err(err) => {
                     self.errors.push(err);
                 }
                 _ => {
                     let err = self.type_context.analyze_context.err(format!(
-                        "Expression that was struct accessed wasn't struct, was: {:?}",
+                        "Expression that was struct accessed wasn't struct or compound, was: {:#?}",
                         un_op.value
                     ));
                     self.errors.push(err);
@@ -359,21 +426,4 @@ impl<'a> Visitor for TypeSolver<'a> {
             }
         }
     }
-
-    /// Substitue the types of struct members. This is needed if generics are used.
-    fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Struct(struct_), ..) = &mut ast_token.token {
-            if let Some(members) = &mut struct_.members {
-                for member in members {
-                    if let Some(ty) = &mut member.ret_type {
-                        self.subtitute_type(ty, true);
-                    }
-                }
-            }
-        }
-    }
-
-    // TODO: Implement similar generic logic as for structs.
-    fn visit_interface(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {}
-    fn visit_enum(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {}
 }

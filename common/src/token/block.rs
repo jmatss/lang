@@ -1,10 +1,12 @@
+use std::collections::HashMap;
+
 use super::{
     expr::{Expr, Var},
     stmt::Modifier,
 };
 use crate::types::Type;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockHeader {
     // TODO: Make If(/else/elseif), match, while and loop expression.
     //  So that they can return values and be used in sub expressions.
@@ -84,10 +86,10 @@ pub enum BlockHeader {
     Test(Function),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Struct {
     pub name: String,
-    pub generics: Option<Vec<Type>>,
+    pub generic_params: Option<Vec<String>>,
     pub implements: Option<Vec<Type>>,
     pub members: Option<Vec<Var>>, // TODO: extends: Vec<Type>
 }
@@ -95,20 +97,20 @@ pub struct Struct {
 impl Struct {
     pub fn new(
         name: String,
-        generics: Option<Vec<Type>>,
+        generic_params: Option<Vec<String>>,
         implements: Option<Vec<Type>>,
         members: Option<Vec<Var>>,
     ) -> Self {
         Self {
             name,
-            generics,
+            generic_params,
             implements,
             members,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
     pub generics: Option<Vec<Type>>,
@@ -148,7 +150,7 @@ impl Function {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Enum {
     pub name: String,
     pub generics: Vec<Type>,
@@ -160,7 +162,7 @@ impl Enum {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Interface {
     pub name: String,
     pub generics: Vec<Type>,

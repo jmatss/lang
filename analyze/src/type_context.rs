@@ -3,8 +3,8 @@ use common::{
     token::expr::Expr,
     types::Type,
 };
-use log::debug;
-use std::collections::HashMap;
+use log::{debug, warn};
+use std::collections::{hash_map, HashMap};
 
 use crate::AnalyzeContext;
 
@@ -82,6 +82,134 @@ impl<'a> TypeContext<'a> {
         }
     }
 
+    /// Takes in two types and sorts them in the correct "mapping order" i.e.
+    /// which type should map to which in the substitution map.
+    /// The left item in the returned tuple should be mapped to the right.
+    /// Returns Err if something goes wrong and returns None if the types are
+    /// equal and shouldn't be mapped.
+    pub fn get_mapping_direction(&mut self, lhs: Type, rhs: Type) -> CustomResult<(Type, Type)> {
+        // TODO: Can mapping unknowns (any/int/float) to each other cause infinite
+        //       recursion. Probably; how can it be prevented?
+
+        debug!(
+            "Getting mapping direction -- lhs: {:?}, rhs: {:?}",
+            lhs, rhs
+        );
+
+        let lhs_sub = match self.get_substitution(&lhs, false) {
+            SubResult::Solved(replaced_ty) | SubResult::UnSolved(replaced_ty) => replaced_ty,
+            SubResult::Err(err) => return Err(err),
+        };
+        let rhs_sub = match self.get_substitution(&rhs, false) {
+            SubResult::Solved(replaced_ty) | SubResult::UnSolved(replaced_ty) => replaced_ty,
+            SubResult::Err(err) => return Err(err),
+        };
+
+        if !lhs_sub.is_compatible(&rhs_sub) {
+            return Err(LangError::new(
+                format!(
+                    "Tried to map incompatible types. Lhs_sub: {:?}, rhs_sub: {:?}",
+                    lhs_sub, rhs_sub
+                ),
+                AnalyzeError {
+                    line_nr: 0,
+                    column_nr: 0,
+                },
+            ));
+        }
+
+        Ok(
+            if lhs_sub == rhs_sub || lhs_sub.is_unknown() || lhs_sub.is_generic() {
+                (lhs, rhs)
+            } else if rhs_sub.is_unknown() || rhs_sub.is_generic() {
+                (rhs, lhs)
+            } else if !lhs_sub.is_unknown_any() && !rhs_sub.is_unknown_any() {
+                // True if both are known, but they aren't equal and they are still
+                // compatible. This means that both are aggregates of the same type.
+                // Structs will have been filtered earlier in this function.
+                match (lhs_sub.clone(), rhs_sub.clone()) {
+                    (Type::Pointer(inner_lhs), Type::Pointer(inner_rhs)) => {
+                        self.get_mapping_direction(*inner_lhs, *inner_rhs)?
+                    }
+                    (Type::Array(inner_lhs, _), Type::Array(inner_rhs, _)) => {
+                        self.get_mapping_direction(*inner_lhs, *inner_rhs)?
+                    }
+                    _ => unreachable!(format!("lhs_sub: {:?}, rhs_sub: {:?}", lhs_sub, rhs_sub)),
+                }
+            } else if !lhs_sub.is_unknown_any() {
+                (rhs, lhs) // Only lhs known.
+            } else if !rhs_sub.is_unknown_any() {
+                (lhs, rhs) // Only rhs known.
+            } else if lhs_sub.is_unknown_struct_member() {
+                // Prefer struct member unknowns over int/float/array unknowns since
+                // it will always have its type set in the struct definition.
+                (rhs, lhs)
+            } else if rhs.is_unknown_struct_member() {
+                (lhs, rhs)
+            } else if lhs_sub.is_unknown_int() || lhs_sub.is_unknown_float() {
+                // Prefer int/float unknowns over array member unknowns.
+                (rhs, lhs)
+            } else if rhs.is_unknown_int() || rhs_sub.is_unknown_float() {
+                (lhs, rhs)
+            } else {
+                // Both are array member unknowns, direction doesn't matter.
+                (rhs, lhs)
+            },
+        )
+    }
+
+    /// Checks if adding a substitution from `from` to `type` creates a loop.
+    /// This will be called recursivly to check if mapping `from` to a type
+    /// that `to` maps to causes a loop... and so on.
+    fn causes_loop(&self, from: &Type, to: &Type) -> bool {
+        if let Some(new_to) = self.substitutions.get(to) {
+            if from == new_to {
+                true
+            } else {
+                self.causes_loop(from, new_to)
+            }
+        } else {
+            false
+        }
+    }
+
+    /// Inserts a new substitution, mapping `from` to `to`.
+    pub fn insert_substitution(&mut self, from: Type, to: Type) -> CustomResult<()> {
+        debug!("Insert substitution -- from: {:?}, to: {:?}", &from, &to);
+
+        // Can't map to itself (infinite recursion) and shouldn't cause any kind
+        // of loop.
+        if from == to || self.causes_loop(&from, &to) {
+            debug!(
+                "Substitution to self or causes loop -- from unsolved: {:?}, to solved: {:?}",
+                &from, &to
+            );
+            return Ok(());
+        }
+
+        // If the `from` doesn't already have a mapping, just insert the
+        // new mapping to `to` and return. Otherwise add a new substitution
+        // between the old and the new `to`.
+        let old_to = match self.substitutions.entry(from) {
+            hash_map::Entry::Occupied(ref mut o) => o.get().clone(),
+            hash_map::Entry::Vacant(v) => {
+                v.insert(to);
+                return Ok(());
+            }
+        };
+
+        match self.get_mapping_direction(to, old_to) {
+            Ok((new_from, new_to)) => {
+                if !self.causes_loop(&new_from, &new_to) {
+                    self.insert_substitution(new_from, new_to)
+                } else {
+                    Ok(())
+                }
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     /// Substitutes the given type recursively until no more substitution can
     /// be found. If the type is already known, this function will make no
     /// substitution and will not report any errors.
@@ -121,20 +249,83 @@ impl<'a> TypeContext<'a> {
                     Type::Pointer(inner_ty) | Type::Array(inner_ty, _) => {
                         match self.get_substitution(&inner_ty, finalize) {
                             SubResult::Solved(sub_ty) => {
+                                // Add a new substitution for the inner types
+                                // if they are solvable.
+                                if let Err(err) =
+                                    self.insert_substitution(*inner_ty.clone(), sub_ty.clone())
+                                {
+                                    return SubResult::Err(err);
+                                }
+                                warn!(
+                                    "aggregate solved -- inner: {:#?}\nsub_ty: {:#?}",
+                                    inner_ty, sub_ty
+                                );
+
                                 *inner_ty = Box::new(sub_ty);
                                 return SubResult::Solved(cur_ty);
                             }
                             SubResult::UnSolved(un_sub_ty) => {
+                                // Add a new constraint for the inner types
+                                // if they are unsolvable.
+                                self.insert_constraint(*inner_ty.clone(), un_sub_ty.clone());
+                                warn!(
+                                    "aggregate unsolved -- inner: {:#?}\nun_sub_ty: {:#?}",
+                                    inner_ty, un_sub_ty
+                                );
+
                                 *inner_ty = Box::new(un_sub_ty);
                                 return SubResult::UnSolved(cur_ty);
                             }
                             err => return err,
                         }
                     }
-                    _ => {
-                        // Only possibility is Struct type, nothing to unwrap.
-                        return SubResult::Solved(cur_ty);
+                    Type::CompoundType(_, gen_map) => {
+                        let mut is_solved = true;
+
+                        // All generic types needs to be solved. If any of them
+                        // can't be solved, this whould compound type will count
+                        // as unsolvable.
+                        for gen_ty in gen_map.values_mut() {
+                            match self.get_substitution(gen_ty, finalize) {
+                                SubResult::Solved(sub_ty) => {
+                                    // Add a new substitution for the gen types
+                                    // if they are solvable.
+                                    if let Err(err) =
+                                        self.insert_substitution(gen_ty.clone(), sub_ty.clone())
+                                    {
+                                        return SubResult::Err(err);
+                                    }
+                                    warn!(
+                                        "compound solved -- gen_ty: {:#?}\nsub_ty: {:#?}",
+                                        gen_ty, sub_ty
+                                    );
+
+                                    *gen_ty = sub_ty;
+                                }
+                                SubResult::UnSolved(un_sub_ty) => {
+                                    // Add a new constraint for the gen types
+                                    // if they are unsolvable.
+                                    self.insert_constraint(gen_ty.clone(), un_sub_ty.clone());
+                                    warn!(
+                                        "compound unsolved -- gen_ty: {:#?}\nun_sub_ty: {:#?}",
+                                        gen_ty, un_sub_ty
+                                    );
+
+                                    *gen_ty = un_sub_ty;
+                                    is_solved = false;
+                                }
+                                err => return err,
+                            }
+                        }
+
+                        if is_solved {
+                            return SubResult::Solved(cur_ty);
+                        } else {
+                            return SubResult::UnSolved(cur_ty);
+                        }
                     }
+                    Type::Custom(_) => return SubResult::Solved(cur_ty),
+                    _ => unreachable!("Unmatched aggregate type: {:#?}", cur_ty),
                 }
             } else {
                 match cur_ty.clone() {
@@ -167,10 +358,11 @@ impl<'a> TypeContext<'a> {
                                 struct_ty
                             }
                             SubResult::UnSolved(un_sub_ty) => {
-                                return SubResult::UnSolved(Type::UnknownStructMember(
-                                    Box::new(un_sub_ty),
+                                cur_ty = Type::UnknownStructMember(
+                                    Box::new(un_sub_ty.clone()),
                                     member_name.clone(),
-                                ))
+                                );
+                                un_sub_ty
                             }
                             err => return err,
                         };
@@ -191,13 +383,13 @@ impl<'a> TypeContext<'a> {
                                     }
                                 };
 
-                                if let Some(ret_type) = &var.ret_type {
-                                    match self.get_substitution(ret_type, finalize) {
+                                if let Some(var_type) = &var.ret_type {
+                                    match self.get_substitution(var_type, finalize) {
                                         SubResult::Solved(sub_ty) => {
                                             return SubResult::Solved(sub_ty)
                                         }
-                                        SubResult::UnSolved(_) => {
-                                            return SubResult::UnSolved(cur_ty)
+                                        SubResult::UnSolved(un_sub_ty) => {
+                                            return SubResult::UnSolved(un_sub_ty)
                                         }
                                         err => return err,
                                     }
@@ -214,6 +406,51 @@ impl<'a> TypeContext<'a> {
                                     ));
                                 }
                             }
+
+                            Type::CompoundType(struct_name, gens) => {
+                                let var = match self.analyze_context.get_struct_member(
+                                    struct_name,
+                                    member_name,
+                                    0,
+                                ) {
+                                    Ok(var) => var.clone(),
+                                    Err(err) => {
+                                        return SubResult::Err(err);
+                                    }
+                                };
+
+                                if let Some(ty) = &var.ret_type {
+                                    // Since this fetched the actual struct "template"
+                                    // that is used by all, the generics will still
+                                    // be the "Generics". Need to replace them with
+                                    // the actual type for this specific use of the
+                                    // struct.
+                                    let mut ty = ty.clone();
+                                    ty.replace_generics_impl(gens);
+
+                                    match self.get_substitution(&ty, finalize) {
+                                        SubResult::Solved(sub_ty) => {
+                                            return SubResult::Solved(sub_ty)
+                                        }
+                                        SubResult::UnSolved(un_sub_ty) => {
+                                            return SubResult::UnSolved(un_sub_ty)
+                                        }
+                                        err => return err,
+                                    }
+                                } else {
+                                    return SubResult::Err(LangError::new(
+                                        format!(
+                                            "Type not set for member \"{}\" in struct \"{}\"",
+                                            member_name, struct_name
+                                        ),
+                                        AnalyzeError {
+                                            line_nr: 0,
+                                            column_nr: 0,
+                                        },
+                                    ));
+                                }
+                            }
+
                             _ => {
                                 if finalize {
                                     return SubResult::Err(LangError::new(
@@ -243,10 +480,11 @@ impl<'a> TypeContext<'a> {
                                 struct_ty
                             }
                             SubResult::UnSolved(un_sub_ty) => {
-                                return SubResult::UnSolved(Type::UnknownStructMethod(
-                                    Box::new(un_sub_ty),
+                                cur_ty = Type::UnknownStructMethod(
+                                    Box::new(un_sub_ty.clone()),
                                     method_name.clone(),
-                                ))
+                                );
+                                un_sub_ty
                             }
                             err => return err,
                         };
@@ -272,8 +510,8 @@ impl<'a> TypeContext<'a> {
                                         SubResult::Solved(sub_ty) => {
                                             return SubResult::Solved(sub_ty)
                                         }
-                                        SubResult::UnSolved(_) => {
-                                            return SubResult::UnSolved(cur_ty)
+                                        SubResult::UnSolved(un_sub_ty) => {
+                                            return SubResult::UnSolved(un_sub_ty)
                                         }
                                         err => return err,
                                     }
@@ -317,12 +555,13 @@ impl<'a> TypeContext<'a> {
                                 sub_ty
                             }
                             SubResult::UnSolved(un_sub_ty) => {
-                                return SubResult::UnSolved(Type::UnknownMethodArgument(
-                                    Box::new(un_sub_ty),
+                                cur_ty = Type::UnknownMethodArgument(
+                                    Box::new(un_sub_ty.clone()),
                                     method_name.clone(),
                                     name_opt.clone(),
                                     *idx,
-                                ))
+                                );
+                                un_sub_ty
                             }
                             err => return err,
                         };
@@ -449,9 +688,8 @@ impl<'a> TypeContext<'a> {
                                     self.insert_constraint(cur_ty, *inner_ty.clone());
                                 }
 
-                                return SubResult::UnSolved(Type::UnknownArrayMember(Box::new(
-                                    un_sub_ty,
-                                )));
+                                cur_ty = Type::UnknownArrayMember(Box::new(un_sub_ty.clone()));
+                                un_sub_ty
                             }
                             err => return err,
                         };

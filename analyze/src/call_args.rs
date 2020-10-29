@@ -1,10 +1,14 @@
 use std::cell::RefCell;
 
 use common::{
-    error::CustomResult, error::LangError, token::expr::Argument, token::expr::FuncCall,
-    token::expr::Var, traverser::TraverseContext, visitor::Visitor,
+    error::CustomResult,
+    error::LangError,
+    token::expr::Argument,
+    token::expr::FuncCall,
+    token::expr::{StructInit, Var},
+    traverser::TraverseContext,
+    visitor::Visitor,
 };
-use log::warn;
 
 use crate::AnalyzeContext;
 
@@ -25,7 +29,7 @@ impl<'a> CallArgs<'a> {
         }
     }
 
-    fn reorder(&mut self, func_call: &mut FuncCall, params: &[Var]) -> CustomResult<()> {
+    fn reorder_func_call(&mut self, func_call: &mut FuncCall, params: &[Var]) -> CustomResult<()> {
         let analyze_context = self.analyze_context.borrow();
 
         let mut idx: u64 = 0;
@@ -59,6 +63,54 @@ impl<'a> CallArgs<'a> {
                     return Err(analyze_context.err(format!(
                         "Unable to find parameter \"{}\" in function \"{}\".",
                         arg_name, &func_call.name
+                    )));
+                }
+            } else {
+                idx += 1;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn reorder_struct_init(
+        &mut self,
+        struct_init: &mut StructInit,
+        members: &[Var],
+    ) -> CustomResult<()> {
+        let analyze_context = self.analyze_context.borrow();
+
+        let mut idx: u64 = 0;
+        while idx < struct_init.arguments.len() as u64 {
+            let arg = struct_init
+                .arguments
+                .get(idx as usize)
+                .expect("Known to be in bounds.");
+
+            // TODO: Can this lead to a infinite loop where two named arguments
+            //       with the same name will be swapped back over and over?
+            if let Some(arg_name) = &arg.name {
+                let mut new_idx = 0;
+                let mut found = false;
+                for member in members {
+                    if arg_name == &member.name {
+                        found = true;
+                        break;
+                    }
+                    new_idx += 1;
+                }
+
+                if found && idx == new_idx {
+                    idx += 1;
+                } else if found {
+                    // The `idx` is not increment if a swap was made. This is done
+                    // since then you wan't to see if the new argument at this idx
+                    // needs to be swapped to somewhere else.
+                    struct_init.arguments.swap(idx as usize, new_idx as usize);
+                } else {
+                    return Err(analyze_context.err(format!(
+                        "Unable to find member \"{}\" in struct \"{}\".",
+                        arg_name, &struct_init.name
                     )));
                 }
             } else {
@@ -151,7 +203,7 @@ impl<'a> Visitor for CallArgs<'a> {
 
         // Reorder the arguments of the function call according to the parameter
         // names used for the arguments.
-        if let Err(err) = self.reorder(func_call, params) {
+        if let Err(err) = self.reorder_func_call(func_call, params) {
             self.errors.push(err);
             return;
         }
@@ -162,5 +214,37 @@ impl<'a> Visitor for CallArgs<'a> {
             self.errors.push(err);
             return;
         }
+    }
+
+    fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
+        let analyze_context = self.analyze_context.borrow();
+
+        let struct_ = match analyze_context.get_struct(&struct_init.name, ctx.block_id) {
+            Ok(struct_) => struct_,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
+        // Get the members of the struct. This will be used to reorder the
+        // arguments in the struct init call correctly.
+        let members = if let Some(members) = &struct_.members {
+            members
+        } else {
+            // Early return if there are no members of the struct, there
+            // is nothing to do here.
+            return;
+        };
+
+        // Reorder the arguments of the struct init call according to the member
+        // names used for the arguments.
+        if let Err(err) = self.reorder_struct_init(struct_init, members) {
+            self.errors.push(err);
+            return;
+        }
+
+        // TODO: Should there be default values for structs (?). Arrange that
+        //       here in that case.
     }
 }

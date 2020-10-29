@@ -22,7 +22,7 @@ use inkwell::{
     values::{AnyValueEnum, BasicValueEnum, FunctionValue, InstructionValue, PointerValue},
     AddressSpace,
 };
-use log::debug;
+use log::{debug, warn};
 use std::collections::HashMap;
 
 use crate::expr::ExprTy;
@@ -185,6 +185,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             match header {
                 BlockHeader::Struct(struct_) => {
+                    warn!("Compiling struct: {:#?}", struct_);
                     self.compile_struct(struct_)?;
                 }
                 BlockHeader::Enum(enum_) => {
@@ -262,7 +263,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Token::Expr(ref mut expr) => {
                 self.compile_expr(expr, ExprTy::RValue)?;
             }
-            Token::EOF => (),
+            Token::Empty | Token::EOF => (),
         }
         Ok(())
     }
@@ -488,6 +489,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     struct_type.clone().into()
                 } else {
                     return Err(self.err(format!("Unable to find custom type: {}", ident)));
+                }
+            }
+            Type::CompoundType(ident, generics) => {
+                let struct_name = common::util::to_generic_struct_name(
+                    ident,
+                    &generics.values().cloned().collect::<Vec<_>>(),
+                );
+
+                if let Some(struct_type) = self.module.get_struct_type(&struct_name) {
+                    struct_type.clone().into()
+                } else {
+                    return Err(self.err(format!(
+                        "Unable to find custom compound type: {}",
+                        struct_name
+                    )));
                 }
             }
             _ => return Err(self.err(format!("Invalid type during type codegen: {:?}", ty))),

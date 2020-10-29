@@ -134,7 +134,7 @@ impl<'a> BlockAnalyzer<'a> {
 
                     Token::Stmt(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
 
-                    Token::Expr(_) | Token::EOF => (),
+                    Token::Empty | Token::Expr(_) | Token::EOF => (),
                 }
             }
 

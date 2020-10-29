@@ -1,23 +1,25 @@
+use std::collections::BTreeMap;
+
 use crate::parser::ParseTokenIter;
 use common::{error::CustomResult, types::Type};
 use lex::token::{LexToken, LexTokenKind, Sym};
 
 pub struct TypeParser<'a> {
     iter: &'a mut ParseTokenIter,
-    generics: Option<&'a Vec<Type>>,
+    generics: Option<&'a Vec<String>>,
 }
 
 // TODO: Need to accept "right shift" (>>) as part of a type when generics are
 //       implemented.
 
 impl<'a> TypeParser<'a> {
-    pub fn new(iter: &'a mut ParseTokenIter, generics: Option<&'a Vec<Type>>) -> Self {
+    pub fn new(iter: &'a mut ParseTokenIter, generics: Option<&'a Vec<String>>) -> Self {
         Self { iter, generics }
     }
 
     pub fn parse(
         iter: &'a mut ParseTokenIter,
-        generics: Option<&'a Vec<Type>>,
+        generics: Option<&'a Vec<String>>,
     ) -> CustomResult<Type> {
         let mut type_parser = Self::new(iter, generics);
         type_parser.parse_type()
@@ -44,14 +46,18 @@ impl<'a> TypeParser<'a> {
                     let generic_list = self.parse_type_generics()?;
                     let mut ty = Type::ident_to_type(&ident);
 
-                    // Wrap the current type into a "Generic" if it exists in
+                    // Wrap the current ident into a "Generic" if it exists in
                     // the `self.generics` map.
-                    if let Some(true) = self.generics.map(|g| g.contains(&ty)) {
-                        ty = Type::Generic(Box::new(ty));
+                    if let Some(true) = self.generics.map(|g| g.contains(&ident)) {
+                        ty = Type::Generic(ident.clone());
                     }
 
+                    // TODO: Currently how this logic works, the first type of
+                    //       the "CompoundType" can NOT be wrapped in a "Generic",
+                    //       is this OK?
+
                     Ok(if let Some(generic_list) = generic_list {
-                        Type::CompoundType(Box::new(ty), generic_list)
+                        Type::CompoundType(ident, generic_list)
                     } else {
                         ty
                     })
@@ -75,7 +81,7 @@ impl<'a> TypeParser<'a> {
     /// Parses a list of types inside a generic "tag" (<..>).
     ///   X<T>      // Type with generic argument.
     ///   X<T, V>   // Type with multiple generic arguments.
-    pub(crate) fn parse_type_generics(&mut self) -> CustomResult<Option<Vec<Type>>> {
+    pub(crate) fn parse_type_generics(&mut self) -> CustomResult<Option<BTreeMap<String, Type>>> {
         // If the next token isn't a "PointyBracketBegin" there are no generic
         // list, just return None.
         if let Some(lex_token) = self.iter.next_skip_space() {
@@ -97,12 +103,12 @@ impl<'a> TypeParser<'a> {
             }
         }
 
-        let mut generics = Vec::new();
+        let mut generics = BTreeMap::new();
 
         loop {
             // Iterate a parse one generic type at a time in the list.
             let generic = self.parse_type()?;
-            generics.push(generic);
+            generics.insert(generic.to_string(), generic);
 
             // End of a type in the generic list. The next token should either
             // be a comma if there are more arguments in the list or a

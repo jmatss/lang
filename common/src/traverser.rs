@@ -95,6 +95,7 @@ impl<'a> AstTraverser<'a> {
             }
             Token::Expr(expr) => self.traverse_expr(expr),
             Token::Stmt(stmt) => self.traverse_stmt(stmt),
+            Token::Empty => debug!("Visiting Empty block"),
             Token::EOF => {
                 debug!("Visiting EOF");
                 for v in self.visitors.iter_mut() {
