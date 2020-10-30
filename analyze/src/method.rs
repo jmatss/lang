@@ -107,7 +107,7 @@ impl<'a> MethodAnalyzer<'a> {
                     self.analyze(body_token);
                 }
             }
-            Token::EOF => (),
+            Token::Empty | Token::EOF => (),
         }
     }
 }

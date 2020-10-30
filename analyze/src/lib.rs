@@ -7,6 +7,7 @@ mod defer;
 mod indexing;
 mod method;
 mod type_context;
+mod type_converter;
 mod type_inferencer;
 mod type_solver;
 //mod unitialized;
@@ -32,6 +33,7 @@ use indexing::IndexingAnalyzer;
 use method::MethodAnalyzer;
 use std::{cell::RefCell, collections::HashMap};
 use type_context::TypeContext;
+use type_converter::TypeConverter;
 use type_inferencer::TypeInferencer;
 use type_solver::TypeSolver;
 
@@ -119,6 +121,13 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
     let mut type_solver = TypeSolver::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut type_solver)
+        .traverse(ast_root)
+        .take_errors()?;
+
+    let generic_structs = type_solver.generic_structs;
+    let mut type_converter = TypeConverter::new(generic_structs);
+    AstTraverser::new()
+        .add_visitor(&mut type_converter)
         .traverse(ast_root)
         .take_errors()?;
 

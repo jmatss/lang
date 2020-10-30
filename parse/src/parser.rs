@@ -356,7 +356,7 @@ impl ParseTokenIter {
         ExprParser::parse(self, stop_conds)
     }
 
-    pub fn parse_type(&mut self, generics: Option<&Vec<Type>>) -> CustomResult<Type> {
+    pub fn parse_type(&mut self, generics: Option<&Vec<String>>) -> CustomResult<Type> {
         TypeParser::parse(self, generics)
     }
 
@@ -512,7 +512,7 @@ impl ParseTokenIter {
         &mut self,
         start_symbol: Sym,
         end_symbol: Sym,
-        generics: Option<&Vec<Type>>,
+        generics: Option<&Vec<String>>,
     ) -> CustomResult<(Vec<Var>, bool)> {
         let mut parameters = Vec::new();
         let mut is_var_arg = false;
@@ -628,7 +628,7 @@ impl ParseTokenIter {
     }
 
     /// Parses a type including the starting colon.
-    fn parse_colon_type(&mut self, generics: Option<&Vec<Type>>) -> CustomResult<Type> {
+    fn parse_colon_type(&mut self, generics: Option<&Vec<String>>) -> CustomResult<Type> {
         if let Some(lex_token) = self.next_skip_space() {
             if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
                 self.parse_type(generics)

@@ -1,6 +1,5 @@
 use crate::type_context::{SubResult, TypeContext};
 use common::{
-    error::CustomResult,
     error::{LangError, LangErrorKind::AnalyzeError},
     token::ast::Token,
     token::op::Op,
@@ -17,7 +16,7 @@ use common::{
     visitor::Visitor,
 };
 use log::debug;
-use std::collections::hash_map::Entry;
+use std::collections::BTreeMap;
 
 // TODO: Better error messages. Ex. if two types arent't compatible,
 //       print information about where the types "came" from.
@@ -63,128 +62,19 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
     }
 
     // TODO: Should this be given as three numbers instead of a concatenated String?
-    fn new_unknown_ident(&mut self) -> String {
+    /// Creates a new unknown identifier that will be given to a unkown type.
+    /// The new string will containg a unique ID (ID), the line number (L),
+    /// the column number (C) and a free text to give the unkown type some more
+    /// context for readability.
+    fn new_unknown_ident(&mut self, text: &str) -> String {
         let cur_line_nr = self.type_context.analyze_context.cur_line_nr;
         let cur_column_nr = self.type_context.analyze_context.cur_column_nr;
-        let type_ident = format!("{}-{}:{}", self.type_id, cur_line_nr, cur_column_nr);
+        let type_ident = format!(
+            "ID:{}-R:{}-C:{}-{}",
+            self.type_id, cur_line_nr, cur_column_nr, text
+        );
         self.type_id += 1;
         type_ident
-    }
-
-    /// Takes in two types and sorts them in the correct "mapping order" i.e.
-    /// which type should map to which in the substitution map.
-    /// The left item in the returned tuple should be mapped to the right.
-    /// Returns Err if something goes wrong and returns None if the types are
-    /// equal and shouldn't be mapped.
-    fn get_mapping_direction(&self, lhs: Type, rhs: Type) -> CustomResult<(Type, Type)> {
-        // TODO: Can mapping unknowns (any/int/float) to each other cause infinite
-        //       recursion. Probably; how can it be prevented?
-
-        if !lhs.is_compatible(&rhs) {
-            return Err(LangError::new(
-                format!(
-                    "Tried to map incompatible types. Lhs: {:?}, rhs: {:?}",
-                    lhs, rhs
-                ),
-                AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            ));
-        }
-
-        Ok(if lhs == rhs || lhs.is_unknown() || lhs.is_generic() {
-            (lhs, rhs)
-        } else if rhs.is_unknown() || rhs.is_generic() {
-            (rhs, lhs)
-        } else if !lhs.is_unknown_any() && !rhs.is_unknown_any() {
-            // True if both are known, but they aren't equal and they are still
-            // compatible. This means that both are aggregates of the same type.
-            // Structs will have been filtered earlier in this function.
-            match (lhs.clone(), rhs.clone()) {
-                (Type::Pointer(inner_lhs), Type::Pointer(inner_rhs)) => {
-                    self.get_mapping_direction(*inner_lhs, *inner_rhs)?
-                }
-                (Type::Array(inner_lhs, _), Type::Array(inner_rhs, _)) => {
-                    self.get_mapping_direction(*inner_lhs, *inner_rhs)?
-                }
-                _ => unreachable!(format!("lhs: {:?}, rhs: {:?}", lhs, rhs)),
-            }
-        } else if !lhs.is_unknown_any() {
-            (rhs, lhs) // Only lhs known.
-        } else if !rhs.is_unknown_any() {
-            (lhs, rhs) // Only rhs known.
-        } else if lhs.is_unknown_struct_member() {
-            // Prefer struct member unknowns over int/float/array unknowns since
-            // it will always have its type set in the struct definition.
-            (rhs, lhs)
-        } else if rhs.is_unknown_struct_member() {
-            (lhs, rhs)
-        } else if lhs.is_unknown_int() || lhs.is_unknown_float() {
-            // Prefer int/float unknowns over array member unknowns.
-            (rhs, lhs)
-        } else if rhs.is_unknown_int() || rhs.is_unknown_float() {
-            (lhs, rhs)
-        } else {
-            // Both are array member unknowns, direction doesn't matter.
-            (rhs, lhs)
-        })
-    }
-
-    /// Checks if adding a substitution from `from` to `type` creates a loop.
-    /// This will be called recursivly to check if mapping `from` to a type
-    /// that `to` maps to causes a loop... and so on.
-    fn causes_loop(&self, from: &Type, to: &Type) -> bool {
-        if let Some(new_to) = self.type_context.substitutions.get(to) {
-            if from == new_to {
-                true
-            } else {
-                self.causes_loop(from, new_to)
-            }
-        } else {
-            false
-        }
-    }
-
-    /// Inserts a new substitution. The order of `first` and `second` doesn't
-    /// matter, this function will make sure that they are mapped in the correct
-    /// direction.
-    fn insert_substitution(&mut self, first: Type, second: Type) {
-        let (from, to) = match self.get_mapping_direction(first, second) {
-            Ok(types) => types,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
-
-        debug!("Insert substitution -- from: {:?}, to: {:?}", &from, &to);
-
-        // Can't map to itself (infinite recursion) and shouldn't cause any kind
-        // of loop.
-        if from == to || self.causes_loop(&from, &to) {
-            return;
-        }
-
-        // If the `from` doesn't already have a mapping, just insert the
-        // new mapping to `to` and return. Otherwise add a new substitution
-        // between the old and the new `to`.
-        let old_to = match self.type_context.substitutions.entry(from) {
-            Entry::Occupied(ref mut o) => o.get().clone(),
-            Entry::Vacant(v) => {
-                v.insert(to);
-                return;
-            }
-        };
-
-        match self.get_mapping_direction(to, old_to) {
-            Ok((new_from, new_to)) => {
-                if !self.causes_loop(&new_from, &new_to) {
-                    self.insert_substitution(new_from, new_to)
-                }
-            }
-            Err(err) => self.errors.push(err),
-        };
     }
 
     // TODO: Solve infinite recursive solves when generics get implemented.
@@ -220,7 +110,7 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
                         lhs, rhs
                     ));
                     self.errors.push(err);
-                    self.type_context.constraints.remove(i);
+                    self.type_context.constraints.swap_remove(i);
                     continue;
                 }
 
@@ -229,18 +119,29 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
                         self.type_context.constraints.swap_remove(i);
                     }
 
-                    (SubResult::Solved(first), SubResult::UnSolved(second))
-                    | (SubResult::UnSolved(first), SubResult::Solved(second))
-                    | (SubResult::UnSolved(first), SubResult::UnSolved(second)) => {
-                        // The order doesn't matter(map to/from), it will be fixed
-                        // in the function that is called.
-                        self.insert_substitution(first, second);
-                        self.type_context.constraints.remove(i);
+                    (SubResult::Solved(to), SubResult::UnSolved(from))
+                    | (SubResult::UnSolved(from), SubResult::Solved(to)) => {
+                        if let Err(err) = self.type_context.insert_substitution(from, to) {
+                            self.errors.push(err)
+                        }
+                        self.type_context.constraints.swap_remove(i);
+                    }
+
+                    (SubResult::UnSolved(first), SubResult::UnSolved(second)) => {
+                        match self.type_context.get_mapping_direction(first, second) {
+                            Ok((from, to)) => {
+                                if let Err(err) = self.type_context.insert_substitution(from, to) {
+                                    self.errors.push(err)
+                                }
+                            }
+                            Err(err) => self.errors.push(err),
+                        };
+                        self.type_context.constraints.swap_remove(i);
                     }
 
                     (_, SubResult::Err(err)) | (SubResult::Err(err), _) => {
                         self.errors.push(err);
-                        self.type_context.constraints.remove(i);
+                        self.type_context.constraints.swap_remove(i);
                     }
                 }
 
@@ -312,8 +213,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     Lit::String(_) => Type::Pointer(Box::new(Type::U8)),
                     Lit::Char(_) => Type::Character,
                     Lit::Bool(_) => Type::Boolean,
-                    Lit::Integer(_, radix) => Type::UnknownInt(self.new_unknown_ident(), *radix),
-                    Lit::Float(_) => Type::UnknownFloat(self.new_unknown_ident()),
+                    Lit::Integer(_, radix) => {
+                        Type::UnknownInt(self.new_unknown_ident("int_literal"), *radix)
+                    }
+                    Lit::Float(_) => Type::UnknownFloat(self.new_unknown_ident("float_literal")),
                 };
                 *gen_ty_opt = Some(new_gen_ty);
             }
@@ -607,6 +510,44 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         };
 
         if let Some(members) = &struct_.members {
+            // Gets a map if the generics that maps the ident of the generic
+            // (ex. "T", "U" etc.) to a new unknown generic type. This is needed
+            // to ensure that two members of a struct with the same ident uses
+            // the same unknown generic type. It is also needed to ensure that
+            // different struct uses different types for the generics.
+            let unknown_generics = if let Some(gens) = &struct_.generic_params {
+                let mut map = BTreeMap::new();
+                for generic_ident in gens {
+                    let unknown_ident =
+                        self.new_unknown_ident(&format!("generic_{}", generic_ident));
+                    let gen_ty = Type::Generic(unknown_ident);
+
+                    map.insert(generic_ident.clone(), gen_ty);
+                }
+                map
+            } else {
+                BTreeMap::default()
+            };
+
+            // If this struct init is a init for a struct with generics, the
+            // return type of the init should be wrapped in a "CompoundType"
+            // with the generics attached to the return type.
+            if !unknown_generics.is_empty() {
+                match &struct_init.ret_type {
+                    Some(Type::CompoundType(..)) => {
+                        // If the type already is set to a compound, use that
+                        // already set type.
+                    }
+                    Some(_) => {
+                        struct_init.ret_type = Some(Type::CompoundType(
+                            struct_init.name.clone(),
+                            unknown_generics.clone(),
+                        ));
+                    }
+                    None => unreachable!("Ret type not set for struct init."),
+                }
+            }
+
             if members.len() != struct_init.arguments.len() {
                 let err = LangError::new(
                     format!(
@@ -663,21 +604,17 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 // Add constraints mapping the type of the struct init argument
                 // to the corresponding actual struct member type.
                 match arg.value.get_expr_type_mut() {
-                    Ok(ty) => {
+                    Ok(arg_ty) => {
                         if let Some(member) = members.get(index) {
-                            if let Some(ret_type) = &member.ret_type {
-                                // Bind init member to actual type in struct definition.
-                                self.type_context
-                                    .insert_constraint(ty.clone(), ret_type.clone());
+                            let mut member = member.clone();
 
-                                // Bind type to any array accessing of this member.
-                                self.type_context.insert_constraint(
-                                    ty.clone(),
-                                    Type::UnknownStructMember(
-                                        Box::new(Type::Custom(struct_init.name.clone())),
-                                        member.name.clone(),
-                                    ),
-                                );
+                            // Get the "actual" type of the member. If it contains
+                            // a generic, it needs to get the actual unknown
+                            // generic type from the `unknown_generics` map.
+                            // Otherwise reuse the already set type.
+                            let member_type = if let Some(member_type) = &mut member.ret_type {
+                                member_type.replace_generics_impl(&unknown_generics);
+                                member_type.clone()
                             } else {
                                 let err = LangError::new(
                                     format!(
@@ -692,7 +629,25 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                 );
                                 self.errors.push(err);
                                 return;
-                            }
+                            };
+
+                            // Bind init member to actual type in struct definition.
+                            self.type_context
+                                .insert_constraint(arg_ty.clone(), member_type);
+
+                            // Bind type of member to the struct.
+                            self.type_context.insert_constraint(
+                                arg_ty.clone(),
+                                Type::UnknownStructMember(
+                                    Box::new(
+                                        struct_init
+                                            .ret_type
+                                            .clone()
+                                            .expect("Will always be set at this point"),
+                                    ),
+                                    member.name.clone(),
+                                ),
+                            );
                         } else {
                             let err = LangError::new(
                                 format!(
@@ -734,7 +689,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let ret_ty = if let Some(ret_ty) = &array_init.ret_type {
             ret_ty.clone()
         } else {
-            let new_ty = Type::Unknown(self.new_unknown_ident());
+            let new_ty = Type::Unknown(self.new_unknown_ident("array_init"));
             array_init.ret_type = Some(new_ty.clone());
             new_ty
         };
@@ -785,7 +740,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let ret_ty = if let Some(ty) = &bin_op.ret_type {
             ty.clone()
         } else {
-            let new_type = Type::Unknown(self.new_unknown_ident());
+            let new_type = Type::Unknown(self.new_unknown_ident("bin_op"));
             bin_op.ret_type = Some(new_type.clone());
             new_type
         };
@@ -880,7 +835,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let ret_ty = if let Some(ty) = &un_op.ret_type {
             ty.clone()
         } else {
-            let new_ty = Type::Unknown(self.new_unknown_ident());
+            let new_ty = Type::Unknown(self.new_unknown_ident("un_op"));
             un_op.ret_type = Some(new_ty.clone());
             new_ty
         };
@@ -975,7 +930,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// same type. Add it as a constraint.
     fn visit_match_case(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token.token {
-            if let Some(mut match_expr) = self.cur_match_expr.clone() {
+            if let Some(match_expr) = self.cur_match_expr.clone() {
                 let match_expr_ty = match match_expr.get_expr_type() {
                     Ok(expr_ty) => expr_ty.clone(),
                     Err(err) => {
@@ -1054,7 +1009,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let new_type = if var.ret_type.is_some() {
                 var.ret_type.clone()
             } else {
-                Some(Type::Unknown(self.new_unknown_ident()))
+                Some(Type::Unknown(self.new_unknown_ident("var_decl")))
             };
 
             var.ret_type = new_type.clone();
@@ -1116,7 +1071,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             };
 
-            let int_ty = Type::UnknownInt(self.new_unknown_ident(), 10);
+            let int_ty = Type::UnknownInt(self.new_unknown_ident("increment"), 10);
 
             self.type_context.insert_constraint(expr_ty, int_ty)
         }
@@ -1132,7 +1087,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             };
 
-            let int_ty = Type::UnknownInt(self.new_unknown_ident(), 10);
+            let int_ty = Type::UnknownInt(self.new_unknown_ident("decrement"), 10);
 
             self.type_context.insert_constraint(expr_ty, int_ty)
         }
