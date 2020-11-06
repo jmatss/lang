@@ -38,7 +38,8 @@ impl Visitor for IndexingAnalyzer {
                         bin_op.lhs, &var
                     );
 
-                    let struct_access = UnOperator::StructAccess(var.name.clone(), None, None);
+                    let struct_access =
+                        UnOperator::StructAccess(var.borrow().name.clone(), None, None);
                     let un_op = UnOp::new(struct_access, bin_op.lhs.clone());
                     *expr = Expr::Op(Op::UnOp(un_op));
 

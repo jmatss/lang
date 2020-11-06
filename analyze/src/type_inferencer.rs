@@ -16,7 +16,7 @@ use common::{
     visitor::Visitor,
 };
 use log::debug;
-use std::collections::BTreeMap;
+use std::{cell::RefMut, collections::BTreeMap};
 
 // TODO: Better error messages. Ex. if two types arent't compatible,
 //       print information about where the types "came" from.
@@ -223,7 +223,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {
+    fn visit_var(&mut self, var: &mut RefMut<Var>, ctx: &TraverseContext) {
         let context_var_ty = match self
             .type_context
             .analyze_context
@@ -280,7 +280,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             } else if let Some(this_arg) = func_call.arguments.first_mut() {
                 if let Expr::Op(Op::UnOp(un_op)) = &mut this_arg.value {
                     if let UnOperator::Address = un_op.operator {
-                        match un_op.value.get_expr_type_mut() {
+                        match un_op.value.get_expr_type() {
                             Ok(struct_ty) => struct_ty.clone(),
                             Err(err) => {
                                 self.errors.push(err);
@@ -603,7 +603,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
                 // Add constraints mapping the type of the struct init argument
                 // to the corresponding actual struct member type.
-                match arg.value.get_expr_type_mut() {
+                match arg.value.get_expr_type() {
                     Ok(arg_ty) => {
                         if let Some(member) = members.get(index) {
                             let mut member = member.clone();
@@ -696,7 +696,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
         let mut arg_types = Vec::new();
         for arg in &mut array_init.arguments {
-            match arg.value.get_expr_type_mut() {
+            match arg.value.get_expr_type() {
                 Ok(arg_ty) => {
                     arg_types.push(arg_ty.clone());
                 }
@@ -745,7 +745,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             new_type
         };
 
-        let lhs_ty = match bin_op.lhs.get_expr_type_mut() {
+        let lhs_ty = match bin_op.lhs.get_expr_type() {
             Ok(lhs_ty) => lhs_ty.clone(),
             Err(err) => {
                 self.errors.push(err);
@@ -753,7 +753,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
         };
 
-        let rhs_ty = match bin_op.rhs.get_expr_type_mut() {
+        let rhs_ty = match bin_op.rhs.get_expr_type() {
             Ok(rhs_ty) => rhs_ty.clone(),
             Err(err) => {
                 self.errors.push(err);
@@ -840,7 +840,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             new_ty
         };
 
-        let val_ty = match un_op.value.get_expr_type_mut() {
+        let val_ty = match un_op.value.get_expr_type() {
             Ok(rhs_ty) => rhs_ty.clone(),
             Err(err) => {
                 self.errors.push(err);
@@ -880,7 +880,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// can access the types of the parameters and the return type of the func.
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Function(func), ..) = &ast_token.token {
-            self.cur_func = Some(func.clone());
+            self.cur_func = Some(func.borrow().clone());
         }
     }
 
@@ -895,7 +895,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     Type::Void
                 };
 
-                let expr_ty = match self.type_context.get_expr_type_opt(expr_opt.as_mut()) {
+                let expr_ty = match self.type_context.get_expr_type(expr_opt.as_ref()) {
                     Ok(expr_ty) => expr_ty,
                     Err(err) => {
                         self.errors.push(err);
@@ -903,8 +903,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     }
                 };
 
-                self.type_context
-                    .insert_constraint(func_ret_ty, expr_ty.clone());
+                self.type_context.insert_constraint(func_ret_ty, expr_ty);
             } else {
                 let err = self
                     .type_context
@@ -990,9 +989,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// should also have the same type. Add as constraints.
     fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
         if let Stmt::VariableDecl(var, expr_opt) = stmt {
+            let mut var = var.borrow_mut();
+            let var_name = var.name.clone();
+
             // No way to do type inference of rhs on var decl with no init value.
             let rhs_ty_opt = if expr_opt.is_some() {
-                match self.type_context.get_expr_type_opt(expr_opt.as_mut()) {
+                match self.type_context.get_expr_type(expr_opt.as_ref()) {
                     Ok(rhs_ty) => Some(rhs_ty),
                     Err(err) => {
                         self.errors.push(err);
@@ -1025,7 +1027,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let context_var_ty = match self
                 .type_context
                 .analyze_context
-                .get_var(&var.name, ctx.block_id)
+                .get_var(&var_name, ctx.block_id)
             {
                 Ok(context_var) => {
                     context_var.ret_type = new_type;

@@ -41,6 +41,7 @@ impl<'a> Visitor for DeclVarAnalyzer<'a> {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
         if let Stmt::VariableDecl(var, _) = stmt {
+            let var = var.borrow();
             let key = (var.name.clone(), ctx.block_id);
 
             if let Entry::Vacant(v) = analyze_context.variables.entry(key) {

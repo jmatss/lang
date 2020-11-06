@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::cell::RefCell;
 
 use super::{
     expr::{Expr, Var},
@@ -12,10 +12,10 @@ pub enum BlockHeader {
     //  So that they can return values and be used in sub expressions.
     // Default == None, i.e. if there are no current block. Ex. at the start of a file.
     Default,
-    Function(Function),
-    Struct(Struct),
-    Enum(Enum),
-    Interface(Interface),
+    Function(RefCell<Function>),
+    Struct(RefCell<Struct>),
+    Enum(RefCell<Enum>),
+    Interface(RefCell<Interface>),
 
     /// The string is the name of the structure that this impl block implements
     /// and the body of this block will contain the functions.
@@ -78,7 +78,7 @@ pub enum BlockHeader {
     Match(Expr),
     MatchCase(Expr),
 
-    For(Var, Expr),
+    For(RefCell<Var>, Expr),
     // TODO: Maybe merge while and loop (?)
     While(Option<Expr>),
 

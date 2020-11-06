@@ -23,7 +23,7 @@ use inkwell::{
     AddressSpace,
 };
 use log::{debug, warn};
-use std::collections::HashMap;
+use std::{cell::Ref, collections::HashMap};
 
 use crate::expr::ExprTy;
 
@@ -186,7 +186,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             match header {
                 BlockHeader::Struct(struct_) => {
                     warn!("Compiling struct: {:#?}", struct_);
-                    self.compile_struct(struct_)?;
+                    self.compile_struct(&struct_.borrow())?;
                 }
                 BlockHeader::Enum(enum_) => {
                     panic!("TODO: Enum");
@@ -221,7 +221,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             match header {
                 BlockHeader::Function(func) => {
                     let linkage = Linkage::External;
-                    self.compile_func_proto(func, Some(linkage))?;
+                    self.compile_func_proto(&func.borrow(), Some(linkage))?;
                 }
                 BlockHeader::Implement(struct_name) => {
                     for ast_token in body.iter_mut() {
@@ -233,8 +233,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             // this specific method. This will be done when compiling
                             // the method call.
                             let linkage = Linkage::External;
-                            func.name = common::util::to_method_name(struct_name, &func.name);
-                            self.compile_func_proto(func, Some(linkage))?;
+                            func.borrow_mut().name =
+                                common::util::to_method_name(struct_name, &func.borrow().name);
+                            self.compile_func_proto(&func.borrow(), Some(linkage))?;
                         }
                     }
                 }
@@ -296,7 +297,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile_var_decl(&mut self, var: &Var) -> CustomResult<()> {
+    pub(super) fn compile_var_decl(&mut self, var: &Ref<Var>) -> CustomResult<()> {
         let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
@@ -327,7 +328,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub(super) fn compile_var_store(
         &mut self,
-        var: &mut Var,
+        var: &Ref<Var>,
         basic_value: BasicValueEnum<'ctx>,
     ) -> CustomResult<InstructionValue<'ctx>> {
         debug!(
@@ -352,7 +353,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(self.builder.build_store(ptr, basic_value))
     }
 
-    pub(super) fn compile_var_load(&mut self, var: &Var) -> CustomResult<BasicValueEnum<'ctx>> {
+    pub(super) fn compile_var_load(
+        &mut self,
+        var: &Ref<Var>,
+    ) -> CustomResult<BasicValueEnum<'ctx>> {
         if var.is_const {
             self.get_const_value(var)
         } else {
@@ -381,7 +385,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(crate) fn get_var_ptr(&mut self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
+    pub(crate) fn get_var_ptr(&mut self, var: &Ref<Var>) -> CustomResult<PointerValue<'ctx>> {
         let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context

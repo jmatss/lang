@@ -14,7 +14,7 @@ use common::{
     BlockId,
 };
 use std::{
-    cell::RefCell,
+    cell::{RefCell, RefMut},
     collections::{hash_map::Entry, HashMap},
 };
 
@@ -34,7 +34,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
         }
     }
 
-    fn analyze_func_header(&mut self, func: &Function, func_id: BlockId) {
+    fn analyze_func_header(&mut self, func: &mut RefMut<Function>, func_id: BlockId) {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
         // Add the function in the scope of its root parent (`root_parent_id`).
@@ -119,7 +119,12 @@ impl<'a> DeclFuncAnalyzer<'a> {
         }
     }
 
-    fn analyze_method_header(&mut self, struct_name: &str, func: &mut Function, func_id: BlockId) {
+    fn analyze_method_header(
+        &mut self,
+        struct_name: &str,
+        func: &mut RefMut<Function>,
+        func_id: BlockId,
+    ) {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
         // Add the methods in the scope of the structs root parent.
@@ -208,7 +213,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
 
             for body_token in body {
                 if let Token::Block(BlockHeader::Function(func), ..) = &mut body_token.token {
-                    func.method_struct = Some(struct_name.clone());
+                    func.borrow_mut().method_struct = Some(struct_name.clone());
                 } else {
                     let err = analyze_context.err(format!(
                         "AST token in impl block with name \"{}\" not a function: {:?}",
@@ -222,10 +227,11 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
 
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Function(func), func_id, ..) = &mut ast_token.token {
+            let mut func = func.borrow_mut();
             if let Some(struct_name) = func.method_struct.clone() {
-                self.analyze_method_header(&struct_name, func, *func_id);
+                self.analyze_method_header(&struct_name, &mut func, *func_id);
             } else {
-                self.analyze_func_header(func, *func_id);
+                self.analyze_func_header(&mut func, *func_id);
             }
         }
     }
@@ -239,6 +245,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
             //       declarations of a function that they have the same
             //       parameters & return type.
             // External declarations should always be in the default block.
+            let func = func.borrow();
             let key = (func.name.clone(), 0);
             analyze_context.functions.insert(key, func.clone());
         }

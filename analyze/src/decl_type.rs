@@ -42,6 +42,8 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
         if let Token::Block(BlockHeader::Struct(struct_), struct_id, ..) = &ast_token.token {
+            let struct_ = struct_.borrow();
+
             // Add the struct in the scope of its root parent (`root_parent_id`).
             let root_parent_id = match analyze_context.get_next_root_parent(*struct_id) {
                 Ok(id) => id,
@@ -72,6 +74,8 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
         if let Token::Block(BlockHeader::Enum(enum_), enum_id, ..) = &ast_token.token {
+            let enum_ = enum_.borrow();
+
             // Add the enum in the scope of its root parent (`root_parent_id`).
             let root_parent_id = match analyze_context.get_next_root_parent(*enum_id) {
                 Ok(id) => id,
@@ -103,6 +107,8 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
 
         if let Token::Block(BlockHeader::Interface(interface), interface_id, ..) = &ast_token.token
         {
+            let interface = interface.borrow();
+
             // Add the interface in the scope of its root parent (`root_parent_id`).
             let root_parent_id = match analyze_context.get_next_root_parent(*interface_id) {
                 Ok(id) => id,

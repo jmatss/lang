@@ -1,3 +1,5 @@
+use std::cell::Ref;
+
 use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
@@ -88,7 +90,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
             BlockHeader::Function(func) => {
-                self.compile_func(func, id, body)?;
+                self.compile_func(&func.borrow(), id, body)?;
             }
             BlockHeader::Implement(_) => {
                 for ast_token in body {
@@ -97,7 +99,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     {
                         // The method will already have been renamed to be prefixed
                         // with the struct name, so no need to do it here.
-                        self.compile_func(func, *func_id, func_body)?;
+                        self.compile_func(&func.borrow(), *func_id, func_body)?;
                     }
                 }
             }
@@ -150,7 +152,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_func(
         &mut self,
-        func: &Function,
+        func: &Ref<Function>,
         func_id: BlockId,
         body: &mut [AstToken],
     ) -> CustomResult<()> {
@@ -225,7 +227,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// Compoles a function prototype.
     pub(super) fn compile_func_proto(
         &self,
-        func: &Function,
+        func: &Ref<Function>,
         linkage_opt: Option<Linkage>,
     ) -> CustomResult<FunctionValue<'ctx>> {
         let param_types = if let Some(params) = &func.parameters {
@@ -466,7 +468,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile_struct(&mut self, struct_: &Struct) -> CustomResult<()> {
+    pub(super) fn compile_struct(&mut self, struct_: &Ref<Struct>) -> CustomResult<()> {
         // Go through all members of the struct and create a vector containing
         // all their types.
         let member_types = if let Some(members) = &struct_.members {

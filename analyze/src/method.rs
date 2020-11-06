@@ -45,7 +45,7 @@ impl<'a> MethodAnalyzer<'a> {
     fn analyze_expr(&mut self, expr: &mut Expr) {
         match expr {
             Expr::Var(var) => {
-                if var.name == THIS_VAR_NAME {
+                if var.borrow().name == THIS_VAR_NAME {
                     let new_expr = Expr::Op(Op::UnOp(UnOp::new(
                         UnOperator::Deref,
                         Box::new(expr.clone()),

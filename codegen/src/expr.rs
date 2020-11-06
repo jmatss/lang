@@ -70,8 +70,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 })
             }
             Expr::Var(var) => match expr_ty {
-                ExprTy::LValue => self.get_var_ptr(var).map(|x| x.into()),
-                ExprTy::RValue => self.compile_var_load(var).map(|x| x.into()),
+                ExprTy::LValue => self.get_var_ptr(&var.borrow()).map(|x| x.into()),
+                ExprTy::RValue => self.compile_var_load(&var.borrow()).map(|x| x.into()),
             },
         }?;
 

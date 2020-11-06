@@ -726,12 +726,9 @@ impl<'a> TypeContext<'a> {
         }
     }
 
-    pub fn get_expr_type_opt<'b>(
-        &self,
-        expr_opt: Option<&'b mut Expr>,
-    ) -> CustomResult<&'b mut Type> {
+    pub fn get_expr_type(&self, expr_opt: Option<&Expr>) -> CustomResult<Type> {
         if let Some(expr) = expr_opt {
-            expr.get_expr_type_mut()
+            expr.get_expr_type()
         } else {
             Err(LangError::new(
                 "expr opt set to None.".into(),

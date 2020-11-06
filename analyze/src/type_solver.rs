@@ -1,4 +1,7 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    cell::RefMut,
+    collections::{hash_map::Entry, HashMap},
+};
 
 use crate::type_context::{SubResult, TypeContext};
 use common::{
@@ -8,6 +11,7 @@ use common::{
         ast::AstToken,
         block::Struct,
         expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
+        op::Op,
         op::{BinOp, UnOp},
         stmt::Stmt,
     },
@@ -100,7 +104,7 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    fn visit_var(&mut self, var: &mut Var, _ctx: &TraverseContext) {
+    fn visit_var(&mut self, var: &mut RefMut<Var>, _ctx: &TraverseContext) {
         if let Some(ty) = &mut var.ret_type {
             self.subtitute_type(ty, true);
         } else {
@@ -122,7 +126,7 @@ impl<'a> Visitor for TypeSolver<'a> {
                     .first_mut()
                     .filter(|arg| arg.name == Some("this".into()))
                 {
-                    match this_arg.value.get_expr_type_mut() {
+                    match this_arg.value.get_expr_type() {
                         Ok(Type::Pointer(struct_ty)) => {
                             if let Type::Custom(struct_name) = struct_ty.as_ref() {
                                 func_call.method_struct = Some(struct_name.clone());
@@ -274,10 +278,10 @@ impl<'a> Visitor for TypeSolver<'a> {
         if let UnOperator::StructAccess(member_name, member_idx, member_ty) = &mut un_op.operator {
             *member_ty = un_op.ret_type.clone();
 
-            match un_op.value.get_expr_type_mut() {
+            match un_op.value.get_expr_type() {
                 Ok(Type::Custom(struct_name)) | Ok(Type::CompoundType(struct_name, ..)) => {
                     match self.type_context.analyze_context.get_struct_member_index(
-                        struct_name,
+                        &struct_name,
                         member_name,
                         ctx.block_id,
                     ) {
@@ -307,30 +311,19 @@ impl<'a> Visitor for TypeSolver<'a> {
     //       type updated as well.
     fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
         if let Stmt::VariableDecl(var, expr_opt) = stmt {
+            let mut var = var.borrow_mut();
+
             // Update type for rhs of var decl if it exists.
-            if expr_opt.is_some() {
-                match self.type_context.get_expr_type_opt(expr_opt.as_mut()) {
-                    Ok(expr_ty) => match self.type_context.get_substitution(expr_ty, true) {
-                        SubResult::Solved(sub_ty) => {
-                            *expr_ty = sub_ty;
-                        }
-                        SubResult::UnSolved(un_sub_ty) => {
-                            let err = self.type_context.analyze_context.err(format!(
-                                "Unable to resolve type {:?} for rhs of var decl: {:?}. Got back unsolved type: {:?}.",
-                                expr_ty, var, un_sub_ty
-                            ));
-                            self.errors.push(err);
-                            return;
-                        }
-                        SubResult::Err(err) => {
-                            self.errors.push(err);
-                            return;
-                        }
-                    },
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
+            if let Some(expr) = expr_opt {
+                match expr {
+                    Expr::Lit(..) => self.visit_lit(expr, ctx),
+                    Expr::Type(_) => self.visit_expr(expr, ctx),
+                    Expr::Var(var) => self.visit_var(&mut var.borrow_mut(), ctx),
+                    Expr::FuncCall(func_call) => self.visit_func_call(func_call, ctx),
+                    Expr::StructInit(struct_init) => self.visit_struct_init(struct_init, ctx),
+                    Expr::ArrayInit(array_init) => self.visit_array_init(array_init, ctx),
+                    Expr::Op(Op::BinOp(bin_op)) => self.visit_bin_op(bin_op, ctx),
+                    Expr::Op(Op::UnOp(un_op)) => self.visit_un_op(un_op, ctx),
                 }
             }
 
@@ -396,7 +389,7 @@ impl<'a> Visitor for TypeSolver<'a> {
                             return;
                         }
                         SubResult::Err(mut err) => {
-                            err.msg.push_str(&format!(" -- {:#?}.", stmt));
+                            err.msg.push_str(&format!(" -- {:#?}.", "TODO: Remove."));
                             self.errors.push(err);
                             return;
                         }
