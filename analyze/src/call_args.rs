@@ -166,26 +166,18 @@ impl<'a> Visitor for CallArgs<'a> {
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
         let analyze_context = self.analyze_context.borrow();
 
-        let func = if let Some(struct_name) = &func_call.method_struct {
-            // Get function if this is a struct method.
-            match analyze_context.get_struct_method(struct_name, &func_call.name, ctx.block_id) {
-                Ok(func) => func,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            }
+        // If this is a function contained in a struct (method), one needs to
+        // make sure to fetch it as a method since they are stored differently
+        // compared to a regular function.
+        let func_res = if let Some(struct_name) = &func_call.method_struct {
+            analyze_context.get_method(struct_name, &func_call.name, ctx.block_id)
         } else {
-            // Get function if this is a regular stand-alone function.
-            let parent_id = 0;
-            let key = (func_call.name.clone(), parent_id);
-            if let Some(func) = analyze_context.functions.get(&key) {
-                func
-            } else {
-                let err = analyze_context.err(format!(
-                    "Unable to find function \"{}\" in block id {}.",
-                    &func_call.name, parent_id
-                ));
+            analyze_context.get_func(&func_call.name, ctx.block_id)
+        };
+
+        let func = match func_res {
+            Ok(func) => func,
+            Err(err) => {
                 self.errors.push(err);
                 return;
             }

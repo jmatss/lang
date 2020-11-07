@@ -30,6 +30,7 @@ use decl_type::DeclTypeAnalyzer;
 use decl_var::DeclVarAnalyzer;
 use defer::DeferAnalyzer;
 use indexing::IndexingAnalyzer;
+use log::debug;
 use method::MethodAnalyzer;
 use std::{cell::RefCell, collections::HashMap};
 use type_context::TypeContext;
@@ -176,6 +177,9 @@ pub struct BlockInfo {
 }
 
 impl BlockInfo {
+    /// The block id given to the default block.
+    const DEFAULT_BLOCK_ID: BlockId = 0;
+
     pub fn new(block_id: BlockId, is_root_block: bool, is_branchable_block: bool) -> Self {
         Self {
             block_id,
@@ -194,27 +198,27 @@ impl BlockInfo {
 
 #[derive(Debug)]
 pub struct AnalyzeContext {
-    /// Contains all ... that have been seen traversing down to this part of the code.
-    /// The BlockId represent the outer scope for a item. For variables it will
-    /// be the scope in which they are declared in and for the rest the BlockId
-    /// will be their first root parent traversing upwards.
-    pub variables: HashMap<(String, BlockId), Var>,
-    pub functions: HashMap<(String, BlockId), Function>,
-    pub structs: HashMap<(String, BlockId), Struct>,
-    pub enums: HashMap<(String, BlockId), Enum>,
-    pub interfaces: HashMap<(String, BlockId), Interface>,
+    /// Contains all declarations that have been seen traversing down to this
+    /// part of the code. The BlockId represent the outer scope for a item.
+    /// For variables it will be the scope in which they are declared in and for
+    /// the rest, the BlockId will be the parent block.
+    variables: HashMap<(String, BlockId), *mut Var>,
+    functions: HashMap<(String, BlockId), *mut Function>,
+    structs: HashMap<(String, BlockId), *mut Struct>,
+    enums: HashMap<(String, BlockId), *mut Enum>,
+    interfaces: HashMap<(String, BlockId), *mut Interface>,
     /// A `methods` entry should have a corresponding struct in `structs` with
     /// the same key. The string in the outer map key is the name of the struct
     /// and the string in the inner map is the name of the method.
-    pub methods: HashMap<(String, BlockId), HashMap<String, Function>>,
+    methods: HashMap<(String, BlockId), HashMap<String, *mut Function>>,
 
     pub block_info: HashMap<BlockId, BlockInfo>,
     pub use_paths: Vec<Path>,
 
     /// The line/column where the `analyzer` currently is. When the analyzing is
     /// done, these variable will not be used and will be invalid.
-    pub cur_line_nr: u64,
-    pub cur_column_nr: u64,
+    pub line_nr: u64,
+    pub column_nr: u64,
 }
 
 impl Default for AnalyzeContext {
@@ -236,175 +240,233 @@ impl AnalyzeContext {
             block_info: HashMap::default(),
             use_paths: Vec::default(),
 
-            cur_line_nr: 0,
-            cur_column_nr: 0,
+            line_nr: 0,
+            column_nr: 0,
         }
     }
 
-    /// Given a name of a variable `ident` and a block scope `id`, returns
-    /// the variable that this combination represents in the `analyze context`.
-    pub fn get_var(&mut self, ident: &str, id: BlockId) -> CustomResult<&mut Var> {
-        let decl_block_id = self.get_var_decl_scope(ident, id)?;
-        let key = (ident.into(), decl_block_id);
+    pub fn debug_print(&self) {
+        debug!("Variables:\n{:#?}", self.variables);
+        debug!("Functions:\n{:#?}", self.functions);
+        debug!("Structs:\n{:#?}", self.structs);
+        debug!("Enums:\n{:#?}", self.enums);
+        debug!("Interfaces:\n{:#?}", self.interfaces);
+        debug!("Methods:\n{:#?}", self.methods);
+        debug!("Block info:\n{:#?}", self.block_info);
+    }
 
-        if let Some(context_var) = self.variables.get_mut(&key) {
-            return Ok(context_var);
+    /// Returns the block ID for the block with ID `id`.
+    pub fn get_parent(&self, id: BlockId) -> CustomResult<BlockId> {
+        if let Some(block_info) = self.block_info.get(&id) {
+            Ok(block_info.parent_id)
+        } else {
+            Err(self.err(format!(
+                "Unable to find block info for block with id: {}",
+                id
+            )))
         }
+    }
 
-        Err(LangError::new(
-            format!(
-                "Unable to find var with name \"{}\" in decl block ID {}.",
-                ident, decl_block_id
-            ),
-            AnalyzeError {
-                line_nr: 0,
-                column_nr: 0,
-            },
-        ))
+    /// Given a name of a declaration `ident` and a block scope `id`, returns
+    /// the block in which the sought after declaration was declared.
+    ///
+    // TODO: Is `stop_at_root` even needed? In which cases is it needed to stop
+    //       stop at the first root block? Can there be sted functions?
+    /// `stop_at_root` indicates if the search should stop once the first root
+    /// block is found. This should be used for ex. variables so that only the
+    /// variables with the name `ident` in the current scope is considered and
+    /// not any parent scopes.
+    fn get_decl_scope<T>(
+        &self,
+        ident: &str,
+        id: BlockId,
+        map: &HashMap<(String, BlockId), T>,
+    ) -> CustomResult<BlockId> {
+        if map.get(&(ident.into(), id)).is_some() {
+            Ok(id)
+        } else if id == BlockInfo::DEFAULT_BLOCK_ID {
+            Err(self.err(format!(
+                "Unable to find decl for \"{}\", ended in up root block.",
+                ident
+            )))
+        } else {
+            // Unable to find declaration in the current block scope. See
+            // recursively if the declaration exists in a parent scope.
+            let parent_id = self.get_parent(id)?;
+
+            if id != parent_id {
+                self.get_decl_scope(ident, parent_id, map)
+            } else {
+                Err(self.err(format!(
+                    "Block with id {} is its own parent in block info.",
+                    id
+                )))
+            }
+        }
     }
 
     /// Given a name of a variable `ident` and a block scope `id`, returns
     /// the block in which the sought after variable was declared.
     pub fn get_var_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
-        if self.variables.get(&(ident.into(), id)).is_some() {
-            Ok(id)
+        self.get_decl_scope(ident, id, &self.variables)
+    }
+
+    /// Given a name of a function `ident` and a block scope `id`, returns
+    /// the block in which the sought after function was declared.
+    pub fn get_func_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
+        self.get_decl_scope(ident, id, &self.functions)
+    }
+
+    /// Given a name of a struct `ident` and a block scope `id`, returns
+    /// the block in which the sought after struct was declared.
+    pub fn get_struct_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
+        self.get_decl_scope(ident, id, &self.structs)
+    }
+
+    /// Given a name of a enum `ident` and a block scope `id`, returns
+    /// the block in which the sought after enum was declared.
+    pub fn get_enum_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
+        self.get_decl_scope(ident, id, &self.enums)
+    }
+
+    /// Given a name of a interface `ident` and a block scope `id`, returns
+    /// the block in which the sought after interface was declared.
+    pub fn get_interface_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
+        self.get_decl_scope(ident, id, &self.interfaces)
+    }
+
+    /// Given a name of a declaration `ident` and the block in which this
+    /// declaration was declared, `decl_block_id`, returns a mutable reference
+    /// to the declaration in the AST.
+    fn get_mut<T>(
+        &self,
+        ident: &str,
+        decl_block_id: BlockId,
+        map: &HashMap<(String, BlockId), *mut T>,
+    ) -> CustomResult<&mut T> {
+        let key = (ident.into(), decl_block_id);
+
+        if let Some(ptr) = map.get(&key) {
+            if let Some(ref_) = unsafe { ptr.as_mut() } {
+                Ok(ref_)
+            } else {
+                panic!(
+                    "Invalid pointer to decl with name \"{}\" in decl block ID {}.",
+                    ident, decl_block_id
+                );
+            }
         } else {
-            // Unable to find variable in the current block scope. If this block
-            // isn't a "root" block i.e. it has a parent scope, see recursively
-            // if the variable exists in a parent scope.
-            if let Some(block_info) = self.block_info.get(&id) {
-                // TODO: How should this work for the default block?
-                if id == block_info.parent_id {
-                    Err(LangError::new(
-                        format!("Block with id {} is its own parent in block info.", id),
-                        AnalyzeError {
-                            line_nr: self.cur_line_nr,
-                            column_nr: self.cur_column_nr,
-                        },
-                    ))
-                } else if !block_info.is_root_block {
-                    self.get_var_decl_scope(ident, block_info.parent_id)
+            Err(self.err(format!(
+                "Unable to find decl with name \"{}\" in decl block ID {}.",
+                ident, decl_block_id
+            )))
+        }
+    }
+
+    /// Given a name of a variable `ident` and a block scope `id`, returns
+    /// a reference to the declaration in the AST.
+    pub fn get_var(&self, ident: &str, id: BlockId) -> CustomResult<&Var> {
+        Ok(self.get_var_mut(ident, id)?)
+    }
+
+    /// Given a name of a variable `ident` and a block scope `id`, returns
+    /// a mutable reference to the declaration in the AST.
+    pub fn get_var_mut(&self, ident: &str, id: BlockId) -> CustomResult<&mut Var> {
+        let decl_block_id = self.get_var_decl_scope(ident, id)?;
+        self.get_mut(ident, decl_block_id, &self.variables)
+    }
+
+    /// Given a name of a function `ident` and a block scope `id`, returns
+    /// a reference to the declaration in the AST.
+    pub fn get_func(&self, ident: &str, id: BlockId) -> CustomResult<&Function> {
+        Ok(self.get_func_mut(ident, id)?)
+    }
+
+    /// Given a name of a function `ident` and a block scope `id`, returns
+    /// a mutable reference to the declaration in the AST.
+    pub fn get_func_mut(&self, ident: &str, id: BlockId) -> CustomResult<&mut Function> {
+        let decl_block_id = self.get_func_decl_scope(ident, id)?;
+        self.get_mut(ident, decl_block_id, &self.functions)
+    }
+
+    /// Given a name of a struct `ident` and a block scope `id`, returns
+    /// a reference to the declaration in the AST.
+    pub fn get_struct(&self, ident: &str, id: BlockId) -> CustomResult<&Struct> {
+        Ok(self.get_struct_mut(ident, id)?)
+    }
+
+    /// Given a name of a struct `ident` and a block scope `id`, returns
+    /// a mutable reference to the declaration in the AST.
+    pub fn get_struct_mut(&self, ident: &str, id: BlockId) -> CustomResult<&mut Struct> {
+        let decl_block_id = self.get_struct_decl_scope(ident, id)?;
+        self.get_mut(ident, decl_block_id, &self.structs)
+    }
+
+    /// Given a name of a enum `ident` and a block scope `id`, returns
+    /// a reference to the declaration in the AST.
+    pub fn get_enum(&self, ident: &str, id: BlockId) -> CustomResult<&Enum> {
+        Ok(self.get_enum_mut(ident, id)?)
+    }
+
+    /// Given a name of a enum `ident` and a block scope `id`, returns
+    /// a mutable reference to the declaration in the AST.
+    pub fn get_enum_mut(&self, ident: &str, id: BlockId) -> CustomResult<&mut Enum> {
+        let decl_block_id = self.get_enum_decl_scope(ident, id)?;
+        self.get_mut(ident, decl_block_id, &self.enums)
+    }
+
+    /// Given a name of a interface `ident` and a block scope `id`, returns
+    /// a reference to the declaration in the AST.
+    pub fn get_interface(&self, ident: &str, id: BlockId) -> CustomResult<&Interface> {
+        Ok(self.get_interface_mut(ident, id)?)
+    }
+
+    /// Given a name of a interface `ident` and a block scope `id`, returns
+    /// a mutable reference to the declaration in the AST.
+    pub fn get_interface_mut(&self, ident: &str, id: BlockId) -> CustomResult<&mut Interface> {
+        let decl_block_id = self.get_interface_decl_scope(ident, id)?;
+        self.get_mut(ident, decl_block_id, &self.interfaces)
+    }
+
+    /// Given a name of a struct `struct_`, a name of a method `func` and a
+    /// block scope `id`, returns a reference to the declaration in the AST.
+    pub fn get_method(&self, struct_: &str, func: &str, id: BlockId) -> CustomResult<&Function> {
+        Ok(self.get_method_mut(struct_, func, id)?)
+    }
+
+    /// Given a name of a struct `struct_`, a name of a method `func` and a
+    /// block scope `id`, returns a reference mutable to the declaration in
+    /// the AST.
+    pub fn get_method_mut(
+        &self,
+        struct_: &str,
+        func: &str,
+        id: BlockId,
+    ) -> CustomResult<&mut Function> {
+        let decl_block_id = self.get_struct_decl_scope(struct_, id)?;
+        let key = (struct_.into(), decl_block_id);
+
+        if let Some(methods) = self.methods.get(&key) {
+            if let Some(ptr) = methods.get(func) {
+                if let Some(ref_) = unsafe { ptr.as_mut() } {
+                    Ok(ref_)
                 } else {
-                    Err(LangError::new(
-                        format!(
-                            "Unable to find var decl for \"{}\" in scope of root block {}.",
-                            ident, id
-                        ),
-                        AnalyzeError {
-                            line_nr: self.cur_line_nr,
-                            column_nr: self.cur_column_nr,
-                        },
-                    ))
+                    panic!(
+                        "Invalid pointer to method with name \"{}\" in struct {}.",
+                        &func, &struct_
+                    );
                 }
             } else {
-                Err(LangError::new(
-                    format!(
-                        "Unable to get var decl block info for block with id: {}",
-                        id
-                    ),
-                    AnalyzeError {
-                        line_nr: self.cur_line_nr,
-                        column_nr: self.cur_column_nr,
-                    },
-                ))
+                Err(self.err(format!(
+                    "Unable to find method named \"{}\" in struct \"{}\".",
+                    &func, &struct_,
+                )))
             }
-        }
-    }
-
-    /// Finds root parent BlockId containing the struct with name `ident` in a
-    /// scope containing the block with BlockId `id`.
-    pub fn get_struct_parent_id(&self, ident: String, id: BlockId) -> CustomResult<BlockId> {
-        let mut cur_id = id;
-
-        while let Some(block_info) = self.block_info.get(&cur_id) {
-            let key = (ident.clone(), cur_id);
-            if self.structs.contains_key(&key) {
-                return Ok(cur_id);
-            }
-            cur_id = block_info.parent_id;
-        }
-
-        Err(LangError::new(
-            format!(
-                "Unable to get struct \"{}\" block info for block with id: {}, ended at ID: {}.",
-                &ident, &id, &cur_id
-            ),
-            AnalyzeError {
-                line_nr: self.cur_line_nr,
-                column_nr: self.cur_column_nr,
-            },
-        ))
-    }
-
-    /// Given a block id `id`, returns the ID for the first root block
-    /// "surounding" the `id` block. Example: For a if-statement, the root block
-    /// will be the function containing the if-statement.
-    pub fn get_root_parent(&self, id: BlockId) -> CustomResult<BlockId> {
-        let mut cur_id = id;
-
-        while let Some(block_info) = self.block_info.get(&cur_id) {
-            // If this is a root block, return the ID; otherwise continue the loop.
-            if block_info.is_root_block {
-                return Ok(cur_id);
-            } else {
-                cur_id = block_info.parent_id;
-            }
-        }
-
-        Err(LangError::new(
-            format!(
-                "Unable to get root block info for block with id {}, ended at block ID: {}.",
-                &id, &cur_id
-            ),
-            AnalyzeError {
-                line_nr: self.cur_line_nr,
-                column_nr: self.cur_column_nr,
-            },
-        ))
-    }
-
-    /// Given a block id `id`, returns the ID for the first root block
-    /// "surounding" the `id` block. This function will NOT consider the
-    /// current block with ID `id` a root block, it will look for its first
-    /// parent instead.
-    pub fn get_next_root_parent(&self, id: BlockId) -> CustomResult<BlockId> {
-        // Get the parent id before the main loop so that the given `id` is
-        // never tried to be a root block which it can be. But we are not
-        // interested of this block, only its parents.
-        let parent_id = if let Some(block_info) = self.block_info.get(&id) {
-            block_info.parent_id
         } else {
-            return Err(LangError::new(
-                format!("The given block id doesn't have a parent: {}", id),
-                AnalyzeError {
-                    line_nr: self.cur_line_nr,
-                    column_nr: self.cur_column_nr,
-                },
-            ));
-        };
-
-        self.get_root_parent(parent_id)
-    }
-
-    /// Finds the struct with the name `struct_name` in a scope containing the block
-    /// with ID `id`. The struct can ex. be declared in parent block scope.
-    pub fn get_struct(&self, struct_name: &str, id: BlockId) -> CustomResult<&Struct> {
-        let parent_block_id = self.get_struct_parent_id(struct_name.into(), id)?;
-        let key = (struct_name.into(), parent_block_id);
-
-        if let Some(struct_) = self.structs.get(&key) {
-            Ok(struct_)
-        } else {
-            Err(LangError::new(
-                format!(
-                    "Unable to find struct with name \"{}\" with child block ID {}.",
-                    &struct_name, id
-                ),
-                AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            ))
+            Err(self.err(format!(
+                "Unable to find struct named \"{}\" declared in block {}.",
+                &struct_, &decl_block_id
+            )))
         }
     }
 
@@ -422,28 +484,16 @@ impl AnalyzeContext {
             if let Some(var) = members.iter().find(|member| member.name == member_name) {
                 Ok(var)
             } else {
-                Err(LangError::new(
-                    format!(
-                        "Unable to find member with name \"{}\" in struct \"{}\".",
-                        &member_name, &struct_name
-                    ),
-                    AnalyzeError {
-                        line_nr: 0,
-                        column_nr: 0,
-                    },
-                ))
+                Err(self.err(format!(
+                    "Unable to find member with name \"{}\" in struct \"{}\".",
+                    &member_name, &struct_name
+                )))
             }
         } else {
-            Err(LangError::new(
-                format!(
-                    "Struct \"{}\" has no members but tried to access member \"{:?}\".",
-                    &struct_name, &member_name
-                ),
-                AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            ))
+            Err(self.err(format!(
+                "Struct \"{}\" has no members but tried to access member \"{:?}\".",
+                &struct_name, &member_name
+            )))
         }
     }
 
@@ -458,79 +508,21 @@ impl AnalyzeContext {
     ) -> CustomResult<u64> {
         let struct_ = self.get_struct(struct_name, id)?;
         if let Some(members) = &struct_.members {
-            let mut idx = 0;
-            for member in members.iter() {
+            for (idx, member) in members.iter().enumerate() {
                 if member_name == member.name {
-                    return Ok(idx);
+                    return Ok(idx as u64);
                 }
-                idx += 1;
             }
 
-            Err(LangError::new(
-                format!(
-                    "Unable to find member with name \"{}\" in struct \"{}\".",
-                    &member_name, &struct_name
-                ),
-                AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            ))
+            Err(self.err(format!(
+                "Unable to find member with name \"{}\" in struct \"{}\".",
+                &member_name, &struct_name
+            )))
         } else {
-            Err(LangError::new(
-                format!(
-                    "Struct \"{}\" has no members but tried to access member \"{:?}\".",
-                    &struct_name, &member_name
-                ),
-                AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            ))
-        }
-    }
-
-    /// Finds the struct with the name `struct_name` in a scope containing the block
-    /// with ID `id` and returns the method with name `method_name`.
-    /// The struct can ex. be declared in parent block scope.
-    pub fn get_struct_method(
-        &self,
-        struct_name: &str,
-        method_name: &str,
-        id: BlockId,
-    ) -> CustomResult<&Function> {
-        let struct_parent_id = match self.get_struct_parent_id(struct_name.into(), id) {
-            Ok(id) => id,
-            Err(err) => return Err(err),
-        };
-
-        let key = (struct_name.into(), struct_parent_id);
-        if let Some(struct_methods) = self.methods.get(&key) {
-            if let Some(method) = struct_methods.get(method_name) {
-                Ok(method)
-            } else {
-                Err(LangError::new(
-                    format!(
-                        "Unable to find method \"{}\" in struct \"{}\" with parent ID {}.",
-                        &method_name, &struct_name, &id
-                    ),
-                    AnalyzeError {
-                        line_nr: 0,
-                        column_nr: 0,
-                    },
-                ))
-            }
-        } else {
-            Err(LangError::new(
-                format!(
-                    "Unable to find methods for struct \"{}\" with parent ID {}.",
-                    &struct_name, &id
-                ),
-                AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            ))
+            Err(self.err(format!(
+                "Struct \"{}\" has no members but tried to access member \"{:?}\".",
+                &struct_name, &member_name
+            )))
         }
     }
 
@@ -538,45 +530,31 @@ impl AnalyzeContext {
     /// with ID `id` and returns the index of the parameter with name `param_name`
     /// in the method with name `method_name`.
     /// The struct can ex. be declared in parent block scope.
-    pub fn get_struct_method_param_idx(
+    pub fn get_method_param_idx(
         &self,
         struct_name: &str,
         method_name: &str,
         param_name: &str,
         id: BlockId,
     ) -> CustomResult<u64> {
-        let method = self.get_struct_method(struct_name, method_name, id)?;
+        let method = self.get_method(struct_name, method_name, id)?;
 
         if let Some(params) = &method.parameters {
-            let mut idx: u64 = 0;
-            for param in params {
+            for (idx, param) in params.iter().enumerate() {
                 if param_name == param.name {
-                    return Ok(idx);
+                    return Ok(idx as u64);
                 }
-                idx += 1;
             }
 
-            Err(LangError::new(
-                format!(
-                    "Unable to find param with name \"{}\" in method \"{}\" in struct \"{}\".",
-                    &param_name, &method_name, &struct_name
-                ),
-                AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            ))
+            Err(self.err(format!(
+                "Unable to find param with name \"{}\" in method \"{}\" in struct \"{}\".",
+                &param_name, &method_name, &struct_name
+            )))
         } else {
-            Err(LangError::new(
-                format!(
-                    "Method \"{}\" in struct \"{}\" had no parameters, expected param with name: {}",
-                    &method_name, &struct_name, &param_name
-                ),
-                AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            ))
+            Err(self.err(format!(
+                "Method \"{}\" in struct \"{}\" had no parameters, expected param with name: {}",
+                &method_name, &struct_name, &param_name
+            )))
         }
     }
 
@@ -588,54 +566,24 @@ impl AnalyzeContext {
         param_name: &str,
         id: BlockId,
     ) -> CustomResult<u64> {
-        // TODO: Don't hardcode the default BlockId 0.
-        let parent_id = 0;
-        let key = (func_name.into(), parent_id);
-        let func = if let Some(func) = self.functions.get(&key) {
-            func
-        } else {
-            return Err(LangError::new(
-                format!(
-                    "Unable to find function \"{}\" in decl block ID \"{}\".",
-                    &func_name, parent_id
-                ),
-                AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            ));
-        };
+        let func = self.get_func(func_name, id)?;
 
         if let Some(params) = &func.parameters {
-            let mut idx: u64 = 0;
-            for param in params {
+            for (idx, param) in params.iter().enumerate() {
                 if param_name == param.name {
-                    return Ok(idx);
+                    return Ok(idx as u64);
                 }
-                idx += 1;
             }
 
-            Err(LangError::new(
-                format!(
-                    "Unable to find param with name \"{}\" in function \"{}\".",
-                    &param_name, &func_name,
-                ),
-                AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            ))
+            Err(self.err(format!(
+                "Unable to find param with name \"{}\" in function \"{}\".",
+                &param_name, &func_name,
+            )))
         } else {
-            Err(LangError::new(
-                format!(
-                    "Function \"{}\" had no parameters, expected param with name: {}",
-                    &func_name, &param_name
-                ),
-                AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
-                },
-            ))
+            Err(self.err(format!(
+                "Function \"{}\" had no parameters, expected param with name: {}",
+                &func_name, &param_name
+            )))
         }
     }
 
@@ -644,8 +592,8 @@ impl AnalyzeContext {
         LangError::new_backtrace(
             msg,
             AnalyzeError {
-                line_nr: self.cur_line_nr,
-                column_nr: self.cur_column_nr,
+                line_nr: self.line_nr,
+                column_nr: self.column_nr,
             },
             true,
         )

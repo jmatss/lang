@@ -1,7 +1,4 @@
-use std::{
-    cell::RefMut,
-    collections::{hash_map::Entry, HashMap},
-};
+use std::collections::{hash_map::Entry, HashMap};
 
 use crate::type_context::{SubResult, TypeContext};
 use common::{
@@ -11,7 +8,6 @@ use common::{
         ast::AstToken,
         block::Struct,
         expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
-        op::Op,
         op::{BinOp, UnOp},
         stmt::Stmt,
     },
@@ -77,8 +73,8 @@ impl<'a> Visitor for TypeSolver<'a> {
     }
 
     fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
-        self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
+        self.type_context.analyze_context.line_nr = ast_token.line_nr;
+        self.type_context.analyze_context.column_nr = ast_token.column_nr;
     }
 
     /// Iterate through all expressions and substitute all Unknown types that
@@ -104,7 +100,7 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    fn visit_var(&mut self, var: &mut RefMut<Var>, _ctx: &TraverseContext) {
+    fn visit_var(&mut self, var: &mut Var, _ctx: &TraverseContext) {
         if let Some(ty) = &mut var.ret_type {
             self.subtitute_type(ty, true);
         } else {
@@ -307,115 +303,16 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    // TODO: Need to make sure that the global var in `analyze_context` has its
-    //       type updated as well.
-    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
-        if let Stmt::VariableDecl(var, expr_opt) = stmt {
-            let mut var = var.borrow_mut();
-
-            // Update type for rhs of var decl if it exists.
-            if let Some(expr) = expr_opt {
-                match expr {
-                    Expr::Lit(..) => self.visit_lit(expr, ctx),
-                    Expr::Type(_) => self.visit_expr(expr, ctx),
-                    Expr::Var(var) => self.visit_var(&mut var.borrow_mut(), ctx),
-                    Expr::FuncCall(func_call) => self.visit_func_call(func_call, ctx),
-                    Expr::StructInit(struct_init) => self.visit_struct_init(struct_init, ctx),
-                    Expr::ArrayInit(array_init) => self.visit_array_init(array_init, ctx),
-                    Expr::Op(Op::BinOp(bin_op)) => self.visit_bin_op(bin_op, ctx),
-                    Expr::Op(Op::UnOp(un_op)) => self.visit_un_op(un_op, ctx),
-                }
-            }
-
-            // Update type for lhs of var decl.
+    fn visit_var_decl(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
+        if let Stmt::VariableDecl(var, _) = stmt {
             if let Some(ty) = &mut var.ret_type {
-                match self.type_context.get_substitution(ty, true) {
-                    SubResult::Solved(sub_ty) => {
-                        *ty = sub_ty;
-                    }
-                    SubResult::UnSolved(un_sub_ty) => {
-                        let err = self.type_context.analyze_context.err(format!(
-                            "Unable to resolve type {:?} for lhs of var decl. Got back unsolved type: {:?}.",
-                            ty, un_sub_ty
-                        ));
-                        self.errors.push(err);
-                        return;
-                    }
-                    SubResult::Err(mut err) => {
-                        err.msg.push_str(&format!(" -- {:#?}.", var));
-                        self.errors.push(err);
-                        return;
-                    }
-                }
-            } else {
-                let err = self
-                    .type_context
-                    .analyze_context
-                    .err(format!("Unable to get ret type for var: {}.", &var.name));
-                self.errors.push(err);
-                return;
-            }
-
-            let decl_block_id = match self
-                .type_context
-                .analyze_context
-                .get_var_decl_scope(&var.name, ctx.block_id)
-            {
-                Ok(decl_block_id) => decl_block_id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-            let key = (var.name.clone(), decl_block_id);
-
-            // Get the substitution type for the variable in the `analyze_context`.
-            let sub_type = if let Some(ref context_var) = self
-                .type_context
-                .analyze_context
-                .variables
-                .get(&key)
-                .cloned()
-            {
-                if let Some(ty) = &context_var.ret_type {
-                    match self.type_context.get_substitution(ty, true) {
-                        SubResult::Solved(sub_ty) => sub_ty,
-                        SubResult::UnSolved(un_sub_ty) => {
-                            let err = self.type_context.analyze_context.err(format!(
-                                    "Unable to resolve type {:?} for context var: {:?}. Got back unsolved type: {:?}.",
-                                    ty, context_var, un_sub_ty
-                                ));
-                            self.errors.push(err);
-                            return;
-                        }
-                        SubResult::Err(mut err) => {
-                            err.msg.push_str(&format!(" -- {:#?}.", "TODO: Remove."));
-                            self.errors.push(err);
-                            return;
-                        }
-                    }
-                } else {
-                    let err = self.type_context.analyze_context.err(format!(
-                        "Unable to get ret type for var in analyze context with key: {:?}.",
-                        &key
-                    ));
-                    self.errors.push(err);
-                    return;
-                }
+                self.subtitute_type(ty, true);
             } else {
                 let err = self.type_context.analyze_context.err(format!(
-                    "Unable to find var with name \"{}\" in decl block {}.",
-                    &var.name, decl_block_id
+                    "Unable to find infer type for var decl ret_type: {:?}",
+                    stmt
                 ));
                 self.errors.push(err);
-                return;
-            };
-
-            // Update the type to the var in `analyze_context`.
-            if let Some(context_var) = self.type_context.analyze_context.variables.get_mut(&key) {
-                if let Some(ty) = &mut context_var.ret_type {
-                    *ty = sub_type;
-                }
             }
         }
     }

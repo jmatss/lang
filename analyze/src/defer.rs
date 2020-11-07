@@ -44,7 +44,12 @@ impl<'a> DeferAnalyzer<'a> {
         }
     }
 
-    fn insert_defers(&mut self, i: &mut usize, body: &mut Vec<AstToken>, defers: Vec<Expr>) {
+    fn insert_defers_into_ast(
+        &mut self,
+        i: &mut usize,
+        body: &mut Vec<AstToken>,
+        defers: Vec<Expr>,
+    ) {
         for expr in defers.into_iter() {
             body.insert(
                 *i,
@@ -134,14 +139,14 @@ impl<'a> Visitor for DeferAnalyzer<'a> {
                     // as instructions before this branch.
                     Token::Stmt(Stmt::Return(_)) => {
                         if let Some(defers) = self.get_defers_all_parents(*id) {
-                            self.insert_defers(&mut i, body, defers);
+                            self.insert_defers_into_ast(&mut i, body, defers);
                         }
                     }
                     Token::Stmt(Stmt::Yield(_))
                     | Token::Stmt(Stmt::Break)
                     | Token::Stmt(Stmt::Continue) => {
                         if let Some(defers) = self.get_defers_until_branchable(*id) {
-                            self.insert_defers(&mut i, body, defers);
+                            self.insert_defers_into_ast(&mut i, body, defers);
                         }
                     }
 

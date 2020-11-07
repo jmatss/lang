@@ -8,8 +8,7 @@ use common::{
     },
 };
 use inkwell::{
-    module::Linkage, types::AnyTypeEnum, values::AnyValueEnum, values::BasicValueEnum,
-    values::InstructionValue,
+    module::Linkage, types::AnyTypeEnum, values::BasicValueEnum, values::InstructionValue,
 };
 use log::debug;
 
@@ -35,8 +34,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
 
             Stmt::VariableDecl(var, expr_opt) => {
-                let var = var.borrow();
-
                 self.compile_var_decl(&var)?;
                 if let Some(expr) = expr_opt {
                     let any_value = self.compile_expr(expr, ExprTy::RValue)?;
@@ -53,7 +50,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // TODO: Add other external declares other than func (var, struct etc.)
             Stmt::ExternalDecl(func) => {
                 let linkage = Linkage::External;
-                self.compile_func_proto(&func.borrow(), Some(linkage))?;
+                self.compile_func_proto(&func, Some(linkage))?;
                 Ok(())
             }
             Stmt::Assignment(assign_op, lhs, rhs) => {
@@ -400,7 +397,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         debug!(
-            "Assigning, op: {:?}, lhs_ptr: {:?}, val: {:?}",
+            "Assigning, op: {:#?}, lhs_ptr: {:#?}, val: {:#?}",
             assign_op, lhs_ptr, value
         );
 

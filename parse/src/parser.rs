@@ -82,17 +82,18 @@ impl Default for ParseTokenIter {
 
 impl ParseTokenIter {
     pub fn new() -> Self {
-        let mut iter = Self {
+        let root_block_id = 0;
+        let start_block_id = 1;
+
+        Self {
             iter: TokenIter::new(Vec::default()),
-            block_id: 0,
+            block_id: start_block_id,
             cur_line_nr: 1,
             cur_column_nr: 1,
             uses: Vec::default(),
             root_block_body: Vec::default(),
-            root_block_id: 0,
-        };
-        iter.root_block_id = iter.reserve_block_id();
-        iter
+            root_block_id,
+        }
     }
 
     pub fn set_lex_tokens(&mut self, lex_tokens: Vec<LexToken>) {

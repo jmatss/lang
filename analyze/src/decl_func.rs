@@ -1,4 +1,4 @@
-use crate::AnalyzeContext;
+use crate::{AnalyzeContext, BlockInfo};
 use common::{
     error::LangError,
     token::ast::Token,
@@ -14,7 +14,7 @@ use common::{
     BlockId,
 };
 use std::{
-    cell::{RefCell, RefMut},
+    cell::RefCell,
     collections::{hash_map::Entry, HashMap},
 };
 
@@ -34,12 +34,13 @@ impl<'a> DeclFuncAnalyzer<'a> {
         }
     }
 
-    fn analyze_func_header(&mut self, func: &mut RefMut<Function>, func_id: BlockId) {
+    fn analyze_func_header(&mut self, func: &mut Function, func_id: BlockId) {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
-        // Add the function in the scope of its root parent (`root_parent_id`).
-        let root_parent_id = match analyze_context.get_next_root_parent(func_id) {
-            Ok(id) => id,
+        // The function will be added in the scope of its parent, so fetch the
+        // block id for the parent.
+        let parent_id = match analyze_context.get_parent(func_id) {
+            Ok(parent_id) => parent_id,
             Err(err) => {
                 self.errors.push(err);
                 return;
@@ -48,8 +49,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
 
         // If true: Function already declared somewhere, make sure that the
         // current declaration and the previous one matches.
-        let key = (func.name.clone(), root_parent_id);
-        if let Some(prev_func) = analyze_context.functions.get(&key) {
+        if let Ok(prev_func) = analyze_context.get_func(&func.name, parent_id) {
             let empty_vec = Vec::new();
             let cur_func_params = if let Some(params) = &func.parameters {
                 params
@@ -107,35 +107,34 @@ impl<'a> DeclFuncAnalyzer<'a> {
                 }
             }
         } else {
-            analyze_context.functions.insert(key, func.clone());
+            // Add the function into decl lookup maps.
+            let key = (func.name.clone(), parent_id);
+            let func_ptr = func as *mut Function;
+            analyze_context.functions.insert(key, func_ptr);
 
-            // Add the parameters as variables in the function scope.
-            if let Some(ref params) = func.parameters {
+            // Add the parameters as variables in the function scope decl lookup.
+            if let Some(params) = &mut func.parameters {
                 for param in params {
                     let param_key = (param.name.clone(), func_id);
-                    analyze_context.variables.insert(param_key, param.clone());
+                    let param_ptr = param as *mut Var;
+                    analyze_context.variables.insert(param_key, param_ptr);
                 }
             }
         }
     }
 
-    fn analyze_method_header(
-        &mut self,
-        struct_name: &str,
-        func: &mut RefMut<Function>,
-        func_id: BlockId,
-    ) {
+    fn analyze_method_header(&mut self, struct_name: &str, func: &mut Function, func_id: BlockId) {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
-        // Add the methods in the scope of the structs root parent.
-        let struct_parent_id =
-            match analyze_context.get_struct_parent_id(struct_name.into(), func_id) {
-                Ok(id) => id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+        // The method will be added in the scope of its wrapping struct, so
+        // fetch the block id for the struct.
+        let struct_decl_id = match analyze_context.get_struct_decl_scope(struct_name, func_id) {
+            Ok(struct_decl_id) => struct_decl_id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
 
         // TODO: Should probably be changed to something better.
         // If this is a non-static method, the first parameter should be a
@@ -152,25 +151,27 @@ impl<'a> DeclFuncAnalyzer<'a> {
         }
 
         // Insert this method into `methods` in the analyze context.
-        let key = (struct_name.into(), struct_parent_id);
+        let key = (struct_name.into(), struct_decl_id);
         match analyze_context.methods.entry(key) {
             Entry::Occupied(ref mut v) => {
-                v.get_mut().insert(func.name.clone(), func.clone());
+                let func_ptr = func as *mut Function;
+                v.get_mut().insert(func.name.clone(), func_ptr);
             }
             Entry::Vacant(_) => {
                 let err = analyze_context.err(format!(
                     "Unable to find decl methods for struct \"{}\" in block with id {}.",
-                    struct_name, struct_parent_id
+                    struct_name, struct_decl_id
                 ));
                 self.errors.push(err);
             }
         }
 
         // Add the parameters as variables in the method scope.
-        if let Some(ref params) = func.parameters {
+        if let Some(params) = &mut func.parameters {
             for param in params {
                 let param_key = (param.name.clone(), func_id);
-                analyze_context.variables.insert(param_key, param.clone());
+                let param_ptr = param as *mut Var;
+                analyze_context.variables.insert(param_key, param_ptr);
             }
         }
     }
@@ -186,34 +187,35 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
     }
 
     fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.analyze_context.borrow_mut().cur_line_nr = ast_token.line_nr;
-        self.analyze_context.borrow_mut().cur_column_nr = ast_token.column_nr;
+        self.analyze_context.borrow_mut().line_nr = ast_token.line_nr;
+        self.analyze_context.borrow_mut().column_nr = ast_token.column_nr;
     }
 
     /// Create a entry for this impl block in the analyze contexts `methods` map
     /// and marks the functions that it contain with the name of this impl block.
-    /// This lets the functions when they are visited to know that they are
-    /// methods.
+    /// This lets the one differentiate between functions and methods in the
+    /// Function struct by checking the `method_struct` field.
     fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
         if let Token::Block(BlockHeader::Implement(struct_name), impl_id, body) =
             &mut ast_token.token
         {
-            let struct_parent_id =
-                match analyze_context.get_struct_parent_id(struct_name.clone(), *impl_id) {
-                    Ok(id) => id,
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
-                };
-            let key = (struct_name.clone(), struct_parent_id);
+            let struct_decl_id = match analyze_context.get_struct_decl_scope(struct_name, *impl_id)
+            {
+                Ok(id) => id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            let key = (struct_name.clone(), struct_decl_id);
             analyze_context.methods.insert(key, HashMap::default());
 
             for body_token in body {
                 if let Token::Block(BlockHeader::Function(func), ..) = &mut body_token.token {
-                    func.borrow_mut().method_struct = Some(struct_name.clone());
+                    func.method_struct = Some(struct_name.clone());
                 } else {
                     let err = analyze_context.err(format!(
                         "AST token in impl block with name \"{}\" not a function: {:?}",
@@ -227,11 +229,10 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
 
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Function(func), func_id, ..) = &mut ast_token.token {
-            let mut func = func.borrow_mut();
             if let Some(struct_name) = func.method_struct.clone() {
-                self.analyze_method_header(&struct_name, &mut func, *func_id);
+                self.analyze_method_header(&struct_name, func, *func_id);
             } else {
-                self.analyze_func_header(&mut func, *func_id);
+                self.analyze_func_header(func, *func_id);
             }
         }
     }
@@ -240,14 +241,13 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
         if let Stmt::ExternalDecl(func) = stmt {
-            // TODO: Don't hardcode zeros for the default block everywhere.
             // TODO: Should probably check that if there are multiple extern
             //       declarations of a function that they have the same
             //       parameters & return type.
             // External declarations should always be in the default block.
-            let func = func.borrow();
-            let key = (func.name.clone(), 0);
-            analyze_context.functions.insert(key, func.clone());
+            let key = (func.name.clone(), BlockInfo::DEFAULT_BLOCK_ID);
+            let func_ptr = func as *mut Function;
+            analyze_context.functions.insert(key, func_ptr);
         }
     }
 }

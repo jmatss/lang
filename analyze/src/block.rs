@@ -18,7 +18,7 @@ pub struct BlockAnalyzer<'a> {
     errors: Vec<LangError>,
 }
 
-impl<'a> BlockAnalyzer<'a> {
+impl<'a, 'a_ctx> BlockAnalyzer<'a> {
     pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
         Self {
             analyze_context,
@@ -29,7 +29,7 @@ impl<'a> BlockAnalyzer<'a> {
     /// Returns true if the given header is a "root" i.e. a block that creates
     /// a new scope where every block created inside them only has access to
     /// this block + globals.
-    fn analyze_is_root(&self, header: &BlockHeader) -> bool {
+    fn is_root(&self, header: &BlockHeader) -> bool {
         match header {
             BlockHeader::Function(_)
             | BlockHeader::Struct(_)
@@ -43,7 +43,7 @@ impl<'a> BlockAnalyzer<'a> {
 
     /// Returns true if the given header is a "branchable" block i.e. a block
     /// that can contain branch instructions like "break".
-    fn analyze_is_branchable(&self, header: &BlockHeader) -> bool {
+    fn is_branchable(&self, header: &BlockHeader) -> bool {
         match header {
             BlockHeader::Match(_) | BlockHeader::For(_, _) | BlockHeader::While(_) => true,
             _ => false,
@@ -78,12 +78,12 @@ impl<'a> BlockAnalyzer<'a> {
         analyze_context: &mut RefMut<AnalyzeContext>,
         parent_id: usize,
     ) {
-        analyze_context.cur_line_nr = ast_token.line_nr;
-        analyze_context.cur_column_nr = ast_token.column_nr;
+        analyze_context.line_nr = ast_token.line_nr;
+        analyze_context.column_nr = ast_token.column_nr;
 
         if let Token::Block(ref header, id, body) = &ast_token.token {
-            let is_root_block = self.analyze_is_root(header);
-            let is_branchable_block = self.analyze_is_branchable(header);
+            let is_root_block = self.is_root(header);
+            let is_branchable_block = self.is_branchable(header);
             let mut block_info = BlockInfo::new(*id, is_root_block, is_branchable_block);
 
             // Update the mapping from this block to its parent.
@@ -163,8 +163,8 @@ impl<'a> Visitor for BlockAnalyzer<'a> {
 
     fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         let mut analyze_context = self.analyze_context.borrow_mut();
-        analyze_context.cur_line_nr = ast_token.line_nr;
-        analyze_context.cur_column_nr = ast_token.column_nr;
+        analyze_context.line_nr = ast_token.line_nr;
+        analyze_context.column_nr = ast_token.column_nr;
     }
 
     /// All traversing is done from the default block, no other visit function

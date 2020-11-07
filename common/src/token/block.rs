@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use super::{
     expr::{Expr, Var},
     stmt::Modifier,
@@ -12,10 +10,10 @@ pub enum BlockHeader {
     //  So that they can return values and be used in sub expressions.
     // Default == None, i.e. if there are no current block. Ex. at the start of a file.
     Default,
-    Function(RefCell<Function>),
-    Struct(RefCell<Struct>),
-    Enum(RefCell<Enum>),
-    Interface(RefCell<Interface>),
+    Function(Function),
+    Struct(Struct),
+    Enum(Enum),
+    Interface(Interface),
 
     /// The string is the name of the structure that this impl block implements
     /// and the body of this block will contain the functions.
@@ -78,7 +76,7 @@ pub enum BlockHeader {
     Match(Expr),
     MatchCase(Expr),
 
-    For(RefCell<Var>, Expr),
+    For(Var, Expr),
     // TODO: Maybe merge while and loop (?)
     While(Option<Expr>),
 

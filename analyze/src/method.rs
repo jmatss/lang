@@ -37,6 +37,7 @@ impl<'a> MethodAnalyzer<'a> {
         }
     }
 
+    // TODO: This whole "this" logic should be changed.
     /// Since `this` is sent as a reference to a method, it will always need to
     /// be dereferenced before use. So all "this" in the source code needs to be
     /// rewritten as "this.*".
@@ -45,7 +46,7 @@ impl<'a> MethodAnalyzer<'a> {
     fn analyze_expr(&mut self, expr: &mut Expr) {
         match expr {
             Expr::Var(var) => {
-                if var.borrow().name == THIS_VAR_NAME {
+                if var.name == THIS_VAR_NAME {
                     let new_expr = Expr::Op(Op::UnOp(UnOp::new(
                         UnOperator::Deref,
                         Box::new(expr.clone()),
@@ -132,9 +133,9 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
     /// into the first argument of the method call and then replace the whole
     /// expr Dot with a FuncCall token.
     fn visit_expr(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
-        let analyze_context = self.analyze_context.borrow();
-
         if let Expr::Op(Op::BinOp(bin_op)) = expr {
+            let analyze_context = self.analyze_context.borrow();
+
             if let Some(method_call) = bin_op.rhs.eval_to_func_call() {
                 match bin_op.operator {
                     // Struct access/method call.

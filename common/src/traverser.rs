@@ -238,7 +238,7 @@ impl<'a> AstTraverser<'a> {
             Expr::Var(var) => {
                 debug!("Visiting var");
                 for v in self.visitors.iter_mut() {
-                    v.visit_var(&mut var.borrow_mut(), &self.traverse_context)
+                    v.visit_var(var, &self.traverse_context)
                 }
             }
             Expr::FuncCall(func_call) => {

@@ -7,7 +7,7 @@ use crate::{
     error::{CustomResult, LangError, LangErrorKind::GeneralError},
     ENV_VAR,
 };
-use std::{cell::RefCell, path::PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
@@ -49,11 +49,11 @@ pub enum Stmt {
 
     // Used both for "var" and "const" variables. The expr options will be Some
     // if this var decl also has han initializer.
-    VariableDecl(RefCell<Var>, Option<Expr>),
+    VariableDecl(Var, Option<Expr>),
 
     // TODO: Implement extern for variables as well.
     // Declaration of extern functions.
-    ExternalDecl(RefCell<Function>),
+    ExternalDecl(Function),
 
     // static, private etc.
     Modifier(Modifier),

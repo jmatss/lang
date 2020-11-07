@@ -1,7 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
-};
+use std::collections::{hash_map::Entry, HashMap};
 
 use common::{
     error::LangError,
@@ -55,8 +52,6 @@ impl Visitor for TypeConverter {
                 let mut to_be_removed = false;
 
                 if let Token::Block(BlockHeader::Struct(struct_), old_id, ..) = &body_token.token {
-                    let struct_ = struct_.borrow();
-
                     if struct_.generic_params.is_some() {
                         let old_token = body_token.clone();
 
@@ -73,8 +68,7 @@ impl Visitor for TypeConverter {
                         match self.generic_structs.entry(struct_.name.clone()) {
                             Entry::Occupied(o) => {
                                 for generic_struct in o.get() {
-                                    let header =
-                                        BlockHeader::Struct(RefCell::new(generic_struct.clone()));
+                                    let header = BlockHeader::Struct(generic_struct.clone());
                                     let struct_body = Vec::with_capacity(0);
 
                                     let token = Token::Block(header, *old_id, struct_body);

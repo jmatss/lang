@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use crate::{
     parser::ParseTokenIter,
     token::{get_if_expr_op, Fix, Operator, Output},
@@ -425,13 +423,13 @@ impl<'a> ExprParser<'a> {
                     }
 
                     let var = self.iter.parse_var_type(ident)?;
-                    Ok(Expr::Var(RefCell::new(var)))
+                    Ok(Expr::Var(var))
                 }
             }
         } else {
             // TODO: Merge with logic above, same stuff.
             let var = self.iter.parse_var_type(ident)?;
-            Ok(Expr::Var(RefCell::new(var)))
+            Ok(Expr::Var(var))
         }
     }
 }

@@ -1,4 +1,4 @@
-use std::{cell::RefCell, hash::Hash};
+use std::hash::Hash;
 
 use super::{
     lit::Lit,
@@ -11,7 +11,7 @@ use crate::{
     BlockId,
 };
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
     // TODO: Unnecessary to have type here? Bool, string and char types are
     //       implied. For numbers the postfix notation might be converted to a
@@ -22,11 +22,7 @@ pub enum Expr {
     // TODO: Is it ok to have type as a expression? This lets one handle binary
     //       operators like ex. "as" in a simple way.
     Type(Type),
-
-    // Need to be wrapped in RefCell since a "pointer" to this variable will
-    // be stored in a lookup table for fast lookups.
-    Var(RefCell<Var>),
-
+    Var(Var),
     FuncCall(FuncCall),
     StructInit(StructInit),
     ArrayInit(ArrayInit),
@@ -34,33 +30,12 @@ pub enum Expr {
     Op(Op),
 }
 
-impl Hash for Expr {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match &self {
-            Expr::Var(var) => var.borrow().hash(state),
-            _ => self.hash(state),
-        }
-    }
-}
-
-impl PartialEq for Expr {
-    fn eq(&self, other: &Self) -> bool {
-        match &self {
-            Expr::Var(self_var) => match other {
-                Expr::Var(other_var) => *self_var == *other_var,
-                _ => false,
-            },
-            _ => self.eq(other),
-        }
-    }
-}
-
 impl Expr {
     pub fn get_expr_type(&self) -> CustomResult<Type> {
         Ok(match self {
             Expr::Lit(_, Some(ty)) | Expr::Type(ty) => ty.clone(),
             Expr::Var(var) => {
-                if let Some(ty) = &var.borrow().ret_type {
+                if let Some(ty) = &var.ret_type {
                     ty.clone()
                 } else {
                     return Err(LangError::new(
@@ -200,7 +175,7 @@ impl Expr {
 
     /// If this is a Dot operation, this function will return the variable from
     /// the rhs.
-    pub fn eval_to_var(&mut self) -> Option<&RefCell<Var>> {
+    pub fn eval_to_var(&mut self) -> Option<&Var> {
         match self {
             Expr::Var(var) => Some(var),
             Expr::Op(op) => match op {

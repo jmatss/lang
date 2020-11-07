@@ -1,6 +1,6 @@
 use crate::type_context::{SubResult, TypeContext};
 use common::{
-    error::{LangError, LangErrorKind::AnalyzeError},
+    error::LangError,
     token::ast::Token,
     token::op::Op,
     token::{
@@ -16,7 +16,7 @@ use common::{
     visitor::Visitor,
 };
 use log::debug;
-use std::{cell::RefMut, collections::BTreeMap};
+use std::collections::BTreeMap;
 
 // TODO: Better error messages. Ex. if two types arent't compatible,
 //       print information about where the types "came" from.
@@ -61,14 +61,13 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
         }
     }
 
-    // TODO: Should this be given as three numbers instead of a concatenated String?
     /// Creates a new unknown identifier that will be given to a unkown type.
     /// The new string will containg a unique ID (ID), the line number (L),
     /// the column number (C) and a free text to give the unkown type some more
     /// context for readability.
     fn new_unknown_ident(&mut self, text: &str) -> String {
-        let cur_line_nr = self.type_context.analyze_context.cur_line_nr;
-        let cur_column_nr = self.type_context.analyze_context.cur_column_nr;
+        let cur_line_nr = self.type_context.analyze_context.line_nr;
+        let cur_column_nr = self.type_context.analyze_context.column_nr;
         let type_ident = format!(
             "ID:{}-R:{}-C:{}-{}",
             self.type_id, cur_line_nr, cur_column_nr, text
@@ -154,16 +153,10 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
             // something has failed and a error will be reported.
             if start_constraint_len == self.type_context.constraints.len() {
                 if finalize {
-                    let err = LangError::new(
-                        format!(
-                            "Unable to solve all type constraints: {:?}",
-                            self.type_context.constraints
-                        ),
-                        AnalyzeError {
-                            line_nr: 0,
-                            column_nr: 0,
-                        },
-                    );
+                    let err = self.type_context.analyze_context.err(format!(
+                        "Unable to solve all type constraints: {:?}",
+                        self.type_context.constraints
+                    ));
                     self.errors.push(err);
                 } else {
                     self.solve_constraints(true);
@@ -184,14 +177,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     }
 
     fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
-        self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
+        self.type_context.analyze_context.line_nr = ast_token.line_nr;
+        self.type_context.analyze_context.column_nr = ast_token.column_nr;
     }
 
     /// Solve the constraints at the EOF. Also debug log the results.
     fn visit_eof(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.type_context.analyze_context.cur_line_nr = ast_token.line_nr;
-        self.type_context.analyze_context.cur_column_nr = ast_token.column_nr;
+        self.type_context.analyze_context.line_nr = ast_token.line_nr;
+        self.type_context.analyze_context.column_nr = ast_token.column_nr;
 
         self.solve_constraints(false);
         debug!(
@@ -223,44 +216,40 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_var(&mut self, var: &mut RefMut<Var>, ctx: &TraverseContext) {
-        let context_var_ty = match self
+    fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {
+        let var_decl = match self
             .type_context
             .analyze_context
             .get_var(&var.name, ctx.block_id)
         {
-            Ok(context_var) => {
-                if let Some(ty) = &context_var.ret_type {
-                    ty.clone()
-                } else {
-                    let err = LangError::new(
-                        format!("Ret type not set for context var: {:?}", context_var),
-                        AnalyzeError {
-                            line_nr: 0,
-                            column_nr: 0,
-                        },
-                    );
-                    self.errors.push(err);
-                    return;
-                }
-            }
+            Ok(var_decl) => var_decl,
             Err(err) => {
                 self.errors.push(err);
                 return;
             }
         };
 
+        let var_decl_ty = if let Some(ty) = &var_decl.ret_type {
+            ty.clone()
+        } else {
+            let err = self
+                .type_context
+                .analyze_context
+                .err(format!("Ret type not set for var decl: {:?}", var_decl));
+            self.errors.push(err);
+            return;
+        };
+
         let var_ty = if let Some(ty) = &var.ret_type {
             ty.clone()
         } else {
-            var.ret_type = Some(context_var_ty.clone());
-            context_var_ty.clone()
+            let new_type = Type::Unknown(self.new_unknown_ident("var_use"));
+            var.ret_type = Some(new_type.clone());
+            new_type
         };
 
-        // Add type constraint between var "use" and var "decl" if they are different.
-        if context_var_ty != var_ty {
-            self.type_context.insert_constraint(context_var_ty, var_ty);
-        }
+        // Add type constraint between var "use" and var "decl",
+        self.type_context.insert_constraint(var_decl_ty, var_ty);
     }
 
     // TODO: Clean up.
@@ -281,51 +270,35 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 if let Expr::Op(Op::UnOp(un_op)) = &mut this_arg.value {
                     if let UnOperator::Address = un_op.operator {
                         match un_op.value.get_expr_type() {
-                            Ok(struct_ty) => struct_ty.clone(),
+                            Ok(struct_ty) => struct_ty,
                             Err(err) => {
                                 self.errors.push(err);
                                 return;
                             }
                         }
                     } else {
-                        let err = LangError::new(
-                            format!(
-                                "Expected \"this\" for method call \"{}\" to be \"address\" of struct, was: \"{:?}\"",
-                                &func_call.name, this_arg.value
-                            ),
-                            AnalyzeError {
-                                line_nr: 0,
-                                column_nr: 0,
-                            },
-                        );
+                        let err = self.type_context.analyze_context.err(format!(
+                            "Expected \"this\" for method call \"{}\" to be \"address\" of struct, was: \"{:?}\"",
+                            &func_call.name, this_arg.value
+                        ));
                         self.errors.push(err);
                         return;
                     }
                 } else {
-                    let err = LangError::new(
+                    let err = self.type_context.analyze_context.err(
                         format!(
                             "Expected \"this\" for method call \"{}\" to be \"address\" of struct, was: \"{:?}\"",
                             &func_call.name, this_arg.value
                         ),
-                        AnalyzeError {
-                            line_nr: 0,
-                            column_nr: 0,
-                        },
                     );
                     self.errors.push(err);
                     return;
                 }
             } else {
-                let err = LangError::new(
-                    format!(
-                        "Method call \"{}\" has no arguments, expected atleast \"this\"/\"self\".",
-                        &func_call.name
-                    ),
-                    AnalyzeError {
-                        line_nr: 0,
-                        column_nr: 0,
-                    },
-                );
+                let err = self.type_context.analyze_context.err(format!(
+                    "Method call \"{}\" has no arguments, expected atleast \"this\"/\"self\".",
+                    &func_call.name
+                ));
                 self.errors.push(err);
                 return;
             };
@@ -339,15 +312,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 // in the function call.
                 let inner_idx = if let Some(arg_name) = &arg.name {
                     if let Type::Custom(struct_name) = &struct_ty {
-                        match self
-                            .type_context
-                            .analyze_context
-                            .get_struct_method_param_idx(
-                                struct_name,
-                                &func_call.name,
-                                arg_name,
-                                ctx.block_id,
-                            ) {
+                        match self.type_context.analyze_context.get_method_param_idx(
+                            struct_name,
+                            &func_call.name,
+                            arg_name,
+                            ctx.block_id,
+                        ) {
                             Ok(idx) => idx,
                             Err(err) => {
                                 self.errors.push(err);
@@ -391,99 +361,87 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         } else {
             // TODO: FIXME: For now all functions will be defined in the root
             //              block, so just hardcode zero. Must change later.
-            let func_decl_block = 0;
-            let key = (func_call.name.clone(), func_decl_block);
-            if let Some(ref func) = self
+            let func = match self
                 .type_context
                 .analyze_context
-                .functions
-                .get(&key)
-                .cloned()
+                .get_func(&func_call.name, ctx.block_id)
             {
-                // Iterate through all arguments of the function and match
-                // up their types with the parameters of the function.
-                // The amount of args/params will already have been checked before,
-                // just make sure that this doesn't break for vararg functions.
-                // The "similar" logic for methods will be done during type solving
-                // in `type_context` since at this point there is no way to know
-                // the type of the struct and indirectly the method.
-                if let Some(params) = &func.parameters {
-                    let mut idx: u64 = 0;
-                    for arg in &func_call.arguments {
-                        let inner_idx = if let Some(arg_name) = &arg.name {
-                            match self.type_context.analyze_context.get_func_param_idx(
-                                &func_call.name,
-                                &arg_name,
-                                ctx.block_id,
-                            ) {
-                                Ok(idx) => idx,
-                                Err(err) => {
-                                    self.errors.push(err);
-                                    return;
-                                }
-                            }
-                        } else {
-                            idx
-                        };
+                Ok(func) => func.clone(),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
-                        let arg_ty = match arg.value.get_expr_type() {
-                            Ok(ty) => ty.clone(),
+            // Iterate through all arguments of the function and match
+            // up their types with the parameters of the function.
+            // The amount of args/params will already have been checked before,
+            // just make sure that this doesn't break for vararg functions.
+            // The "similar" logic for methods will be done during type solving
+            // in `type_context` since at this point there is no way to know
+            // the type of the struct and indirectly the method.
+            if let Some(params) = &func.parameters {
+                let mut idx: u64 = 0;
+                for arg in &func_call.arguments {
+                    // If the argument is a named argument, get the index for the
+                    // named parameter instead of using the index of its position
+                    // in the function call.
+                    let inner_idx = if let Some(arg_name) = &arg.name {
+                        match self.type_context.analyze_context.get_func_param_idx(
+                            &func_call.name,
+                            &arg_name,
+                            ctx.block_id,
+                        ) {
+                            Ok(idx) => idx,
                             Err(err) => {
                                 self.errors.push(err);
                                 return;
                             }
-                        };
-
-                        if func.is_var_arg && inner_idx >= params.len() as u64 {
-                            idx += 1;
-                            continue;
                         }
+                    } else {
+                        idx
+                    };
 
-                        let par_ty = if let Some(ty) = &params
-                            .get(inner_idx as usize)
-                            .map(|param| param.ret_type.clone())
-                            .flatten()
-                        {
-                            ty.clone()
-                        } else {
-                            let err = LangError::new(
-                                format!(
-                                    "Type for parameter \"{:?}\" with index {} in function \"{}\" set to None.",
-                                    arg.name, inner_idx, func.name
-                                ),
-                                AnalyzeError {
-                                    line_nr: 0,
-                                    column_nr: 0,
-                                },
-                            );
+                    let arg_ty = match arg.value.get_expr_type() {
+                        Ok(ty) => ty.clone(),
+                        Err(err) => {
                             self.errors.push(err);
                             return;
-                        };
+                        }
+                    };
 
-                        self.type_context.insert_constraint(arg_ty, par_ty);
-
+                    if func.is_var_arg && inner_idx >= params.len() as u64 {
                         idx += 1;
+                        continue;
                     }
-                }
 
-                if let Some(ty) = &func.ret_type {
-                    ty.clone()
-                } else {
-                    Type::Void
+                    let par_ty = if let Some(ty) = &params
+                        .get(inner_idx as usize)
+                        .map(|param| param.ret_type.clone())
+                        .flatten()
+                    {
+                        ty.clone()
+                    } else {
+                        let err = self.type_context.analyze_context.err(
+                            format!(
+                                "Type for parameter \"{:?}\" with index {} in function \"{}\" set to None.",
+                                arg.name, inner_idx, func.name
+                            ),
+                        );
+                        self.errors.push(err);
+                        return;
+                    };
+
+                    self.type_context.insert_constraint(arg_ty, par_ty);
+
+                    idx += 1;
                 }
+            }
+
+            if let Some(ty) = &func.ret_type {
+                ty.clone()
             } else {
-                let err = LangError::new(
-                    format!(
-                        "Unable to find function \"{}\" in block {}.",
-                        &func_call.name, func_decl_block
-                    ),
-                    AnalyzeError {
-                        line_nr: 0,
-                        column_nr: 0,
-                    },
-                );
-                self.errors.push(err);
-                return;
+                Type::Void
             }
         };
 
@@ -549,15 +507,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
 
             if members.len() != struct_init.arguments.len() {
-                let err = LangError::new(
+                let err = self.type_context.analyze_context.err(
                     format!(
                         "Struct \"{}\" and struct init has diff amount of members. Struct#: {:?}, init#: {:?}.",
                         &struct_.name, members.len(), struct_init.arguments.len()
                     ),
-                    AnalyzeError {
-                        line_nr: self.type_context.analyze_context.cur_line_nr,
-                        column_nr: self.type_context.analyze_context.cur_column_nr,
-                    },
                 );
                 self.errors.push(err);
                 return;
@@ -580,16 +534,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     if found {
                         i
                     } else {
-                        let err = LangError::new(
-                            format!(
-                                "Struct \"{:?}\" has no member with name \"{:?}\".",
-                                &struct_.name, &members[i].name
-                            ),
-                            AnalyzeError {
-                                line_nr: self.type_context.analyze_context.cur_line_nr,
-                                column_nr: self.type_context.analyze_context.cur_column_nr,
-                            },
-                        );
+                        let err = self.type_context.analyze_context.err(format!(
+                            "Struct \"{:?}\" has no member with name \"{:?}\".",
+                            &struct_.name, &members[i].name
+                        ));
                         self.errors.push(err);
                         return;
                     }
@@ -616,17 +564,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                 member_type.replace_generics_impl(&unknown_generics);
                                 member_type.clone()
                             } else {
-                                let err = LangError::new(
-                                    format!(
-                                        "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
-                                        members.get(index),
-                                        &struct_.name
-                                    ),
-                                    AnalyzeError {
-                                        line_nr: self.type_context.analyze_context.cur_line_nr,
-                                        column_nr: self.type_context.analyze_context.cur_column_nr,
-                                    },
-                                );
+                                let err = self.type_context.analyze_context.err(format!(
+                                    "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
+                                    members.get(index),
+                                    &struct_.name
+                                ));
                                 self.errors.push(err);
                                 return;
                             };
@@ -649,16 +591,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                 ),
                             );
                         } else {
-                            let err = LangError::new(
-                                format!(
-                                    "Unable to get member at index {} in struct \"{:?}\".",
-                                    index, &struct_.name
-                                ),
-                                AnalyzeError {
-                                    line_nr: self.type_context.analyze_context.cur_line_nr,
-                                    column_nr: self.type_context.analyze_context.cur_column_nr,
-                                },
-                            );
+                            let err = self.type_context.analyze_context.err(format!(
+                                "Unable to get member at index {} in struct \"{:?}\".",
+                                index, &struct_.name
+                            ));
                             self.errors.push(err);
                             return;
                         }
@@ -670,16 +606,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             }
         } else if !struct_init.arguments.is_empty() {
-            let err = LangError::new(
-                format!(
-                    "Struct \"{}\" has no members, but struct init specified members.",
-                    &struct_.name
-                ),
-                AnalyzeError {
-                    line_nr: self.type_context.analyze_context.cur_line_nr,
-                    column_nr: self.type_context.analyze_context.cur_column_nr,
-                },
-            );
+            let err = self.type_context.analyze_context.err(format!(
+                "Struct \"{}\" has no members, but struct init specified members.",
+                &struct_.name
+            ));
             self.errors.push(err);
             return;
         }
@@ -746,7 +676,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         };
 
         let lhs_ty = match bin_op.lhs.get_expr_type() {
-            Ok(lhs_ty) => lhs_ty.clone(),
+            Ok(lhs_ty) => lhs_ty,
             Err(err) => {
                 self.errors.push(err);
                 return;
@@ -754,7 +684,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         };
 
         let rhs_ty = match bin_op.rhs.get_expr_type() {
-            Ok(rhs_ty) => rhs_ty.clone(),
+            Ok(rhs_ty) => rhs_ty,
             Err(err) => {
                 self.errors.push(err);
                 return;
@@ -841,7 +771,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         };
 
         let val_ty = match un_op.value.get_expr_type() {
-            Ok(rhs_ty) => rhs_ty.clone(),
+            Ok(rhs_ty) => rhs_ty,
             Err(err) => {
                 self.errors.push(err);
                 return;
@@ -880,7 +810,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// can access the types of the parameters and the return type of the func.
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Function(func), ..) = &ast_token.token {
-            self.cur_func = Some(func.borrow().clone());
+            self.cur_func = Some(func.clone());
         }
     }
 
@@ -931,7 +861,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         if let Token::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token.token {
             if let Some(match_expr) = self.cur_match_expr.clone() {
                 let match_expr_ty = match match_expr.get_expr_type() {
-                    Ok(expr_ty) => expr_ty.clone(),
+                    Ok(expr_ty) => expr_ty,
                     Err(err) => {
                         self.errors.push(err);
                         return;
@@ -939,7 +869,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 };
 
                 let case_expr_ty = match match_case_expr.get_expr_type() {
-                    Ok(expr_ty) => expr_ty.clone(),
+                    Ok(expr_ty) => expr_ty,
                     Err(err) => {
                         self.errors.push(err);
                         return;
@@ -965,7 +895,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             debug!("ASSIGNMENT\nlhs: {:#?}\nrhs: {:#?}", lhs, rhs);
 
             let lhs_ty = match lhs.get_expr_type() {
-                Ok(lhs_ty) => lhs_ty.clone(),
+                Ok(lhs_ty) => lhs_ty,
                 Err(err) => {
                     self.errors.push(err);
                     return;
@@ -973,7 +903,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             };
 
             let rhs_ty = match rhs.get_expr_type() {
-                Ok(rhs_ty) => rhs_ty.clone(),
+                Ok(rhs_ty) => rhs_ty,
                 Err(err) => {
                     self.errors.push(err);
                     return;
@@ -985,13 +915,9 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     }
 
     /// The types of the lhs and rhs of a variable declaration with a init value
-    /// should be of the same type. The variable in `variables` in `analyze_context`
-    /// should also have the same type. Add as constraints.
-    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    /// should be of the same type, add as constraints.
+    fn visit_var_decl(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         if let Stmt::VariableDecl(var, expr_opt) = stmt {
-            let mut var = var.borrow_mut();
-            let var_name = var.name.clone();
-
             // No way to do type inference of rhs on var decl with no init value.
             let rhs_ty_opt = if expr_opt.is_some() {
                 match self.type_context.get_expr_type(expr_opt.as_ref()) {
@@ -1013,52 +939,22 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             } else {
                 Some(Type::Unknown(self.new_unknown_ident("var_decl")))
             };
+            var.ret_type = new_type;
 
-            var.ret_type = new_type.clone();
-            let lhs_ty = match self.type_context.get_ret_type(var.ret_type.as_mut()) {
-                Ok(lhs_ty) => lhs_ty,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            // Set the type for the variable in the `analyze_context` as well.
-            let context_var_ty = match self
-                .type_context
-                .analyze_context
-                .get_var(&var_name, ctx.block_id)
-            {
-                Ok(context_var) => {
-                    context_var.ret_type = new_type;
-
-                    if let Some(ty) = &context_var.ret_type {
-                        ty.clone()
-                    } else {
-                        let err = LangError::new(
-                            format!(""),
-                            AnalyzeError {
-                                line_nr: 0,
-                                column_nr: 0,
-                            },
-                        );
-                        self.errors.push(err);
-                        return;
-                    }
-                }
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
+            let lhs_ty = if let Some(ty) = &var.ret_type {
+                ty.clone()
+            } else {
+                let err = self
+                    .type_context
+                    .analyze_context
+                    .err(format!("Lhs of var decl has no type: {:?}", var.ret_type));
+                self.errors.push(err);
+                return;
             };
 
             // Add constraints only if this var decl has a init value.
-            // The var and context_var will already have the same type.
             if let Some(rhs_ty) = rhs_ty_opt {
-                self.type_context
-                    .insert_constraint(lhs_ty.clone(), rhs_ty.clone());
-                self.type_context
-                    .insert_constraint(context_var_ty, rhs_ty.clone());
+                self.type_context.insert_constraint(lhs_ty, rhs_ty);
             }
         }
     }
@@ -1066,7 +962,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     fn visit_inc(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         if let Stmt::Increment(expr) = stmt {
             let expr_ty = match expr.get_expr_type() {
-                Ok(ty) => ty.clone(),
+                Ok(ty) => ty,
                 Err(err) => {
                     self.errors.push(err);
                     return;
@@ -1082,7 +978,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     fn visit_dec(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         if let Stmt::Increment(expr) = stmt {
             let expr_ty = match expr.get_expr_type() {
-                Ok(ty) => ty.clone(),
+                Ok(ty) => ty,
                 Err(err) => {
                     self.errors.push(err);
                     return;

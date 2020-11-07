@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use crate::{
     parser::{ParseTokenIter, DEFAULT_STOP_CONDS},
     token::get_modifier_token,
@@ -205,7 +203,7 @@ impl<'a> KeyworkParser<'a> {
 
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
 
-        let header = BlockHeader::For(RefCell::new(var), expr);
+        let header = BlockHeader::For(var, expr);
         self.iter.next_block(header)
     }
 
@@ -390,7 +388,7 @@ impl<'a> KeyworkParser<'a> {
                 }
             };
 
-            Ok(Token::Stmt(Stmt::ExternalDecl(RefCell::new(func))))
+            Ok(Token::Stmt(Stmt::ExternalDecl(func)))
         } else {
             Err(self
                 .iter
@@ -449,7 +447,7 @@ impl<'a> KeyworkParser<'a> {
 
         let is_const = false;
         let var = Var::new(ident, var_type, None, None, is_const);
-        let var_decl = Stmt::VariableDecl(RefCell::new(var), expr_opt);
+        let var_decl = Stmt::VariableDecl(var, expr_opt);
         Ok(Token::Stmt(var_decl))
     }
 
@@ -520,7 +518,7 @@ impl<'a> KeyworkParser<'a> {
     /// The "function" keyword has already been consumed when this function is called.
     fn parse_func(&mut self) -> CustomResult<AstToken> {
         let func = self.parse_func_proto()?;
-        let func_header = BlockHeader::Function(RefCell::new(func));
+        let func_header = BlockHeader::Function(func);
         self.iter.next_block(func_header)
     }
 
@@ -679,7 +677,7 @@ impl<'a> KeyworkParser<'a> {
 
         let implements = None;
         let struct_ = Struct::new(ident, generics, implements, members_opt);
-        let header = BlockHeader::Struct(RefCell::new(struct_));
+        let header = BlockHeader::Struct(struct_);
 
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);

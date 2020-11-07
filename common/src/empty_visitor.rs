@@ -1,5 +1,3 @@
-use std::cell::RefMut;
-
 use crate::{
     error::LangError,
     token::{
@@ -159,7 +157,7 @@ impl Visitor for DummyVisitor {
         unreachable!()
     }
 
-    fn visit_var(&mut self, var: &mut RefMut<Var>, ctx: &TraverseContext) {
+    fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {
         unreachable!()
     }
 

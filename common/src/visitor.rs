@@ -1,5 +1,3 @@
-use std::cell::RefMut;
-
 use crate::{
     error::LangError,
     token::{
@@ -59,7 +57,7 @@ pub trait Visitor {
     /* EXPRESSIONS */
     fn visit_lit(&mut self, expr: &mut Expr, ctx: &TraverseContext) {}
     //fn visit_type(&mut self, expr: &mut Expr, ctx: &TraverseContext) {}
-    fn visit_var(&mut self, var: &mut RefMut<Var>, ctx: &TraverseContext) {}
+    fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {}
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {}
     fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {}
     fn visit_array_init(&mut self, array_init: &mut ArrayInit, ctx: &TraverseContext) {}

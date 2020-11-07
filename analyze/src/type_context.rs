@@ -6,7 +6,7 @@ use common::{
 use log::{debug, warn};
 use std::collections::{hash_map, HashMap};
 
-use crate::AnalyzeContext;
+use crate::{AnalyzeContext, BlockInfo};
 
 // TODO: Remove `analyze_context` from here, makes no sense to have it nested
 //       in this TypeContext. The TypeCOntexct currently needs to look up
@@ -375,7 +375,7 @@ impl<'a> TypeContext<'a> {
                                 let var = match self.analyze_context.get_struct_member(
                                     struct_name,
                                     member_name,
-                                    0,
+                                    BlockInfo::DEFAULT_BLOCK_ID,
                                 ) {
                                     Ok(var) => var.clone(),
                                     Err(err) => {
@@ -494,10 +494,10 @@ impl<'a> TypeContext<'a> {
                                 // TODO: Fix this. Move `analyze_context` out
                                 //       of `type_context` and don't hardcode
                                 //       the default block ID.
-                                let method = match self.analyze_context.get_struct_method(
+                                let method = match self.analyze_context.get_method(
                                     struct_name,
                                     method_name,
-                                    0,
+                                    BlockInfo::DEFAULT_BLOCK_ID,
                                 ) {
                                     Ok(method) => method.clone(),
                                     Err(err) => {
@@ -571,10 +571,10 @@ impl<'a> TypeContext<'a> {
                                 // TODO: Fix this. Move `analyze_context` out
                                 //       of `type_context` and don't hardcode
                                 //       the default block ID.
-                                let method = match self.analyze_context.get_struct_method(
+                                let method = match self.analyze_context.get_method(
                                     struct_name,
                                     method_name,
-                                    0,
+                                    BlockInfo::DEFAULT_BLOCK_ID,
                                 ) {
                                     Ok(method) => method,
                                     Err(err) => {
