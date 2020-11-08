@@ -37,7 +37,7 @@ impl<'a> TypeSolver<'a> {
     }
 
     fn subtitute_type(&mut self, ty: &mut Type, finalize: bool) {
-        match self.type_context.get_substitution(ty, finalize) {
+        match self.type_context.solve_substitution(ty, finalize) {
             SubResult::Solved(sub_ty) => {
                 *ty = sub_ty;
             }
@@ -124,7 +124,7 @@ impl<'a> Visitor for TypeSolver<'a> {
                 {
                     match this_arg.value.get_expr_type() {
                         Ok(Type::Pointer(struct_ty)) => {
-                            if let Type::Custom(struct_name) = struct_ty.as_ref() {
+                            if let Type::CompoundType(struct_name, _) = struct_ty.as_ref() {
                                 func_call.method_struct = Some(struct_name.clone());
                             } else {
                                 let err = self.type_context.analyze_context.err(format!(
@@ -275,7 +275,7 @@ impl<'a> Visitor for TypeSolver<'a> {
             *member_ty = un_op.ret_type.clone();
 
             match un_op.value.get_expr_type() {
-                Ok(Type::Custom(struct_name)) | Ok(Type::CompoundType(struct_name, ..)) => {
+                Ok(Type::CompoundType(struct_name, ..)) => {
                     match self.type_context.analyze_context.get_struct_member_index(
                         &struct_name,
                         member_name,

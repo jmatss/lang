@@ -6,10 +6,11 @@ use crate::token::expr::Expr;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    /// A type that contains generic types. The first boxed type if the actual
-    /// type and the vector of types are the generic types. Currently only
-    /// structs are allowed to be compound types (the first type only allows
-    /// Strings which can only be translated to structs).
+    /// A struct type that can contain generic types. The first boxed type is
+    /// the actual type and the vector of types are the generic types.
+    /// Currently only structs are allowed to be compound types.
+    /// For a regular struct with no generics, the generic map will be empty.
+    ///
     /// Need to use "BTreeMap" instead of "HashMap" to make this "Type" structure
     /// hashable with the default derived "Hash".
     /// The key of the map is the name/identifier of the generic and the value
@@ -36,9 +37,6 @@ pub enum Type {
     F64,
     I128,
     U128,
-
-    /// Struct type.
-    Custom(String),
 
     /// A generic type. Ex. a generic "T" on a struct would be represented
     /// as a "Generic" containing the string "T".
@@ -95,24 +93,23 @@ impl Type {
             "f64" => Type::F64,
             "i128" => Type::I128,
             "u128" => Type::U128,
-            _ => Type::Custom(s.to_string()),
+            _ => Type::CompoundType(s.to_string(), BTreeMap::default()),
         }
     }
 
     /// Recursively replaces any generic identifiers from "Custom" to "Generic".
     pub fn replace_generics(&mut self, generics: &[String]) {
         match self {
-            Type::CompoundType(_, gens) => {
-                for gen in gens.values_mut() {
-                    gen.replace_generics(generics);
+            Type::CompoundType(struct_name, gens) => {
+                if generics.contains(struct_name) && gens.is_empty() {
+                    *self = Type::Generic(struct_name.clone());
+                } else {
+                    for gen in gens.values_mut() {
+                        gen.replace_generics(generics);
+                    }
                 }
             }
             Type::Pointer(ty) | Type::Array(ty, _) => ty.replace_generics(generics),
-            Type::Custom(ident) => {
-                if generics.contains(ident) {
-                    *self = Type::Generic(ident.clone());
-                }
-            }
             _ => (),
         }
     }
@@ -187,7 +184,7 @@ impl Type {
 
     pub fn is_aggregated(&self) -> bool {
         match self {
-            Type::CompoundType(..) | Type::Pointer(_) | Type::Array(..) | Type::Custom(_) => true,
+            Type::CompoundType(..) | Type::Pointer(_) | Type::Array(..) => true,
             _ => false,
         }
     }
@@ -347,7 +344,6 @@ impl Type {
             | (Type::F64, Type::F64)
             | (Type::I128, Type::U128)
             | (Type::U128, Type::U128) => true,
-            (Type::Custom(a), Type::Custom(b)) if a == b => true,
             (Type::CompoundType(comp_a, gens_a), Type::CompoundType(comp_b, gens_b)) => {
                 comp_a == comp_b && gens_a.len() == gens_b.len()
             }
@@ -408,7 +404,6 @@ impl Display for Type {
             Type::F64 => result.push_str("f64"),
             Type::I128 => result.push_str("i128"),
             Type::U128 => result.push_str("u128"),
-            Type::Custom(ident) | Type::Generic(ident) => result.push_str(ident),
             _ => unreachable!("Invalid type when calling `to_string`: {:?}", self),
         }
 

@@ -18,12 +18,21 @@ pub struct AstTraverser<'a> {
     errors: Vec<LangError>,
 }
 
-// TODO: Add more context here. Ex. line/column nr. If that is the case it can
-//       be given to more "visit_..." functions.
+// TODO: Add more context here.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct TraverseContext {
     pub block_id: usize,
     pub parent_block_id: usize,
+
+    pub line_nr: u64,
+    pub column_nr: u64,
+}
+
+impl TraverseContext {
+    pub fn set_pos(&mut self, line_nr: u64, column_nr: u64) {
+        self.line_nr = line_nr;
+        self.column_nr = column_nr;
+    }
 }
 
 impl<'a> Default for AstTraverser<'a> {
@@ -41,8 +50,15 @@ impl<'a> AstTraverser<'a> {
             traverse_context: TraverseContext {
                 block_id: 0,
                 parent_block_id: usize::MAX,
+                line_nr: 0,
+                column_nr: 0,
             },
         }
+    }
+
+    pub fn set_pos(&mut self, line_nr: u64, column_nr: u64) {
+        self.traverse_context.line_nr = line_nr;
+        self.traverse_context.column_nr = column_nr;
     }
 
     pub fn add_visitor(&mut self, visitor: &'a mut dyn Visitor) -> &mut Self {
@@ -69,6 +85,8 @@ impl<'a> AstTraverser<'a> {
     }
 
     pub fn traverse(&mut self, ast_token: &mut AstToken) -> &mut Self {
+        self.set_pos(ast_token.line_nr, ast_token.column_nr);
+
         for v in self.visitors.iter_mut() {
             v.visit_token(ast_token, &self.traverse_context);
         }
@@ -108,6 +126,8 @@ impl<'a> AstTraverser<'a> {
     }
 
     pub fn traverse_block(&mut self, ast_token: &mut AstToken) {
+        self.set_pos(ast_token.line_nr, ast_token.column_nr);
+
         debug!("Visiting block -- {:#?}", ast_token);
         for v in self.visitors.iter_mut() {
             v.visit_block(ast_token, &self.traverse_context);

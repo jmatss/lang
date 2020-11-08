@@ -75,96 +75,6 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
         self.type_id += 1;
         type_ident
     }
-
-    // TODO: Solve infinite recursive solves when generics get implemented.
-    // TODO: Should the constraint be removed when a new substitution is added?
-    //       Will that constraint every by used again?
-    fn solve_constraints(&mut self, finalize: bool) {
-        // Iterate through the constraints until all of them have been converted
-        // into substitutions in some way. If a constraint can't be solved, a
-        // error will be reported.
-        while !self.type_context.constraints.is_empty() {
-            let start_constraint_len = self.type_context.constraints.len();
-
-            let mut i = 0;
-            while i < self.type_context.constraints.len() {
-                // Safe to unwrap since `i` will always be less that the size
-                // of `constraints` enforced by the while loop expr.
-                let (lhs, rhs) = self.type_context.constraints.get(i).unwrap().clone();
-
-                let lhs_sub = self.type_context.get_substitution(&lhs, finalize);
-                let rhs_sub = self.type_context.get_substitution(&rhs, finalize);
-
-                debug!(
-                    "Solving constraint -- finalize: {}\nlhs: {:#?}\nlhs_sub: {:#?}\nrhs: {:#?}\nrhs_sub: {:#?}",
-                    finalize, &lhs, &lhs_sub, &rhs, &rhs_sub
-                );
-
-                // If the types aren't compatible, report a error and remove the
-                // constraint. This will allow the inference to continue to do as
-                // much work as possible even though it will never be 100% solved.
-                if !lhs.is_compatible(&rhs) {
-                    let err = self.type_context.analyze_context.err(format!(
-                        "Unsolvable type constraint. Lhs: {:?}, rhs: {:?}",
-                        lhs, rhs
-                    ));
-                    self.errors.push(err);
-                    self.type_context.constraints.swap_remove(i);
-                    continue;
-                }
-
-                match (lhs_sub, rhs_sub) {
-                    (SubResult::Solved(_), SubResult::Solved(_)) => {
-                        self.type_context.constraints.swap_remove(i);
-                    }
-
-                    (SubResult::Solved(to), SubResult::UnSolved(from))
-                    | (SubResult::UnSolved(from), SubResult::Solved(to)) => {
-                        if let Err(err) = self.type_context.insert_substitution(from, to) {
-                            self.errors.push(err)
-                        }
-                        self.type_context.constraints.swap_remove(i);
-                    }
-
-                    (SubResult::UnSolved(first), SubResult::UnSolved(second)) => {
-                        match self.type_context.get_mapping_direction(first, second) {
-                            Ok((from, to)) => {
-                                if let Err(err) = self.type_context.insert_substitution(from, to) {
-                                    self.errors.push(err)
-                                }
-                            }
-                            Err(err) => self.errors.push(err),
-                        };
-                        self.type_context.constraints.swap_remove(i);
-                    }
-
-                    (_, SubResult::Err(err)) | (SubResult::Err(err), _) => {
-                        self.errors.push(err);
-                        self.type_context.constraints.swap_remove(i);
-                    }
-                }
-
-                i += 1;
-            }
-
-            // If the `finalize` flag isn't set, run this recursively with it
-            // set to make all possible substitutions.
-            // If it after the second iteration isn't able to solve all types,
-            // something has failed and a error will be reported.
-            if start_constraint_len == self.type_context.constraints.len() {
-                if finalize {
-                    let err = self.type_context.analyze_context.err(format!(
-                        "Unable to solve all type constraints: {:?}",
-                        self.type_context.constraints
-                    ));
-                    self.errors.push(err);
-                } else {
-                    self.solve_constraints(true);
-                }
-                return;
-            }
-        }
-    }
 }
 
 impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
@@ -186,7 +96,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         self.type_context.analyze_context.line_nr = ast_token.line_nr;
         self.type_context.analyze_context.column_nr = ast_token.column_nr;
 
-        self.solve_constraints(false);
+        let mut result = self.type_context.solve_constraints(true);
+        if let Err(errors) = &mut result {
+            self.errors.append(errors);
+        }
+
         debug!(
             "Type inference Done.\nConstraints: {:#?}\nSubs: {:#?}",
             self.type_context.constraints, self.type_context.substitutions
@@ -265,7 +179,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // be stored in the `func_call.method_struct`, so one can get the
             // struct type from there.
             let struct_ty = if let Some(struct_name) = &func_call.method_struct {
-                Type::Custom(struct_name.clone())
+                Type::CompoundType(struct_name.clone(), BTreeMap::default())
             } else if let Some(this_arg) = func_call.arguments.first_mut() {
                 if let Expr::Op(Op::UnOp(un_op)) = &mut this_arg.value {
                     if let UnOperator::Address = un_op.operator {
@@ -311,7 +225,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 // named parameter instead of using the index of its position
                 // in the function call.
                 let inner_idx = if let Some(arg_name) = &arg.name {
-                    if let Type::Custom(struct_name) = &struct_ty {
+                    if let Type::CompoundType(struct_name, _) = &struct_ty {
                         match self.type_context.analyze_context.get_method_param_idx(
                             struct_name,
                             &func_call.name,
@@ -452,7 +366,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// members with the type of the struct init arguments.
     fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
         if struct_init.ret_type.is_none() {
-            struct_init.ret_type = Some(Type::Custom(struct_init.name.clone()));
+            struct_init.ret_type = Some(Type::CompoundType(
+                struct_init.name.clone(),
+                BTreeMap::default(),
+            ));
         }
 
         let struct_ = match self
@@ -698,13 +615,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             BinOperator::In | BinOperator::Is | BinOperator::Of => (),
 
             BinOperator::As => {
-                if let Expr::Type(ty) = &*bin_op.rhs {
-                    // TODO: The lhs and rhs needs to be checked so that they
-                    //       have compatible types but they don't need to have
-                    //       the same type.
+                if let Expr::Type(rhs_ty) = &*bin_op.rhs {
+                    // The rhs of a "as" will be a hardcoded type. The lhs
+                    // doesn't have to be the same type (since it should be
+                    // casted at this point), but the return type of the bin op
+                    // must be the same type as the rhs.
                     // Change the type of the bin op directly so that it takes
                     // precedence during type inferencing.
-                    bin_op.ret_type = Some(ty.clone());
+                    bin_op.ret_type = Some(rhs_ty.clone());
                 } else {
                     let err = self
                         .type_context

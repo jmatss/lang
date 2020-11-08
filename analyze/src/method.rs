@@ -155,7 +155,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
 
                     // Static struct access/method call.
                     BinOperator::DoubleColon => match bin_op.lhs.as_ref() {
-                        Expr::Type(Type::Custom(ident)) => {
+                        Expr::Type(Type::CompoundType(ident, _)) => {
                             method_call.is_method = true;
                             method_call.method_struct = Some(ident.clone());
 

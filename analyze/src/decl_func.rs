@@ -15,7 +15,7 @@ use common::{
 };
 use std::{
     cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, BTreeMap, HashMap},
 };
 
 /// Gathers information about all function/method declarations found in the AST
@@ -141,7 +141,10 @@ impl<'a> DeclFuncAnalyzer<'a> {
         // reference(/pointer) to "this"/"self".
         if !func.is_static() {
             const THIS_VAR_NAME: &str = "this";
-            let ty = Type::Pointer(Box::new(Type::Custom(struct_name.into())));
+            let ty = Type::Pointer(Box::new(Type::CompoundType(
+                struct_name.into(),
+                BTreeMap::default(),
+            )));
             let var = Var::new(THIS_VAR_NAME.into(), Some(ty), None, None, false);
             if let Some(ref mut params) = func.parameters {
                 params.insert(0, var);

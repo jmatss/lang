@@ -626,7 +626,7 @@ impl<'a> KeyworkParser<'a> {
         let generics = if let Some(gens) = type_parse.parse_type_generics()? {
             let mut generics = Vec::with_capacity(gens.len());
             for (ident, gen) in &gens {
-                if let Type::Custom(generic_ident) = gen {
+                if let Type::CompoundType(generic_ident, _) = gen {
                     generics.push(generic_ident.clone());
                 } else {
                     return Err(self.iter.err(format!(

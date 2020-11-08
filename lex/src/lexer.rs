@@ -159,7 +159,17 @@ impl LexTokenIter {
 
     #[inline]
     fn valid_linebreak(c: char, c_next: Option<char>) -> bool {
-        c == '\n' || (c == '\r' && c_next.map_or(false, |x| x == '\n'))
+        LexTokenIter::valid_linebreak_n(c) || LexTokenIter::valid_linebreak_rn(c, c_next)
+    }
+
+    #[inline]
+    fn valid_linebreak_n(c: char) -> bool {
+        c == '\n'
+    }
+
+    #[inline]
+    fn valid_linebreak_rn(c: char, c_next: Option<char>) -> bool {
+        c == '\r' && c_next.map_or(false, |x| x == '\n')
     }
 
     // char.is_whitespace() includes linebreaks, so need to check valid_linebreak first.
@@ -475,6 +485,8 @@ impl LexTokenIter {
             comment.push(c);
         }
 
+        self.cur_column_nr += (n + comment.len()) as u64;
+
         comment.iter().collect()
     }
 
@@ -495,12 +507,18 @@ impl LexTokenIter {
         // has been fully consumed.
         let mut multi_line_comment_begin_count = 1;
 
+        // Used to prevent "\r\n" being treated as two linebreaks (first \r\n
+        // and then \n).
+        let mut prev_was_linebreak_rn = false;
+
         while let Some(c) = self.iter.next() {
-            if let Some((lex_token_kind, sym_len)) = self
-                .iter
-                .peek_three()
-                .map(|(c1, c2, c3)| LexToken::get_if_symbol_three_chars(c1, c2, c3))
-                .flatten()
+            let (c1, c2, c3) = if let Some(c) = self.iter.peek_three() {
+                c
+            } else {
+                panic!("None when peeking in multi line comment.")
+            };
+
+            if let Some((lex_token_kind, sym_len)) = LexToken::get_if_symbol_three_chars(c1, c2, c3)
             {
                 match lex_token_kind {
                     LexTokenKind::Sym(Sym::CommentMultiLineBegin) => {
@@ -518,8 +536,25 @@ impl LexTokenIter {
                 }
             }
 
+            // TODO: Seems to calculate incorrect line/col looking at the
+            //       line/col for the unknown types.
+
+            // Increment line number if a linebreak is found. Make sure to not
+            // count any "\n" after a "\r\n" was seen to prevent counting those
+            // linebreaks twice.
+            if LexTokenIter::valid_linebreak(c1, c2)
+                && !(prev_was_linebreak_rn && LexTokenIter::valid_linebreak_n(c))
+            {
+                self.cur_line_nr += 1;
+            }
+
+            prev_was_linebreak_rn = LexTokenIter::valid_linebreak_rn(c1, c2);
+
             comment.push(c);
         }
+
+        // The 2 is the symbol size of the "CommentMultiLineEnd".
+        self.cur_column_nr += (n + 2 + comment.len()) as u64;
 
         comment.iter().collect()
     }

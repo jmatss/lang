@@ -23,6 +23,7 @@ use common::{
         stmt::Path,
     },
     traverser::AstTraverser,
+    types::Type,
     BlockId,
 };
 use decl_func::DeclFuncAnalyzer;
@@ -526,6 +527,57 @@ impl AnalyzeContext {
         }
     }
 
+    /// Given a function or method `func`, finds the parameter with the name
+    // `param_name` and also its index.
+    fn get_param(&self, func: &Function, param_name: &str) -> CustomResult<(u64, Var)> {
+        if let Some(params) = &func.parameters {
+            for (idx, param) in params.iter().enumerate() {
+                if param_name == param.name {
+                    return Ok((idx as u64, param.clone()));
+                }
+            }
+
+            Err(self.err(format!(
+                "Unable to find param with name \"{}\" in function with name \"{}\".",
+                &param_name, &func.name,
+            )))
+        } else {
+            Err(self.err(format!(
+                "Function \"{}\" had no parameters, expected param with name: {}",
+                &func.name, &param_name
+            )))
+        }
+    }
+
+    /// Given a function or method `func`, finds the parameter with the name
+    // `param_name` and also its index.
+    fn get_param_with_idx(&self, func: &Function, idx: u64) -> CustomResult<Var> {
+        if let Some(params) = &func.parameters {
+            for (i, param) in params.iter().enumerate() {
+                if idx == i as u64 {
+                    return Ok(param.clone());
+                }
+            }
+
+            Err(self.err(format!(
+                "Unable to find param with index \"{}\" in function with name \"{}\".",
+                idx, &func.name,
+            )))
+        } else {
+            Err(self.err(format!(
+                "Function \"{}\" had no parameters, expected param with index: {}",
+                &func.name, idx
+            )))
+        }
+    }
+
+    /// Given a function or method `func`, finds the index of the parameter with
+    /// the name `param_name`. The index indicates the position of the parameter
+    /// in the struct parameter list.
+    fn get_param_idx(&self, func: &Function, param_name: &str) -> CustomResult<u64> {
+        Ok(self.get_param(func, param_name)?.0)
+    }
+
     /// Finds the struct with the name `struct_name` in a scope containing the block
     /// with ID `id` and returns the index of the parameter with name `param_name`
     /// in the method with name `method_name`.
@@ -538,24 +590,7 @@ impl AnalyzeContext {
         id: BlockId,
     ) -> CustomResult<u64> {
         let method = self.get_method(struct_name, method_name, id)?;
-
-        if let Some(params) = &method.parameters {
-            for (idx, param) in params.iter().enumerate() {
-                if param_name == param.name {
-                    return Ok(idx as u64);
-                }
-            }
-
-            Err(self.err(format!(
-                "Unable to find param with name \"{}\" in method \"{}\" in struct \"{}\".",
-                &param_name, &method_name, &struct_name
-            )))
-        } else {
-            Err(self.err(format!(
-                "Method \"{}\" in struct \"{}\" had no parameters, expected param with name: {}",
-                &method_name, &struct_name, &param_name
-            )))
-        }
+        self.get_param_idx(method, param_name)
     }
 
     /// Finds the function with the name `func_name` in a scope containing the block
@@ -567,24 +602,47 @@ impl AnalyzeContext {
         id: BlockId,
     ) -> CustomResult<u64> {
         let func = self.get_func(func_name, id)?;
+        self.get_param_idx(func, param_name)
+    }
 
-        if let Some(params) = &func.parameters {
-            for (idx, param) in params.iter().enumerate() {
-                if param_name == param.name {
-                    return Ok(idx as u64);
-                }
-            }
-
-            Err(self.err(format!(
-                "Unable to find param with name \"{}\" in function \"{}\".",
-                &param_name, &func_name,
-            )))
+    /// Given a function or method `func`, finds the type of the parameter with
+    /// the name `param_name`.
+    fn get_param_type(&self, func: &Function, idx: u64) -> CustomResult<Type> {
+        if let Some(ty) = &self.get_param_with_idx(func, idx)?.ret_type {
+            Ok(ty.clone())
         } else {
             Err(self.err(format!(
-                "Function \"{}\" had no parameters, expected param with name: {}",
-                &func_name, &param_name
+                "Parameter at index \"{}\" in function \"{}\" has no type set.",
+                idx, func.name
             )))
         }
+    }
+
+    /// Finds the struct with the name `struct_name` in a scope containing the block
+    /// with ID `id` and returns the type of the parameter with name `param_name`
+    /// in the method with name `method_name`.
+    /// The struct can ex. be declared in parent block scope.
+    pub fn get_method_param_type(
+        &self,
+        struct_name: &str,
+        method_name: &str,
+        idx: u64,
+        id: BlockId,
+    ) -> CustomResult<Type> {
+        let method = self.get_method(struct_name, method_name, id)?;
+        self.get_param_type(method, idx)
+    }
+
+    /// Finds the function with the name `func_name` in a scope containing the block
+    /// with ID `id` and returns the type of the parameter with name `param_name`.
+    pub fn get_func_param_type(
+        &self,
+        func_name: &str,
+        idx: u64,
+        id: BlockId,
+    ) -> CustomResult<Type> {
+        let func = self.get_func(func_name, id)?;
+        self.get_param_type(func, idx)
     }
 
     /// Used when returing errors to include current line/column number.

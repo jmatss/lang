@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::{
     parser::ParseTokenIter,
     token::{get_if_expr_op, Fix, Operator, Output},
@@ -401,7 +403,10 @@ impl<'a> ExprParser<'a> {
                 }
 
                 // Static method call, this is the lhs type.
-                LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(Type::Custom(ident.into()))),
+                LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(Type::CompoundType(
+                    ident.into(),
+                    BTreeMap::default(),
+                ))),
 
                 _ => {
                     // See if this is a type. It is a type if the previous

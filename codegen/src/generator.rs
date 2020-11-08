@@ -185,7 +185,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             match header {
                 BlockHeader::Struct(struct_) => {
-                    warn!("Compiling struct: {:#?}", struct_);
                     self.compile_struct(&struct_)?;
                 }
                 BlockHeader::Enum(enum_) => {
@@ -459,6 +458,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     }
                 }
             }
+
             Type::Void => AnyTypeEnum::VoidType(self.context.void_type()),
             Type::Character => AnyTypeEnum::IntType(self.context.i32_type()),
             // TODO: What type should the string be?
@@ -478,18 +478,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Type::F64 => AnyTypeEnum::FloatType(self.context.f64_type()),
             Type::I128 => AnyTypeEnum::IntType(self.context.i128_type()),
             Type::U128 => AnyTypeEnum::IntType(self.context.i128_type()),
-            Type::Custom(ref ident) => {
-                if let Some(struct_type) = self.module.get_struct_type(ident) {
-                    struct_type.clone().into()
-                } else {
-                    return Err(self.err(format!("Unable to find custom type: {}", ident)));
-                }
-            }
+
             Type::CompoundType(ident, generics) => {
-                let struct_name = common::util::to_generic_struct_name(
-                    ident,
-                    &generics.values().cloned().collect::<Vec<_>>(),
-                );
+                let struct_name = if generics.is_empty() {
+                    ident.clone()
+                } else {
+                    common::util::to_generic_struct_name(
+                        ident,
+                        &generics.values().cloned().collect::<Vec<_>>(),
+                    )
+                };
 
                 if let Some(struct_type) = self.module.get_struct_type(&struct_name) {
                     struct_type.clone().into()
@@ -500,6 +498,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )));
                 }
             }
+
             _ => return Err(self.err(format!("Invalid type during type codegen: {:?}", ty))),
         })
     }
