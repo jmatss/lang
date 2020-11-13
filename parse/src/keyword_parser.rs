@@ -10,7 +10,7 @@ use common::{
         ast::AstToken,
         block::{BlockHeader, Function, Struct},
         expr::Var,
-        stmt::{Path, Stmt},
+        stmt::{Modifier, Path, Stmt},
     },
     types::Type,
 };
@@ -530,11 +530,51 @@ impl<'a> KeyworkParser<'a> {
     fn parse_func_proto(&mut self) -> CustomResult<Function> {
         let mut modifiers = Vec::new();
 
+        static THIS: &str = "this";
+
         // Start by parsing the modifiers and identifier. This will loop until
         // the identifier/name of the function is found.
         let ident = loop {
             if let Some(lex_token) = self.iter.next_skip_space_line() {
                 match &lex_token.kind {
+                    // function this
+                    LexTokenKind::Ident(ident) if ident == THIS => {
+                        modifiers.push(Modifier::This);
+                    }
+
+                    // function {this}
+                    LexTokenKind::Sym(Sym::CurlyBracketBegin) => {
+                        let lex_token = self.iter.next_skip_space_line();
+                        if let Some(LexTokenKind::Ident(ident)) =
+                            lex_token.as_ref().map(|l| &l.kind)
+                        {
+                            if ident != THIS {
+                                return Err(self.iter.err(format!(
+                                    "Expected \"this\" after CurlyBracketBegin in \"function\" header, got: {:?}",
+                                    lex_token
+                                )));
+                            }
+                        } else {
+                            return Err(self.iter.err(format!(
+                                "Expected \"this\" after CurlyBracketBegin in \"function\" header, got: {:?}",
+                                lex_token
+                            )));
+                        }
+
+                        let lex_token = self.iter.next_skip_space_line();
+                        if let Some(LexTokenKind::Sym(Sym::CurlyBracketEnd)) =
+                            lex_token.as_ref().map(|l| &l.kind)
+                        {
+                        } else {
+                            return Err(self.iter.err(format!(
+                                "Expected CurlyBracketEnd after \"this\" in \"function\" header, got: {:?}",
+                                lex_token
+                            )));
+                        }
+
+                        modifiers.push(Modifier::ThisPointer);
+                    }
+
                     LexTokenKind::Ident(ident) => {
                         break ident.clone();
                     }

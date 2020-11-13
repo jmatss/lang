@@ -19,6 +19,16 @@ impl<I: Clone> TokenIter<I> {
         item.cloned()
     }
 
+    /// Get the next two items from the iterator.
+    #[inline]
+    pub fn next_two(&mut self) -> Option<(I, Option<I>)> {
+        if let Some(first) = self.next() {
+            Some((first, self.next()))
+        } else {
+            None
+        }
+    }
+
     /// Rewinds back one character in the iterator.
     /// If the returned bool is false, this operation tried to rewind to a
     /// position before the actual iterator (pos < 0).

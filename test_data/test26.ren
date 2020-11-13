@@ -7,33 +7,41 @@ struct TestStruct
 
 implement TestStruct
 {
-    function conv() -> u64
+    function {this} inc() -> u64
     {
+        this.*.x += 1
+        return this.*.x as u64
+    }
+
+    function this inc_by_val() -> u64
+    {
+        this.x += 1
         return this.x as u64
     }
-    
-    function static static_conv(arg: i32) -> u64
+
+    function static_inc(arg: i32) -> u64
     {
-        return arg as u64
+        return (arg + 1) as u64
     }
 }
 
 function main() -> i32
 {
     var test_struct = TestStruct { 5 }
-    
-    var first = test_struct.conv()
-    var second = TestStruct::static_conv(5)
-    var third = TestStruct::conv(this=test_struct.&)
-    
-    // TODO: Better error messages when trying to call static
-    //       method as non-static and vice versa.
-    // var first = test_struct.static_conv(5)
-    // var second = TestStruct::conv()
-    
-    printf("first: %llu, second: %llu, third: %llu", first, second, third)
-    assert(first == second)
-    assert(second == third)
+
+    var by_ref = test_struct.&.inc()
+    printf("by_ref: %llu, test_struct.x: %d", by_ref, test_struct.x)
+    assert(by_ref == 6 as u64)
+    assert(test_struct.x == 6)
+
+    var by_val = test_struct.inc_by_val()
+    printf("\nby_val: %llu, test_struct.x: %d", by_val, test_struct.x)
+    assert(by_val == 7 as u64)
+    assert(test_struct.x == 6)
+
+    var by_static = TestStruct::static_inc(5)
+    printf("\nby_static: %llu", by_static)
+    assert(by_static == 6 as u64)
 
     return 0
 }

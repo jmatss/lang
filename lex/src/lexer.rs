@@ -203,18 +203,16 @@ impl LexTokenIter {
     // TODO: number containing scientifical notaion (e/E).
     /// Returns the number (int or float) at the current position of the iterator.
     fn get_number(&mut self) -> LexTokenKind {
-        let radix = if let Some(('0', Some(sep_char))) = self.iter.peek_two() {
-            // Move the iterator forward to skip the assumed prefix.
-            self.iter.skip(2);
-
+        let radix = if let Some(('0', Some(sep_char))) = self.iter.next_two() {
             match sep_char.to_ascii_uppercase() {
                 'X' => 16,
                 'B' => 2,
                 'O' => 8,
                 _ => {
-                    // Rewing the position of the iterator the two skipped chars
-                    // since they aren't part of a prefix, this is (most likely)
-                    // just a decimal number that start with '0'.
+                    // Rewind the position of the iterator to include the two
+                    // read characters from above since they aren't part of a
+                    // prefix. This is (most likely) just a decimal number that
+                    // start with '0'.
                     self.iter.rewind_n(2);
                     10
                 }
@@ -230,9 +228,7 @@ impl LexTokenIter {
         let mut number = self.get_integer(radix);
 
         // Will be set to true if the column number should be decrement with one.
-        // This is true for floats that doesn't have a number after the "dot" and
-        // have been prepended with a "0" (which shouldn't be added to the
-        // column count).
+        // This is true for floats that doesn't have a number after the "dot".
         let mut dec_column_nr = false;
 
         // If this number contains a dot, assume it is a float number.
@@ -243,6 +239,7 @@ impl LexTokenIter {
 
             if LexTokenIter::valid_number(next, radix) {
                 number = [number, self.get_integer(radix)].join(".");
+                dec_column_nr = false;
             } else {
                 number.push_str(".0");
                 dec_column_nr = true;

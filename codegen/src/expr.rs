@@ -422,7 +422,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         param_type: &BasicTypeEnum,
         arg_type: &BasicTypeEnum,
     ) -> CustomResult<()> {
-        return Ok(());
         if arg_type != param_type {
             // TODO: Should be able to convert a {[u8: N]} to a {u8}. This is
             //       useful when working with for example string literals.

@@ -144,7 +144,9 @@ impl Function {
     }
 
     pub fn is_static(&self) -> bool {
-        self.modifiers.contains(&Modifier::Static)
+        (!self.modifiers.contains(&Modifier::This)
+            && !self.modifiers.contains(&Modifier::ThisPointer))
+            || self.modifiers.contains(&Modifier::Static)
     }
 }
 

@@ -6,6 +6,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{BlockHeader, Function},
+        stmt::Modifier,
         stmt::Stmt,
     },
     traverser::TraverseContext,
@@ -140,11 +141,24 @@ impl<'a> DeclFuncAnalyzer<'a> {
         // If this is a non-static method, the first parameter should be a
         // reference(/pointer) to "this"/"self".
         if !func.is_static() {
-            const THIS_VAR_NAME: &str = "this";
-            let ty = Type::Pointer(Box::new(Type::CompoundType(
-                struct_name.into(),
-                BTreeMap::default(),
-            )));
+            static THIS_VAR_NAME: &str = "this";
+
+            let ty = if func.modifiers.contains(&Modifier::This) {
+                Type::CompoundType(struct_name.into(), BTreeMap::default())
+            } else if func.modifiers.contains(&Modifier::ThisPointer) {
+                Type::Pointer(Box::new(Type::CompoundType(
+                    struct_name.into(),
+                    BTreeMap::default(),
+                )))
+            } else {
+                let err = analyze_context.err(format!(
+                    "Non static function did not contain \"this\" or \"this ptr\" reference. Struct name: {}, func: {:#?}.",
+                    struct_name, func
+                ));
+                self.errors.push(err);
+                return;
+            };
+
             let var = Var::new(THIS_VAR_NAME.into(), Some(ty), None, None, false);
             if let Some(ref mut params) = func.parameters {
                 params.insert(0, var);
@@ -196,8 +210,8 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
 
     /// Create a entry for this impl block in the analyze contexts `methods` map
     /// and marks the functions that it contain with the name of this impl block.
-    /// This lets the one differentiate between functions and methods in the
-    /// Function struct by checking the `method_struct` field.
+    /// This lets one differentiate between functions and methods in the Function
+    /// struct by checking the `method_struct` field.
     fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         let mut analyze_context = self.analyze_context.borrow_mut();
 

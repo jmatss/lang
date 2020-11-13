@@ -66,6 +66,8 @@ pub enum Modifier {
     Static,
     Private,
     Public,
+    This,
+    ThisPointer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

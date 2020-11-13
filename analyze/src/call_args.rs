@@ -1,11 +1,13 @@
-use std::cell::RefCell;
-
 use common::{
     error::CustomResult,
     error::LangError,
     token::expr::Argument,
     token::expr::FuncCall,
-    token::expr::{StructInit, Var},
+    token::{
+        block::Function,
+        expr::{StructInit, Var},
+        stmt::Modifier,
+    },
     traverser::TraverseContext,
     visitor::Visitor,
 };
@@ -16,22 +18,50 @@ use crate::AnalyzeContext;
 /// arguments so that they are put in the correct index position so that
 /// the codegen works correctly. It also assigns any default values found in the
 /// function parameters to the current function call (if expected).
+/// It also wraps "this" in a pointer if the modifier of the function that it is
+/// calling expects this as a pointer.
 pub struct CallArgs<'a> {
-    analyze_context: &'a RefCell<AnalyzeContext>,
+    analyze_context: &'a AnalyzeContext,
     errors: Vec<LangError>,
 }
 
 impl<'a> CallArgs<'a> {
-    pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
+    pub fn new(analyze_context: &'a AnalyzeContext) -> Self {
         Self {
             analyze_context,
             errors: Vec::default(),
         }
     }
 
-    fn reorder_func_call(&mut self, func_call: &mut FuncCall, params: &[Var]) -> CustomResult<()> {
-        let analyze_context = self.analyze_context.borrow();
+    fn wrap_this_if_needed(
+        &mut self,
+        func_call: &mut FuncCall,
+        func: &mut Function,
+    ) -> CustomResult<()> {
+        static THIS: &str = "this";
 
+        if func.modifiers.contains(&Modifier::ThisPointer) {
+            if let Some(this_param) = func.parameters.as_mut().map(|p| p.first_mut()).flatten() {
+                if this_param.name != THIS {
+                    return Err(self.analyze_context.err(format!(
+                        "First parameter of instance method was not \"this\": {:#?}",
+                        func
+                    )));
+                }
+
+            // TODO: Is this even needed? Should wrap "this" here in that case.
+            } else {
+                return Err(self.analyze_context.err(format!(
+                    "Instance method had no parameters, expected atleast \"this\": {:#?}.",
+                    func
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn reorder_func_call(&mut self, func_call: &mut FuncCall, params: &[Var]) -> CustomResult<()> {
         let mut idx: u64 = 0;
         while idx < func_call.arguments.len() as u64 {
             let arg = func_call
@@ -60,7 +90,7 @@ impl<'a> CallArgs<'a> {
                     // needs to be swapped to somewhere else.
                     func_call.arguments.swap(idx as usize, new_idx as usize);
                 } else {
-                    return Err(analyze_context.err(format!(
+                    return Err(self.analyze_context.err(format!(
                         "Unable to find parameter \"{}\" in function \"{}\".",
                         arg_name, &func_call.name
                     )));
@@ -78,8 +108,6 @@ impl<'a> CallArgs<'a> {
         struct_init: &mut StructInit,
         members: &[Var],
     ) -> CustomResult<()> {
-        let analyze_context = self.analyze_context.borrow();
-
         let mut idx: u64 = 0;
         while idx < struct_init.arguments.len() as u64 {
             let arg = struct_init
@@ -108,7 +136,7 @@ impl<'a> CallArgs<'a> {
                     // needs to be swapped to somewhere else.
                     struct_init.arguments.swap(idx as usize, new_idx as usize);
                 } else {
-                    return Err(analyze_context.err(format!(
+                    return Err(self.analyze_context.err(format!(
                         "Unable to find member \"{}\" in struct \"{}\".",
                         arg_name, &struct_init.name
                     )));
@@ -127,8 +155,6 @@ impl<'a> CallArgs<'a> {
         params: &[Var],
         is_variadic: bool,
     ) -> CustomResult<()> {
-        let analyze_context = self.analyze_context.borrow();
-
         // If here are more parameters in the function that there are arguments
         // to the current function call, assume that "missing" arguments
         // are supposed to be filled in with the default parameters. If there are
@@ -142,7 +168,7 @@ impl<'a> CallArgs<'a> {
                         Argument::new(Some(param.name.clone()), *default_value.clone());
                     func_call.arguments.push(default_arg);
                 } else {
-                    return Err(analyze_context.err(format!(
+                    return Err(self.analyze_context.err(format!(
                         "Function call to \"{}\" missing argument for parameter \"{}\".",
                         &func_call.name, &param.name
                     )));
@@ -164,15 +190,15 @@ impl<'a> Visitor for CallArgs<'a> {
     }
 
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
-        let analyze_context = self.analyze_context.borrow();
-
         // If this is a function contained in a struct (method), one needs to
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
         let func_res = if let Some(struct_name) = &func_call.method_struct {
-            analyze_context.get_method(struct_name, &func_call.name, ctx.block_id)
+            self.analyze_context
+                .get_method_mut(struct_name, &func_call.name, ctx.block_id)
         } else {
-            analyze_context.get_func(&func_call.name, ctx.block_id)
+            self.analyze_context
+                .get_func_mut(&func_call.name, ctx.block_id)
         };
 
         let func = match func_res {
@@ -182,6 +208,13 @@ impl<'a> Visitor for CallArgs<'a> {
                 return;
             }
         };
+
+        // Wrap "this" into a pointer if this is a method that has specified
+        // that the method should take "this" as a pointer.
+        if let Err(err) = self.wrap_this_if_needed(func_call, func) {
+            self.errors.push(err);
+            return;
+        }
 
         // Get the parameters for the function. This will be used to reorder
         // the arguments in the function call correctly.
@@ -209,9 +242,10 @@ impl<'a> Visitor for CallArgs<'a> {
     }
 
     fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
-        let analyze_context = self.analyze_context.borrow();
-
-        let struct_ = match analyze_context.get_struct(&struct_init.name, ctx.block_id) {
+        let struct_ = match self
+            .analyze_context
+            .get_struct(&struct_init.name, ctx.block_id)
+        {
             Ok(struct_) => struct_,
             Err(err) => {
                 self.errors.push(err);

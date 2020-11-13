@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 log = "0.4.11"
+either = "1.6.1"
 
 common = { path = "../common" }
 parse = { path = "../parse" }

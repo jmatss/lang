@@ -66,8 +66,8 @@ use type_solver::TypeSolver;
 /// so that the "type analyzing" can know that it is a method vs function.
 /// The "MethodAnalyzer" should be ran after "decl analyzers" since it will
 /// need struct/func information to figure out types for method calls.
-/// "decl_func_analyzer"/"decl_type_analyzer" needs to be ran before the
-/// "call_args" since it needs to access structs and functions.
+/// "decl_func_analyzer"/"decl_type_analyzer"/"type..." needs to be ran before
+/// the "call_args" since it needs to access structs, functions and methods.
 pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>> {
     let analyze_context = RefCell::new(AnalyzeContext::new());
 
@@ -98,10 +98,8 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
         .take_errors()?;
 
     let mut method_analyzer = MethodAnalyzer::new(&analyze_context);
-    let mut call_args = CallArgs::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut method_analyzer)
-        .add_visitor(&mut call_args)
         .traverse(ast_root)
         .take_errors()?;
 
@@ -130,6 +128,12 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
     let mut type_converter = TypeConverter::new(generic_structs);
     AstTraverser::new()
         .add_visitor(&mut type_converter)
+        .traverse(ast_root)
+        .take_errors()?;
+
+    let mut call_args = CallArgs::new(&analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut call_args)
         .traverse(ast_root)
         .take_errors()?;
 
@@ -247,12 +251,53 @@ impl AnalyzeContext {
     }
 
     pub fn debug_print(&self) {
-        debug!("Variables:\n{:#?}", self.variables);
-        debug!("Functions:\n{:#?}", self.functions);
-        debug!("Structs:\n{:#?}", self.structs);
-        debug!("Enums:\n{:#?}", self.enums);
-        debug!("Interfaces:\n{:#?}", self.interfaces);
-        debug!("Methods:\n{:#?}", self.methods);
+        debug!(
+            "Variables:\n{:#?}",
+            self.variables
+                .iter()
+                .map(|(k, v)| (k, unsafe { v.as_ref() }.unwrap()))
+                .collect::<HashMap<_, _>>()
+        );
+        debug!(
+            "Functions:\n{:#?}",
+            self.functions
+                .iter()
+                .map(|(k, v)| (k, unsafe { v.as_ref() }.unwrap()))
+                .collect::<HashMap<_, _>>()
+        );
+        debug!(
+            "Structs:\n{:#?}",
+            self.structs
+                .iter()
+                .map(|(k, v)| (k, unsafe { v.as_ref() }.unwrap()))
+                .collect::<HashMap<_, _>>()
+        );
+        debug!(
+            "Enums:\n{:#?}",
+            self.enums
+                .iter()
+                .map(|(k, v)| (k, unsafe { v.as_ref() }.unwrap()))
+                .collect::<HashMap<_, _>>()
+        );
+        debug!(
+            "Interfaces:\n{:#?}",
+            self.interfaces
+                .iter()
+                .map(|(k, v)| (k, unsafe { v.as_ref() }.unwrap()))
+                .collect::<HashMap<_, _>>()
+        );
+        debug!(
+            "Methods:\n{:#?}",
+            self.methods
+                .iter()
+                .map(|(k, v)| (
+                    k,
+                    v.iter()
+                        .map(|(ki, vi)| (ki, unsafe { vi.as_ref() }.unwrap()))
+                        .collect::<HashMap<_, _>>()
+                ))
+                .collect::<HashMap<_, _>>()
+        );
         debug!("Block info:\n{:#?}", self.block_info);
     }
 

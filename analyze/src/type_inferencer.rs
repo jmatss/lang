@@ -1,4 +1,4 @@
-use crate::type_context::{SubResult, TypeContext};
+use crate::type_context::TypeContext;
 use common::{
     error::LangError,
     token::ast::Token,
@@ -15,6 +15,7 @@ use common::{
     types::Type,
     visitor::Visitor,
 };
+use either::Either;
 use log::debug;
 use std::collections::BTreeMap;
 
@@ -192,21 +193,20 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         }
                     } else {
                         let err = self.type_context.analyze_context.err(format!(
-                            "Expected \"this\" for method call \"{}\" to be \"address\" of struct, was: \"{:?}\"",
+                            "Un op in \"this\" for method call \"{}\" was expected to be \"address\" but was: \"{:?}\"",
                             &func_call.name, this_arg.value
                         ));
                         self.errors.push(err);
                         return;
                     }
                 } else {
-                    let err = self.type_context.analyze_context.err(
-                        format!(
-                            "Expected \"this\" for method call \"{}\" to be \"address\" of struct, was: \"{:?}\"",
-                            &func_call.name, this_arg.value
-                        ),
-                    );
-                    self.errors.push(err);
-                    return;
+                    match this_arg.value.get_expr_type() {
+                        Ok(struct_ty) => struct_ty,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    }
                 }
             } else {
                 let err = self.type_context.analyze_context.err(format!(
@@ -221,40 +221,19 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // the method parameter types that will be figured out later.
             let mut idx: u64 = 0;
             for arg in &func_call.arguments {
-                // If the argument is a named argument, get the index for the
-                // named parameter instead of using the index of its position
-                // in the function call.
-                let inner_idx = if let Some(arg_name) = &arg.name {
-                    if let Type::CompoundType(struct_name, _) = &struct_ty {
-                        match self.type_context.analyze_context.get_method_param_idx(
-                            struct_name,
-                            &func_call.name,
-                            arg_name,
-                            ctx.block_id,
-                        ) {
-                            Ok(idx) => idx,
-                            Err(err) => {
-                                self.errors.push(err);
-                                return;
-                            }
-                        }
-                    } else {
-                        let err = self.type_context.analyze_context.err(format!(
-                            "\"this\" in method no a struc type, was: {:?}",
-                            struct_ty
-                        ));
-                        self.errors.push(err);
-                        return;
-                    }
+                // If the argument is a named argument, give the argument name
+                // to the new "UnknownMethodArgument" to try and figure out the
+                // position of the argument through it. Otherwise use the index.
+                let position = if let Some(arg_name) = &arg.name {
+                    Either::Left(arg_name.into())
                 } else {
-                    idx
+                    Either::Right(idx)
                 };
 
                 let arg_ty = Type::UnknownMethodArgument(
                     Box::new(struct_ty.clone()),
                     func_call.name.clone(),
-                    arg.name.clone(),
-                    inner_idx,
+                    position,
                 );
 
                 let arg_expr_ty = match arg.value.get_expr_type() {
@@ -265,7 +244,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     }
                 };
 
-                self.type_context.insert_constraint(arg_ty, arg_expr_ty);
+                // TODO: Need to do this for a more general case and it should
+                //       prevent any kind of infinite loops. Should be implemented
+                //       somewhere else.
+                // Don't add a constraint the argument has the same type as the
+                // struct.
+                if arg_expr_ty != struct_ty {
+                    self.type_context.insert_constraint(arg_ty, arg_expr_ty);
+                }
 
                 idx += 1;
             }

@@ -3,6 +3,7 @@ use common::{
     token::expr::Expr,
     types::Type,
 };
+use either::Either;
 use log::debug;
 use std::collections::{hash_map, HashMap};
 
@@ -306,6 +307,17 @@ impl<'a> TypeContext<'a> {
             return Ok(());
         }
 
+        // Insert substitutions for the inner types of aggregate types.
+        match (&from, &to) {
+            // TODO: Does "CompoundType" also need to be matched on?
+            //Type::CompoundType(..) => {}
+            (Type::Pointer(inner_from), Type::Pointer(inner_to))
+            | (Type::Array(inner_from, _), Type::Array(inner_to, _)) => {
+                self.insert_substitution(*inner_from.clone(), *inner_to.clone())?;
+            }
+            _ => (),
+        }
+
         // If the `from` doesn't already have a mapping, just insert the
         // new mapping to `to` and return. Otherwise add a new substitution
         // between the old and the new `to`.
@@ -367,6 +379,11 @@ impl<'a> TypeContext<'a> {
                     | (Type::Array(l, _), Type::Array(r, _)) => {
                         match self.get_mapping_direction(*l, *r) {
                             Ok((from, to)) => {
+                                debug!(
+                                    "Outer aggregate solved -- inner from: {:#?}\nto: {:#?}",
+                                    from, to
+                                );
+
                                 if let Err(err) = self.insert_substitution(from, to) {
                                     return SubResult::Err(err);
                                 }
@@ -415,17 +432,11 @@ impl<'a> TypeContext<'a> {
                         return self.solve_unknown_struct_method(struct_ty, method_name, finalize);
                     }
 
-                    Type::UnknownMethodArgument(
-                        ref struct_ty,
-                        ref method_name,
-                        ref name_opt,
-                        ref idx,
-                    ) => {
+                    Type::UnknownMethodArgument(ref struct_ty, ref method_name, ref position) => {
                         return self.solve_unknown_method_argument(
                             struct_ty,
                             method_name,
-                            name_opt,
-                            *idx,
+                            position,
                             finalize,
                         );
                     }
@@ -495,26 +506,28 @@ impl<'a> TypeContext<'a> {
 
         match self.solve_substitution(&inner_ty, finalize) {
             SubResult::Solved(sub_ty) => {
-                // Add a new substitution for the inner types if they are solvable.
-                // The `insert_substitution` function will make sure that no
-                // weird mappings/loops are caused, so it should always be safe
-                // to call here.
-                self.insert_substitution(inner_ty.clone(), sub_ty.clone())?;
                 debug!(
                     "Inner type solved -- inner: {:#?}\nsub_ty: {:#?}",
                     inner_ty, sub_ty
                 );
 
+                // Add a new substitution for the inner types if they are solvable.
+                // The `insert_substitution` function will make sure that no
+                // weird mappings/loops are caused, so it should always be safe
+                // to call here.
+                self.insert_substitution(inner_ty.clone(), sub_ty.clone())?;
+
                 *inner_ty = sub_ty;
                 is_solved = true;
             }
             SubResult::UnSolved(un_sub_ty) => {
-                // Add a new constraint for the inner types if they are unsolvable.
-                self.insert_constraint(inner_ty.clone(), un_sub_ty.clone());
                 debug!(
                     "Inner type unsolved -- inner: {:#?}\nun_sub_ty: {:#?}",
                     inner_ty, un_sub_ty
                 );
+
+                // Add a new constraint for the inner types if they are unsolvable.
+                self.insert_constraint(inner_ty.clone(), un_sub_ty.clone());
 
                 *inner_ty = un_sub_ty;
                 is_solved = false;
@@ -655,8 +668,7 @@ impl<'a> TypeContext<'a> {
         &mut self,
         struct_ty: &Type,
         method_name: &str,
-        name_opt: &Option<String>,
-        idx: u64,
+        position: &Either<String, u64>,
         finalize: bool,
     ) -> SubResult {
         let sub_struct_ty = match self.solve_substitution(&struct_ty, finalize) {
@@ -664,8 +676,7 @@ impl<'a> TypeContext<'a> {
                 self.cur_ty = Type::UnknownMethodArgument(
                     Box::new(sub_struct_ty.clone()),
                     method_name.into(),
-                    name_opt.clone(),
-                    idx,
+                    position.clone(),
                 );
                 sub_struct_ty
             }
@@ -679,21 +690,22 @@ impl<'a> TypeContext<'a> {
                 // identify the parameter type and then get the
                 // index for the parameter. Otherwise use the
                 // index of the argument directly.
-                let actual_idx = if let Some(arg_name) = name_opt {
-                    // TODO: Fix this. Move `analyze_context` out
-                    //       of `type_context` and don't hardcode
-                    //       the default block ID.
-                    match self.analyze_context.get_method_param_idx(
-                        struct_name,
-                        method_name,
-                        arg_name,
-                        BlockInfo::DEFAULT_BLOCK_ID,
-                    ) {
-                        Ok(idx) => idx,
-                        Err(err) => return SubResult::Err(err),
+                let actual_idx = match position {
+                    Either::Left(arg_name) => {
+                        // TODO: Fix this. Move `analyze_context` out
+                        //       of `type_context` and don't hardcode
+                        //       the default block ID.
+                        match self.analyze_context.get_method_param_idx(
+                            struct_name,
+                            method_name,
+                            arg_name,
+                            BlockInfo::DEFAULT_BLOCK_ID,
+                        ) {
+                            Ok(idx) => idx,
+                            Err(err) => return SubResult::Err(err),
+                        }
                     }
-                } else {
-                    idx
+                    Either::Right(idx) => *idx,
                 };
 
                 let arg_ty = match self.analyze_context.get_method_param_type(

@@ -2,6 +2,8 @@ use std::{collections::BTreeMap, fmt::Display};
 
 use crate::token::expr::Expr;
 
+use either::Either;
+
 // TODO: Implement generics.
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,10 +67,10 @@ pub enum Type {
     /// Unknown method of the struct type "Type" with the name "String".
     UnknownStructMethod(Box<Type>, String),
 
-    /// Unknown method argument of the struct type "Type" with then name "String".
-    /// The optional string is the name of the argument if specificed.
-    /// The u64 is the index of the argument in the function call.
-    UnknownMethodArgument(Box<Type>, String, Option<String>, u64),
+    /// Unknown method argument of the struct type "Type" with the name "String".
+    /// The "Either" if either the name of the argument or the index of the
+    /// argument in the method call if no argument name is set.
+    UnknownMethodArgument(Box<Type>, String, Either<String, u64>),
 
     /// Unknown type of array member of array with type "Type".
     UnknownArrayMember(Box<Type>),

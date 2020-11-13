@@ -122,7 +122,7 @@ impl<'a> Visitor for TypeSolver<'a> {
                     .first_mut()
                     .filter(|arg| arg.name == Some("this".into()))
                 {
-                    match this_arg.value.get_expr_type() {
+                    match &this_arg.value.get_expr_type() {
                         Ok(Type::Pointer(struct_ty)) => {
                             if let Type::CompoundType(struct_name, _) = struct_ty.as_ref() {
                                 func_call.method_struct = Some(struct_name.clone());
@@ -135,13 +135,19 @@ impl<'a> Visitor for TypeSolver<'a> {
                                 return;
                             }
                         }
+
+                        Ok(Type::CompoundType(struct_name, ..)) => {
+                            func_call.method_struct = Some(struct_name.clone());
+                        }
+
                         Err(err) => {
-                            self.errors.push(err);
+                            self.errors.push(err.clone());
                             return;
                         }
+
                         _ => {
                             let err = self.type_context.analyze_context.err(format!(
-                                "First argument of method call \"{}\" not a pointer to struct type (\"this\"/\"self\"): {:?}",
+                                "First argument of method call \"{}\" not a struct or pointer to struct (\"this\"/\"self\"): {:?}",
                                 &func_call.name, this_arg
                             ));
                             self.errors.push(err);
