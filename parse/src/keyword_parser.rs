@@ -697,7 +697,7 @@ impl<'a> KeyworkParser<'a> {
         for member in &mut members {
             if let Some(ret_ty) = &mut member.ret_type {
                 // Replace any generics with the type "Generic" instead of
-                // the type "Custom".
+                // the type "CompoundType".
                 if let Some(gens) = &generics {
                     ret_ty.replace_generics(gens);
                 }

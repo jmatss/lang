@@ -219,6 +219,8 @@ impl LexTokenIter {
             // Rewind the position of the iterator to include the two read
             // characters from above since they aren't part of a prefix.
             self.iter.rewind_n(2);
+        } else {
+            self.cur_column_nr += 2;
         }
 
         // Parse the number. If the this is a integer, the whole number will
@@ -481,9 +483,10 @@ impl LexTokenIter {
             comment.push(c);
         }
 
-        self.cur_column_nr += (n + comment.len()) as u64;
+        let comment_str = comment.iter().collect::<String>();
+        self.cur_column_nr += (n + comment_str.chars().count()) as u64;
 
-        comment.iter().collect()
+        comment_str
     }
 
     /// Lexes a multi line comment until the matching "CommentMultiLineEnd" is
@@ -507,9 +510,22 @@ impl LexTokenIter {
         // and then \n).
         let mut prev_was_linebreak_rn = false;
 
-        while let Some(c) = self.iter.next() {
-            let (c1, c2, c3) = if let Some(c) = self.iter.peek_three() {
-                c
+        // Keeps track of the current column count when parsing the current line
+        // of the comment. When parsing the last line, this column will be used
+        // to update the `self.cur_column_nr`. Starts with `n` for the first line
+        // which is the length of the "CommentMultiLineBegin".
+        let mut line_column_count = n;
+
+        // Used to indicate if this comment streched over multiple lines or just
+        // a single one. If it is only on one line, the "column count" for this
+        // comment will be added to the current `self.cur_column_nr`. Otherwise
+        // it will just overwrite it with the current col count in this function.
+        let mut multi_line = false;
+
+        while let Some(c1) = self.iter.next() {
+            let (c2, c3) = if let Some(chars) = self.iter.peek_two() {
+                let (c2, c3) = chars;
+                (Some(c2), c3)
             } else {
                 panic!("None when peeking in multi line comment.")
             };
@@ -527,30 +543,36 @@ impl LexTokenIter {
                 }
 
                 if multi_line_comment_begin_count == 0 {
-                    self.iter.skip(sym_len);
+                    // -1 because the first char has already been "consumed".
+                    self.iter.skip(sym_len - 1);
+                    line_column_count += sym_len - 1;
                     break;
                 }
             }
 
-            // TODO: Seems to calculate incorrect line/col looking at the
-            //       line/col for the unknown types.
-
             // Increment line number if a linebreak is found. Make sure to not
             // count any "\n" after a "\r\n" was seen to prevent counting those
             // linebreaks twice.
-            if LexTokenIter::valid_linebreak(c1, c2)
-                && !(prev_was_linebreak_rn && LexTokenIter::valid_linebreak_n(c))
-            {
-                self.cur_line_nr += 1;
+            if LexTokenIter::valid_linebreak(c1, c2) {
+                if !(prev_was_linebreak_rn && LexTokenIter::valid_linebreak_n(c1)) {
+                    self.cur_line_nr += 1;
+                }
+                line_column_count = 0;
+                multi_line = true;
+            } else {
+                line_column_count += 1;
             }
 
             prev_was_linebreak_rn = LexTokenIter::valid_linebreak_rn(c1, c2);
 
-            comment.push(c);
+            comment.push(c1);
         }
 
-        // The 2 is the symbol size of the "CommentMultiLineEnd".
-        self.cur_column_nr += (n + 2 + comment.len()) as u64;
+        if multi_line {
+            self.cur_column_nr = (line_column_count) as u64;
+        } else {
+            self.cur_column_nr += (n + line_column_count) as u64;
+        }
 
         comment.iter().collect()
     }
