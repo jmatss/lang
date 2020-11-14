@@ -6,7 +6,7 @@ use common::{
     token::op::UnOperator,
     token::{
         ast::AstToken,
-        block::Struct,
+        block::{Function, Struct},
         expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
         op::{BinOp, UnOp},
         stmt::Stmt,
@@ -23,6 +23,7 @@ pub struct TypeSolver<'a> {
     // Will contain all generic structs that have had the generic types substituted
     // with real types. The key is the name of the struct.
     pub generic_structs: HashMap<String, Vec<Struct>>,
+    pub generic_struct_methods: HashMap<String, Vec<Function>>,
 
     errors: Vec<LangError>,
 }
@@ -32,6 +33,7 @@ impl<'a> TypeSolver<'a> {
         Self {
             type_context,
             generic_structs: HashMap::default(),
+            generic_struct_methods: HashMap::default(),
             errors: Vec::default(),
         }
     }
@@ -53,6 +55,73 @@ impl<'a> TypeSolver<'a> {
             }
         }
     }
+
+    /// Creates new instances of structs that have had their generics replaced
+    /// with the actual real types that will be used.
+    fn create_generic_struct(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
+        let struct_init_generics =
+            if let Type::CompoundType(_, generics) = &struct_init.ret_type.as_ref().unwrap() {
+                generics
+            } else {
+                unreachable!("create_generic_struct with no generics");
+            };
+
+        // Get the actual struct implementation and create a copy of it.
+        let mut gen_struct_ty = match self
+            .type_context
+            .analyze_context
+            .get_struct(&struct_init.name, ctx.block_id)
+        {
+            Ok(struct_ty) => struct_ty.clone(),
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
+        // TODO: Add so that one can specify the generic types with some
+        //       turbofish logic.
+
+        // For every member of the struct, replace any generic types with
+        // the type of the struct_init generics.
+        if let Some(members) = &mut gen_struct_ty.members {
+            for member in members {
+                if let Some(ty) = &mut member.ret_type {
+                    ty.replace_generics_impl(struct_init_generics);
+                }
+            }
+        }
+
+        // TODO: "map.values()" iterates the values in a arbitrary order.
+        //       Need to come up with a good way to keeping them in the
+        //       expected order.
+
+        let generics = struct_init_generics
+            .iter()
+            .map(|(_, v)| v.clone())
+            .collect::<Vec<_>>();
+
+        // Convert the old struct name to the new struct name containing
+        // references to the implemented generic types.
+        let old_name = gen_struct_ty.name;
+        let new_name = util::to_generic_struct_name(&old_name, &generics);
+        struct_init.name = new_name.clone();
+        gen_struct_ty.name = new_name;
+
+        // This new struct variable will be added as a new struct type stored
+        // in `self.generic_structs` and will then be inserted into the
+        // AST later on by another "class" ("type_converter").
+        match self.generic_structs.entry(old_name) {
+            Entry::Occupied(ref mut o) => {
+                o.get_mut().push(gen_struct_ty);
+            }
+            Entry::Vacant(v) => {
+                v.insert(vec![gen_struct_ty]);
+            }
+        }
+    }
+
+    fn create_generic_struct_methods() {}
 }
 
 impl<'a> Visitor for TypeSolver<'a> {
@@ -174,61 +243,25 @@ impl<'a> Visitor for TypeSolver<'a> {
         if let Some(ty) = &mut struct_init.ret_type {
             self.subtitute_type(ty, true);
 
-            // If this struct contains generics, a new struct type will be created
-            // for every struct init using different generic types.
-            let mut gen_struct_ty = match self
-                .type_context
-                .analyze_context
-                .get_struct(&struct_init.name, ctx.block_id)
-            {
-                Ok(struct_ty) if struct_ty.generic_params.is_some() => struct_ty.clone(),
-                Ok(_) => return,
-                Err(err) => {
+            // Get the mapping for the generics for this specific struct init
+            // instance. This will be used to replace the generic types of a
+            // struct which will create a new struct type.
+            //
+            // If this is a struct without generics, there is nothing more to do,
+            // do early return from here.
+            match ty {
+                Type::CompoundType(_, generics) if !generics.is_empty() => {
+                    self.create_generic_struct(struct_init, ctx)
+                }
+
+                Type::CompoundType(..) => (),
+
+                _ => {
+                    let err = self.type_context.analyze_context.err(format!(
+                        "Ret type of struct init not CompoundType: {:#?}",
+                        ty
+                    ));
                     self.errors.push(err);
-                    return;
-                }
-            };
-
-            // TODO: Add so that one can specify the generic types with some
-            //       turbofish logic.
-
-            let mut generics = Vec::default();
-
-            // For every generic members of the struct, replace the type with
-            // the type of the argument for this new struct type `gen_struct_ty`.
-            if let Some(members) = &mut gen_struct_ty.members {
-                for (arg, param) in struct_init.arguments.iter().zip(members) {
-                    if let Some(Type::Generic(_)) = &param.ret_type {
-                        match arg.value.get_expr_type() {
-                            Ok(new_ty) => {
-                                param.ret_type = Some(new_ty.clone());
-                                generics.push(new_ty.clone());
-                            }
-                            Err(err) => {
-                                self.errors.push(err);
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Convert the old struct name to the new struct name containing
-            // references to the implemented generic types.
-            let old_name = gen_struct_ty.name;
-            let new_name = util::to_generic_struct_name(&old_name, &generics);
-            struct_init.name = new_name.clone();
-            gen_struct_ty.name = new_name;
-
-            // This new struct variable will be added as a new struct type stored
-            // in `self.generic_structs` and will then be inserted into the
-            // AST later on by another "class" ("type_converter").
-            match self.generic_structs.entry(old_name) {
-                Entry::Occupied(ref mut o) => {
-                    o.get_mut().push(gen_struct_ty);
-                }
-                Entry::Vacant(v) => {
-                    v.insert(vec![gen_struct_ty]);
                 }
             }
         } else {

@@ -130,7 +130,7 @@ impl<'a> TypeContext<'a> {
         }
     }
 
-    pub fn solve_constraint(
+    fn solve_constraint(
         &mut self,
         lhs: Type,
         rhs: Type,

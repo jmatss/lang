@@ -94,8 +94,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Solve the constraints at the EOF. Also debug log the results.
     fn visit_eof(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.type_context.analyze_context.line_nr = ast_token.line_nr;
-        self.type_context.analyze_context.column_nr = ast_token.column_nr;
+        self.type_context.analyze_context.line_nr = 0;
+        self.type_context.analyze_context.column_nr = 0;
 
         let mut result = self.type_context.solve_constraints(true);
         if let Err(errors) = &mut result {
@@ -349,13 +349,6 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Adds the correct type for the struct init and ties the types of the struct
     /// members with the type of the struct init arguments.
     fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
-        if struct_init.ret_type.is_none() {
-            struct_init.ret_type = Some(Type::CompoundType(
-                struct_init.name.clone(),
-                BTreeMap::default(),
-            ));
-        }
-
         let struct_ = match self
             .type_context
             .analyze_context
@@ -397,14 +390,18 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         // If the type already is set to a compound, use that
                         // already set type.
                     }
-                    Some(_) => {
+                    _ => {
                         struct_init.ret_type = Some(Type::CompoundType(
                             struct_init.name.clone(),
                             unknown_generics.clone(),
                         ));
                     }
-                    None => unreachable!("Ret type not set for struct init."),
                 }
+            } else {
+                struct_init.ret_type = Some(Type::CompoundType(
+                    struct_init.name.clone(),
+                    BTreeMap::default(),
+                ));
             }
 
             if members.len() != struct_init.arguments.len() {
@@ -421,26 +418,20 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // TODO: Verify that all members are initialized.
 
             for (i, arg) in struct_init.arguments.iter_mut().enumerate() {
-                // If a name is set, this is a named member init. Shouldn't use
-                // the index, set the correctly named member instead.
+                // If a name is set, this is a named member init. Don't use the
+                // iterator index, get the corrent index of the struct field with
+                // the name `arg.name`.
                 let index: usize = if let Some(arg_name) = &arg.name {
-                    let mut found = false;
-                    for member in members {
-                        if arg_name == &member.name {
-                            found = true;
-                            break;
+                    match self.type_context.analyze_context.get_struct_member_index(
+                        &struct_.name,
+                        arg_name,
+                        ctx.block_id,
+                    ) {
+                        Ok(idx) => idx as usize,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
                         }
-                    }
-
-                    if found {
-                        i
-                    } else {
-                        let err = self.type_context.analyze_context.err(format!(
-                            "Struct \"{:?}\" has no member with name \"{:?}\".",
-                            &struct_.name, &members[i].name
-                        ));
-                        self.errors.push(err);
-                        return;
                     }
                 } else {
                     i

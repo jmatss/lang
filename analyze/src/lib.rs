@@ -71,24 +71,28 @@ use type_solver::TypeSolver;
 pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>> {
     let analyze_context = RefCell::new(AnalyzeContext::new());
 
+    debug!("Running IndexingAnalyzer");
     let mut indexing_analyzer = IndexingAnalyzer::new();
     AstTraverser::new()
         .add_visitor(&mut indexing_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
+    debug!("Running BlockAnalyzer");
     let mut block_analyzer = BlockAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut block_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
+    debug!("Running DeclTypeAnalyzer");
     let mut decl_type_analyzer = DeclTypeAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut decl_type_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
+    debug!("Running DeclVarAnalyzer, running DeclFuncAnalyzer");
     let mut decl_var_analyzer = DeclVarAnalyzer::new(&analyze_context);
     let mut decl_func_analyzer = DeclFuncAnalyzer::new(&analyze_context);
     AstTraverser::new()
@@ -97,12 +101,14 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
         .traverse(ast_root)
         .take_errors()?;
 
+    debug!("Running MethodAnalyzer");
     let mut method_analyzer = MethodAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut method_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
+    debug!("Running DeferAnalyzer");
     let mut defer_analyzer = DeferAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut defer_analyzer)
@@ -112,25 +118,29 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
     let mut analyze_context = analyze_context.replace(AnalyzeContext::default());
     let mut type_context = TypeContext::new(&mut analyze_context);
 
+    debug!("Running TypeInferencer");
     let mut type_inferencer = TypeInferencer::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut type_inferencer)
         .traverse(ast_root)
         .take_errors()?;
 
+    debug!("Running TypeSolver");
     let mut type_solver = TypeSolver::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut type_solver)
         .traverse(ast_root)
         .take_errors()?;
 
+    debug!("Running TypeConverter");
     let generic_structs = type_solver.generic_structs;
-    let mut type_converter = TypeConverter::new(generic_structs);
+    let mut type_converter = TypeConverter::new(&mut analyze_context, generic_structs);
     AstTraverser::new()
         .add_visitor(&mut type_converter)
         .traverse(ast_root)
         .take_errors()?;
 
+    debug!("Running CallArgs");
     let mut call_args = CallArgs::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut call_args)
