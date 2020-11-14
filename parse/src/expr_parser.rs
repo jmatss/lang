@@ -319,9 +319,10 @@ impl<'a> ExprParser<'a> {
     /// Converts the given "outputs" in reverse polsih notation to an expression.
     fn rev_polish_to_expr(&mut self) -> CustomResult<Expr> {
         let mut expr_stack = Vec::new();
+        let outputs = std::mem::take(&mut self.outputs);
 
-        for output in std::mem::take(&mut self.outputs) {
-            match output {
+        for output in &outputs {
+            match output.clone() {
                 Output::Operand(expr) => {
                     expr_stack.push(expr);
                 }
@@ -356,8 +357,8 @@ impl<'a> ExprParser<'a> {
 
                 _ => {
                     return Err(self.iter.err(format!(
-                        "Bad match during rev_polish_to_expr with Output: {:?}",
-                        output
+                        "Bad match during rev_polish_to_expr with Output: {:?}. Outputs: {:#?}",
+                        output, outputs
                     )));
                 }
             }

@@ -259,8 +259,6 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // The expected return type of the function call.
             Type::UnknownStructMethod(Box::new(struct_ty), func_call.name.clone())
         } else {
-            // TODO: FIXME: For now all functions will be defined in the root
-            //              block, so just hardcode zero. Must change later.
             let func = match self
                 .type_context
                 .analyze_context

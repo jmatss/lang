@@ -262,11 +262,18 @@ impl<'a> TypeContext<'a> {
             } else if !rhs_sub.is_unknown_any() {
                 // Only rhs known.
                 (lhs, rhs)
-            } else if lhs_sub.is_unknown_struct_member() {
-                // Prefer struct member unknowns over int/float/array unknowns since
-                // it will always have its type set in the struct definition.
+            } else if lhs_sub.is_unknown_struct_member()
+                || lhs_sub.is_unknown_struct_method()
+                || lhs_sub.is_unknown_method_argument()
+            {
+                // Prefer struct member/method unknowns over int/float/array
+                // unknowns since the types will always be set for the structs
+                // and their methods.
                 (rhs, lhs)
-            } else if rhs.is_unknown_struct_member() {
+            } else if rhs_sub.is_unknown_struct_member()
+                || rhs_sub.is_unknown_struct_method()
+                || rhs_sub.is_unknown_method_argument()
+            {
                 (lhs, rhs)
             } else if lhs_sub.is_unknown_int() || lhs_sub.is_unknown_float() {
                 // Prefer int/float unknowns over array member unknowns.

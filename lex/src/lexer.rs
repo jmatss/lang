@@ -208,19 +208,18 @@ impl LexTokenIter {
                 'X' => 16,
                 'B' => 2,
                 'O' => 8,
-                _ => {
-                    // Rewind the position of the iterator to include the two
-                    // read characters from above since they aren't part of a
-                    // prefix. This is (most likely) just a decimal number that
-                    // start with '0'.
-                    self.iter.rewind_n(2);
-                    10
-                }
+                _ => 10,
             }
         } else {
             // Decimal.
             10
         };
+
+        if radix == 10 {
+            // Rewind the position of the iterator to include the two read
+            // characters from above since they aren't part of a prefix.
+            self.iter.rewind_n(2);
+        }
 
         // Parse the number. If the this is a integer, the whole number will
         // be parsed. If this is a float, the number after the dot will be parsed
