@@ -371,7 +371,7 @@ impl<'a> TypeContext<'a> {
             if self.cur_ty.is_primitive() {
                 return SubResult::Solved(self.cur_ty.clone());
             } else if self.substitutions.contains_key(&self.cur_ty) {
-                let sub_ty = self.substitutions.get(&self.cur_ty).unwrap().clone();
+                let mut sub_ty = self.substitutions.get(&self.cur_ty).unwrap().clone();
 
                 // TODO: Clean up logic in here. Shouldn't need to have special
                 //       edge case for aggregate types (pointer and array) in
@@ -398,6 +398,31 @@ impl<'a> TypeContext<'a> {
                         }
                     }
                     _ => (),
+                }
+
+                // TODO: Will be removed when refactoring, stupid to sprinkle
+                //       out a bunch of "generic" name conversion like this.
+                if let Type::CompoundType(old_name, generics) = &mut sub_ty {
+                    // Replace the old struct name with a new one if this is a struct
+                    // with generics. The name should contain information about the
+                    // generics to make it "unique".
+                    if !generics.is_empty() {
+                        debug!("BEFORE -- generics: {:#?}", generics);
+                        let generic_tys = generics.values().cloned().collect::<Vec<_>>();
+
+                        let mut gens_is_solved = true;
+                        for gen_ty in &generic_tys {
+                            if let Type::Generic(_) = gen_ty {
+                                gens_is_solved = false;
+                                break;
+                            }
+                        }
+
+                        if gens_is_solved {
+                            *old_name = util::to_generic_struct_name(old_name, &generic_tys);
+                        }
+                        debug!("AFTER");
+                    }
                 }
 
                 // Set the substitute type as the current type and and try to
@@ -493,11 +518,6 @@ impl<'a> TypeContext<'a> {
                         _ => (),
                     }
                 }
-
-                warn!(
-                    "INSIDE -- generics: {:#?}, is_solved: {}, old_name: {}",
-                    generics, is_solved, old_name
-                );
 
                 // Replace the old struct name with a new one if this is a struct
                 // with generics. The name should contain information about the
@@ -614,10 +634,24 @@ impl<'a> TypeContext<'a> {
 
                     match self.solve_substitution(&new_ty, finalize) {
                         SubResult::Solved(sub_ty) => {
+                            let mut struct_ty_clone = struct_ty.clone();
+
+                            // Replace the old struct name with a new one if this is a struct
+                            // with generics. The name should contain information about the
+                            // generics to make it "unique".
+                            if !generics.is_empty() {
+                                if let Type::CompoundType(old_name, _) = &mut struct_ty_clone {
+                                    let generic_tys =
+                                        generics.values().cloned().collect::<Vec<_>>();
+                                    *old_name =
+                                        util::to_generic_struct_name(old_name, &generic_tys);
+                                }
+                            }
+
                             // If this is 100% solved, add a substitution from the
                             // "UnknownStructMember" to the actual type.
                             self.cur_ty = Type::UnknownStructMember(
-                                Box::new(struct_ty.clone()),
+                                Box::new(struct_ty_clone),
                                 member_name.into(),
                             );
 
@@ -669,12 +703,23 @@ impl<'a> TypeContext<'a> {
         };
 
         match &sub_struct_ty {
-            Type::CompoundType(struct_name, ..) => {
+            Type::CompoundType(struct_name, generics) => {
+                // The struct type might have been resolved by this point.
+                // This means that name of the struct might have been changed
+                // for structs containing generics to include the generics
+                // in its name. Need to use the old struct since the new ones
+                // aren't created until the `type_converter` stage.
+                let old_struct_name = if !generics.is_empty() && struct_name.contains(':') {
+                    util::from_generic_struct_name(&struct_name)
+                } else {
+                    struct_name.clone()
+                };
+
                 // TODO: Fix this. Move `analyze_context` out
                 //       of `type_context` and don't hardcode
                 //       the default block ID.
                 let method = match self.analyze_context.get_method(
-                    struct_name,
+                    &old_struct_name,
                     method_name,
                     BlockInfo::DEFAULT_BLOCK_ID,
                 ) {
@@ -684,11 +729,45 @@ impl<'a> TypeContext<'a> {
                     }
                 };
 
-                if let Some(ret_type) = &method.ret_type {
-                    match self.solve_substitution(ret_type, finalize) {
-                        SubResult::Solved(sub_ty) => SubResult::Solved(sub_ty),
-                        SubResult::UnSolved(un_sub_ty) => SubResult::UnSolved(un_sub_ty),
-                        err => err,
+                if let Some(ty) = &method.ret_type {
+                    let mut struct_ty_clone = struct_ty.clone();
+
+                    // Replace the old struct name with a new one if this is a struct
+                    // with generics. The name should contain information about the
+                    // generics to make it "unique".
+                    if !generics.is_empty() {
+                        if let Type::CompoundType(old_name, _) = &mut struct_ty_clone {
+                            let generic_tys = generics.values().cloned().collect::<Vec<_>>();
+                            *old_name = util::to_generic_struct_name(old_name, &generic_tys);
+                        }
+                    }
+
+                    // Since this fetched the actual struct "template"
+                    // that is used by all, the generics will still
+                    // be the "Generics". Need to replace them with
+                    // the actual type for this specific use of the
+                    // struct.
+                    let mut new_ty = ty.clone();
+                    new_ty.replace_generics_impl(generics);
+
+                    match self.solve_substitution(&new_ty, finalize) {
+                        SubResult::Solved(sub_ty) => {
+                            // If this is 100% solved, add a substitution from the
+                            // "UnknownStructMember" to the actual type.
+                            self.cur_ty = Type::UnknownStructMethod(
+                                Box::new(struct_ty_clone),
+                                method_name.into(),
+                            );
+
+                            if let Err(err) =
+                                self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
+                            {
+                                SubResult::Err(err)
+                            } else {
+                                SubResult::Solved(sub_ty)
+                            }
+                        }
+                        res => res,
                     }
                 } else {
                     SubResult::Solved(Type::Void)
@@ -729,7 +808,18 @@ impl<'a> TypeContext<'a> {
         };
 
         match &sub_struct_ty {
-            Type::CompoundType(struct_name, ..) => {
+            Type::CompoundType(struct_name, generics) => {
+                // The struct type might have been resolved by this point.
+                // This means that name of the struct might have been changed
+                // for structs containing generics to include the generics
+                // in its name. Need to use the old struct since the new ones
+                // aren't created until the `type_converter` stage.
+                let old_struct_name = if !generics.is_empty() && struct_name.contains(':') {
+                    util::from_generic_struct_name(&struct_name)
+                } else {
+                    struct_name.clone()
+                };
+
                 // If this is a named argument, use that name to
                 // identify the parameter type and then get the
                 // index for the parameter. Otherwise use the
@@ -740,7 +830,7 @@ impl<'a> TypeContext<'a> {
                         //       of `type_context` and don't hardcode
                         //       the default block ID.
                         match self.analyze_context.get_method_param_idx(
-                            struct_name,
+                            &old_struct_name,
                             method_name,
                             arg_name,
                             BlockInfo::DEFAULT_BLOCK_ID,
@@ -753,7 +843,7 @@ impl<'a> TypeContext<'a> {
                 };
 
                 let arg_ty = match self.analyze_context.get_method_param_type(
-                    struct_name,
+                    &old_struct_name,
                     method_name,
                     actual_idx,
                     BlockInfo::DEFAULT_BLOCK_ID,
