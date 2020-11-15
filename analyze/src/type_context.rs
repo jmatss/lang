@@ -2,9 +2,10 @@ use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
     token::expr::Expr,
     types::Type,
+    util,
 };
 use either::Either;
-use log::debug;
+use log::{debug, warn};
 use std::collections::{hash_map, HashMap};
 
 use crate::{AnalyzeContext, BlockInfo};
@@ -482,7 +483,7 @@ impl<'a> TypeContext<'a> {
         // of self/self.cur_ty. Will update the real `self.cur_ty` inside the
         // match statement with information updated in the cloned `cur_ty`.
         match local_cur_ty {
-            Type::CompoundType(_, ref mut generics) => {
+            Type::CompoundType(ref mut old_name, ref mut generics) => {
                 is_solved = true;
 
                 // All inner types needs to be solved. If any of them can't be solved,
@@ -493,6 +494,19 @@ impl<'a> TypeContext<'a> {
                         Err(err) => return Err(err),
                         _ => (),
                     }
+                }
+
+                warn!(
+                    "INSIDE -- generics: {:#?}, is_solved: {}, old_name: {}",
+                    generics, is_solved, old_name
+                );
+
+                // Replace the old struct name with a new one if this is a struct
+                // with generics. The name should contain information about the
+                // generics to make it "unique".
+                if is_solved && !generics.is_empty() {
+                    let generic_tys = generics.values().cloned().collect::<Vec<_>>();
+                    *old_name = util::to_generic_struct_name(old_name, &generic_tys);
                 }
             }
 

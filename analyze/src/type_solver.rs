@@ -20,10 +20,13 @@ use common::{
 pub struct TypeSolver<'a> {
     type_context: &'a mut TypeContext<'a>,
 
-    // Will contain all generic structs that have had the generic types substituted
-    // with real types. The key is the name of the struct.
+    /// Will contain all generic structs that have had the generic types substituted
+    /// with real types. The key is the name of the struct (WITHOUT generics).
     pub generic_structs: HashMap<String, Vec<Struct>>,
-    pub generic_struct_methods: HashMap<String, Vec<Function>>,
+
+    // The outer key is the struct name WITH generics.
+    // The inner key is the name of the method.
+    pub generic_struct_methods: HashMap<String, HashMap<String, Function>>,
 
     errors: Vec<LangError>,
 }
@@ -58,19 +61,27 @@ impl<'a> TypeSolver<'a> {
 
     /// Creates new instances of structs that have had their generics replaced
     /// with the actual real types that will be used.
+    ///
+    /// When this function is called, the "Type" of the struct init will have the
+    /// new correct name containing generics. The "name" field itself will NOT
+    /// have the new name, so it needs to be updated.
     fn create_generic_struct(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
-        let struct_init_generics =
-            if let Type::CompoundType(_, generics) = &struct_init.ret_type.as_ref().unwrap() {
-                generics
-            } else {
-                unreachable!("create_generic_struct with no generics");
-            };
+        let (new_name, struct_init_generics) = if let Type::CompoundType(new_name, generics) =
+            &struct_init.ret_type.as_ref().unwrap()
+        {
+            (new_name, generics)
+        } else {
+            unreachable!("create_generic_struct with no generics");
+        };
+
+        struct_init.name = new_name.clone();
+        let old_name = util::from_generic_struct_name(new_name);
 
         // Get the actual struct implementation and create a copy of it.
         let mut gen_struct_ty = match self
             .type_context
             .analyze_context
-            .get_struct(&struct_init.name, ctx.block_id)
+            .get_struct(&old_name, ctx.block_id)
         {
             Ok(struct_ty) => struct_ty.clone(),
             Err(err) => {
@@ -79,8 +90,9 @@ impl<'a> TypeSolver<'a> {
             }
         };
 
-        // TODO: Add so that one can specify the generic types with some
-        //       turbofish logic.
+        // Give the new copy of the struct type the "new name" containing
+        // information about the generic arguments.
+        gen_struct_ty.name = new_name.clone();
 
         // For every member of the struct, replace any generic types with
         // the type of the struct_init generics.
@@ -92,21 +104,30 @@ impl<'a> TypeSolver<'a> {
             }
         }
 
-        // TODO: "map.values()" iterates the values in a arbitrary order.
-        //       Need to come up with a good way to keeping them in the
-        //       expected order.
+        // For every method of the struct, replace any generic types with
+        // the type of the struct_init generics.
+        // The methods are just pointers inside the "Struct" struct, so need to
+        // dereference and create copies of the methods.
+        if let Some(methods) = &mut gen_struct_ty.methods {
+            let mut new_methods = HashMap::default();
 
-        let generics = struct_init_generics
-            .iter()
-            .map(|(_, v)| v.clone())
-            .collect::<Vec<_>>();
+            for (method_name, method) in methods {
+                let mut new_method = unsafe { method.as_mut() }.unwrap().clone();
 
-        // Convert the old struct name to the new struct name containing
-        // references to the implemented generic types.
-        let old_name = gen_struct_ty.name;
-        let new_name = util::to_generic_struct_name(&old_name, &generics);
-        struct_init.name = new_name.clone();
-        gen_struct_ty.name = new_name;
+                if let Some(parameters) = &mut new_method.parameters {
+                    for param in parameters {
+                        if let Some(ty) = &mut param.ret_type {
+                            ty.replace_generics_impl(struct_init_generics);
+                        }
+                    }
+                }
+
+                new_methods.insert(method_name.clone(), new_method);
+            }
+
+            self.generic_struct_methods
+                .insert(new_name.clone(), new_methods);
+        }
 
         // This new struct variable will be added as a new struct type stored
         // in `self.generic_structs` and will then be inserted into the
@@ -120,8 +141,6 @@ impl<'a> TypeSolver<'a> {
             }
         }
     }
-
-    fn create_generic_struct_methods() {}
 }
 
 impl<'a> Visitor for TypeSolver<'a> {
@@ -251,7 +270,7 @@ impl<'a> Visitor for TypeSolver<'a> {
             // do early return from here.
             match ty {
                 Type::CompoundType(_, generics) if !generics.is_empty() => {
-                    self.create_generic_struct(struct_init, ctx)
+                    self.create_generic_struct(struct_init, ctx);
                 }
 
                 Type::CompoundType(..) => (),

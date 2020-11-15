@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::{
     expr::{Expr, Var},
     stmt::Modifier,
@@ -10,10 +12,14 @@ pub enum BlockHeader {
     //  So that they can return values and be used in sub expressions.
     // Default == None, i.e. if there are no current block. Ex. at the start of a file.
     Default,
-    Function(Function),
-    Struct(Struct),
-    Enum(Enum),
-    Interface(Interface),
+
+    // Box the structs so that they are allocated on the heap and aren't moved
+    // around when modification on the AST happens. This will allow one to keep
+    // raw pointers to them without risk of the addresses changing.
+    Function(Box<Function>),
+    Struct(Box<Struct>),
+    Enum(Box<Enum>),
+    Interface(Box<Interface>),
 
     /// The string is the name of the structure that this impl block implements
     /// and the body of this block will contain the functions.
@@ -90,20 +96,19 @@ pub struct Struct {
     pub generic_params: Option<Vec<String>>,
     pub implements: Option<Vec<Type>>,
     pub members: Option<Vec<Var>>, // TODO: extends: Vec<Type>
+
+    /// The key is the name of the method.
+    pub methods: Option<HashMap<String, *mut Function>>,
 }
 
 impl Struct {
-    pub fn new(
-        name: String,
-        generic_params: Option<Vec<String>>,
-        implements: Option<Vec<Type>>,
-        members: Option<Vec<Var>>,
-    ) -> Self {
+    pub fn new(name: String) -> Self {
         Self {
             name,
-            generic_params,
-            implements,
-            members,
+            generic_params: None,
+            implements: None,
+            members: None,
+            methods: None,
         }
     }
 }

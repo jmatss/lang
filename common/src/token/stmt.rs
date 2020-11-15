@@ -52,8 +52,9 @@ pub enum Stmt {
     VariableDecl(Var, Option<Expr>),
 
     // TODO: Implement extern for variables as well.
-    // Declaration of extern functions.
-    ExternalDecl(Function),
+    // Declaration of extern functions. Box to prevent the address of the Function
+    // to move around. This will allow for stable use of raw pointers.
+    ExternalDecl(Box<Function>),
 
     // static, private etc.
     Modifier(Modifier),

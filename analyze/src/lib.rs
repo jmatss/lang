@@ -134,7 +134,12 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
 
     debug!("Running TypeConverter");
     let generic_structs = type_solver.generic_structs;
-    let mut type_converter = TypeConverter::new(&mut analyze_context, generic_structs);
+    let generic_struct_methods = type_solver.generic_struct_methods;
+    let mut type_converter = TypeConverter::new(
+        &mut analyze_context,
+        generic_structs,
+        generic_struct_methods,
+    );
     AstTraverser::new()
         .add_visitor(&mut type_converter)
         .traverse(ast_root)
@@ -222,10 +227,6 @@ pub struct AnalyzeContext {
     structs: HashMap<(String, BlockId), *mut Struct>,
     enums: HashMap<(String, BlockId), *mut Enum>,
     interfaces: HashMap<(String, BlockId), *mut Interface>,
-    /// A `methods` entry should have a corresponding struct in `structs` with
-    /// the same key. The string in the outer map key is the name of the struct
-    /// and the string in the inner map is the name of the method.
-    methods: HashMap<(String, BlockId), HashMap<String, *mut Function>>,
 
     pub block_info: HashMap<BlockId, BlockInfo>,
     pub use_paths: Vec<Path>,
@@ -250,7 +251,6 @@ impl AnalyzeContext {
             structs: HashMap::default(),
             enums: HashMap::default(),
             interfaces: HashMap::default(),
-            methods: HashMap::default(),
 
             block_info: HashMap::default(),
             use_paths: Vec::default(),
@@ -261,6 +261,7 @@ impl AnalyzeContext {
     }
 
     pub fn debug_print(&self) {
+        /*
         debug!(
             "Variables:\n{:#?}",
             self.variables
@@ -298,16 +299,18 @@ impl AnalyzeContext {
         );
         debug!(
             "Methods:\n{:#?}",
-            self.methods
+            self.structs
                 .iter()
-                .map(|(k, v)| (
-                    k,
-                    v.iter()
-                        .map(|(ki, vi)| (ki, unsafe { vi.as_ref() }.unwrap()))
-                        .collect::<HashMap<_, _>>()
+                .map(|(ks, vs)| (
+                    ks,
+                    unsafe { vs.as_ref().unwrap() }.clone().methods.map(|m| m
+                        .iter()
+                        .map(|(n, f)| (n.clone(), unsafe { f.as_ref() }.unwrap()))
+                        .collect::<Vec<_>>())
                 ))
                 .collect::<HashMap<_, _>>()
         );
+        */
         debug!("Block info:\n{:#?}", self.block_info);
     }
 
@@ -394,12 +397,12 @@ impl AnalyzeContext {
     /// Given a name of a declaration `ident` and the block in which this
     /// declaration was declared, `decl_block_id`, returns a mutable reference
     /// to the declaration in the AST.
-    fn get_mut<T>(
+    fn get_mut<'a, T>(
         &self,
         ident: &str,
         decl_block_id: BlockId,
         map: &HashMap<(String, BlockId), *mut T>,
-    ) -> CustomResult<&mut T> {
+    ) -> CustomResult<&'a mut T> {
         let key = (ident.into(), decl_block_id);
 
         if let Some(ptr) = map.get(&key) {
@@ -495,35 +498,56 @@ impl AnalyzeContext {
     /// the AST.
     pub fn get_method_mut(
         &self,
-        struct_: &str,
-        func: &str,
+        struct_name: &str,
+        func_name: &str,
         id: BlockId,
     ) -> CustomResult<&mut Function> {
-        let decl_block_id = self.get_struct_decl_scope(struct_, id)?;
-        let key = (struct_.into(), decl_block_id);
+        let decl_block_id = self.get_struct_decl_scope(struct_name, id)?;
+        let struct_ = self.get_struct(struct_name, decl_block_id)?;
 
-        if let Some(methods) = self.methods.get(&key) {
-            if let Some(ptr) = methods.get(func) {
-                if let Some(ref_) = unsafe { ptr.as_mut() } {
-                    Ok(ref_)
-                } else {
-                    panic!(
-                        "Invalid pointer to method with name \"{}\" in struct {}.",
-                        &func, &struct_
-                    );
-                }
+        if let Some(ptr) = struct_
+            .methods
+            .as_ref()
+            .and_then(|ref map| map.get(func_name))
+        {
+            if let Some(ref_) = unsafe { ptr.as_mut() } {
+                Ok(ref_)
             } else {
-                Err(self.err(format!(
-                    "Unable to find method named \"{}\" in struct \"{}\".",
-                    &func, &struct_,
-                )))
+                panic!(
+                    "Invalid pointer to method with name \"{}\" in struct {:#?}.",
+                    &func_name, &struct_
+                );
             }
         } else {
             Err(self.err(format!(
-                "Unable to find struct named \"{}\" declared in block {}.",
-                &struct_, &decl_block_id
+                "Unable to find method named \"{}\" in struct \"{:#?}\".",
+                &func_name, &struct_,
             )))
         }
+    }
+
+    /// Inserts the given method `func` into the struct with name `struct_name`
+    /// that can be found from the block id `id`.
+    pub fn insert_method(
+        &mut self,
+        struct_name: &str,
+        func: &mut Function,
+        id: BlockId,
+    ) -> CustomResult<()> {
+        let decl_block_id = self.get_struct_decl_scope(struct_name, id)?;
+        let struct_ = self.get_struct_mut(struct_name, decl_block_id)?;
+
+        let methods = if let Some(methods) = &mut struct_.methods {
+            methods
+        } else {
+            struct_.methods = Some(HashMap::default());
+            struct_.methods.as_mut().unwrap()
+        };
+
+        let ptr = func as *mut Function;
+        methods.insert(func.name.clone(), ptr);
+
+        Ok(())
     }
 
     /// Finds the struct with the name `struct_name` in a scope containing the block

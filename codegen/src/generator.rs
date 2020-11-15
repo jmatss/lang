@@ -22,7 +22,7 @@ use inkwell::{
     values::{AnyValueEnum, BasicValueEnum, FunctionValue, InstructionValue, PointerValue},
     AddressSpace,
 };
-use log::{debug, warn};
+use log::debug;
 use std::collections::HashMap;
 
 use crate::expr::ExprTy;
@@ -479,17 +479,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Type::I128 => AnyTypeEnum::IntType(self.context.i128_type()),
             Type::U128 => AnyTypeEnum::IntType(self.context.i128_type()),
 
-            Type::CompoundType(ident, generics) => {
-                let struct_name = if generics.is_empty() {
-                    ident.clone()
-                } else {
-                    common::util::to_generic_struct_name(
-                        ident,
-                        &generics.values().cloned().collect::<Vec<_>>(),
-                    )
-                };
-
-                if let Some(struct_type) = self.module.get_struct_type(&struct_name) {
+            Type::CompoundType(struct_name, _) => {
+                if let Some(struct_type) = self.module.get_struct_type(struct_name) {
                     struct_type.clone().into()
                 } else {
                     return Err(self.err(format!(

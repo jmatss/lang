@@ -14,10 +14,8 @@ use common::{
     visitor::Visitor,
     BlockId,
 };
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, BTreeMap, HashMap},
-};
+use log::debug;
+use std::{cell::RefCell, collections::BTreeMap};
 
 /// Gathers information about all function/method declarations found in the AST
 /// and inserts them into the `analyze_context`. This includes external function
@@ -113,6 +111,8 @@ impl<'a> DeclFuncAnalyzer<'a> {
             let func_ptr = func as *mut Function;
             analyze_context.functions.insert(key, func_ptr);
 
+            debug!("XADDRESS FUNC_DECL -- name: {} {:?}", &func.name, func_ptr);
+
             // Add the parameters as variables in the function scope decl lookup.
             if let Some(params) = &mut func.parameters {
                 for param in params {
@@ -168,19 +168,9 @@ impl<'a> DeclFuncAnalyzer<'a> {
         }
 
         // Insert this method into `methods` in the analyze context.
-        let key = (struct_name.into(), struct_decl_id);
-        match analyze_context.methods.entry(key) {
-            Entry::Occupied(ref mut v) => {
-                let func_ptr = func as *mut Function;
-                v.get_mut().insert(func.name.clone(), func_ptr);
-            }
-            Entry::Vacant(_) => {
-                let err = analyze_context.err(format!(
-                    "Unable to find decl methods for struct \"{}\" in block with id {}.",
-                    struct_name, struct_decl_id
-                ));
-                self.errors.push(err);
-            }
+        if let Err(err) = analyze_context.insert_method(struct_name, func, struct_decl_id) {
+            self.errors.push(err);
+            return;
         }
 
         // Add the parameters as variables in the method scope.
@@ -208,28 +198,13 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
         self.analyze_context.borrow_mut().column_nr = ast_token.column_nr;
     }
 
-    /// Create a entry for this impl block in the analyze contexts `methods` map
-    /// and marks the functions that it contain with the name of this impl block.
-    /// This lets one differentiate between functions and methods in the Function
-    /// struct by checking the `method_struct` field.
+    /// Marks the functions in this implement block with the name of the implement
+    /// block (equivalent to the struct name). This lets one differentiate between
+    /// functions and methods by checking the `method_struct` field in "Function"s.
     fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        let mut analyze_context = self.analyze_context.borrow_mut();
+        let analyze_context = self.analyze_context.borrow();
 
-        if let Token::Block(BlockHeader::Implement(struct_name), impl_id, body) =
-            &mut ast_token.token
-        {
-            let struct_decl_id = match analyze_context.get_struct_decl_scope(struct_name, *impl_id)
-            {
-                Ok(id) => id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            let key = (struct_name.clone(), struct_decl_id);
-            analyze_context.methods.insert(key, HashMap::default());
-
+        if let Token::Block(BlockHeader::Implement(struct_name), _, body) = &mut ast_token.token {
             for body_token in body {
                 if let Token::Block(BlockHeader::Function(func), ..) = &mut body_token.token {
                     func.method_struct = Some(struct_name.clone());
@@ -263,8 +238,10 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
             //       parameters & return type.
             // External declarations should always be in the default block.
             let key = (func.name.clone(), BlockInfo::DEFAULT_BLOCK_ID);
-            let func_ptr = func as *mut Function;
+            let func_ptr = func.as_mut() as *mut Function;
             analyze_context.functions.insert(key, func_ptr);
+
+            debug!("XADDRESS ExternDecl -- name: {} {:?}", &func.name, func_ptr);
         }
     }
 }

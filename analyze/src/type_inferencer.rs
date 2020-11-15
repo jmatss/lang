@@ -703,7 +703,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// can access the types of the parameters and the return type of the func.
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Function(func), ..) = &ast_token.token {
-            self.cur_func = Some(func.clone());
+            self.cur_func = Some(*func.clone());
         }
     }
 

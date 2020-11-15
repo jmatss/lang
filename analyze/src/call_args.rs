@@ -3,14 +3,11 @@ use common::{
     error::LangError,
     token::expr::Argument,
     token::expr::FuncCall,
-    token::{
-        block::Function,
-        expr::{StructInit, Var},
-        stmt::Modifier,
-    },
+    token::expr::{StructInit, Var},
     traverser::TraverseContext,
     visitor::Visitor,
 };
+use log::warn;
 
 use crate::AnalyzeContext;
 
@@ -31,34 +28,6 @@ impl<'a> CallArgs<'a> {
             analyze_context,
             errors: Vec::default(),
         }
-    }
-
-    fn wrap_this_if_needed(
-        &mut self,
-        func_call: &mut FuncCall,
-        func: &mut Function,
-    ) -> CustomResult<()> {
-        static THIS: &str = "this";
-
-        if func.modifiers.contains(&Modifier::ThisPointer) {
-            if let Some(this_param) = func.parameters.as_mut().map(|p| p.first_mut()).flatten() {
-                if this_param.name != THIS {
-                    return Err(self.analyze_context.err(format!(
-                        "First parameter of instance method was not \"this\": {:#?}",
-                        func
-                    )));
-                }
-
-            // TODO: Is this even needed? Should wrap "this" here in that case.
-            } else {
-                return Err(self.analyze_context.err(format!(
-                    "Instance method had no parameters, expected atleast \"this\": {:#?}.",
-                    func
-                )));
-            }
-        }
-
-        Ok(())
     }
 
     fn reorder_func_call(&mut self, func_call: &mut FuncCall, params: &[Var]) -> CustomResult<()> {
@@ -208,13 +177,6 @@ impl<'a> Visitor for CallArgs<'a> {
                 return;
             }
         };
-
-        // Wrap "this" into a pointer if this is a method that has specified
-        // that the method should take "this" as a pointer.
-        if let Err(err) = self.wrap_this_if_needed(func_call, func) {
-            self.errors.push(err);
-            return;
-        }
 
         // Get the parameters for the function. This will be used to reorder
         // the arguments in the function call correctly.

@@ -68,7 +68,7 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
             } else {
                 // Add the struct into decl lookup maps.
                 let key = (struct_.name.clone(), parent_id);
-                let struct_ptr = struct_ as *mut Struct;
+                let struct_ptr = struct_.as_mut() as *mut Struct;
                 analyze_context.structs.insert(key, struct_ptr);
             }
         }
@@ -101,7 +101,7 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
             } else {
                 // Add the enum into decl lookup maps.
                 let key = (enum_.name.clone(), parent_id);
-                let enum_ptr = enum_ as *mut Enum;
+                let enum_ptr = enum_.as_mut() as *mut Enum;
                 analyze_context.enums.insert(key, enum_ptr);
             }
         }
@@ -136,7 +136,7 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
             } else {
                 // Add the interface into decl lookup maps.
                 let key = (interface.name.clone(), parent_id);
-                let interface_ptr = interface as *mut Interface;
+                let interface_ptr = interface.as_mut() as *mut Interface;
                 analyze_context.interfaces.insert(key, interface_ptr);
             }
         }

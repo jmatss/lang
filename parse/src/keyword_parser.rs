@@ -388,7 +388,7 @@ impl<'a> KeyworkParser<'a> {
                 }
             };
 
-            Ok(Token::Stmt(Stmt::ExternalDecl(func)))
+            Ok(Token::Stmt(Stmt::ExternalDecl(Box::new(func))))
         } else {
             Err(self
                 .iter
@@ -518,7 +518,7 @@ impl<'a> KeyworkParser<'a> {
     /// The "function" keyword has already been consumed when this function is called.
     fn parse_func(&mut self) -> CustomResult<AstToken> {
         let func = self.parse_func_proto()?;
-        let func_header = BlockHeader::Function(func);
+        let func_header = BlockHeader::Function(Box::new(func));
         self.iter.next_block(func_header)
     }
 
@@ -715,9 +715,10 @@ impl<'a> KeyworkParser<'a> {
             None
         };
 
-        let implements = None;
-        let struct_ = Struct::new(ident, generics, implements, members_opt);
-        let header = BlockHeader::Struct(struct_);
+        let mut struct_ = Struct::new(ident);
+        struct_.generic_params = generics;
+        struct_.members = members_opt;
+        let header = BlockHeader::Struct(Box::new(struct_));
 
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);
