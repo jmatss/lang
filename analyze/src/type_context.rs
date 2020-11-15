@@ -244,42 +244,40 @@ impl<'a> TypeContext<'a> {
                 (lhs, rhs)
             } else if rhs_sub.is_unknown() || rhs_sub.is_generic() {
                 (rhs, lhs)
-            } else if !lhs_sub.is_unknown_any() && !rhs_sub.is_unknown_any() {
+            } else if !lhs_sub.contains_unknown_any() && !rhs_sub.contains_unknown_any() {
                 // True if both are known, but they aren't equal and they are still
                 // compatible. This means that both are aggregates of the same type.
                 // Structs will have been filtered earlier in this function.
                 match (lhs_sub.clone(), rhs_sub.clone()) {
-                    (Type::Pointer(inner_lhs), Type::Pointer(inner_rhs)) => {
-                        self.get_mapping_direction(*inner_lhs, *inner_rhs)?
-                    }
-                    (Type::Array(inner_lhs, _), Type::Array(inner_rhs, _)) => {
+                    (Type::Pointer(inner_lhs), Type::Pointer(inner_rhs))
+                    | (Type::Array(inner_lhs, _), Type::Array(inner_rhs, _)) => {
                         self.get_mapping_direction(*inner_lhs, *inner_rhs)?
                     }
                     _ => unreachable!(format!("lhs_sub: {:?}, rhs_sub: {:?}", lhs_sub, rhs_sub)),
                 }
-            } else if !lhs_sub.is_unknown_any() {
+            } else if !lhs_sub.contains_unknown_any() {
                 // Only lhs known.
                 (rhs, lhs)
-            } else if !rhs_sub.is_unknown_any() {
+            } else if !rhs_sub.contains_unknown_any() {
                 // Only rhs known.
                 (lhs, rhs)
-            } else if lhs_sub.is_unknown_struct_member()
-                || lhs_sub.is_unknown_struct_method()
-                || lhs_sub.is_unknown_method_argument()
+            } else if rhs_sub.contains_unknown_int()
+                || rhs_sub.contains_unknown_float()
+                || rhs_sub.contains_unknown_array_member()
             {
                 // Prefer struct member/method unknowns over int/float/array
                 // unknowns since the types will always be set for the structs
                 // and their methods.
                 (rhs, lhs)
-            } else if rhs_sub.is_unknown_struct_member()
-                || rhs_sub.is_unknown_struct_method()
-                || rhs_sub.is_unknown_method_argument()
+            } else if lhs_sub.contains_unknown_int()
+                || lhs_sub.contains_unknown_float()
+                || lhs_sub.contains_unknown_array_member()
             {
                 (lhs, rhs)
-            } else if lhs_sub.is_unknown_int() || lhs_sub.is_unknown_float() {
+            } else if lhs_sub.contains_unknown_int() || lhs_sub.contains_unknown_float() {
                 // Prefer int/float unknowns over array member unknowns.
                 (rhs, lhs)
-            } else if rhs.is_unknown_int() || rhs_sub.is_unknown_float() {
+            } else if rhs.contains_unknown_int() || rhs_sub.contains_unknown_float() {
                 (lhs, rhs)
             } else {
                 // Both are array member unknowns, direction doesn't matter.
@@ -580,11 +578,22 @@ impl<'a> TypeContext<'a> {
 
         match &sub_struct_ty {
             Type::CompoundType(struct_name, generics) => {
+                // The struct type might have been resolved by this point.
+                // This means that name of the struct might have been changed
+                // for structs containing generics to include the generics
+                // in its name. Need to use the old struct since the new ones
+                // aren't created until the `type_converter` stage.
+                let old_struct_name = if !generics.is_empty() && struct_name.contains(':') {
+                    util::from_generic_struct_name(&struct_name)
+                } else {
+                    struct_name.clone()
+                };
+
                 // TODO: Fix this. Move `analyze_context` out
                 //       of `type_context` and don't hardcode
                 //       the default block ID.
                 let var = match self.analyze_context.get_struct_member(
-                    struct_name,
+                    &old_struct_name,
                     member_name,
                     BlockInfo::DEFAULT_BLOCK_ID,
                 ) {
@@ -604,14 +613,28 @@ impl<'a> TypeContext<'a> {
                     new_ty.replace_generics_impl(generics);
 
                     match self.solve_substitution(&new_ty, finalize) {
-                        SubResult::Solved(sub_ty) => SubResult::Solved(sub_ty),
-                        SubResult::UnSolved(un_sub_ty) => SubResult::UnSolved(un_sub_ty),
-                        err => err,
+                        SubResult::Solved(sub_ty) => {
+                            // If this is 100% solved, add a substitution from the
+                            // "UnknownStructMember" to the actual type.
+                            self.cur_ty = Type::UnknownStructMember(
+                                Box::new(struct_ty.clone()),
+                                member_name.into(),
+                            );
+
+                            if let Err(err) =
+                                self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
+                            {
+                                SubResult::Err(err)
+                            } else {
+                                SubResult::Solved(sub_ty)
+                            }
+                        }
+                        res => res,
                     }
                 } else {
                     SubResult::Err(self.analyze_context.err(format!(
                         "Type not set for member \"{}\" in struct \"{}\"",
-                        member_name, struct_name
+                        member_name, old_struct_name
                     )))
                 }
             }

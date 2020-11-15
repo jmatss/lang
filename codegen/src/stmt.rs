@@ -168,6 +168,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Err(self.err("TODO: Implement \"modifier\" statement.".into()))
     }
 
+    // TODO: Check type to see that the assignment is valid.
     fn compile_assign(
         &mut self,
         assign_op: &AssignOperator,

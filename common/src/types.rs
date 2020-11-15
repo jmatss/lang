@@ -290,6 +290,98 @@ impl Type {
         }
     }
 
+    /// Checks if the Type `ty` can be found in self. It doesn't check the actual
+    /// "content" of the type, just that the Enum type are equals.
+    fn contains(&self, ty: &Type) -> bool {
+        match (self, ty) {
+            (Type::CompoundType(_, _), Type::CompoundType(_, _))
+            | (Type::Pointer(_), Type::Pointer(_))
+            | (Type::Array(_, _), Type::Array(_, _))
+            | (Type::Void, Type::Void)
+            | (Type::Character, Type::Character)
+            | (Type::String, Type::String)
+            | (Type::Boolean, Type::Boolean)
+            | (Type::I8, Type::I8)
+            | (Type::U8, Type::U8)
+            | (Type::I16, Type::I16)
+            | (Type::U16, Type::U16)
+            | (Type::I32, Type::I32)
+            | (Type::U32, Type::U32)
+            | (Type::F32, Type::F32)
+            | (Type::I64, Type::I64)
+            | (Type::U64, Type::U64)
+            | (Type::F64, Type::F64)
+            | (Type::I128, Type::I128)
+            | (Type::U128, Type::U128)
+            | (Type::Generic(_), Type::Generic(_))
+            | (Type::Unknown(_), Type::Unknown(_))
+            | (Type::UnknownInt(_, _), Type::UnknownInt(_, _))
+            | (Type::UnknownFloat(_), Type::UnknownFloat(_))
+            | (Type::UnknownStructMember(_, _), Type::UnknownStructMember(_, _))
+            | (Type::UnknownStructMethod(_, _), Type::UnknownStructMethod(_, _))
+            | (Type::UnknownMethodArgument(_, _, _), Type::UnknownMethodArgument(_, _, _))
+            | (Type::UnknownArrayMember(_), Type::UnknownArrayMember(_)) => {
+                return true;
+            }
+
+            _ => (),
+        }
+
+        match self {
+            Type::CompoundType(_, generics) => {
+                for generic in generics.values() {
+                    if generic.contains(ty) {
+                        return true;
+                    }
+                }
+                false
+            }
+
+            Type::Pointer(inner_ty)
+            | Type::Array(inner_ty, _)
+            | Type::UnknownStructMember(inner_ty, _)
+            | Type::UnknownStructMethod(inner_ty, _)
+            | Type::UnknownMethodArgument(inner_ty, _, _)
+            | Type::UnknownArrayMember(inner_ty) => inner_ty.contains(ty),
+
+            _ => false,
+        }
+    }
+
+    pub fn contains_unknown_any(&self) -> bool {
+        let tmp_ty = Type::Void;
+        let tmp_str: String = "DOES_NOT_MATTER".into();
+        self.contains(&Type::Unknown(tmp_str.clone()))
+            | self.contains(&Type::UnknownInt(tmp_str.clone(), 0))
+            | self.contains(&Type::UnknownFloat(tmp_str.clone()))
+            | self.contains(&Type::UnknownStructMember(
+                Box::new(tmp_ty.clone()),
+                tmp_str.clone(),
+            ))
+            | self.contains(&Type::UnknownStructMethod(
+                Box::new(tmp_ty.clone()),
+                tmp_str.clone(),
+            ))
+            | self.contains(&Type::UnknownMethodArgument(
+                Box::new(tmp_ty.clone()),
+                tmp_str,
+                Either::Right(0),
+            ))
+            | self.contains(&Type::UnknownArrayMember(Box::new(tmp_ty)))
+    }
+
+    pub fn contains_unknown_int(&self) -> bool {
+        self.contains(&Type::UnknownInt("".into(), 0))
+    }
+
+    pub fn contains_unknown_float(&self) -> bool {
+        self.contains(&Type::UnknownFloat("".into()))
+    }
+
+    pub fn contains_unknown_array_member(&self) -> bool {
+        self.contains(&Type::UnknownArrayMember(Box::new(Type::Void)))
+    }
+
     // TODO: Currently aggregated types with different inner types will return
     //       true. Should this be the case?
     pub fn is_compatible(&self, other: &Type) -> bool {

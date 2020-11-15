@@ -333,9 +333,20 @@ impl<'a> Visitor for TypeSolver<'a> {
             *member_ty = un_op.ret_type.clone();
 
             match un_op.value.get_expr_type() {
-                Ok(Type::CompoundType(struct_name, ..)) => {
+                Ok(Type::CompoundType(ref struct_name, ref generics)) => {
+                    // The struct type will have been resolved by this point.
+                    // This means that name of the struct will have been changed
+                    // for structs containing generics to include the generics
+                    // in its name. Need to use the old struct since the new ones
+                    // aren't created until the `type_converter` stage.
+                    let old_struct_name = if !generics.is_empty() && struct_name.contains(':') {
+                        util::from_generic_struct_name(&struct_name)
+                    } else {
+                        struct_name.clone()
+                    };
+
                     match self.type_context.analyze_context.get_struct_member_index(
-                        &struct_name,
+                        &old_struct_name,
                         member_name,
                         ctx.block_id,
                     ) {
