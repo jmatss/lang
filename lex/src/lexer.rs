@@ -26,13 +26,11 @@ pub fn lex(filename: &str) -> Result<Vec<LexToken>, Vec<LangError>> {
 
     loop {
         match iter.next_token() {
-            Ok(lex_token) => {
-                if lex_token.kind == LexTokenKind::EOF {
-                    lex_token_vec.push(lex_token);
-                    break;
-                }
+            Ok(lex_token) if lex_token.is_eof() => {
                 lex_token_vec.push(lex_token);
+                break;
             }
+            Ok(lex_token) => lex_token_vec.push(lex_token),
             Err(e) => errors.push(e),
         }
     }
@@ -49,10 +47,10 @@ pub struct LexTokenIter {
     iter: TokenIter<char>,
 
     /// Current line number (or rather last seen line number).
-    cur_line_nr: u64,
+    line_nr: u64,
 
     /// Current column number (or rather last seen column number).
-    cur_column_nr: u64,
+    column_nr: u64,
 }
 
 impl LexTokenIter {
@@ -60,8 +58,8 @@ impl LexTokenIter {
         // TODO: This copies all chars, change to not make a copy if possible.
         Self {
             iter: TokenIter::new(content.chars().collect::<Vec<_>>()),
-            cur_line_nr: 1,
-            cur_column_nr: 1,
+            line_nr: 1,
+            column_nr: 1,
         }
     }
 
@@ -72,8 +70,8 @@ impl LexTokenIter {
         // radix 10 numbers).
         const RADIX: u32 = 10;
 
-        let line_nr = self.cur_line_nr;
-        let column_nr = self.cur_column_nr;
+        let line_nr = self.line_nr;
+        let column_nr = self.column_nr;
 
         let kind = if let Some((c1, c2, c3)) = self.iter.peek_three() {
             if LexTokenIter::valid_linebreak(c1, c2) {
@@ -120,7 +118,7 @@ impl LexTokenIter {
                     LexTokenKind::Sym(Sym::SingleQuote) => self.get_lit_char()?,
                     _ => {
                         self.iter.skip(n);
-                        self.cur_column_nr += n as u64;
+                        self.column_nr += n as u64;
                         symbol_kind
                     }
                 }
@@ -149,7 +147,7 @@ impl LexTokenIter {
 
     #[inline]
     fn valid_identifier(c: char) -> bool {
-        LexTokenIter::valid_identifier_start(c) || c.is_numeric()
+        LexTokenIter::valid_identifier_start(c) || LexTokenIter::valid_number(c, 10)
     }
 
     #[inline]
@@ -191,7 +189,7 @@ impl LexTokenIter {
             }
         }
 
-        self.cur_column_nr += result.chars().count() as u64;
+        self.column_nr += result.chars().count() as u64;
 
         if !result.is_empty() {
             Ok(result)
@@ -220,7 +218,7 @@ impl LexTokenIter {
             // characters from above since they aren't part of a prefix.
             self.iter.rewind_n(2);
         } else {
-            self.cur_column_nr += 2;
+            self.column_nr += 2;
         }
 
         // Parse the number. If the this is a integer, the whole number will
@@ -251,9 +249,9 @@ impl LexTokenIter {
             false
         };
 
-        self.cur_column_nr += number.chars().count() as u64;
+        self.column_nr += number.chars().count() as u64;
         if dec_column_nr {
-            self.cur_column_nr -= 1;
+            self.column_nr -= 1;
         }
 
         if is_float {
@@ -367,7 +365,7 @@ impl LexTokenIter {
             }
         }
 
-        self.cur_column_nr += column_count;
+        self.column_nr += column_count;
 
         Ok(chars.iter().collect())
     }
@@ -423,22 +421,18 @@ impl LexTokenIter {
 
     /// Returns the line break at the current position of the iterator.
     fn get_linebreak(&mut self) -> CustomResult<LexTokenKind> {
-        self.cur_line_nr += 1;
-        self.cur_column_nr = 1;
-
-        if let Some(peek_chars) = self.iter.peek_two() {
-            if let ('\n', _) = peek_chars {
-                self.iter.skip(1);
-                Ok(LexTokenKind::Sym(Sym::LineBreak))
-            } else if let ('\r', Some('\n')) = peek_chars {
-                self.iter.skip(2);
-                Ok(LexTokenKind::Sym(Sym::LineBreak))
-            } else {
-                Err(self.err("No linebreak character received in get_linebreak.".into()))
+        match self.iter.peek_two() {
+            Some(('\n', _)) => self.iter.skip(1),
+            Some(('\r', Some('\n'))) => self.iter.skip(2),
+            fail => {
+                return Err(self.err(format!("Found bad line break in get_linebreak: {:?}", fail)))
             }
-        } else {
-            Err(self.err("Received None in get_linebreak.".into()))
         }
+
+        self.line_nr += 1;
+        self.column_nr = 1;
+
+        Ok(LexTokenKind::Sym(Sym::LineBreak))
     }
 
     /// Returns all the consecutive white spaces at the current position of the
@@ -459,7 +453,7 @@ impl LexTokenIter {
             }
         }
 
-        self.cur_column_nr += count as u64;
+        self.column_nr += count as u64;
 
         LexTokenKind::Sym(Sym::WhiteSpace(count))
     }
@@ -484,7 +478,7 @@ impl LexTokenIter {
         }
 
         let comment_str = comment.iter().collect::<String>();
-        self.cur_column_nr += (n + comment_str.chars().count()) as u64;
+        self.column_nr += (n + comment_str.chars().count()) as u64;
 
         comment_str
     }
@@ -555,7 +549,7 @@ impl LexTokenIter {
             // linebreaks twice.
             if LexTokenIter::valid_linebreak(c1, c2) {
                 if !(prev_was_linebreak_rn && LexTokenIter::valid_linebreak_n(c1)) {
-                    self.cur_line_nr += 1;
+                    self.line_nr += 1;
                 }
                 line_column_count = 0;
                 multi_line = true;
@@ -569,9 +563,9 @@ impl LexTokenIter {
         }
 
         if multi_line {
-            self.cur_column_nr = (line_column_count) as u64;
+            self.column_nr = (line_column_count) as u64;
         } else {
-            self.cur_column_nr += (n + line_column_count) as u64;
+            self.column_nr += (n + line_column_count) as u64;
         }
 
         comment.iter().collect()
@@ -582,8 +576,8 @@ impl LexTokenIter {
         LangError::new_backtrace(
             msg,
             LexError {
-                line_nr: self.cur_line_nr,
-                column_nr: self.cur_column_nr,
+                line_nr: self.line_nr,
+                column_nr: self.column_nr,
             },
             true,
         )

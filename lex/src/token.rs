@@ -15,6 +15,14 @@ impl LexToken {
             column_nr,
         }
     }
+
+    pub fn is_eof(&self) -> bool {
+        if let LexTokenKind::EOF = self.kind {
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
