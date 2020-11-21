@@ -15,8 +15,8 @@ use common::{
 use lex::token::{LexTokenKind, Sym};
 use log::debug;
 
-pub struct ExprParser<'a> {
-    iter: &'a mut ParseTokenIter,
+pub struct ExprParser<'a, 'b> {
+    iter: &'a mut ParseTokenIter<'b>,
 
     /// Keeps a count of the amount of tokens seen. If no tokens have been seen
     /// before a "stop condition" is seen, something has gone wrong. This
@@ -51,8 +51,8 @@ pub struct ExprParser<'a> {
     parenthesis_count: isize,
 }
 
-impl<'a> ExprParser<'a> {
-    pub fn parse(iter: &'a mut ParseTokenIter, stop_conds: &'a [Sym]) -> CustomResult<Expr> {
+impl<'a, 'b> ExprParser<'a, 'b> {
+    pub fn parse(iter: &'a mut ParseTokenIter<'b>, stop_conds: &'a [Sym]) -> CustomResult<Expr> {
         let mut expr_parser = Self {
             iter,
             token_count: 0,
@@ -266,23 +266,12 @@ impl<'a> ExprParser<'a> {
 
         self.prev_was_operand = false;
 
-        // Unary operators are treated differently than binary operators,
-        // they just get added directly to one of the stacks depending on
-        // if it prefix or postfix. Early return.
+        // If the unary operator is postfix, it is assumed to be a part of the
+        // previous operand.
         if let Operator::UnaryOperator(_) = op {
-            if let Fix::Prefix = op_info.fix {
-                //self.operators.push(op.clone());
-            } else {
-                // TODO: Is it ok to treat PostFix the same way as PreFix
-                //       to try and get them to care about precedence?
-                //self.outputs.push(Output::Operator(op));
-                //self.operators.push(op.clone());
-
-                // If the operator is postfix, it is assumed to be a part of
-                // the previous operand.
+            if let Fix::Postfix = op_info.fix {
                 self.prev_was_operand = true;
             }
-            //return Ok(());
         }
 
         // OBS!. The precedence is in reverse i.e. the higher the value of the

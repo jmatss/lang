@@ -1,10 +1,9 @@
 use super::token::LexTokenKind;
-use crate::token::LexToken;
 use crate::token::Sym;
+use crate::{char_iter::CharIter, token::LexToken};
 use common::error::LangError;
 use common::{
     error::{CustomResult, LangErrorKind::LexError},
-    iter::TokenIter,
     token::lit::Lit,
 };
 use log::debug;
@@ -20,7 +19,7 @@ pub fn lex(filename: &str) -> Result<Vec<LexToken>, Vec<LangError>> {
         .and_then(|mut f| f.read_to_string(&mut contents))
         .map_err(|e| vec![e.into()])?;
 
-    let mut iter = LexTokenIter::new(&contents);
+    let mut iter = LexTokenIter::new(unsafe { contents.as_bytes_mut() });
     let mut lex_token_vec = Vec::new();
     let mut errors = Vec::new();
 
@@ -42,9 +41,9 @@ pub fn lex(filename: &str) -> Result<Vec<LexToken>, Vec<LangError>> {
     }
 }
 
-pub struct LexTokenIter {
+pub struct LexTokenIter<'a> {
     /// Use to iterate over the character tokens.
-    iter: TokenIter<char>,
+    iter: CharIter<'a>,
 
     /// Current line number (or rather last seen line number).
     line_nr: u64,
@@ -53,11 +52,10 @@ pub struct LexTokenIter {
     column_nr: u64,
 }
 
-impl LexTokenIter {
-    pub fn new(content: &str) -> Self {
-        // TODO: This copies all chars, change to not make a copy if possible.
+impl<'a> LexTokenIter<'a> {
+    pub fn new(content: &'a mut [u8]) -> Self {
         Self {
-            iter: TokenIter::new(content.chars().collect::<Vec<_>>()),
+            iter: CharIter::new(content),
             line_nr: 1,
             column_nr: 1,
         }
@@ -668,73 +666,73 @@ mod tests {
 
     #[test]
     fn test_get_lit() {
-        let input = "\"abc 123 åäö\"";
+        let mut input = "\"abc 123 åäö\"".to_owned();
         let expected = "abc 123 åäö";
-        let actual = LexTokenIter::new(input)
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
             .get_lit(Sym::DoubleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
         // Escape backslash.
-        let input = "\'\\\\\'";
+        let mut input = "\'\\\\\'".to_owned();
         let expected = "\\";
-        let actual = LexTokenIter::new(input)
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
         // Escape "raw byte".
-        let input = "\'\\x41\'";
+        let mut input = "\'\\x41\'".to_owned();
         let expected = "A";
-        let actual = LexTokenIter::new(input)
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
         // Escape newline.
-        let input = "\'\\n\'";
+        let mut input = "\'\\n\'".to_owned();
         let expected = "\n";
-        let actual = LexTokenIter::new(input)
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
         // Escape carriage return.
-        let input = "\'\\r\'";
+        let mut input = "\'\\r\'".to_owned();
         let expected = "\r";
-        let actual = LexTokenIter::new(input)
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
         // Escape tab.
-        let input = "\'\\t\'";
+        let mut input = "\'\\t\'".to_owned();
         let expected = "\t";
-        let actual = LexTokenIter::new(input)
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
         // Escape null.
-        let input = "\'\\0\'";
+        let mut input = "\'\\0\'".to_owned();
         let expected = "\0";
-        let actual = LexTokenIter::new(input)
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
         // Escape single quote.
-        let input = "\'\\\'\'";
+        let mut input = "\'\\\'\'".to_owned();
         let expected = "\'";
-        let actual = LexTokenIter::new(input)
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
         // Escape double quote.
-        let input = "\'\\\"\'";
+        let mut input = "\'\\\"\'".to_owned();
         let expected = "\"";
-        let actual = LexTokenIter::new(input)
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);

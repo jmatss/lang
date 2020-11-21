@@ -16,17 +16,17 @@ use common::{
 };
 use lex::token::{Kw, LexTokenKind, Sym};
 
-pub struct KeyworkParser<'a> {
-    iter: &'a mut ParseTokenIter,
+pub struct KeyworkParser<'a, 'b> {
+    iter: &'a mut ParseTokenIter<'b>,
 
     // TODO: Rework how line_nr and column_nr are stored/parsed during parsing.
     line_nr: u64,
     column_nr: u64,
 }
 
-impl<'a> KeyworkParser<'a> {
+impl<'a, 'b> KeyworkParser<'a, 'b> {
     pub fn parse(
-        iter: &'a mut ParseTokenIter,
+        iter: &'a mut ParseTokenIter<'b>,
         keyword: Kw,
         line_nr: u64,
         column_nr: u64,

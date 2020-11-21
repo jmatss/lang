@@ -51,9 +51,9 @@ pub const DEFAULT_ASSIGN_STOP_CONDS: [Sym; 16] = [
 
 // TODO: Clean up logic for storing line_nr and column_nr for parser.
 
-pub struct ParseTokenIter {
+pub struct ParseTokenIter<'a> {
     /// Use to iterate over the LexTokens.
-    iter: TokenIter<LexToken>,
+    iter: TokenIter<'a, LexToken>,
 
     /// The ID of the current block. This ID is increment for every block and
     /// every block will be given a unique ID.
@@ -74,19 +74,19 @@ pub struct ParseTokenIter {
     pub root_block_id: BlockId,
 }
 
-impl Default for ParseTokenIter {
+impl<'a> Default for ParseTokenIter<'a> {
     fn default() -> Self {
         ParseTokenIter::new()
     }
 }
 
-impl ParseTokenIter {
+impl<'a> ParseTokenIter<'a> {
     pub fn new() -> Self {
         let root_block_id = 0;
         let start_block_id = 1;
 
         Self {
-            iter: TokenIter::new(Vec::default()),
+            iter: TokenIter::new(<&mut [LexToken]>::default()),
             block_id: start_block_id,
             cur_line_nr: 1,
             cur_column_nr: 1,
@@ -94,10 +94,6 @@ impl ParseTokenIter {
             root_block_body: Vec::default(),
             root_block_id,
         }
-    }
-
-    pub fn set_lex_tokens(&mut self, lex_tokens: Vec<LexToken>) {
-        self.iter = TokenIter::new(lex_tokens);
     }
 
     pub fn take_root_block(&mut self) -> AstToken {
@@ -113,8 +109,19 @@ impl ParseTokenIter {
         }
     }
 
-    pub fn parse(&mut self) -> Result<(), Vec<LangError>> {
+    pub fn parse(&mut self, lex_tokens: &mut [LexToken]) -> Result<(), Vec<LangError>> {
         let mut errors = Vec::new();
+
+        // Safety: The `lex_tokens` are "leaked" here since they won't outlive
+        //         or live as long as this parser, so they can't be stored in
+        //         the parser in safe rust. It is safe to leak since `self.iter`
+        //         which contains the leaked `lex_tokens` will be replaced
+        //         before this function returns and will thus stop being leaked.
+        if let Some(slice_ref) = unsafe { (lex_tokens as *mut [LexToken]).as_mut() } {
+            self.iter = TokenIter::new(slice_ref);
+        } else {
+            panic!("Unable to leak lex_tokens.");
+        }
 
         // Keep track of the tokens that have been parsed for the current `parse`
         // call. This is needed so that they can be added infront of the previous
@@ -141,6 +148,10 @@ impl ParseTokenIter {
                 Err(e) => errors.push(e),
             }
         }
+
+        // Need to do this to ensure that the leaked `lex_tokens` doesn't get
+        // reused after this function call.
+        self.iter = TokenIter::new(<&mut [LexToken]>::default());
 
         if errors.is_empty() {
             // Move all previous tokens to the end of this vec and then replace
@@ -644,14 +655,10 @@ impl ParseTokenIter {
         }
     }
 
-    /// Inserest a item at the current iterator position.
-    pub fn insert(&mut self, item: LexToken) {
-        self.iter.insert(item);
-    }
-
-    /// Removes the item at the current iterator position. Returns the removed item.
-    pub fn remove(&mut self) -> LexToken {
-        self.iter.remove()
+    /// Replaces the lex token at the current position with the value of `item`.
+    /// Returns the old token that was replaced.
+    pub fn replace(&mut self, item: LexToken) -> LexToken {
+        self.iter.replace(item)
     }
 
     #[inline]

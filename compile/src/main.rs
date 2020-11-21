@@ -61,7 +61,7 @@ fn main() -> CustomResult<()> {
     // to process. ALl files will be incldued in the same module.
     let mut parser = ParseTokenIter::new();
     let mut ast_root = loop {
-        let lex_tokens = match lexer::lex(&input_file) {
+        let mut lex_tokens = match lexer::lex(&input_file) {
             Ok(lex_tokens) => lex_tokens,
             Err(errs) => {
                 for e in errs {
@@ -72,8 +72,7 @@ fn main() -> CustomResult<()> {
         };
         info!("Lexing for file \"{}\" complete.", &input_file);
 
-        parser.set_lex_tokens(lex_tokens);
-        match parser.parse() {
+        match parser.parse(&mut lex_tokens) {
             Ok(_) => (),
             Err(errs) => {
                 for e in errs {

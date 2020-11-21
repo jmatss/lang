@@ -1,10 +1,14 @@
-pub struct TokenIter<I: Clone> {
-    pos: usize,
-    iter: Vec<I>,
+// TODO: Is it possible to not have the whole `self.iter` as mutable and just
+//       temporarily make the iter mutable in the `replace()` function? It is
+//       the only function that needs to modify the iter.
+
+pub struct TokenIter<'a, I: Clone> {
+    pub pos: usize,
+    iter: &'a mut [I],
 }
 
-impl<I: Clone> TokenIter<I> {
-    pub fn new(items: Vec<I>) -> Self {
+impl<'a, I: Clone> TokenIter<'a, I> {
+    pub fn new(items: &'a mut [I]) -> Self {
         Self {
             pos: 0,
             iter: items,
@@ -29,7 +33,7 @@ impl<I: Clone> TokenIter<I> {
         }
     }
 
-    /// Rewinds back one character in the iterator.
+    /// Rewinds back one item in the iterator.
     /// If the returned bool is false, this operation tried to rewind to a
     /// position before the actual iterator (pos < 0).
     #[inline]
@@ -42,7 +46,7 @@ impl<I: Clone> TokenIter<I> {
         }
     }
 
-    /// Puts back a character into the iterator.
+    /// Puts back a iter into the iterator.
     /// If the returned bool is false, this operation tried to rewind to a
     /// position before the actual iterator (pos < 0).
     #[inline]
@@ -96,13 +100,26 @@ impl<I: Clone> TokenIter<I> {
         }
     }
 
-    /// Inserest a item at the current iterator position.
-    pub fn insert(&mut self, item: I) {
-        self.iter.insert(self.pos, item);
+    /// Peeks and clones the four upcoming items in the iterator.
+    #[inline]
+    pub fn peek_four(&mut self) -> Option<(I, Option<I>, Option<I>, Option<I>)> {
+        if let Some(first) = self.peek_at_n(0) {
+            Some((
+                first,
+                self.peek_at_n(1),
+                self.peek_at_n(2),
+                self.peek_at_n(3),
+            ))
+        } else {
+            None
+        }
     }
 
-    /// Removes the item at the current iterator position. Returns the removed item.
-    pub fn remove(&mut self) -> I {
-        self.iter.remove(self.pos)
+    /// Replaces the item at the current position with the value of `item`.
+    /// Returns the old token that was replaced.
+    pub fn replace(&mut self, item: I) -> I {
+        let old = self.iter[self.pos].clone();
+        self.iter[self.pos] = item;
+        old
     }
 }

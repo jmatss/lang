@@ -4,21 +4,21 @@ use crate::parser::ParseTokenIter;
 use common::{error::CustomResult, types::Type};
 use lex::token::{LexToken, LexTokenKind, Sym};
 
-pub struct TypeParser<'a> {
-    iter: &'a mut ParseTokenIter,
+pub struct TypeParser<'a, 'b> {
+    iter: &'a mut ParseTokenIter<'b>,
     generics: Option<&'a Vec<String>>,
 }
 
 // TODO: Need to accept "right shift" (>>) as part of a type when generics are
 //       implemented.
 
-impl<'a> TypeParser<'a> {
-    pub fn new(iter: &'a mut ParseTokenIter, generics: Option<&'a Vec<String>>) -> Self {
+impl<'a, 'b> TypeParser<'a, 'b> {
+    pub fn new(iter: &'a mut ParseTokenIter<'b>, generics: Option<&'a Vec<String>>) -> Self {
         Self { iter, generics }
     }
 
     pub fn parse(
-        iter: &'a mut ParseTokenIter,
+        iter: &'a mut ParseTokenIter<'b>,
         generics: Option<&'a Vec<String>>,
     ) -> CustomResult<Type> {
         let mut type_parser = Self::new(iter, generics);
@@ -114,7 +114,7 @@ impl<'a> TypeParser<'a> {
             // be a comma if there are more arguments in the list or a
             // "PointyBracketEnd" if the generic list have been parsed fully.
             // It might also be a "ShiftRight" if this it is two "PointyBracketEnd"
-            // following each other, need rewrite the tokens.
+            // following each other, need to rewrite the token in that case.
             if let Some(lex_token) = self.iter.next_skip_space() {
                 match lex_token.kind {
                     LexTokenKind::Sym(Sym::Comma) => {
@@ -125,14 +125,11 @@ impl<'a> TypeParser<'a> {
                     }
                     LexTokenKind::Sym(Sym::ShiftRight) => {
                         self.iter.rewind()?;
-                        self.iter.remove();
 
                         let kind = LexTokenKind::Sym(Sym::PointyBracketEnd);
                         let token = LexToken::new(kind, lex_token.line_nr, lex_token.column_nr);
-                        self.iter.insert(token.clone());
-                        self.iter.insert(token);
+                        self.iter.replace(token);
 
-                        self.iter.next_skip_space();
                         return Ok(Some(generics));
                     }
                     _ => {
