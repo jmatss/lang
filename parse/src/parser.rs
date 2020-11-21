@@ -110,8 +110,6 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     pub fn parse(&mut self, lex_tokens: &mut [LexToken]) -> Result<(), Vec<LangError>> {
-        let mut errors = Vec::new();
-
         // Safety: The `lex_tokens` are "leaked" here since they won't outlive
         //         or live as long as this parser, so they can't be stored in
         //         the parser in safe rust. It is safe to leak since `self.iter`
@@ -122,6 +120,17 @@ impl<'a> ParseTokenIter<'a> {
         } else {
             panic!("Unable to leak lex_tokens.");
         }
+
+        let result = unsafe { self.parse_priv() };
+
+        // Reset the iter to be empty to prevent possible use-after-free.
+        self.iter = TokenIter::new(<&mut [LexToken]>::default());
+
+        result
+    }
+
+    unsafe fn parse_priv(&mut self) -> Result<(), Vec<LangError>> {
+        let mut errors = Vec::new();
 
         // Keep track of the tokens that have been parsed for the current `parse`
         // call. This is needed so that they can be added infront of the previous
@@ -148,10 +157,6 @@ impl<'a> ParseTokenIter<'a> {
                 Err(e) => errors.push(e),
             }
         }
-
-        // Need to do this to ensure that the leaked `lex_tokens` doesn't get
-        // reused after this function call.
-        self.iter = TokenIter::new(<&mut [LexToken]>::default());
 
         if errors.is_empty() {
             // Move all previous tokens to the end of this vec and then replace
