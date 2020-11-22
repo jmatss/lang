@@ -1,26 +1,32 @@
-use std::collections::BTreeMap;
-
 use crate::parser::ParseTokenIter;
-use common::{error::CustomResult, types::Type};
+use common::{
+    error::CustomResult,
+    r#type::{
+        generics::{Generics, GenericsKind},
+        inner_ty::InnerTy,
+        ty::Ty,
+    },
+};
 use lex::token::{LexToken, LexTokenKind, Sym};
+use log::warn;
 
 pub struct TypeParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
-    generics: Option<&'a Vec<String>>,
+    generics: Option<&'a Generics>,
 }
 
 // TODO: Need to accept "right shift" (>>) as part of a type when generics are
 //       implemented.
 
 impl<'a, 'b> TypeParser<'a, 'b> {
-    pub fn new(iter: &'a mut ParseTokenIter<'b>, generics: Option<&'a Vec<String>>) -> Self {
+    pub fn new(iter: &'a mut ParseTokenIter<'b>, generics: Option<&'a Generics>) -> Self {
         Self { iter, generics }
     }
 
     pub fn parse(
         iter: &'a mut ParseTokenIter<'b>,
-        generics: Option<&'a Vec<String>>,
-    ) -> CustomResult<Type> {
+        generics: Option<&'a Generics>,
+    ) -> CustomResult<Ty> {
         let mut type_parser = Self::new(iter, generics);
         type_parser.parse_type()
     }
@@ -38,29 +44,22 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     ///   C                     Lang
     ///   uint32_t *(*x)[]      x: {[{u32}]}
     ///   char *x               x: {char}
-    fn parse_type(&mut self) -> CustomResult<Type> {
+    fn parse_type(&mut self) -> CustomResult<Ty> {
         if let Some(lex_token) = self.iter.next_skip_space() {
             match lex_token.kind {
                 // Ident.
-                LexTokenKind::Ident(ident) => {
-                    let generic_list = self.parse_type_generics()?;
-                    let mut ty = Type::ident_to_type(&ident);
-
+                LexTokenKind::Ident(ref ident) => {
                     // Wrap the current ident into a "Generic" if it exists in
-                    // the `self.generics` map.
-                    if let Some(true) = self.generics.map(|g| g.contains(&ident)) {
-                        ty = Type::Generic(ident.clone());
-                    }
-
-                    // TODO: Currently how this logic works, the first type of
-                    //       the "CompoundType" can NOT be wrapped in a "Generic",
-                    //       is this OK?
-
-                    Ok(if let Some(generic_list) = generic_list {
-                        Type::CompoundType(ident, generic_list)
+                    // the `self.generics` map. Otherwise return it as a
+                    // "UnknownIdent" wrapped in a "CompoundType".
+                    if let Some(true) = self.generics.map(|g| g.contains(ident)) {
+                        Ok(Ty::Generic(ident.clone()))
                     } else {
-                        ty
-                    })
+                        let inner_ty = InnerTy::ident_to_type(&ident, self.iter.current_block_id());
+                        let generics = self.parse_type_generics(GenericsKind::Impl)?;
+
+                        Ok(Ty::CompoundType(inner_ty, generics))
+                    }
                 }
 
                 // Pointer.
@@ -81,15 +80,17 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     /// Parses a list of types inside a generic "tag" (<..>).
     ///   X<T>      // Type with generic argument.
     ///   X<T, V>   // Type with multiple generic arguments.
-    pub(crate) fn parse_type_generics(&mut self) -> CustomResult<Option<BTreeMap<String, Type>>> {
+    pub(crate) fn parse_type_generics(&mut self, kind: GenericsKind) -> CustomResult<Generics> {
+        let mut generics = Generics::new(kind);
+
         // If the next token isn't a "PointyBracketBegin" there are no generic
-        // list, just return None.
+        // list, just return a empty generics.
         if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Sym(Sym::PointyBracketBegin) = lex_token.kind {
                 // Do nothing, parse generic list in logic underneath.
             } else {
                 self.iter.rewind()?;
-                return Ok(None);
+                return Ok(generics);
             }
         }
 
@@ -103,12 +104,14 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             }
         }
 
-        let mut generics = BTreeMap::new();
-
         loop {
-            // Iterate a parse one generic type at a time in the list.
-            let generic = self.parse_type()?;
-            generics.insert(generic.to_string(), generic);
+            // Parse the next item in the list as either a identifier(name) or
+            // a type depending if this is a decl or impl generic list.
+            match generics.kind {
+                GenericsKind::Decl => generics.insert_name(self.next_ident()?),
+                GenericsKind::Impl => generics.insert_type(self.parse_type()?),
+                _ => panic!("Bad GenericsKind: {:#?}", generics),
+            }
 
             // End of a type in the generic list. The next token should either
             // be a comma if there are more arguments in the list or a
@@ -118,10 +121,17 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             if let Some(lex_token) = self.iter.next_skip_space() {
                 match lex_token.kind {
                     LexTokenKind::Sym(Sym::Comma) => {
+                        // Makes a extra check to allow for trailing commas.
+                        if let Some(next) = self.iter.peek_skip_space_line() {
+                            if let LexTokenKind::Sym(Sym::PointyBracketEnd) = next.kind {
+                                self.iter.next_skip_space_line();
+                                return Ok(generics);
+                            }
+                        }
                         continue;
                     }
                     LexTokenKind::Sym(Sym::PointyBracketEnd) => {
-                        return Ok(Some(generics));
+                        return Ok(generics);
                     }
                     LexTokenKind::Sym(Sym::ShiftRight) => {
                         self.iter.rewind()?;
@@ -130,7 +140,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                         let token = LexToken::new(kind, lex_token.line_nr, lex_token.column_nr);
                         self.iter.replace(token);
 
-                        return Ok(Some(generics));
+                        return Ok(generics);
                     }
                     _ => {
                         return Err(self.iter.err(format!(
@@ -147,13 +157,30 @@ impl<'a, 'b> TypeParser<'a, 'b> {
         }
     }
 
+    /// Gets the next lex token and assumes that it is a identifier. If it isn't,
+    /// a error will be returned.
+    fn next_ident(&mut self) -> CustomResult<String> {
+        if let Some(lex_token) = self.iter.next_skip_space_line() {
+            if let LexTokenKind::Ident(ident) = lex_token.kind {
+                Ok(ident)
+            } else {
+                Err(self.iter.err(format!(
+                    "Expected next to be ident in generic decl, was: {:?}",
+                    lex_token
+                )))
+            }
+        } else {
+            Err(self.iter.err("Got Nonewhen parsing generic decl.".into()))
+        }
+    }
+
     /// Parses a pointer type.
     ///   {X}       // Pointer to type (is the {X} syntax be weird/ambiguous?)
-    fn parse_type_pointer(&mut self) -> CustomResult<Type> {
+    fn parse_type_pointer(&mut self) -> CustomResult<Ty> {
         // The "CurlyBracketBegin" has already been skipped.
         // Parse the type and then wrap it into a Pointer type.
         let ty = self.parse_type()?;
-        let ptr_ty = Type::Pointer(Box::new(ty));
+        let ptr_ty = Ty::Pointer(Box::new(ty));
 
         // At this point the token should be a "CurlyBracketEnd" since this is
         // the end of the pointer.
@@ -177,7 +204,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     ///   [X]       // Array of type X with unknown size (slice).
     ///   [X: 3]    // Array of type X with size 3.
     ///   [X: _]    // Array of type X with infered size.
-    fn parse_type_array(&mut self) -> CustomResult<Type> {
+    fn parse_type_array(&mut self) -> CustomResult<Ty> {
         // The "SquareBracketBegin" has already been skipped.
         let gen_ty = self.parse_type()?;
 
@@ -213,7 +240,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             return Err(self.iter.err("Received None at end of array type.".into()));
         };
 
-        let array_ty = Type::Array(Box::new(gen_ty), size);
+        let array_ty = Ty::Array(Box::new(gen_ty), size);
 
         // The next token must be a "SquareBracketEnd" or something has
         // gone wrong.

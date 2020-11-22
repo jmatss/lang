@@ -1,5 +1,5 @@
 use super::expr::Expr;
-use crate::types::Type;
+use crate::r#type::ty::Ty;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Op {
@@ -10,7 +10,7 @@ pub enum Op {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BinOp {
     pub operator: BinOperator,
-    pub ret_type: Option<Type>,
+    pub ret_type: Option<Ty>,
     pub is_const: bool,
     pub lhs: Box<Expr>,
     pub rhs: Box<Expr>,
@@ -31,7 +31,7 @@ impl BinOp {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnOp {
     pub operator: UnOperator,
-    pub ret_type: Option<Type>,
+    pub ret_type: Option<Ty>,
     pub is_const: bool,
     pub value: Box<Expr>,
 }
@@ -108,7 +108,7 @@ pub enum UnOperator {
     /// The string is the name of the member. The u64 is the index of the struct
     /// member being accessed and the Type is the type of the member as declared
     /// in the struct.
-    StructAccess(String, Option<u64>, Option<Type>),
+    StructAccess(String, Option<u64>, Option<Ty>),
 
     BitComplement,
 

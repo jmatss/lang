@@ -1,11 +1,14 @@
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
+    r#type::{
+        generics::{Generics, GenericsKind},
+        inner_ty::InnerTy,
+        ty::Ty,
+    },
     token::expr::Expr,
-    types::Type,
-    util,
 };
 use either::Either;
-use log::{debug, warn};
+use log::debug;
 use std::collections::{hash_map, HashMap};
 
 use crate::{AnalyzeContext, BlockInfo};
@@ -30,7 +33,7 @@ pub struct TypeContext<'a> {
     /// If a "unknown" type doesn't have a substitution in this map at the end
     /// of this step, the program didn't have enough information to infer the type
     /// and the error should be reported.
-    pub substitutions: HashMap<Type, Type>,
+    pub substitutions: HashMap<Ty, Ty>,
 
     /// This contains constraints/equalities that, from looking at the actual source
     /// code, needs to be true. Ex. "var x = y" would create a constraint that
@@ -43,22 +46,22 @@ pub struct TypeContext<'a> {
     ///
     /// If a constraint is added that can never be true ex. "i32 == u32",
     /// that should be reported as a error.
-    pub constraints: Vec<(Type, Type)>,
+    pub constraints: Vec<(Ty, Ty)>,
 
     /// Is the current type when solving substitutions.
-    cur_ty: Type,
+    cur_ty: Ty,
 }
 
 #[derive(Debug, Clone)]
 pub enum SubResult {
-    Solved(Type),
-    UnSolved(Type),
+    Solved(Ty),
+    UnSolved(Ty),
     Err(LangError),
 }
 
 impl SubResult {
     /// Returns a copy of the inner value of the SubResult.
-    pub fn inner(&self) -> Result<Type, LangError> {
+    pub fn inner(&self) -> Result<Ty, LangError> {
         match self {
             SubResult::Solved(ty) | SubResult::UnSolved(ty) => Ok(ty.clone()),
             SubResult::Err(err) => Err(err.clone()),
@@ -68,11 +71,13 @@ impl SubResult {
 
 impl<'a> TypeContext<'a> {
     pub fn new(analyze_context: &'a mut AnalyzeContext) -> Self {
+        let tmp_ty = Ty::CompoundType(InnerTy::Void, Generics::new(GenericsKind::Decl));
+
         Self {
             analyze_context,
             substitutions: HashMap::default(),
             constraints: Vec::default(),
-            cur_ty: Type::Void,
+            cur_ty: tmp_ty,
         }
     }
 
@@ -80,7 +85,7 @@ impl<'a> TypeContext<'a> {
     //       to be to slow?
     /// Inserts a constraint. After a new constraint is inserted, it will try
     /// to solve all constraints.
-    pub fn insert_constraint(&mut self, lhs: Type, rhs: Type) {
+    pub fn insert_constraint(&mut self, lhs: Ty, rhs: Ty) {
         if !self.constraints.contains(&(lhs.clone(), rhs.clone())) {
             debug!("Insert constraint -- lhs: {:?}, rhs: {:?}", &lhs, &rhs);
             self.constraints.push((lhs, rhs));
@@ -118,9 +123,8 @@ impl<'a> TypeContext<'a> {
         while !self.constraints.is_empty() {
             let (lhs, rhs) = self.constraints.swap_remove(0);
 
-            let mut result = self.solve_constraint(lhs, rhs, finalize);
-            if let Err(errs) = &mut result {
-                errors.append(errs);
+            if let Err(mut errs) = self.solve_constraint(lhs, rhs, finalize) {
+                errors.append(&mut errs);
             }
         }
 
@@ -131,12 +135,7 @@ impl<'a> TypeContext<'a> {
         }
     }
 
-    fn solve_constraint(
-        &mut self,
-        lhs: Type,
-        rhs: Type,
-        finalize: bool,
-    ) -> Result<(), Vec<LangError>> {
+    fn solve_constraint(&mut self, lhs: Ty, rhs: Ty, finalize: bool) -> Result<(), Vec<LangError>> {
         let mut errors = Vec::default();
 
         let lhs_sub = self.solve_substitution(&lhs, finalize);
@@ -214,7 +213,7 @@ impl<'a> TypeContext<'a> {
     /// The left item in the returned tuple should be mapped to the right.
     /// Returns Err if something goes wrong ex. if unable to find a valid
     /// mapping for the types.
-    pub fn get_mapping_direction(&mut self, lhs: Type, rhs: Type) -> CustomResult<(Type, Type)> {
+    pub fn get_mapping_direction(&mut self, lhs: Ty, rhs: Ty) -> CustomResult<(Ty, Ty)> {
         // TODO: Can mapping unknowns (any/int/float) to each other cause infinite
         //       recursion. Probably; how can it be prevented?
 
@@ -239,55 +238,15 @@ impl<'a> TypeContext<'a> {
             )));
         }
 
-        Ok(
-            if lhs_sub == rhs_sub || lhs_sub.is_unknown() || lhs_sub.is_generic() {
-                (lhs, rhs)
-            } else if rhs_sub.is_unknown() || rhs_sub.is_generic() {
-                (rhs, lhs)
-            } else if !lhs_sub.contains_unknown_any() && !rhs_sub.contains_unknown_any() {
-                // True if both are known, but they aren't equal and they are still
-                // compatible. This means that both are aggregates of the same type.
-                // Structs will have been filtered earlier in this function.
-                match (lhs_sub.clone(), rhs_sub.clone()) {
-                    (Type::Pointer(inner_lhs), Type::Pointer(inner_rhs))
-                    | (Type::Array(inner_lhs, _), Type::Array(inner_rhs, _)) => {
-                        self.get_mapping_direction(*inner_lhs, *inner_rhs)?
-                    }
-                    _ => unreachable!(format!("lhs_sub: {:?}, rhs_sub: {:?}", lhs_sub, rhs_sub)),
-                }
-            } else if !lhs_sub.contains_unknown_any() {
-                // Only lhs known.
-                (rhs, lhs)
-            } else if !rhs_sub.contains_unknown_any() {
-                // Only rhs known.
-                (lhs, rhs)
-            } else if rhs_sub.contains_unknown_int()
-                || rhs_sub.contains_unknown_float()
-                || rhs_sub.contains_unknown_array_member()
-            {
-                // Prefer struct member/method unknowns over int/float/array
-                // unknowns since the types will always be set for the structs
-                // and their methods.
-                (rhs, lhs)
-            } else if lhs_sub.contains_unknown_int()
-                || lhs_sub.contains_unknown_float()
-                || lhs_sub.contains_unknown_array_member()
-            {
-                (lhs, rhs)
-            } else if lhs_sub.contains_unknown_int() || lhs_sub.contains_unknown_float() {
-                // Prefer int/float unknowns over array member unknowns.
-                (rhs, lhs)
-            } else if rhs.contains_unknown_int() || rhs_sub.contains_unknown_float() {
-                (lhs, rhs)
-            } else {
-                // Both are array member unknowns, direction doesn't matter.
-                (rhs, lhs)
-            },
-        )
+        if lhs_sub.precedence(&rhs_sub) {
+            Ok((rhs_sub, lhs_sub))
+        } else {
+            Ok((lhs_sub, rhs_sub))
+        }
     }
 
     /// Checks if adding a substitution from `from` to `to` creates a loop.
-    fn causes_loop(&self, from: &Type, to: &Type) -> bool {
+    fn causes_loop(&self, from: &Ty, to: &Ty) -> bool {
         if let Some(new_to) = self.substitutions.get(to) {
             if from == new_to {
                 true
@@ -300,7 +259,7 @@ impl<'a> TypeContext<'a> {
     }
 
     /// Inserts a new substitution, mapping `from` to `to`.
-    pub fn insert_substitution(&mut self, from: Type, to: Type) -> CustomResult<()> {
+    pub fn insert_substitution(&mut self, from: Ty, to: Ty) -> CustomResult<()> {
         debug!("Insert substitution -- from: {:?}, to: {:?}", &from, &to);
 
         // Can't map to itself (infinite recursion) and shouldn't cause any kind
@@ -313,14 +272,20 @@ impl<'a> TypeContext<'a> {
             return Ok(());
         }
 
-        // Insert substitutions for the inner types of aggregate types.
+        // Insert substitutions for the inner types of outer types that have
+        // been "solved" and contains other "Ty"s.
         match (&from, &to) {
-            // TODO: Does "CompoundType" also need to be matched on?
-            //Type::CompoundType(..) => {}
-            (Type::Pointer(inner_from), Type::Pointer(inner_to))
-            | (Type::Array(inner_from, _), Type::Array(inner_to, _)) => {
+            (Ty::CompoundType(_, gens_from), Ty::CompoundType(_, gens_to)) => {
+                for (gen_from, gen_ty) in gens_from.iter_types().zip(gens_to.iter_types()) {
+                    self.insert_substitution(gen_from.clone(), gen_ty.clone())?;
+                }
+            }
+
+            (Ty::Pointer(inner_from), Ty::Pointer(inner_to))
+            | (Ty::Array(inner_from, _), Ty::Array(inner_to, _)) => {
                 self.insert_substitution(*inner_from.clone(), *inner_to.clone())?;
             }
+
             _ => (),
         }
 
@@ -355,10 +320,10 @@ impl<'a> TypeContext<'a> {
     /// converted to its default types (i32/f32). After that point the type is
     /// assumed to be set to the correct type and will never change again.
     ///
-    /// If `finalize` is set to false, the UnknownInt" or "UnknownFloat" will be
+    /// If `finalize` is set to false, any "UnknownInt" or "UnknownFloat" will be
     /// kept since the type inference isn't finished yet and they might be set
     /// to something different than the default i32/f32.
-    pub fn solve_substitution(&mut self, ty: &Type, finalize: bool) -> SubResult {
+    pub fn solve_substitution(&mut self, ty: &Ty, finalize: bool) -> SubResult {
         static MAX_LOOP_ITERATIONS: i32 = 50;
 
         self.cur_ty = ty.clone();
@@ -368,115 +333,38 @@ impl<'a> TypeContext<'a> {
             debug!("Substituting, i: {} -- cur_ty: {:?}", i, self.cur_ty);
             i += 1;
 
-            if self.cur_ty.is_primitive() {
-                return SubResult::Solved(self.cur_ty.clone());
-            } else if self.substitutions.contains_key(&self.cur_ty) {
-                let mut sub_ty = self.substitutions.get(&self.cur_ty).unwrap().clone();
-
-                // TODO: Clean up logic in here. Shouldn't need to have special
-                //       edge case for aggregate types (pointer and array) in
-                //       here. Should move this logic into the if-case that
-                //       is below (self.cur_ty.is_aggregated()).
-
-                // If this is a aggregate type (pointer or array), insert a
-                // subtitution for the inner types as well.
-                match (self.cur_ty.clone(), sub_ty.clone()) {
-                    (Type::Pointer(l), Type::Pointer(r))
-                    | (Type::Array(l, _), Type::Array(r, _)) => {
-                        match self.get_mapping_direction(*l, *r) {
-                            Ok((from, to)) => {
-                                debug!(
-                                    "Outer aggregate solved -- inner from: {:#?}\nto: {:#?}",
-                                    from, to
-                                );
-
-                                if let Err(err) = self.insert_substitution(from, to) {
-                                    return SubResult::Err(err);
-                                }
-                            }
-                            Err(err) => return SubResult::Err(err),
-                        }
-                    }
-                    _ => (),
-                }
-
-                // TODO: Will be removed when refactoring, stupid to sprinkle
-                //       out a bunch of "generic" name conversion like this.
-                if let Type::CompoundType(old_name, generics) = &mut sub_ty {
-                    // Replace the old struct name with a new one if this is a struct
-                    // with generics. The name should contain information about the
-                    // generics to make it "unique".
-                    if !generics.is_empty() {
-                        debug!("BEFORE -- generics: {:#?}", generics);
-                        let generic_tys = generics.values().cloned().collect::<Vec<_>>();
-
-                        let mut gens_is_solved = true;
-                        for gen_ty in &generic_tys {
-                            if let Type::Generic(_) = gen_ty {
-                                gens_is_solved = false;
-                                break;
-                            }
-                        }
-
-                        if gens_is_solved {
-                            *old_name = util::to_generic_struct_name(old_name, &generic_tys);
-                        }
-                        debug!("AFTER");
-                    }
-                }
-
+            // TODO: Is it ok to put this fetch at the start, is there a possibility
+            //       that the inner types won't be solved if that is the case?
+            if self.substitutions.contains_key(&self.cur_ty) {
                 // Set the substitute type as the current type and and try to
                 // solve the type iteratively.
-                self.cur_ty = sub_ty;
-            } else if self.cur_ty.is_aggregated() {
-                return match self.solve_aggregate(finalize) {
-                    Ok(true) => SubResult::Solved(self.cur_ty.clone()),
-                    Ok(false) => SubResult::UnSolved(self.cur_ty.clone()),
-                    Err(err) => SubResult::Err(err),
-                };
+                self.cur_ty = self.substitutions.get(&self.cur_ty).unwrap().clone();
             } else {
-                match self.cur_ty.clone() {
-                    // True if finalize is either true or false.
-                    Type::Unknown(_) => return SubResult::UnSolved(self.cur_ty.clone()),
-
-                    // Set default type for int/float if this is to be finalized.
-                    // Don't set default int/float if this isn't to be finalized.
-                    Type::UnknownInt(..) if finalize => {
-                        return SubResult::Solved(Type::I32);
-                    }
-                    Type::UnknownFloat(_) if finalize => {
-                        return SubResult::Solved(Type::F32);
-                    }
-                    Type::UnknownInt(..) | Type::UnknownFloat(_) if !finalize => {
-                        return SubResult::UnSolved(self.cur_ty.clone())
+                match &self.cur_ty {
+                    Ty::CompoundType(..) => {
+                        return self.solve_compound_type(finalize);
                     }
 
-                    // If a generic matches a substition, it will be done in the
-                    // else-if above. Ending up here is makes it "unsolvable".
-                    Type::Generic(_) => return SubResult::UnSolved(self.cur_ty.clone()),
-
-                    Type::UnknownStructMember(ref struct_ty, ref member_name) => {
-                        return self.solve_unknown_struct_member(struct_ty, member_name, finalize);
+                    Ty::Pointer(..) | Ty::Array(..) => {
+                        return self.solve_aggregate(finalize);
                     }
 
-                    Type::UnknownStructMethod(ref struct_ty, ref method_name) => {
-                        return self.solve_unknown_struct_method(struct_ty, method_name, finalize);
+                    Ty::Generic(..) => {
+                        return self.solve_generic(finalize);
                     }
 
-                    Type::UnknownMethodArgument(ref struct_ty, ref method_name, ref position) => {
-                        return self.solve_unknown_method_argument(
-                            struct_ty,
-                            method_name,
-                            position,
-                            finalize,
-                        );
+                    Ty::UnknownStructureMember(..) => {
+                        return self.solve_unknown_structure_member(finalize);
                     }
-
-                    Type::UnknownArrayMember(ref array_ty) => {
-                        return self.solve_unknown_array_member(array_ty, finalize);
+                    Ty::UnknownStructureMethod(..) => {
+                        return self.solve_unknown_structure_method(finalize);
                     }
-
-                    _ => unreachable!("cur_ty: {:#?}", self.cur_ty),
+                    Ty::UnknownMethodArgument(..) => {
+                        return self.solve_unknown_method_argument(finalize);
+                    }
+                    Ty::UnknownArrayMember(..) => {
+                        return self.solve_unknown_array_member(finalize);
+                    }
                 }
             }
         }
@@ -490,434 +378,569 @@ impl<'a> TypeContext<'a> {
         )
     }
 
-    /// Solves aggregate types (i.e. types that might contain other types).
-    /// Aggregate types can be:
-    ///   * Struct compound type (containing possible generic parameters)
-    ///   * Pointer
-    ///   * Array
-    fn solve_aggregate(&mut self, finalize: bool) -> CustomResult<bool> {
+    // TODO: Does the "InnerTy" need to be solved? Currently it isn't and just
+    //       the outer "Ty" is solved and the assumption is that the InnerTy
+    //       will be solved "automatically".
+    /// Solves compound types (i.e. types that might contain generics).
+    fn solve_compound_type(&mut self, finalize: bool) -> SubResult {
         // Since this function will call other functions that updates `cur_ty`
         // recursively, need to save a local copy that will be restored before
         // this function returns.
         let mut local_cur_ty = self.cur_ty.clone();
         let mut is_solved;
 
-        // Need to clone `self.cur_ty` because problems with mutable borrow
-        // of self/self.cur_ty. Will update the real `self.cur_ty` inside the
-        // match statement with information updated in the cloned `cur_ty`.
-        match local_cur_ty {
-            Type::CompoundType(ref mut old_name, ref mut generics) => {
-                is_solved = true;
+        if let Ty::CompoundType(inner_ty, generics) = &mut local_cur_ty {
+            is_solved = true;
 
-                // All inner types needs to be solved. If any of them can't be solved,
-                // this whole aggregate type will count as unsolvable.
-                for inner_ty in generics.values_mut() {
-                    match self.solve_inner_type(inner_ty, finalize) {
-                        Ok(false) => is_solved = false,
-                        Err(err) => return Err(err),
-                        _ => (),
-                    }
-                }
-
-                // Replace the old struct name with a new one if this is a struct
-                // with generics. The name should contain information about the
-                // generics to make it "unique".
-                if is_solved && !generics.is_empty() {
-                    let generic_tys = generics.values().cloned().collect::<Vec<_>>();
-                    *old_name = util::to_generic_struct_name(old_name, &generic_tys);
-                }
-            }
-
-            Type::Pointer(ref mut inner_ty) | Type::Array(ref mut inner_ty, _) => {
-                is_solved = self.solve_inner_type(inner_ty.as_mut(), finalize)?;
-            }
-
-            _ => unreachable!("Expected aggregate, was: {:?}", self.cur_ty),
-        }
-
-        self.cur_ty = local_cur_ty;
-        Ok(is_solved)
-    }
-
-    /// Solves the inner type of aggregate types.
-    fn solve_inner_type(&mut self, inner_ty: &mut Type, finalize: bool) -> CustomResult<bool> {
-        let is_solved;
-
-        match self.solve_substitution(&inner_ty, finalize) {
-            SubResult::Solved(sub_ty) => {
-                debug!(
-                    "Inner type solved -- inner: {:#?}\nsub_ty: {:#?}",
-                    inner_ty, sub_ty
-                );
-
-                // Add a new substitution for the inner types if they are solvable.
-                // The `insert_substitution` function will make sure that no
-                // weird mappings/loops are caused, so it should always be safe
-                // to call here.
-                self.insert_substitution(inner_ty.clone(), sub_ty.clone())?;
-
-                *inner_ty = sub_ty;
-                is_solved = true;
-            }
-            SubResult::UnSolved(un_sub_ty) => {
-                debug!(
-                    "Inner type unsolved -- inner: {:#?}\nun_sub_ty: {:#?}",
-                    inner_ty, un_sub_ty
-                );
-
-                // Add a new constraint for the inner types if they are unsolvable.
-                self.insert_constraint(inner_ty.clone(), un_sub_ty.clone());
-
-                *inner_ty = un_sub_ty;
-                is_solved = false;
-            }
-            SubResult::Err(err) => return Err(err),
-        }
-
-        Ok(is_solved)
-    }
-
-    fn solve_unknown_struct_member(
-        &mut self,
-        struct_ty: &Type,
-        member_name: &str,
-        finalize: bool,
-    ) -> SubResult {
-        // Get any possible substitution and replace the current type with
-        // the new substituted type. The returned value might be the same as the
-        // current, but doesn't hurt to replace with itself.
-        let sub_struct_ty = match self.solve_substitution(struct_ty, finalize) {
-            SubResult::UnSolved(sub_struct_ty) | SubResult::Solved(sub_struct_ty) => {
-                self.cur_ty =
-                    Type::UnknownStructMember(Box::new(sub_struct_ty.clone()), member_name.into());
-                sub_struct_ty
-            }
-
-            err => return err,
-        };
-
-        match &sub_struct_ty {
-            Type::CompoundType(struct_name, generics) => {
-                // The struct type might have been resolved by this point.
-                // This means that name of the struct might have been changed
-                // for structs containing generics to include the generics
-                // in its name. Need to use the old struct since the new ones
-                // aren't created until the `type_converter` stage.
-                let old_struct_name = if !generics.is_empty() && struct_name.contains(':') {
-                    util::from_generic_struct_name(&struct_name)
-                } else {
-                    struct_name.clone()
-                };
-
-                // TODO: Fix this. Move `analyze_context` out
-                //       of `type_context` and don't hardcode
-                //       the default block ID.
-                let var = match self.analyze_context.get_struct_member(
-                    &old_struct_name,
-                    member_name,
-                    BlockInfo::DEFAULT_BLOCK_ID,
-                ) {
-                    Ok(var) => var.clone(),
-                    Err(err) => {
-                        return SubResult::Err(err);
-                    }
-                };
-
-                if let Some(ty) = &var.ret_type {
-                    // Since this fetched the actual struct "template"
-                    // that is used by all, the generics will still
-                    // be the "Generics". Need to replace them with
-                    // the actual type for this specific use of the
-                    // struct.
-                    let mut new_ty = ty.clone();
-                    new_ty.replace_generics_impl(generics);
-
-                    match self.solve_substitution(&new_ty, finalize) {
-                        SubResult::Solved(sub_ty) => {
-                            let mut struct_ty_clone = struct_ty.clone();
-
-                            // Replace the old struct name with a new one if this is a struct
-                            // with generics. The name should contain information about the
-                            // generics to make it "unique".
-                            if !generics.is_empty() {
-                                if let Type::CompoundType(old_name, _) = &mut struct_ty_clone {
-                                    let generic_tys =
-                                        generics.values().cloned().collect::<Vec<_>>();
-                                    *old_name =
-                                        util::to_generic_struct_name(old_name, &generic_tys);
-                                }
-                            }
-
-                            // If this is 100% solved, add a substitution from the
-                            // "UnknownStructMember" to the actual type.
-                            self.cur_ty = Type::UnknownStructMember(
-                                Box::new(struct_ty_clone),
-                                member_name.into(),
-                            );
-
-                            if let Err(err) =
-                                self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
-                            {
-                                SubResult::Err(err)
-                            } else {
-                                SubResult::Solved(sub_ty)
-                            }
+            // All inner types needs to be solved. If any of them can't be solved,
+            // this whole aggregate type will count as unsolvable.
+            for gen_ty in generics.iter_types_mut() {
+                match self.solve_substitution(gen_ty, finalize) {
+                    SubResult::Solved(sub_ty) => {
+                        *gen_ty = sub_ty.clone();
+                        if let Err(err) = self.insert_substitution(gen_ty.clone(), sub_ty) {
+                            return SubResult::Err(err);
                         }
-                        res => res,
                     }
-                } else {
-                    SubResult::Err(self.analyze_context.err(format!(
-                        "Type not set for member \"{}\" in struct \"{}\"",
-                        member_name, old_struct_name
-                    )))
+                    SubResult::UnSolved(sub_ty) => {
+                        *gen_ty = sub_ty.clone();
+                        if let Err(err) = self.insert_substitution(gen_ty.clone(), sub_ty) {
+                            return SubResult::Err(err);
+                        }
+                        is_solved = false;
+                    }
+                    err => return err,
+                }
+            }
+
+            // Make a check to see if the inner type is solved as well.
+            // If this is to be finalized, solve the unkown ints and floats.
+            match inner_ty {
+                InnerTy::UnknownInt(_, _) if finalize => {
+                    *inner_ty = InnerTy::default_int();
+                }
+                InnerTy::UnknownFloat(_) if finalize => {
+                    *inner_ty = InnerTy::default_float();
+                }
+
+                InnerTy::UnknownIdent(ident, id) => {
+                    // Check if this unknown structure can be found and then
+                    // replaced the inner type with the correct structure.
+                    if self.analyze_context.get_struct(ident, *id).is_ok() {
+                        *inner_ty = InnerTy::Struct(ident.clone());
+                    } else if self.analyze_context.get_enum(ident, *id).is_ok() {
+                        *inner_ty = InnerTy::Enum(ident.clone());
+                    } else if self.analyze_context.get_interface(ident, *id).is_ok() {
+                        *inner_ty = InnerTy::Interface(ident.clone());
+                    } else {
+                        is_solved = false;
+                    }
+                }
+
+                InnerTy::Unknown(_) | InnerTy::UnknownInt(_, _) | InnerTy::UnknownFloat(_) => {
+                    is_solved = false
+                }
+
+                _ => (),
+            }
+
+            self.cur_ty = local_cur_ty.clone();
+            if is_solved {
+                SubResult::Solved(local_cur_ty)
+            } else {
+                SubResult::UnSolved(local_cur_ty)
+            }
+        } else {
+            unreachable!("This function will only be called when it is a compound type.");
+        }
+    }
+
+    /// Solves aggregate types (array or pointer). This does NOT solve
+    /// compound types.
+    fn solve_aggregate(&mut self, finalize: bool) -> SubResult {
+        // Since this function will call other functions that updates `cur_ty`
+        // recursively, need to save a local copy that will be restored before
+        // this function returns.
+        let mut local_cur_ty = self.cur_ty.clone();
+
+        match &mut local_cur_ty {
+            Ty::Pointer(ty) | Ty::Array(ty, _) => {
+                match self.solve_substitution(ty.as_ref(), finalize) {
+                    SubResult::Solved(sub_ty) => {
+                        *ty = Box::new(sub_ty);
+                        self.cur_ty = local_cur_ty.clone();
+                        SubResult::Solved(local_cur_ty)
+                    }
+
+                    SubResult::UnSolved(sub_ty) => {
+                        *ty = Box::new(sub_ty);
+                        self.cur_ty = local_cur_ty.clone();
+                        SubResult::UnSolved(local_cur_ty)
+                    }
+
+                    err => err,
                 }
             }
 
             _ => {
-                if finalize {
-                    SubResult::Err(self.analyze_context.err(format!(
-                        "Struct access (member name \"{}\") on unknown struct type: {:?}",
-                        member_name, sub_struct_ty
-                    )))
-                } else {
-                    SubResult::UnSolved(self.cur_ty.clone())
-                }
+                unreachable!("This function will only be called when it is a pointer/array type.");
             }
         }
     }
 
-    fn solve_unknown_struct_method(
-        &mut self,
-        struct_ty: &Type,
-        method_name: &str,
-        finalize: bool,
-    ) -> SubResult {
-        let sub_struct_ty = match self.solve_substitution(struct_ty, finalize) {
-            SubResult::UnSolved(sub_struct_ty) | SubResult::Solved(sub_struct_ty) => {
-                self.cur_ty =
-                    Type::UnknownStructMethod(Box::new(sub_struct_ty.clone()), method_name.into());
-                sub_struct_ty
-            }
+    /// Solves generic types.
+    fn solve_generic(&mut self, finalize: bool) -> SubResult {
+        // TODO: Nothing to do here atm, will there be a time when something
+        //       needs to be done in this function or can it be removed?
+        SubResult::UnSolved(self.cur_ty.clone())
+    }
 
-            err => return err,
-        };
+    fn solve_unknown_structure_member(&mut self, finalize: bool) -> SubResult {
+        // Since this function will call other functions that updates `cur_ty`
+        // recursively, need to save a local copy that will be restored before
+        // this function returns.
+        let mut local_cur_ty = self.cur_ty.clone();
 
-        match &sub_struct_ty {
-            Type::CompoundType(struct_name, generics) => {
-                // The struct type might have been resolved by this point.
-                // This means that name of the struct might have been changed
-                // for structs containing generics to include the generics
-                // in its name. Need to use the old struct since the new ones
-                // aren't created until the `type_converter` stage.
-                let old_struct_name = if !generics.is_empty() && struct_name.contains(':') {
-                    util::from_generic_struct_name(&struct_name)
-                } else {
-                    struct_name.clone()
-                };
+        if let Ty::UnknownStructureMember(ty, member_name) = &mut local_cur_ty {
+            // Work around to make borrow checker happy (so that one can use
+            // `local_cur_ty` further down in this block).
+            let member_name = member_name.clone();
 
-                // TODO: Fix this. Move `analyze_context` out
-                //       of `type_context` and don't hardcode
-                //       the default block ID.
-                let method = match self.analyze_context.get_method(
-                    &old_struct_name,
-                    method_name,
-                    BlockInfo::DEFAULT_BLOCK_ID,
-                ) {
-                    Ok(method) => method.clone(),
-                    Err(err) => {
-                        return SubResult::Err(err);
-                    }
-                };
+            // Get any possible substitution and replace the current type with
+            // the new substituted type. The returned value might be the same as
+            // the current, but doesn't hurt to replace with itself.
+            let sub_ty = match self.solve_substitution(ty, finalize) {
+                SubResult::Solved(sub_ty) | SubResult::UnSolved(sub_ty) => {
+                    self.cur_ty =
+                        Ty::UnknownStructureMember(Box::new(sub_ty.clone()), member_name.clone());
 
-                if let Some(ty) = &method.ret_type {
-                    let mut struct_ty_clone = struct_ty.clone();
-
-                    // Replace the old struct name with a new one if this is a struct
-                    // with generics. The name should contain information about the
-                    // generics to make it "unique".
-                    if !generics.is_empty() {
-                        if let Type::CompoundType(old_name, _) = &mut struct_ty_clone {
-                            let generic_tys = generics.values().cloned().collect::<Vec<_>>();
-                            *old_name = util::to_generic_struct_name(old_name, &generic_tys);
-                        }
-                    }
-
-                    // Since this fetched the actual struct "template"
-                    // that is used by all, the generics will still
-                    // be the "Generics". Need to replace them with
-                    // the actual type for this specific use of the
-                    // struct.
-                    let mut new_ty = ty.clone();
-                    new_ty.replace_generics_impl(generics);
-
-                    match self.solve_substitution(&new_ty, finalize) {
-                        SubResult::Solved(sub_ty) => {
-                            // If this is 100% solved, add a substitution from the
-                            // "UnknownStructMember" to the actual type.
-                            self.cur_ty = Type::UnknownStructMethod(
-                                Box::new(struct_ty_clone),
-                                method_name.into(),
-                            );
-
-                            if let Err(err) =
-                                self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
-                            {
-                                SubResult::Err(err)
-                            } else {
-                                SubResult::Solved(sub_ty)
-                            }
-                        }
-                        res => res,
-                    }
-                } else {
-                    SubResult::Solved(Type::Void)
+                    *ty = Box::new(sub_ty.clone());
+                    sub_ty
                 }
-            }
 
-            _ => {
-                if finalize {
-                    SubResult::Err(self.analyze_context.err(format!(
-                        "Method call (method name \"{}\") on non struct type: {:?}",
-                        method_name, self.cur_ty
+                err => return err,
+            };
+
+            let (inner_ty, generics) = match &sub_ty {
+                Ty::CompoundType(InnerTy::UnknownIdent(..), ..)
+                | Ty::UnknownStructureMember(..)
+                | Ty::UnknownStructureMethod(..)
+                | Ty::UnknownMethodArgument(..) => {
+                    self.cur_ty = local_cur_ty.clone();
+                    return SubResult::UnSolved(local_cur_ty);
+                }
+
+                Ty::CompoundType(inner_ty, generics) => (inner_ty, generics),
+
+                _ => {
+                    return SubResult::Err(self.analyze_context.err(format!(
+                        "Invalid struct type of UnknownStructureMember: {:#?}",
+                        sub_ty
                     )))
-                } else {
-                    SubResult::UnSolved(self.cur_ty.clone())
                 }
+            };
+
+            // Re-set cur_ty after the possible modification above.
+            self.cur_ty = local_cur_ty.clone();
+
+            // TODO: Don't hardcode default id.
+            let id = BlockInfo::DEFAULT_BLOCK_ID;
+
+            let var = match inner_ty {
+                InnerTy::Struct(ident) => {
+                    match self
+                        .analyze_context
+                        .get_struct_member(ident, &member_name, id)
+                    {
+                        Ok(var) => var,
+                        Err(err) => return SubResult::Err(err),
+                    }
+                }
+
+                InnerTy::Enum(ident) => {
+                    match self
+                        .analyze_context
+                        .get_enum_member(ident, &member_name, id)
+                    {
+                        Ok(var) => var,
+                        Err(err) => return SubResult::Err(err),
+                    }
+                }
+
+                InnerTy::Interface(ident) => {
+                    panic!("TODO: Interface");
+                }
+
+                _ => {
+                    return if finalize {
+                        SubResult::Err(self.analyze_context.err(format!(
+                            "Invalid inner type when solving UnknownStructureMember: {:#?}",
+                            inner_ty
+                        )))
+                    } else {
+                        SubResult::UnSolved(self.cur_ty.clone())
+                    };
+                }
+            };
+
+            if let Some(ty) = &var.ret_type {
+                // Since this fetched the actual structue "template" that is used
+                // by all, the generics will still be the "Generics". Need to
+                // replace them with the actual type for this specific use of
+                // the structure.
+                let mut new_ty = ty.clone();
+                new_ty.replace_generics_impl(generics);
+
+                // Add a substitution from the "UnknownStructureMember" to the
+                // actual type fetched from the member of the structure.
+                match self.solve_substitution(&new_ty, finalize) {
+                    SubResult::Solved(sub_ty) => {
+                        if let Err(err) =
+                            self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
+                        {
+                            SubResult::Err(err)
+                        } else {
+                            SubResult::Solved(sub_ty)
+                        }
+                    }
+
+                    SubResult::UnSolved(un_sub_ty) => {
+                        if let Err(err) =
+                            self.insert_substitution(self.cur_ty.clone(), un_sub_ty.clone())
+                        {
+                            SubResult::Err(err)
+                        } else {
+                            SubResult::UnSolved(un_sub_ty)
+                        }
+                    }
+
+                    res => res,
+                }
+            } else {
+                SubResult::Err(self.analyze_context.err(format!(
+                    "Type not set for member \"{}\" in structure \"{}\"",
+                    member_name, inner_ty
+                )))
             }
+        } else {
+            unreachable!(
+                "This function will only be called when it is a UnknownStructureMember type."
+            );
         }
     }
 
-    fn solve_unknown_method_argument(
-        &mut self,
-        struct_ty: &Type,
-        method_name: &str,
-        position: &Either<String, u64>,
-        finalize: bool,
-    ) -> SubResult {
-        let sub_struct_ty = match self.solve_substitution(&struct_ty, finalize) {
-            SubResult::UnSolved(sub_struct_ty) | SubResult::Solved(sub_struct_ty) => {
-                self.cur_ty = Type::UnknownMethodArgument(
-                    Box::new(sub_struct_ty.clone()),
-                    method_name.into(),
-                    position.clone(),
-                );
-                sub_struct_ty
-            }
+    fn solve_unknown_structure_method(&mut self, finalize: bool) -> SubResult {
+        // Since this function will call other functions that updates `cur_ty`
+        // recursively, need to save a local copy that will be restored before
+        // this function returns.
+        let mut local_cur_ty = self.cur_ty.clone();
 
-            err => return err,
-        };
+        if let Ty::UnknownStructureMethod(ty, method_name) = &mut local_cur_ty {
+            // Work around to make borrow checker happy (so that one can use
+            // `local_cur_ty` further down in this block).
+            let method_name = method_name.clone();
 
-        match &sub_struct_ty {
-            Type::CompoundType(struct_name, generics) => {
-                // The struct type might have been resolved by this point.
-                // This means that name of the struct might have been changed
-                // for structs containing generics to include the generics
-                // in its name. Need to use the old struct since the new ones
-                // aren't created until the `type_converter` stage.
-                let old_struct_name = if !generics.is_empty() && struct_name.contains(':') {
-                    util::from_generic_struct_name(&struct_name)
-                } else {
-                    struct_name.clone()
-                };
+            // Get any possible substitution and replace the current type with
+            // the new substituted type. The returned value might be the same as
+            // the current, but doesn't hurt to replace with itself.
+            let sub_ty = match self.solve_substitution(ty, finalize) {
+                SubResult::Solved(sub_ty) | SubResult::UnSolved(sub_ty) => {
+                    self.cur_ty =
+                        Ty::UnknownStructureMethod(Box::new(sub_ty.clone()), method_name.clone());
 
-                // If this is a named argument, use that name to
-                // identify the parameter type and then get the
-                // index for the parameter. Otherwise use the
-                // index of the argument directly.
-                let actual_idx = match position {
-                    Either::Left(arg_name) => {
-                        // TODO: Fix this. Move `analyze_context` out
-                        //       of `type_context` and don't hardcode
-                        //       the default block ID.
-                        match self.analyze_context.get_method_param_idx(
-                            &old_struct_name,
-                            method_name,
-                            arg_name,
-                            BlockInfo::DEFAULT_BLOCK_ID,
-                        ) {
-                            Ok(idx) => idx,
-                            Err(err) => return SubResult::Err(err),
+                    *ty = Box::new(sub_ty.clone());
+                    sub_ty
+                }
+
+                err => return err,
+            };
+
+            let (inner_ty, generics) = match &sub_ty {
+                Ty::CompoundType(InnerTy::UnknownIdent(..), ..)
+                | Ty::UnknownStructureMember(..)
+                | Ty::UnknownStructureMethod(..)
+                | Ty::UnknownMethodArgument(..) => {
+                    self.cur_ty = local_cur_ty.clone();
+                    return SubResult::UnSolved(local_cur_ty);
+                }
+
+                Ty::CompoundType(inner_ty, generics) => (inner_ty, generics),
+
+                _ => {
+                    return SubResult::Err(self.analyze_context.err(format!(
+                        "Invalid struct type of UnknownStructureMethod: {:#?}",
+                        sub_ty
+                    )))
+                }
+            };
+
+            // Re-set cur_ty after the possible modification above.
+            self.cur_ty = local_cur_ty.clone();
+
+            // TODO: Don't hardcode default id.
+            let id = BlockInfo::DEFAULT_BLOCK_ID;
+
+            let method = match inner_ty {
+                InnerTy::Struct(struct_name) => {
+                    match self
+                        .analyze_context
+                        .get_method(struct_name, &method_name, id)
+                    {
+                        Ok(method) => method,
+                        Err(err) => return SubResult::Err(err),
+                    }
+                }
+
+                InnerTy::Enum(_) => {
+                    panic!("TODO: Enum, should it have methods?")
+                }
+
+                InnerTy::Interface(_) => {
+                    panic!("TODO: Interface, should it have methods?");
+                }
+
+                _ => {
+                    return if finalize {
+                        SubResult::Err(self.analyze_context.err(format!(
+                            "Invalid inner type when solving UnknownStructureMethod: {:#?}",
+                            inner_ty
+                        )))
+                    } else {
+                        SubResult::UnSolved(self.cur_ty.clone())
+                    };
+                }
+            };
+
+            if let Some(ty) = &method.ret_type {
+                let mut new_ty = ty.clone();
+                new_ty.replace_generics_impl(generics);
+
+                // Add a substitution from the "UnknownStructureMethod" to the
+                // actual type fetched from the method of the structure.
+                match self.solve_substitution(&new_ty, finalize) {
+                    SubResult::Solved(sub_ty) => {
+                        if let Err(err) =
+                            self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
+                        {
+                            SubResult::Err(err)
+                        } else {
+                            SubResult::Solved(sub_ty)
                         }
                     }
-                    Either::Right(idx) => *idx,
-                };
 
-                let arg_ty = match self.analyze_context.get_method_param_type(
-                    &old_struct_name,
-                    method_name,
-                    actual_idx,
-                    BlockInfo::DEFAULT_BLOCK_ID,
-                ) {
-                    Ok(ty) => ty,
-                    Err(err) => {
-                        return SubResult::Err(err);
+                    SubResult::UnSolved(un_sub_ty) => {
+                        if let Err(err) =
+                            self.insert_substitution(self.cur_ty.clone(), un_sub_ty.clone())
+                        {
+                            SubResult::Err(err)
+                        } else {
+                            SubResult::UnSolved(un_sub_ty)
+                        }
                     }
-                };
 
-                SubResult::Solved(arg_ty)
-            }
-
-            _ => {
-                if finalize {
-                    SubResult::Err(self.analyze_context.err(format!(
-                        "Method call (method name \"{}\") argument used on non struct type(???): {:?}",
-                        method_name, self.cur_ty
-                    )))
+                    res => res,
+                }
+            } else {
+                // The return type of the method is None == Void.
+                let ty = Ty::CompoundType(InnerTy::Void, Generics::new(GenericsKind::Empty));
+                if let Err(err) = self.insert_substitution(self.cur_ty.clone(), ty.clone()) {
+                    SubResult::Err(err)
                 } else {
-                    SubResult::UnSolved(self.cur_ty.clone())
+                    SubResult::Solved(ty)
                 }
             }
+        } else {
+            unreachable!(
+                "This function will only be called when it is a UnknownStructureMethod type."
+            );
         }
     }
 
-    fn solve_unknown_array_member(&mut self, array_ty: &Type, finalize: bool) -> SubResult {
-        let sub_array_ty = match self.solve_substitution(&array_ty, finalize) {
-            SubResult::Solved(sub_ty) => {
-                self.cur_ty = Type::UnknownArrayMember(Box::new(sub_ty.clone()));
-                sub_ty
-            }
+    fn solve_unknown_method_argument(&mut self, finalize: bool) -> SubResult {
+        // Since this function will call other functions that updates `cur_ty`
+        // recursively, need to save a local copy that will be restored before
+        // this function returns.
+        let mut local_cur_ty = self.cur_ty.clone();
 
-            SubResult::UnSolved(un_sub_ty) => {
-                // If it is known that this is an array but the
-                // inner type is unknown, add a constrain between
-                // the inner type and the return type of the
-                // current "UnknownArrayMember".
-                // This constraint is impossible to figure
-                // out before this point, so this is a ugly fix
-                // to ensure that nested arrays are solvable.
-                if let Type::Array(inner_ty, _) = &un_sub_ty {
-                    self.insert_constraint(self.cur_ty.clone(), *inner_ty.clone());
+        if let Ty::UnknownMethodArgument(ty, method_name, name_or_idx) = &mut local_cur_ty {
+            // Work around to make borrow checker happy (so that one can use
+            // `local_cur_ty` further down in this block).
+            let method_name = method_name.clone();
+            let name_or_idx = name_or_idx.clone();
+
+            // Get any possible substitution and replace the current type with
+            // the new substituted type. The returned value might be the same as
+            // the current, but doesn't hurt to replace with itself.
+            let sub_ty = match self.solve_substitution(ty, finalize) {
+                SubResult::Solved(sub_ty) | SubResult::UnSolved(sub_ty) => {
+                    self.cur_ty = Ty::UnknownMethodArgument(
+                        Box::new(sub_ty.clone()),
+                        method_name.clone(),
+                        name_or_idx.clone(),
+                    );
+
+                    *ty = Box::new(sub_ty.clone());
+                    sub_ty
                 }
 
-                self.cur_ty = Type::UnknownArrayMember(Box::new(un_sub_ty.clone()));
-                un_sub_ty
-            }
+                err => return err,
+            };
 
-            err => return err,
-        };
-
-        match &sub_array_ty {
-            Type::Array(inner_ty, _) => match self.solve_substitution(inner_ty, finalize) {
-                SubResult::Solved(sub_ty) => SubResult::Solved(sub_ty),
-                SubResult::UnSolved(un_sub_ty) => SubResult::UnSolved(un_sub_ty),
-                err => err,
-            },
-
-            _ => {
-                if finalize {
-                    SubResult::Err(
-                        self.analyze_context
-                            .err(format!("Array access on non Array type: {:?}", self.cur_ty)),
-                    )
-                } else {
-                    SubResult::UnSolved(self.cur_ty.clone())
+            let (inner_ty, generics) = match &sub_ty {
+                Ty::CompoundType(InnerTy::UnknownIdent(..), ..)
+                | Ty::UnknownStructureMember(..)
+                | Ty::UnknownStructureMethod(..)
+                | Ty::UnknownMethodArgument(..) => {
+                    self.cur_ty = local_cur_ty.clone();
+                    return SubResult::UnSolved(local_cur_ty);
                 }
+
+                Ty::CompoundType(inner_ty, generics) => (inner_ty, generics),
+
+                _ => {
+                    return SubResult::Err(self.analyze_context.err(format!(
+                        "Invalid struct type of UnknownMethodArgument: {:#?}",
+                        sub_ty
+                    )))
+                }
+            };
+
+            // Re-set cur_ty after the possible modification above.
+            self.cur_ty = local_cur_ty.clone();
+
+            let struct_name = match inner_ty {
+                InnerTy::Struct(struct_name) => struct_name,
+
+                InnerTy::Enum(_) => {
+                    panic!("TODO: Enum, should it have methods?")
+                }
+
+                InnerTy::Interface(_) => {
+                    panic!("TODO: Interface, should it have methods?");
+                }
+
+                _ => {
+                    return if finalize {
+                        SubResult::Err(self.analyze_context.err(format!(
+                            "Invalid inner type when solving UnknownStructureMethod: {:#?}",
+                            inner_ty
+                        )))
+                    } else {
+                        SubResult::UnSolved(self.cur_ty.clone())
+                    };
+                }
+            };
+
+            // TODO: Don't hardcode default id.
+            let id = BlockInfo::DEFAULT_BLOCK_ID;
+
+            // If this is a named argument, use that name to identify the parameter
+            // type and then get the index for the parameter. Otherwise use the
+            // index of the argument directly.
+            let actual_idx = match name_or_idx {
+                Either::Left(arg_name) => {
+                    match self.analyze_context.get_method_param_idx(
+                        struct_name,
+                        &method_name,
+                        &arg_name,
+                        id,
+                    ) {
+                        Ok(idx) => idx,
+                        Err(err) => return SubResult::Err(err),
+                    }
+                }
+                Either::Right(idx) => idx,
+            };
+
+            let mut arg_ty = match self.analyze_context.get_method_param_type(
+                struct_name,
+                &method_name,
+                actual_idx,
+                BlockInfo::DEFAULT_BLOCK_ID,
+            ) {
+                Ok(ty) => ty,
+                Err(err) => {
+                    return SubResult::Err(err);
+                }
+            };
+
+            arg_ty.replace_generics_impl(generics);
+
+            // Add a substitution from the "UnknownMethodArgument" to the
+            // actual type fetched from the method of the structure.
+            match self.solve_substitution(&arg_ty, finalize) {
+                SubResult::Solved(sub_ty) => {
+                    if let Err(err) = self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
+                    {
+                        SubResult::Err(err)
+                    } else {
+                        SubResult::Solved(sub_ty)
+                    }
+                }
+
+                SubResult::UnSolved(un_sub_ty) => {
+                    if let Err(err) =
+                        self.insert_substitution(self.cur_ty.clone(), un_sub_ty.clone())
+                    {
+                        SubResult::Err(err)
+                    } else {
+                        SubResult::UnSolved(un_sub_ty)
+                    }
+                }
+
+                res => res,
             }
+        } else {
+            unreachable!(
+                "This function will only be called when it is a UnknownMethodArgument type."
+            );
+        }
+    }
+
+    fn solve_unknown_array_member(&mut self, finalize: bool) -> SubResult {
+        // Since this function will call other functions that updates `cur_ty`
+        // recursively, need to save a local copy that will be restored before
+        // this function returns.
+        let mut local_cur_ty = self.cur_ty.clone();
+
+        if let Ty::UnknownArrayMember(ty) = &mut local_cur_ty {
+            // Add a substitution from the "UnknownArrayMember" to the actual
+            // type of the array if it has been found.
+            match self.solve_substitution(&ty, finalize) {
+                SubResult::Solved(sub_ty) => {
+                    *ty = Box::new(sub_ty.clone());
+                    self.cur_ty = local_cur_ty;
+
+                    if let Err(err) = self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
+                    {
+                        SubResult::Err(err)
+                    } else {
+                        SubResult::Solved(sub_ty)
+                    }
+                }
+
+                SubResult::UnSolved(un_sub_ty) => {
+                    *ty = Box::new(un_sub_ty.clone());
+                    self.cur_ty = local_cur_ty;
+
+                    if let Err(err) =
+                        self.insert_substitution(self.cur_ty.clone(), un_sub_ty.clone())
+                    {
+                        SubResult::Err(err)
+                    } else {
+                        SubResult::UnSolved(un_sub_ty)
+                    }
+                }
+
+                res => res,
+            }
+        } else {
+            unreachable!("This function will only be called when it is a UnknownArrayMember type.");
         }
     }
 
     // TODO: Is it possible to move this function to "Expr" in some way?
-    pub fn get_expr_type(&self, expr_opt: Option<&Expr>) -> CustomResult<Type> {
+    pub fn get_expr_type(&self, expr_opt: Option<&Expr>) -> CustomResult<Ty> {
         if let Some(expr) = expr_opt {
             expr.get_expr_type()
         } else {

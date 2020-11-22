@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
-    types::Type,
+    r#type::ty::Ty,
     BlockId,
 };
 
@@ -17,11 +17,11 @@ pub enum Expr {
     //       implied. For numbers the postfix notation might be converted to a
     //       "As" so that the type doesn't need to be stored in the literal,
     //       it will be stored in the surrounding expression.
-    Lit(Lit, Option<Type>),
+    Lit(Lit, Option<Ty>),
 
     // TODO: Is it ok to have type as a expression? This lets one handle binary
     //       operators like ex. "as" in a simple way.
-    Type(Type),
+    Type(Ty),
     Var(Var),
     FuncCall(FuncCall),
     StructInit(StructInit),
@@ -31,7 +31,7 @@ pub enum Expr {
 }
 
 impl Expr {
-    pub fn get_expr_type(&self) -> CustomResult<Type> {
+    pub fn get_expr_type(&self) -> CustomResult<Ty> {
         Ok(match self {
             Expr::Lit(_, Some(ty)) | Expr::Type(ty) => ty.clone(),
             Expr::Var(var) => {
@@ -94,6 +94,7 @@ impl Expr {
         })
     }
 
+    #[allow(clippy::match_like_matches_macro)]
     pub fn is_var(&self) -> bool {
         match self {
             Expr::Var(_) => true,
@@ -237,7 +238,7 @@ impl Expr {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Var {
     pub name: String,
-    pub ret_type: Option<Type>,
+    pub ret_type: Option<Ty>,
     pub modifiers: Option<Vec<Modifier>>,
     pub default_value: Option<Box<Expr>>,
     pub is_const: bool,
@@ -246,7 +247,7 @@ pub struct Var {
 impl Var {
     pub fn new(
         name: String,
-        ret_type: Option<Type>,
+        ret_type: Option<Ty>,
         modifiers: Option<Vec<Modifier>>,
         default_value: Option<Box<Expr>>,
         is_const: bool,
@@ -265,16 +266,11 @@ impl Var {
 pub struct FuncCall {
     pub name: String,
     pub arguments: Vec<Argument>,
-    pub ret_type: Option<Type>,
+    pub ret_type: Option<Ty>,
 
-    // TODO: Is this needed? Currently set in type solver and the used when
-    //       renaming the method call in codegen. The codegen could get the
-    //       name of the struct from the ret type of the first argument in the
-    //       method call, but would be more work.
-    /// Will be set if this is a method call i.e. a function being a member of
-    /// a struct. The String will be the name of the struct.
-    pub method_struct: Option<String>,
-
+    /// Will be set if this is a method call. It will be set to the structure
+    /// that this method is called on.
+    pub method_structure: Option<Ty>,
     pub is_method: bool,
 }
 
@@ -284,7 +280,7 @@ impl FuncCall {
             name,
             arguments,
             ret_type: None,
-            method_struct: None,
+            method_structure: None,
             is_method: false,
         }
     }
@@ -294,7 +290,7 @@ impl FuncCall {
 pub struct StructInit {
     pub name: String,
     pub arguments: Vec<Argument>,
-    pub ret_type: Option<Type>,
+    pub ret_type: Option<Ty>,
 }
 
 impl StructInit {
@@ -310,7 +306,7 @@ impl StructInit {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ArrayInit {
     pub arguments: Vec<Argument>,
-    pub ret_type: Option<Type>,
+    pub ret_type: Option<Ty>,
 }
 
 impl ArrayInit {

@@ -17,6 +17,7 @@ impl<'a, I: Clone> TokenIter<'a, I> {
 
     /// Get the next item from the iterator.
     #[inline]
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<I> {
         let item = self.iter.get(self.pos);
         self.pos += 1;
@@ -102,6 +103,7 @@ impl<'a, I: Clone> TokenIter<'a, I> {
 
     /// Peeks and clones the four upcoming items in the iterator.
     #[inline]
+    #[allow(clippy::type_complexity)]
     pub fn peek_four(&mut self) -> Option<(I, Option<I>, Option<I>, Option<I>)> {
         if let Some(first) = self.peek_at_n(0) {
             Some((

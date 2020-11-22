@@ -1,13 +1,14 @@
 use common::{
     error::CustomResult,
     error::LangError,
+    r#type::{inner_ty::InnerTy, ty::Ty},
     token::expr::Argument,
     token::expr::FuncCall,
     token::expr::{StructInit, Var},
     traverser::TraverseContext,
+    util,
     visitor::Visitor,
 };
-use log::warn;
 
 use crate::AnalyzeContext;
 
@@ -159,12 +160,39 @@ impl<'a> Visitor for CallArgs<'a> {
     }
 
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
-        // If this is a function contained in a struct (method), one needs to
+        // If this is a function contained in a structure (method), one needs to
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
-        let func_res = if let Some(struct_name) = &func_call.method_struct {
-            self.analyze_context
-                .get_method_mut(struct_name, &func_call.name, ctx.block_id)
+        let func_res = if let Some(ty) = &func_call.method_structure {
+            let (inner_ty, generics) = match ty {
+                Ty::CompoundType(inner_ty, generics) => (inner_ty, generics),
+                _ => {
+                    let err = self.analyze_context.err(format!(
+                        "method structure not valid type for func call: {:#?}",
+                        func_call
+                    ));
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            match inner_ty {
+                InnerTy::Struct(ident) => {
+                    let new_name = util::to_generic_struct_name(ident, generics);
+                    self.analyze_context
+                        .get_method_mut(&new_name, &func_call.name, ctx.block_id)
+                }
+
+                InnerTy::Enum(ident) => {
+                    panic!("TODO: Enum");
+                }
+
+                InnerTy::Interface(ident) => {
+                    panic!("TODO: Interface");
+                }
+
+                _ => unreachable!("Inner type already known to be Compound: {:#?}", func_call),
+            }
         } else {
             self.analyze_context
                 .get_func_mut(&func_call.name, ctx.block_id)
@@ -204,10 +232,21 @@ impl<'a> Visitor for CallArgs<'a> {
     }
 
     fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
-        let struct_ = match self
-            .analyze_context
-            .get_struct(&struct_init.name, ctx.block_id)
-        {
+        let (inner_ty, generics) =
+            if let Some(Ty::CompoundType(inner_ty, generics)) = &struct_init.ret_type {
+                (inner_ty, generics)
+            } else {
+                unreachable!("struct init ret type not compound: {:#?}", struct_init)
+            };
+
+        // TODO: Something similar for enums and interfaces?
+        let new_name = if let InnerTy::Struct(ident) = inner_ty {
+            util::to_generic_struct_name(ident, generics)
+        } else {
+            panic!("Struct init doesn't return struct: {:#?}", struct_init)
+        };
+
+        let struct_ = match self.analyze_context.get_struct(&new_name, ctx.block_id) {
             Ok(struct_) => struct_,
             Err(err) => {
                 self.errors.push(err);

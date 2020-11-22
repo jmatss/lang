@@ -3,6 +3,50 @@ use std.math
 external function printf(format: {u8}, ...) -> i32
 external function exit(exit_code: i32)
 
+struct Assert {}
+implement Assert
+{
+    function is_true(expr: bool, msg: {u8} = "")
+    {
+        if not expr
+        {
+            printf("ASSERT FAILED: %s\n", msg)
+            exit(1)
+        }
+    }
+    
+    // TODO: Implement for Assert<T>.
+    /*
+    function equals(expected: T, actual: T)
+    {
+        if expected != actual
+        {
+            printf("ASSERT FAILED:\n")
+            exit(1)
+        }
+    }
+    */
+    
+    function equals_i32(expected: i32, actual: i32, msg: {u8} = "")
+    {
+        if expected != actual
+        {
+            printf("ASSERT FAILED: %s\n", msg)
+            exit(1)
+        }
+    }
+
+    function equals_f64(expected: f64, actual: f64, epsilon: f64, msg: {u8} = "")
+    {
+        var diff = abs_f64(expected - actual)
+        if diff > epsilon
+        {
+            printf("ASSERT FAILED: %s\n", msg)
+            exit(1)
+        }
+    }
+}
+
 function assert(expr: bool)
 {
     if not expr

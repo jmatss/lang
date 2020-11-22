@@ -5,6 +5,7 @@ use crate::{
 };
 use common::{
     error::CustomResult,
+    r#type::generics::GenericsKind,
     token::ast::Token,
     token::{
         ast::AstToken,
@@ -12,9 +13,9 @@ use common::{
         expr::Var,
         stmt::{Modifier, Path, Stmt},
     },
-    types::Type,
 };
 use lex::token::{Kw, LexTokenKind, Sym};
+use log::warn;
 
 pub struct KeyworkParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
@@ -663,19 +664,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         };
 
         let mut type_parse = TypeParser::new(self.iter, None);
-        let generics = if let Some(gens) = type_parse.parse_type_generics()? {
-            let mut generics = Vec::with_capacity(gens.len());
-            for (ident, gen) in &gens {
-                if let Type::CompoundType(generic_ident, _) = gen {
-                    generics.push(generic_ident.clone());
-                } else {
-                    return Err(self.iter.err(format!(
-                        "Generic type in struct \"{}\" not a ident: {:?}.",
-                        &ident, gen
-                    )));
-                }
-            }
-            Some(generics)
+        let generics = type_parse.parse_type_generics(GenericsKind::Decl)?;
+
+        let generics = if !generics.is_empty() {
+            Some(&generics)
         } else {
             None
         };
@@ -685,7 +677,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let end_symbol = Sym::CurlyBracketEnd;
         let (mut members, is_var_arg) =
             self.iter
-                .parse_par_list(start_symbol, end_symbol, generics.as_ref())?;
+                .parse_par_list(start_symbol, end_symbol, generics)?;
 
         if is_var_arg {
             return Err(self.iter.err(format!(
@@ -698,8 +690,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             if let Some(ret_ty) = &mut member.ret_type {
                 // Replace any generics with the type "Generic" instead of
                 // the type "CompoundType".
-                if let Some(gens) = &generics {
-                    ret_ty.replace_generics(gens);
+                if let Some(gens) = generics {
+                    ret_ty.replace_generics(&gens.iter_names().cloned().collect::<Vec<_>>());
                 }
             } else {
                 self.iter.err(format!(
@@ -716,7 +708,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         };
 
         let mut struct_ = Struct::new(ident);
-        struct_.generic_params = generics;
+        struct_.generic_params =
+            generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
         struct_.members = members_opt;
         let header = BlockHeader::Struct(Box::new(struct_));
 

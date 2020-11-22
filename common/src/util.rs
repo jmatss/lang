@@ -1,4 +1,4 @@
-use crate::types::Type;
+use crate::r#type::generics::Generics;
 
 /// Concatenates a struct name and a method name to create the name that will
 /// be used to refer to this function. The name is concatenated with a dash.
@@ -15,17 +15,12 @@ pub fn to_method_name(struct_name: &str, method_name: &str) -> String {
 ///    TestStruct<K, V>
 ///  (K == u64) and (V == String) =>
 ///    TestStruct:u64,String
-pub fn to_generic_struct_name(old_struct_name: &str, generics: &[Type]) -> String {
-    let mut new_name: String = old_struct_name.into();
-    new_name.push(':');
-    new_name.push_str(
-        &generics
-            .iter()
-            .map(|ty| ty.to_string())
-            .collect::<Vec<_>>()
-            .join(","),
-    );
-    new_name
+pub fn to_generic_struct_name(old_struct_name: &str, generics: &Generics) -> String {
+    if generics.is_empty() {
+        old_struct_name.to_owned()
+    } else {
+        [old_struct_name.into(), generics.to_string()].join(":")
+    }
 }
 
 /// Given a formatted new struct name (see `to_generic_struct_name()`), returns

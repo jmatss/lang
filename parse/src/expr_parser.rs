@@ -1,16 +1,18 @@
-use std::collections::BTreeMap;
-
 use crate::{
     parser::ParseTokenIter,
     token::{get_if_expr_op, Fix, Operator, Output},
 };
 use common::{
     error::CustomResult,
+    r#type::{
+        generics::{Generics, GenericsKind},
+        inner_ty::InnerTy,
+        ty::Ty,
+    },
     token::{
         expr::{ArrayInit, Expr, FuncCall, StructInit},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
-    types::Type,
 };
 use lex::token::{LexTokenKind, Sym};
 use log::debug;
@@ -393,9 +395,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 }
 
                 // Static method call, this is the lhs type.
-                LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(Type::CompoundType(
-                    ident.into(),
-                    BTreeMap::default(),
+                LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(Ty::CompoundType(
+                    InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
+                    Generics::new(GenericsKind::Impl),
                 ))),
 
                 _ => {

@@ -16,6 +16,7 @@ use block::BlockAnalyzer;
 use call_args::CallArgs;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
+    r#type::ty::Ty,
     token::{
         ast::AstToken,
         block::{Enum, Function, Interface, Struct},
@@ -23,7 +24,6 @@ use common::{
         stmt::Path,
     },
     traverser::AstTraverser,
-    types::Type,
     BlockId,
 };
 use decl_func::DeclFuncAnalyzer;
@@ -586,22 +586,39 @@ impl AnalyzeContext {
         member_name: &str,
         id: BlockId,
     ) -> CustomResult<u64> {
-        let struct_ = self.get_struct(struct_name, id)?;
-        if let Some(members) = &struct_.members {
-            for (idx, member) in members.iter().enumerate() {
-                if member_name == member.name {
-                    return Ok(idx as u64);
-                }
-            }
-
+        if let Some(idx) = self.get_struct(struct_name, id)?.member_index(member_name) {
+            Ok(idx as u64)
+        } else {
             Err(self.err(format!(
                 "Unable to find member with name \"{}\" in struct \"{}\".",
                 &member_name, &struct_name
             )))
+        }
+    }
+
+    /// Finds the enum with the name `enum_name` in a scope containing the block
+    /// with ID `id` and returns the member with name `member_name`.
+    /// The enum can ex. be declared in parent block scope.
+    pub fn get_enum_member(
+        &self,
+        enum_name: &str,
+        member_name: &str,
+        id: BlockId,
+    ) -> CustomResult<&Var> {
+        let enum_ = self.get_enum(enum_name, id)?;
+        if let Some(members) = &enum_.members {
+            if let Some(var) = members.iter().find(|member| member.name == member_name) {
+                Ok(var)
+            } else {
+                Err(self.err(format!(
+                    "Unable to find member with name \"{}\" in enum \"{}\".",
+                    &member_name, &enum_name
+                )))
+            }
         } else {
             Err(self.err(format!(
-                "Struct \"{}\" has no members but tried to access member \"{:?}\".",
-                &struct_name, &member_name
+                "Enum \"{}\" has no members but tried to access member \"{:?}\".",
+                &enum_name, &member_name
             )))
         }
     }
@@ -686,7 +703,7 @@ impl AnalyzeContext {
 
     /// Given a function or method `func`, finds the type of the parameter with
     /// the name `param_name`.
-    fn get_param_type(&self, func: &Function, idx: u64) -> CustomResult<Type> {
+    fn get_param_type(&self, func: &Function, idx: u64) -> CustomResult<Ty> {
         if let Some(ty) = &self.get_param_with_idx(func, idx)?.ret_type {
             Ok(ty.clone())
         } else {
@@ -707,19 +724,14 @@ impl AnalyzeContext {
         method_name: &str,
         idx: u64,
         id: BlockId,
-    ) -> CustomResult<Type> {
+    ) -> CustomResult<Ty> {
         let method = self.get_method(struct_name, method_name, id)?;
         self.get_param_type(method, idx)
     }
 
     /// Finds the function with the name `func_name` in a scope containing the block
     /// with ID `id` and returns the type of the parameter with name `param_name`.
-    pub fn get_func_param_type(
-        &self,
-        func_name: &str,
-        idx: u64,
-        id: BlockId,
-    ) -> CustomResult<Type> {
+    pub fn get_func_param_type(&self, func_name: &str, idx: u64, id: BlockId) -> CustomResult<Ty> {
         let func = self.get_func(func_name, id)?;
         self.get_param_type(func, idx)
     }

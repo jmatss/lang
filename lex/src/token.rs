@@ -16,6 +16,7 @@ impl LexToken {
         }
     }
 
+    #[allow(clippy::match_like_matches_macro)]
     pub fn is_eof(&self) -> bool {
         if let LexTokenKind::EOF = self.kind {
             true
@@ -160,6 +161,7 @@ pub enum Sym {
 }
 
 impl LexToken {
+    #[allow(clippy::match_like_matches_macro)]
     pub fn is_break_symbol(&self) -> bool {
         match self.kind {
             LexTokenKind::Sym(Sym::LineBreak) | LexTokenKind::Sym(Sym::SemiColon) => true,

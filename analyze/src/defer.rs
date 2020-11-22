@@ -2,12 +2,11 @@ use crate::AnalyzeContext;
 use common::{
     error::LangError,
     token::ast::Token,
-    token::{ast::AstToken, block::Function, expr::Expr, stmt::Stmt},
+    token::{ast::AstToken, expr::Expr, stmt::Stmt},
     traverser::TraverseContext,
     visitor::Visitor,
     BlockId,
 };
-use log::debug;
 use std::{
     cell::RefCell,
     collections::{hash_map::Entry, HashMap},

@@ -1,6 +1,11 @@
 use crate::{AnalyzeContext, BlockInfo};
 use common::{
     error::LangError,
+    r#type::{
+        generics::{Generics, GenericsKind},
+        inner_ty::InnerTy,
+        ty::Ty,
+    },
     token::ast::Token,
     token::expr::Var,
     token::{
@@ -10,12 +15,11 @@ use common::{
         stmt::Stmt,
     },
     traverser::TraverseContext,
-    types::Type,
     visitor::Visitor,
     BlockId,
 };
 use log::debug;
-use std::{cell::RefCell, collections::BTreeMap};
+use std::cell::RefCell;
 
 /// Gathers information about all function/method declarations found in the AST
 /// and inserts them into the `analyze_context`. This includes external function
@@ -143,13 +147,13 @@ impl<'a> DeclFuncAnalyzer<'a> {
         if !func.is_static() {
             static THIS_VAR_NAME: &str = "this";
 
+            let inner_ty = InnerTy::Struct(struct_name.into());
+            let generics = Generics::new(GenericsKind::Impl);
+
             let ty = if func.modifiers.contains(&Modifier::This) {
-                Type::CompoundType(struct_name.into(), BTreeMap::default())
+                Ty::CompoundType(inner_ty, generics)
             } else if func.modifiers.contains(&Modifier::ThisPointer) {
-                Type::Pointer(Box::new(Type::CompoundType(
-                    struct_name.into(),
-                    BTreeMap::default(),
-                )))
+                Ty::Pointer(Box::new(Ty::CompoundType(inner_ty, generics)))
             } else {
                 let err = analyze_context.err(format!(
                     "Non static function did not contain \"this\" or \"this ptr\" reference. Struct name: {}, func: {:#?}.",

@@ -7,7 +7,6 @@ use common::{
         op::{BinOperator, Op},
     },
     traverser::TraverseContext,
-    types::Type,
     visitor::Visitor,
 };
 
@@ -54,28 +53,40 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
             let analyze_context = self.analyze_context.borrow();
 
             if let Some(method_call) = bin_op.rhs.eval_to_func_call() {
+                // Get the type of the lhs, this will be the structure type that
+                // the method is called on.
+                let lhs_ty = match bin_op.lhs.get_expr_type() {
+                    Ok(ty) => ty,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
                 match bin_op.operator {
-                    // Struct access/method call.
+                    // Instance structure access/method call.
                     BinOperator::Dot => {
                         let arg = Argument::new(Some(THIS_VAR_NAME.into()), *bin_op.lhs.clone());
-
                         method_call.arguments.insert(0, arg);
+
                         method_call.is_method = true;
+                        method_call.method_structure = Some(lhs_ty);
 
                         *expr = Expr::FuncCall(method_call.clone());
                     }
 
-                    // Static struct access/method call.
+                    // Static structure access/method call.
                     BinOperator::DoubleColon => match bin_op.lhs.as_ref() {
-                        Expr::Type(Type::CompoundType(ident, _)) => {
+                        Expr::Type(_) => {
                             method_call.is_method = true;
-                            method_call.method_struct = Some(ident.clone());
+                            method_call.method_structure = Some(lhs_ty);
 
                             *expr = Expr::FuncCall(method_call.clone());
                         }
+
                         _ => {
                             let err = analyze_context.err(format!(
-                                "Lhs of DoubleColon not a Struct type, was: {:?}",
+                                "Lhs of DoubleColon not a UnknownIdent type, was: {:?}",
                                 bin_op.lhs
                             ));
                             self.errors.push(err);

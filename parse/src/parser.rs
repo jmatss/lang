@@ -5,6 +5,7 @@ use crate::{
 use common::{
     error::{CustomResult, LangError, LangErrorKind::ParseError},
     iter::TokenIter,
+    r#type::{generics::Generics, ty::Ty},
     token::ast::Token,
     token::{
         ast::AstToken,
@@ -12,7 +13,6 @@ use common::{
         expr::{Argument, Expr, Var},
         stmt::{Path, Stmt},
     },
-    types::Type,
     BlockId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
@@ -175,6 +175,11 @@ impl<'a> ParseTokenIter<'a> {
         let block_id = self.block_id;
         self.block_id += 1;
         block_id
+    }
+
+    /// Returns the block id of the current block that is being parsed.
+    pub fn current_block_id(&self) -> usize {
+        self.block_id - 1
     }
 
     /// Returns the next ParseToken from the iterator.
@@ -373,7 +378,7 @@ impl<'a> ParseTokenIter<'a> {
         ExprParser::parse(self, stop_conds)
     }
 
-    pub fn parse_type(&mut self, generics: Option<&Vec<String>>) -> CustomResult<Type> {
+    pub fn parse_type(&mut self, generics: Option<&Generics>) -> CustomResult<Ty> {
         TypeParser::parse(self, generics)
     }
 
@@ -529,7 +534,7 @@ impl<'a> ParseTokenIter<'a> {
         &mut self,
         start_symbol: Sym,
         end_symbol: Sym,
-        generics: Option<&Vec<String>>,
+        generics: Option<&Generics>,
     ) -> CustomResult<(Vec<Var>, bool)> {
         let mut parameters = Vec::new();
         let mut is_var_arg = false;
@@ -588,8 +593,8 @@ impl<'a> ParseTokenIter<'a> {
                             } else {
                                 None
                             };
-                        let const_ = false;
 
+                        let const_ = false;
                         let parameter =
                             Var::new(ident, Some(var_type), None, default_value, const_);
                         parameters.push(parameter);
@@ -645,7 +650,7 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     /// Parses a type including the starting colon.
-    fn parse_colon_type(&mut self, generics: Option<&Vec<String>>) -> CustomResult<Type> {
+    fn parse_colon_type(&mut self, generics: Option<&Generics>) -> CustomResult<Ty> {
         if let Some(lex_token) = self.next_skip_space() {
             if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
                 self.parse_type(generics)

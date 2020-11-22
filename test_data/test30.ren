@@ -29,7 +29,7 @@ function main() -> i32
 
     printf("expected_u64: %llu, test_struct_u64.inner: %llu", expected_u64, test_struct_u64.inner)
     assert(expected_u64 == test_struct_u64.inner)
-    printf("expected_f32: %f, test_struct_f32.inner: %f", expected_f32 as f64, test_struct_f32.inner as f64)
+    printf("\nexpected_f32: %f, test_struct_f32.inner: %f", expected_f32 as f64, test_struct_f32.inner as f64)
     assert_equals_f64(expected_f32 as f64, test_struct_f32.inner as f64, 0.01)
 
     var key = "Key"

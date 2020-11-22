@@ -1,8 +1,12 @@
 use crate::type_context::TypeContext;
 use common::{
     error::LangError,
+    r#type::{
+        generics::{Generics, GenericsKind},
+        inner_ty::InnerTy,
+        ty::Ty,
+    },
     token::ast::Token,
-    token::op::Op,
     token::{
         ast::AstToken,
         block::{BlockHeader, Function},
@@ -12,12 +16,10 @@ use common::{
         stmt::Stmt,
     },
     traverser::TraverseContext,
-    types::Type,
     visitor::Visitor,
 };
 use either::Either;
 use log::debug;
-use std::collections::BTreeMap;
 
 // TODO: Better error messages. Ex. if two types arent't compatible,
 //       print information about where the types "came" from.
@@ -116,16 +118,25 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     fn visit_lit(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
         if let Expr::Lit(lit, gen_ty_opt) = expr {
             if gen_ty_opt.is_none() {
-                let new_gen_ty = match lit {
-                    // TODO: Have a custom struct "String" instead of "*u8"?
-                    Lit::String(_) => Type::Pointer(Box::new(Type::U8)),
-                    Lit::Char(_) => Type::Character,
-                    Lit::Bool(_) => Type::Boolean,
-                    Lit::Integer(_, radix) => {
-                        Type::UnknownInt(self.new_unknown_ident("int_literal"), *radix)
+                let inner_ty = match lit {
+                    Lit::String(_) => {
+                        // TODO: Have a custom struct "String" instead of "*u8"?
+                        *gen_ty_opt = Some(Ty::Pointer(Box::new(Ty::CompoundType(
+                            InnerTy::U8,
+                            Generics::new(GenericsKind::Empty),
+                        ))));
+                        return;
                     }
-                    Lit::Float(_) => Type::UnknownFloat(self.new_unknown_ident("float_literal")),
+
+                    Lit::Char(_) => InnerTy::Character,
+                    Lit::Bool(_) => InnerTy::Boolean,
+                    Lit::Integer(_, radix) => {
+                        InnerTy::UnknownInt(self.new_unknown_ident("int_literal"), *radix)
+                    }
+                    Lit::Float(_) => InnerTy::UnknownFloat(self.new_unknown_ident("float_literal")),
                 };
+
+                let new_gen_ty = Ty::CompoundType(inner_ty, Generics::new(GenericsKind::Empty));
                 *gen_ty_opt = Some(new_gen_ty);
             }
         }
@@ -158,7 +169,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let var_ty = if let Some(ty) = &var.ret_type {
             ty.clone()
         } else {
-            let new_type = Type::Unknown(self.new_unknown_ident("var_use"));
+            let new_type = Ty::CompoundType(
+                InnerTy::Unknown(self.new_unknown_ident(&format!("var_use({})", var.name))),
+                Generics::new(GenericsKind::Empty),
+            );
             var.ret_type = Some(new_type.clone());
             new_type
         };
@@ -171,52 +185,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Assign the return type of the function to the function call expr.
     /// Also tie the types of the function parameter to argument types.
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
-        let func_ty = if func_call.is_method {
-            // TODO: Move "this" to be a constant somewhere else.
-            // This this is a method call on a instance of the struct object,
-            // the first argument "this" will contain a reference to the struct
-            // type.
-            // If this is a static method call, the struct name will already
-            // be stored in the `func_call.method_struct`, so one can get the
-            // struct type from there.
-            let struct_ty = if let Some(struct_name) = &func_call.method_struct {
-                Type::CompoundType(struct_name.clone(), BTreeMap::default())
-            } else if let Some(this_arg) = func_call.arguments.first_mut() {
-                if let Expr::Op(Op::UnOp(un_op)) = &mut this_arg.value {
-                    if let UnOperator::Address = un_op.operator {
-                        match un_op.value.get_expr_type() {
-                            Ok(struct_ty) => struct_ty,
-                            Err(err) => {
-                                self.errors.push(err);
-                                return;
-                            }
-                        }
-                    } else {
-                        let err = self.type_context.analyze_context.err(format!(
-                            "Un op in \"this\" for method call \"{}\" was expected to be \"address\" but was: \"{:?}\"",
-                            &func_call.name, this_arg.value
-                        ));
-                        self.errors.push(err);
-                        return;
-                    }
-                } else {
-                    match this_arg.value.get_expr_type() {
-                        Ok(struct_ty) => struct_ty,
-                        Err(err) => {
-                            self.errors.push(err);
-                            return;
-                        }
-                    }
-                }
-            } else {
-                let err = self.type_context.analyze_context.err(format!(
-                    "Method call \"{}\" has no arguments, expected atleast \"this\"/\"self\".",
-                    &func_call.name
-                ));
-                self.errors.push(err);
-                return;
-            };
-
+        let func_ty = if let Some(structure_ty) = &func_call.method_structure {
             // Insert constraints between the function call argument type and
             // the method parameter types that will be figured out later.
             let mut idx: u64 = 0;
@@ -230,8 +199,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     Either::Right(idx)
                 };
 
-                let arg_ty = Type::UnknownMethodArgument(
-                    Box::new(struct_ty.clone()),
+                let arg_ty = Ty::UnknownMethodArgument(
+                    Box::new(structure_ty.clone()),
                     func_call.name.clone(),
                     position,
                 );
@@ -247,9 +216,9 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 // TODO: Need to do this for a more general case and it should
                 //       prevent any kind of infinite loops. Should be implemented
                 //       somewhere else.
-                // Don't add a constraint the argument has the same type as the
-                // struct.
-                if arg_expr_ty != struct_ty {
+                // Don't add a constraint if the argument has the same type as
+                // the structure.
+                if &arg_expr_ty != structure_ty {
                     self.type_context.insert_constraint(arg_ty, arg_expr_ty);
                 }
 
@@ -257,7 +226,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
 
             // The expected return type of the function call.
-            Type::UnknownStructMethod(Box::new(struct_ty), func_call.name.clone())
+            Ty::UnknownStructureMethod(Box::new(structure_ty.clone()), func_call.name.clone())
         } else {
             let func = match self
                 .type_context
@@ -339,7 +308,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             if let Some(ty) = &func.ret_type {
                 ty.clone()
             } else {
-                Type::Void
+                Ty::CompoundType(InnerTy::Void, Generics::new(GenericsKind::Empty))
             }
         };
 
@@ -367,41 +336,33 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // to ensure that two members of a struct with the same ident uses
             // the same unknown generic type. It is also needed to ensure that
             // different struct uses different types for the generics.
-            let unknown_generics = if let Some(gens) = &struct_.generic_params {
-                let mut map = BTreeMap::new();
-                for generic_ident in gens {
-                    let unknown_ident =
-                        self.new_unknown_ident(&format!("generic_{}", generic_ident));
-                    let gen_ty = Type::Generic(unknown_ident);
+            let generics = if let Some(generic_names) = &struct_.generic_params {
+                let mut generics = Generics::new(GenericsKind::Impl);
 
-                    map.insert(generic_ident.clone(), gen_ty);
+                for generic_name in generic_names {
+                    let unknown_ident =
+                        self.new_unknown_ident(&format!("generic_{}", generic_name));
+                    let gen_ty = Ty::Generic(unknown_ident);
+
+                    generics.insert(generic_name.clone(), gen_ty);
                 }
-                map
+
+                generics
             } else {
-                BTreeMap::default()
+                Generics::new(GenericsKind::Empty)
             };
 
-            // If this struct init is a init for a struct with generics, the
-            // return type of the init should be wrapped in a "CompoundType"
-            // with the generics attached to the return type.
-            if !unknown_generics.is_empty() {
-                match &struct_init.ret_type {
-                    Some(Type::CompoundType(..)) => {
-                        // If the type already is set to a compound, use that
-                        // already set type.
-                    }
-                    _ => {
-                        struct_init.ret_type = Some(Type::CompoundType(
-                            struct_init.name.clone(),
-                            unknown_generics.clone(),
-                        ));
-                    }
+            match &struct_init.ret_type {
+                Some(Ty::CompoundType(..)) => {
+                    // If the type already is set to a compound, use that
+                    // already set type.
                 }
-            } else {
-                struct_init.ret_type = Some(Type::CompoundType(
-                    struct_init.name.clone(),
-                    BTreeMap::default(),
-                ));
+                _ => {
+                    struct_init.ret_type = Some(Ty::CompoundType(
+                        InnerTy::UnknownIdent(struct_init.name.clone(), ctx.block_id),
+                        generics.clone(),
+                    ));
+                }
             }
 
             if members.len() != struct_init.arguments.len() {
@@ -453,7 +414,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             // generic type from the `unknown_generics` map.
                             // Otherwise reuse the already set type.
                             let member_type = if let Some(member_type) = &mut member.ret_type {
-                                member_type.replace_generics_impl(&unknown_generics);
+                                member_type.replace_generics_impl(&generics);
                                 member_type.clone()
                             } else {
                                 let err = self.type_context.analyze_context.err(format!(
@@ -472,7 +433,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             // Bind type of member to the struct.
                             self.type_context.insert_constraint(
                                 arg_ty.clone(),
-                                Type::UnknownStructMember(
+                                Ty::UnknownStructureMember(
                                     Box::new(
                                         struct_init
                                             .ret_type
@@ -511,7 +472,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let ret_ty = if let Some(ret_ty) = &array_init.ret_type {
             ret_ty.clone()
         } else {
-            let new_ty = Type::Unknown(self.new_unknown_ident("array_init"));
+            let new_ty = Ty::CompoundType(
+                InnerTy::Unknown(self.new_unknown_ident("array_init")),
+                Generics::new(GenericsKind::Impl),
+            );
+
             array_init.ret_type = Some(new_ty.clone());
             new_ty
         };
@@ -530,7 +495,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
 
         // TODO: What should the type of the index for the array size be?
-        let array_index_type = Type::U32;
+        let array_index_type = Ty::CompoundType(InnerTy::U32, Generics::new(GenericsKind::Impl));
         let dim = array_init.arguments.len();
         let dim_expr = Expr::Lit(Lit::Integer(dim.to_string(), 10), Some(array_index_type));
 
@@ -542,7 +507,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             self.type_context.insert_constraint(
                 ret_ty.clone(),
-                Type::Array(Box::new(left.clone()), Some(Box::new(dim_expr.clone()))),
+                Ty::Array(Box::new(left.clone()), Some(Box::new(dim_expr.clone()))),
             );
 
             for j in i + 1..array_init.arguments.len() {
@@ -562,9 +527,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let ret_ty = if let Some(ty) = &bin_op.ret_type {
             ty.clone()
         } else {
-            let new_type = Type::Unknown(self.new_unknown_ident("bin_op"));
-            bin_op.ret_type = Some(new_type.clone());
-            new_type
+            let new_ty = Ty::CompoundType(
+                InnerTy::Unknown(self.new_unknown_ident("bin_op")),
+                Generics::new(GenericsKind::Impl),
+            );
+
+            bin_op.ret_type = Some(new_ty.clone());
+            new_ty
         };
 
         let lhs_ty = match bin_op.lhs.get_expr_type() {
@@ -582,6 +551,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 return;
             }
         };
+
+        let boolean = Ty::CompoundType(InnerTy::Boolean, Generics::new(GenericsKind::Impl));
 
         match bin_op.operator {
             // The lhs and rhs can be different in these operations, so shouldn't
@@ -622,14 +593,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | BinOperator::GreaterThan
             | BinOperator::LessThanOrEquals
             | BinOperator::GreaterThanOrEquals => {
-                self.type_context.insert_constraint(ret_ty, Type::Boolean);
+                self.type_context.insert_constraint(ret_ty, boolean);
                 self.type_context.insert_constraint(lhs_ty, rhs_ty);
             }
 
             BinOperator::BoolAnd | BinOperator::BoolOr => {
-                self.type_context.insert_constraint(ret_ty, Type::Boolean);
-                self.type_context.insert_constraint(lhs_ty, Type::Boolean);
-                self.type_context.insert_constraint(rhs_ty, Type::Boolean);
+                self.type_context.insert_constraint(ret_ty, boolean.clone());
+                self.type_context.insert_constraint(lhs_ty, boolean.clone());
+                self.type_context.insert_constraint(rhs_ty, boolean);
             }
 
             BinOperator::Addition
@@ -658,7 +629,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let ret_ty = if let Some(ty) = &un_op.ret_type {
             ty.clone()
         } else {
-            let new_ty = Type::Unknown(self.new_unknown_ident("un_op"));
+            let new_ty = Ty::CompoundType(
+                InnerTy::Unknown(self.new_unknown_ident("un_op")),
+                Generics::new(GenericsKind::Impl),
+            );
+
             un_op.ret_type = Some(new_ty.clone());
             new_ty
         };
@@ -680,20 +655,20 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
             UnOperator::Deref => {
                 self.type_context
-                    .insert_constraint(Type::Pointer(Box::new(ret_ty)), val_ty);
+                    .insert_constraint(Ty::Pointer(Box::new(ret_ty)), val_ty);
             }
             UnOperator::Address => {
                 self.type_context
-                    .insert_constraint(ret_ty, Type::Pointer(Box::new(val_ty)));
+                    .insert_constraint(ret_ty, Ty::Pointer(Box::new(val_ty)));
             }
             UnOperator::ArrayAccess(_) => {
                 self.type_context
-                    .insert_constraint(ret_ty, Type::UnknownArrayMember(Box::new(val_ty)));
+                    .insert_constraint(ret_ty, Ty::UnknownArrayMember(Box::new(val_ty)));
             }
             UnOperator::StructAccess(member_name, ..) => {
                 self.type_context.insert_constraint(
                     ret_ty,
-                    Type::UnknownStructMember(Box::new(val_ty), member_name.clone()),
+                    Ty::UnknownStructureMember(Box::new(val_ty), member_name.clone()),
                 );
             }
         }
@@ -715,7 +690,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 let func_ret_ty = if let Some(ty) = &func.ret_type {
                     ty.clone()
                 } else {
-                    Type::Void
+                    Ty::CompoundType(InnerTy::Void, Generics::new(GenericsKind::Empty))
                 };
 
                 let expr_ty = match self.type_context.get_expr_type(expr_opt.as_ref()) {
@@ -830,7 +805,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let new_type = if var.ret_type.is_some() {
                 var.ret_type.clone()
             } else {
-                Some(Type::Unknown(self.new_unknown_ident("var_decl")))
+                Some(Ty::CompoundType(
+                    InnerTy::Unknown(self.new_unknown_ident(&format!("var_decl({})", var.name))),
+                    Generics::new(GenericsKind::Impl),
+                ))
             };
             var.ret_type = new_type;
 
@@ -862,7 +840,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             };
 
-            let int_ty = Type::UnknownInt(self.new_unknown_ident("increment"), 10);
+            let int_ty = Ty::CompoundType(
+                InnerTy::UnknownInt(self.new_unknown_ident("increment"), 10),
+                Generics::new(GenericsKind::Impl),
+            );
 
             self.type_context.insert_constraint(expr_ty, int_ty)
         }
@@ -878,7 +859,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             };
 
-            let int_ty = Type::UnknownInt(self.new_unknown_ident("decrement"), 10);
+            let int_ty = Ty::CompoundType(
+                InnerTy::UnknownInt(self.new_unknown_ident("decrement"), 10),
+                Generics::new(GenericsKind::Impl),
+            );
 
             self.type_context.insert_constraint(expr_ty, int_ty)
         }
