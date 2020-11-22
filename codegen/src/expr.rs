@@ -43,28 +43,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         let any_value = match expr {
             Expr::Lit(lit, ty_opt) => self.compile_lit(lit, ty_opt),
-            Expr::FuncCall(func_call) => {
-                // Since this is a method call, the function will have been renamed
-                // so that its name is unique for the struct instead of unqiue
-                // for the whole program. Rename this method call to the same
-                // name as the method.
-                if let Some(Ty::CompoundType(inner_ty, _)) = &func_call.method_structure {
-                    match inner_ty {
-                        InnerTy::Struct(ident)
-                        | InnerTy::Enum(ident)
-                        | InnerTy::Interface(ident) => {
-                            func_call.name = common::util::to_method_name(ident, &func_call.name)
-                        }
-                        _ => {
-                            return Err(self.err(format!(
-                                "Method structure invalid for method call: {:#?}",
-                                func_call
-                            )));
-                        }
-                    }
-                }
-                self.compile_func_call(func_call)
-            }
+            Expr::FuncCall(func_call) => self.compile_func_call(func_call),
             Expr::Op(op) => self.compile_op(op, expr_ty),
             Expr::StructInit(struct_init) => self.compile_struct_init(struct_init),
             Expr::ArrayInit(array_init) => self.compile_array_init(array_init),
@@ -239,7 +218,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         func_call: &mut FuncCall,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        if let Some(func_ptr) = self.module.get_function(&func_call.name) {
+        if let Some(func_ptr) = self.module.get_function(&func_call.full_name()?) {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
             // functions are supported to be compatible with C code.
@@ -292,14 +271,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         struct_init: &mut StructInit,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        let full_name = if let Some(Ty::CompoundType(_, generics)) = &struct_init.ret_type {
-            util::to_generic_struct_name(&struct_init.name, generics)
-        } else {
-            return Err(self.err(format!(
-                "Struct init not returning CompoundType: {:#?}",
-                struct_init
-            )));
-        };
+        let full_name = struct_init.full_name()?;
 
         let struct_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
             inner

@@ -1,11 +1,7 @@
 use crate::{AnalyzeContext, BlockInfo};
 use common::{
     error::LangError,
-    r#type::{
-        generics::{Generics, GenericsKind},
-        inner_ty::InnerTy,
-        ty::Ty,
-    },
+    r#type::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     token::ast::Token,
     token::expr::Var,
     token::{
@@ -131,6 +127,8 @@ impl<'a> DeclFuncAnalyzer<'a> {
     fn analyze_method_header(&mut self, struct_name: &str, func: &mut Function, func_id: BlockId) {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
+        // TODO: Make this work for all structures.
+
         // The method will be added in the scope of its wrapping struct, so
         // fetch the block id for the struct.
         let struct_decl_id = match analyze_context.get_struct_decl_scope(struct_name, func_id) {
@@ -148,7 +146,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
             static THIS_VAR_NAME: &str = "this";
 
             let inner_ty = InnerTy::Struct(struct_name.into());
-            let generics = Generics::new(GenericsKind::Impl);
+            let generics = Generics::new();
 
             let ty = if func.modifiers.contains(&Modifier::This) {
                 Ty::CompoundType(inner_ty, generics)
@@ -205,17 +203,36 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
     /// Marks the functions in this implement block with the name of the implement
     /// block (equivalent to the struct name). This lets one differentiate between
     /// functions and methods by checking the `method_struct` field in "Function"s.
-    fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         let analyze_context = self.analyze_context.borrow();
 
-        if let Token::Block(BlockHeader::Implement(struct_name), _, body) = &mut ast_token.token {
+        if let Token::Block(BlockHeader::Implement(ident), _, body) = &mut ast_token.token {
+            // Check if this unknown structure can be found and then
+            // replaced the inner type with the correct structure.
+            let inner_ty = if analyze_context.get_struct(ident, ctx.block_id).is_ok() {
+                InnerTy::Struct(ident.clone())
+            } else if analyze_context.get_enum(ident, ctx.block_id).is_ok() {
+                InnerTy::Enum(ident.clone())
+            } else if analyze_context.get_interface(ident, ctx.block_id).is_ok() {
+                InnerTy::Interface(ident.clone())
+            } else {
+                let err = analyze_context.err(format!(
+                    "Unable to find structure for impl block: {:#?}",
+                    ast_token
+                ));
+                self.errors.push(err);
+                return;
+            };
+
+            let ty = Ty::CompoundType(inner_ty, Generics::new());
+
             for body_token in body {
                 if let Token::Block(BlockHeader::Function(func), ..) = &mut body_token.token {
-                    func.method_struct = Some(struct_name.clone());
+                    func.method_structure = Some(ty.clone());
                 } else {
                     let err = analyze_context.err(format!(
                         "AST token in impl block with name \"{}\" not a function: {:?}",
-                        struct_name, body_token
+                        ident, body_token
                     ));
                     self.errors.push(err);
                 }
@@ -225,8 +242,29 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
 
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Function(func), func_id, ..) = &mut ast_token.token {
-            if let Some(struct_name) = func.method_struct.clone() {
-                self.analyze_method_header(&struct_name, func, *func_id);
+            if let Some(structure_ty) = func.method_structure.clone() {
+                if let Ty::CompoundType(inner_ty, _) = structure_ty {
+                    match inner_ty {
+                        InnerTy::Struct(ident)
+                        | InnerTy::Enum(ident)
+                        | InnerTy::Interface(ident) => {
+                            self.analyze_method_header(&ident, func, *func_id);
+                        }
+
+                        // TODO: Clean this logic up, does it need to exists
+                        //       logic for both known and unknown idents here?
+                        InnerTy::UnknownIdent(ident, id) => {
+                            self.analyze_method_header(&ident, func, id);
+                        }
+
+                        _ => unreachable!(
+                            "Method method_structure inner type not structure: {:#?}",
+                            func
+                        ),
+                    }
+                } else {
+                    unreachable!("Method method_structure not CompoundType: {:#?}", func);
+                }
             } else {
                 self.analyze_func_header(func, *func_id);
             }

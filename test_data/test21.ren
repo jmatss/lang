@@ -14,8 +14,15 @@ function main() -> i32
 
     printf("x: %d, test_struct.b: %f", x, test_struct.b)
     Assert::equals_i32(x, 123, "abc123")
-    Assert::equals_i32(x, 456, "def456")
     Assert::equals_f64(test_struct.b, 3.4, 0.001)
+    
+    // TODO: Implement:
+    //   Assert::equals(x, 123)
+    // or
+    //   Assert::equals<i32>(x, 123)
+    // or
+    //   Assert::equals::<i32>(x, 123)
+    // or something else similar.
 
     return 0
 }

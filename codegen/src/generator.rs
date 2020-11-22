@@ -222,17 +222,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let linkage = Linkage::External;
                     self.compile_func_proto(&func, Some(linkage))?;
                 }
-                BlockHeader::Implement(struct_name) => {
+                BlockHeader::Implement(_) => {
                     for ast_token in body.iter_mut() {
                         if let Token::Block(BlockHeader::Function(func), ..) = &mut ast_token.token
                         {
-                            // Since this is a method, rename it so that its name is
-                            // "unique per struct" instead of unqiue for the whole
-                            // program. One also has to rename the method calls to
-                            // this specific method. This will be done when compiling
-                            // the method call.
                             let linkage = Linkage::External;
-                            func.name = common::util::to_method_name(struct_name, &func.name);
                             self.compile_func_proto(&func, Some(linkage))?;
                         }
                     }

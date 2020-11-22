@@ -1,10 +1,6 @@
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
-    r#type::{
-        generics::{Generics, GenericsKind},
-        inner_ty::InnerTy,
-        ty::Ty,
-    },
+    r#type::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     token::expr::Expr,
 };
 use either::Either;
@@ -71,7 +67,7 @@ impl SubResult {
 
 impl<'a> TypeContext<'a> {
     pub fn new(analyze_context: &'a mut AnalyzeContext) -> Self {
-        let tmp_ty = Ty::CompoundType(InnerTy::Void, Generics::new(GenericsKind::Decl));
+        let tmp_ty = Ty::CompoundType(InnerTy::Void, Generics::new());
 
         Self {
             analyze_context,
@@ -742,7 +738,7 @@ impl<'a> TypeContext<'a> {
                 }
             } else {
                 // The return type of the method is None == Void.
-                let ty = Ty::CompoundType(InnerTy::Void, Generics::new(GenericsKind::Empty));
+                let ty = Ty::CompoundType(InnerTy::Void, Generics::new());
                 if let Err(err) = self.insert_substitution(self.cur_ty.clone(), ty.clone()) {
                     SubResult::Err(err)
                 } else {

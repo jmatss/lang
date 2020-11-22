@@ -1,0 +1,45 @@
+//use std.assert
+
+struct TestStruct<T>
+{
+    inner: T,
+}
+
+implement TestStruct
+{
+    function {this} test_func() -> i32
+    {
+        return 123
+    }
+}
+
+function main() -> i32
+{
+    var i: u64 = 1
+    var f: f32 = 123.
+
+    var test_struct_u64 = TestStruct { i }
+    var test_struct_f32 = TestStruct { f }
+    
+    test_struct_u64.&.test_func()
+
+/*
+    var expected_u64: u64 = 1
+    var expected_f32: f32 = 123.
+
+    printf("expected_u64: %llu, test_struct_u64.inner: %llu", expected_u64, test_struct_u64.inner)
+    assert(expected_u64 == test_struct_u64.inner)
+    printf("expected_f32: %f, test_struct_f32.inner: %f", expected_f32 as f64, test_struct_f32.inner as f64)
+    assert_equals_f64(expected_f32 as f64, test_struct_f32.inner as f64, 0.01)
+
+    var key = "Key"
+    var value: u8 = 5
+
+    var test_struct_two = TestStructTwo { key, value.& }
+
+    // TODO: Crashes without "as u8", the 10 gets infered to i32.
+    test_struct_two.value.* = 10 as u8
+*/
+
+    return 0
+}

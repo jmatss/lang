@@ -8,7 +8,6 @@ use common::{
     },
 };
 use lex::token::{LexToken, LexTokenKind, Sym};
-use log::warn;
 
 pub struct TypeParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
@@ -81,7 +80,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     ///   X<T>      // Type with generic argument.
     ///   X<T, V>   // Type with multiple generic arguments.
     pub(crate) fn parse_type_generics(&mut self, kind: GenericsKind) -> CustomResult<Generics> {
-        let mut generics = Generics::new(kind);
+        let mut generics = Generics::new();
 
         // If the next token isn't a "PointyBracketBegin" there are no generic
         // list, just return a empty generics.
@@ -107,7 +106,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
         loop {
             // Parse the next item in the list as either a identifier(name) or
             // a type depending if this is a decl or impl generic list.
-            match generics.kind {
+            match kind {
                 GenericsKind::Decl => generics.insert_name(self.next_ident()?),
                 GenericsKind::Impl => generics.insert_type(self.parse_type()?),
                 _ => panic!("Bad GenericsKind: {:#?}", generics),

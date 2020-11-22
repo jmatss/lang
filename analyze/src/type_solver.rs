@@ -79,10 +79,15 @@ impl<'a> TypeSolver<'a> {
 
         let (new_struct_name, generics) =
             if let Some(Ty::CompoundType(_, generics)) = &struct_init.ret_type {
-                (
-                    util::to_generic_struct_name(&struct_init.name, generics),
-                    generics,
-                )
+                let full_name = match struct_init.full_name() {
+                    Ok(full_name) => full_name,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                (full_name, generics)
             } else {
                 unreachable!("create_generic_struct with bad type: {:#?}", struct_init);
             };

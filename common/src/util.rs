@@ -1,9 +1,20 @@
 use crate::r#type::generics::Generics;
 
-/// Concatenates a struct name and a method name to create the name that will
+/// Concatenates a structure name and a method name to create the name that will
 /// be used to refer to this function. The name is concatenated with a dash.
-pub fn to_method_name(struct_name: &str, method_name: &str) -> String {
-    format!("{}-{}", struct_name, method_name)
+///
+/// Format:
+///   "<STRUCTURE_NAME>:<STRUCTURE_GENERICS>-<FUNCTION_NAME>"
+pub fn to_method_name(
+    structure_name: &str,
+    structure_generics: &Generics,
+    method_name: &str,
+) -> String {
+    format!(
+        "{}-{}",
+        to_generic_struct_name(structure_name, structure_generics),
+        method_name
+    )
 }
 
 /// Formats the name of a struct with generics. The names of the generic struct

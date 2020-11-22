@@ -5,7 +5,11 @@ use super::{
     stmt::Modifier,
 };
 
-use crate::r#type::ty::Ty;
+use crate::{
+    error::{CustomResult, LangError, LangErrorKind},
+    r#type::{inner_ty::InnerTy, ty::Ty},
+    util,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockHeader {
@@ -136,9 +140,9 @@ pub struct Function {
     pub is_var_arg: bool,
 
     /// Will be set if this is a function in a "impl" block which means that
-    /// this is a function tied to a struct. The string will be the struct name
+    /// this is a function tied to a struct. The type will be the structure
     /// (or the "ident" of the impl block if other than struct are allowed).
-    pub method_struct: Option<String>,
+    pub method_structure: Option<Ty>,
 }
 
 impl Function {
@@ -157,7 +161,35 @@ impl Function {
             ret_type,
             is_var_arg,
             modifiers,
-            method_struct: None,
+            method_structure: None,
+        }
+    }
+
+    /// Returns the "full name" which is the name containing possible structure
+    /// and generics as well.
+    ///
+    /// Format:
+    ///   "<STRUCTURE_NAME>:<GENERICS>-<FUNCTION_NAME>"
+    pub fn full_name(&self) -> CustomResult<String> {
+        if let Some(ty) = &self.method_structure {
+            let (structure_name, generics) = if let Ty::CompoundType(inner_ty, generics) = ty {
+                match inner_ty {
+                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
+                        (ident, generics)
+                    }
+                    _ => unreachable!("Method on non structure type: {:#?}", self),
+                }
+            } else {
+                return Err(LangError::new(
+                    format!("Unable to get full name for method: {:#?}", self),
+                    LangErrorKind::GeneralError,
+                ));
+            };
+
+            Ok(util::to_method_name(structure_name, generics, &self.name))
+        } else {
+            // TODO: Possible generics on functions, need to handle it here.
+            Ok(self.name.clone())
         }
     }
 

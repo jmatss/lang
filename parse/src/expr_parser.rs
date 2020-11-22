@@ -397,7 +397,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 // Static method call, this is the lhs type.
                 LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(Ty::CompoundType(
                     InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
-                    Generics::new(GenericsKind::Impl),
+                    Generics::new(),
                 ))),
 
                 _ => {

@@ -283,7 +283,7 @@ impl Ty {
     }
 
     pub fn contains_unknown_any(&self) -> bool {
-        let tmp_ty = Ty::CompoundType(InnerTy::Void, Generics::new(GenericsKind::Empty));
+        let tmp_ty = Ty::CompoundType(InnerTy::Void, Generics::new());
         let tmp_str: String = "".into();
 
         self.contains_inner_ty(&InnerTy::Unknown(tmp_str.clone()))
@@ -319,7 +319,7 @@ impl Ty {
     }
 
     pub fn contains_unknown_array_member(&self) -> bool {
-        let tmp_ty = Ty::CompoundType(InnerTy::Void, Generics::new(GenericsKind::Decl));
+        let tmp_ty = Ty::CompoundType(InnerTy::Void, Generics::new());
         self.contains_ty(&Ty::UnknownArrayMember(Box::new(tmp_ty)))
     }
 

@@ -6,9 +6,12 @@ use super::{
     stmt::Modifier,
 };
 use crate::{
-    error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
-    r#type::ty::Ty,
-    BlockId,
+    error::{
+        CustomResult, LangError,
+        LangErrorKind::{self, AnalyzeError},
+    },
+    r#type::{inner_ty::InnerTy, ty::Ty},
+    util, BlockId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -284,6 +287,34 @@ impl FuncCall {
             is_method: false,
         }
     }
+
+    /// Returns the "full name" which is the name containing possible structure
+    /// and generics as well.
+    ///
+    /// Format:
+    ///   "<STRUCTURE_NAME>:<GENERICS>-<FUNCTION_NAME>"
+    pub fn full_name(&self) -> CustomResult<String> {
+        if let Some(ty) = &self.method_structure {
+            let (structure_name, generics) = if let Ty::CompoundType(inner_ty, generics) = ty {
+                match inner_ty {
+                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
+                        (ident, generics)
+                    }
+                    _ => unreachable!("Method call on non structure type: {:#?}", self),
+                }
+            } else {
+                return Err(LangError::new(
+                    format!("Unable to get full name for method call: {:#?}", self),
+                    LangErrorKind::GeneralError,
+                ));
+            };
+
+            Ok(util::to_method_name(structure_name, generics, &self.name))
+        } else {
+            // TODO: Possible generics on functions, need to handle it here.
+            Ok(self.name.clone())
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -299,6 +330,27 @@ impl StructInit {
             name,
             arguments,
             ret_type: None,
+        }
+    }
+
+    /// Returns the "full name" which is the name containing possible generics
+    /// as well.
+    pub fn full_name(&self) -> CustomResult<String> {
+        if let Some(ty) = &self.ret_type {
+            if let Ty::CompoundType(InnerTy::Struct(ident), generics) = ty {
+                if !generics.is_empty() {
+                    Ok(util::to_generic_struct_name(ident, generics))
+                } else {
+                    Ok(ident.clone())
+                }
+            } else {
+                Err(LangError::new(
+                    format!("Unable to get full name for struct init: {:#?}", self),
+                    LangErrorKind::GeneralError,
+                ))
+            }
+        } else {
+            unreachable!("Struct init has no type: {:#?}", self);
         }
     }
 }
