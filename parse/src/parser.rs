@@ -184,6 +184,8 @@ impl<'a> ParseTokenIter<'a> {
 
     /// Returns the next ParseToken from the iterator.
     pub fn next_token(&mut self) -> CustomResult<AstToken> {
+        let mark = self.iter.mark();
+
         if let Some(lex_token) = self.iter.next() {
             // TODO: Clean up this mess with a mix of ParseToken/ParseTokenKind
             //       (some arms returns ParseTokens, others cascades ParseTokenKinds).
@@ -216,7 +218,7 @@ impl<'a> ParseTokenIter<'a> {
                 // expression atm) or it will be an expression.
                 LexTokenKind::Ident(_) => {
                     // Put back the ident, it is a part of a expression.
-                    self.rewind()?;
+                    self.rewind_to_mark(mark);
 
                     // The first parsed expr can either be the lhs or the rhs.
                     // This will be figure out later in this block.
@@ -251,7 +253,7 @@ impl<'a> ParseTokenIter<'a> {
                 LexTokenKind::Sym(Sym::CurlyBracketBegin) => {
                     // Put back the CurlyBracketBegin, it is expected to be the
                     // first symbol found in the `self.next_block` function.
-                    self.rewind()?;
+                    self.rewind_to_mark(mark);
                     self.next_block(BlockHeader::Anonymous)?
                 }
 
@@ -294,7 +296,7 @@ impl<'a> ParseTokenIter<'a> {
                 LexTokenKind::Lit(_) | LexTokenKind::Sym(_) => {
                     // Put back the token that was just popped and then parse
                     // everything together as an expression.
-                    self.rewind()?;
+                    self.rewind_to_mark(mark);
                     let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
                     let token = Token::Expr(expr);
 
@@ -672,6 +674,11 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     #[inline]
+    pub fn mark(&mut self) -> usize {
+        self.iter.mark()
+    }
+
+    #[inline]
     pub fn rewind(&mut self) -> CustomResult<()> {
         if self.iter.rewind() {
             if let Some(cur_token) = self.iter.peek() {
@@ -682,6 +689,11 @@ impl<'a> ParseTokenIter<'a> {
         } else {
             Err(self.err("Tried to rewind to before the iterator (pos < 0).".into()))
         }
+    }
+
+    #[inline]
+    pub fn rewind_to_mark(&mut self, mark: usize) {
+        self.iter.rewind_to_mark(mark);
     }
 
     #[inline]
@@ -746,7 +758,7 @@ impl<'a> ParseTokenIter<'a> {
         unreachable!();
     }
 
-    /// Peeks and clones the item ahead of the current position of the iterator
+    /// Peeks and clones the item behind the current position of the iterator
     /// that is NOT a white space.
     #[inline]
     pub fn peek_skip_space(&mut self) -> Option<LexToken> {

@@ -297,7 +297,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         match self.analyze_context.get_var(&var.name, self.cur_block_id) {
             Ok(var_decl) => {
-                debug!("Compiling var var_decl: {:?}", &var_decl);
+                debug!("Compiling var var_decl: {:#?}", &var_decl);
 
                 // Constants are never "compiled" into instructions, they are handled
                 // "internaly" in this code during compilation.
@@ -467,8 +467,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             struct_type.clone().into()
                         } else {
                             return Err(self.err(format!(
-                                "Unable to find custom compound type: {}",
-                                inner_ty
+                                "Unable to find custom compound type with name: {:#?}",
+                                ident
                             )));
                         }
                     }

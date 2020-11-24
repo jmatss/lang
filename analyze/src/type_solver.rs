@@ -3,7 +3,7 @@ use std::collections::{hash_map::Entry, HashMap};
 use crate::type_context::{SubResult, TypeContext};
 use common::{
     error::LangError,
-    r#type::{inner_ty::InnerTy, ty::Ty},
+    r#type::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     token::op::UnOperator,
     token::{
         ast::AstToken,
@@ -77,31 +77,30 @@ impl<'a> TypeSolver<'a> {
             }
         };
 
-        let (new_struct_name, generics) =
-            if let Some(Ty::CompoundType(_, generics)) = &struct_init.ret_type {
-                let full_name = match struct_init.full_name() {
-                    Ok(full_name) => full_name,
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
-                };
+        let full_name = match struct_init.full_name() {
+            Ok(full_name) => full_name,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
 
-                (full_name, generics)
-            } else {
-                unreachable!("create_generic_struct with bad type: {:#?}", struct_init);
-            };
+        let generics = if let Some(generics) = struct_init.generics() {
+            generics.clone()
+        } else {
+            Generics::new()
+        };
 
-        // Give the new copy of the struct type the "new name" containing
+        // Give the new copy of the struct type the "full name" containing
         // information about the generic arguments.
-        gen_struct_ty.name = new_struct_name.clone();
+        gen_struct_ty.name = full_name.clone();
 
         // For every member of the struct, replace any generic types with
         // the type of the struct_init generics.
         if let Some(members) = &mut gen_struct_ty.members {
             for member in members {
                 if let Some(ty) = &mut member.ret_type {
-                    ty.replace_generics_impl(generics);
+                    ty.replace_generics_impl(&generics);
                 }
             }
         }
@@ -119,7 +118,7 @@ impl<'a> TypeSolver<'a> {
                 if let Some(parameters) = &mut new_method.parameters {
                     for param in parameters {
                         if let Some(ty) = &mut param.ret_type {
-                            ty.replace_generics_impl(generics);
+                            ty.replace_generics_impl(&generics);
                         }
                     }
                 }
@@ -127,8 +126,7 @@ impl<'a> TypeSolver<'a> {
                 new_methods.insert(method_name.clone(), new_method);
             }
 
-            self.generic_struct_methods
-                .insert(new_struct_name.clone(), new_methods);
+            self.generic_struct_methods.insert(full_name, new_methods);
         }
 
         // This new struct variable will be added as a new struct type stored

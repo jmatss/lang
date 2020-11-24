@@ -4,10 +4,7 @@ use crate::token::expr::Expr;
 
 use either::Either;
 
-use super::{
-    generics::{Generics, GenericsKind},
-    inner_ty::InnerTy,
-};
+use super::{generics::Generics, inner_ty::InnerTy};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Ty {

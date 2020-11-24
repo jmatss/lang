@@ -82,13 +82,15 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     pub(crate) fn parse_type_generics(&mut self, kind: GenericsKind) -> CustomResult<Generics> {
         let mut generics = Generics::new();
 
+        let mark = self.iter.mark();
+
         // If the next token isn't a "PointyBracketBegin" there are no generic
         // list, just return a empty generics.
         if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Sym(Sym::PointyBracketBegin) = lex_token.kind {
                 // Do nothing, parse generic list in logic underneath.
             } else {
-                self.iter.rewind()?;
+                self.iter.rewind_to_mark(mark);
                 return Ok(generics);
             }
         }
@@ -112,6 +114,8 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                 _ => panic!("Bad GenericsKind: {:#?}", generics),
             }
 
+            let mark = self.iter.mark();
+
             // End of a type in the generic list. The next token should either
             // be a comma if there are more arguments in the list or a
             // "PointyBracketEnd" if the generic list have been parsed fully.
@@ -133,7 +137,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                         return Ok(generics);
                     }
                     LexTokenKind::Sym(Sym::ShiftRight) => {
-                        self.iter.rewind()?;
+                        self.iter.rewind_to_mark(mark);
 
                         let kind = LexTokenKind::Sym(Sym::PointyBracketEnd);
                         let token = LexToken::new(kind, lex_token.line_nr, lex_token.column_nr);

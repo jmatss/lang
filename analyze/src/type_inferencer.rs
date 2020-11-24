@@ -335,12 +335,30 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let generics = if let Some(generic_names) = &struct_.generic_params {
                 let mut generics = Generics::new();
 
-                for generic_name in generic_names {
-                    let unknown_ident =
-                        self.new_unknown_ident(&format!("generic_{}", generic_name));
-                    let gen_ty = Ty::Generic(unknown_ident);
+                // If the struct init call has specified explicitly the implementation
+                // types for the generics, use those instead of unknown generics.
+                // Currently these explicit types must be solved types.
+                if let Some(generics_impl) = &struct_init.generics {
+                    if generic_names.len() != generics_impl.len() {
+                        let err = self.type_context.analyze_context.err(format!(
+                            "Wrong amount of generics for struct init. Struct init: {:#?}, struct: {:#?}",
+                            struct_init, struct_
+                        ));
+                        self.errors.push(err);
+                        return;
+                    }
 
-                    generics.insert(generic_name.clone(), gen_ty);
+                    for (name, gen_ty) in generic_names.iter().zip(generics_impl.iter_types()) {
+                        generics.insert(name.clone(), gen_ty.clone());
+                    }
+                } else {
+                    for generic_name in generic_names {
+                        let unknown_ident =
+                            self.new_unknown_ident(&format!("generic_{}", generic_name));
+                        let gen_ty = Ty::Generic(unknown_ident);
+
+                        generics.insert(generic_name.clone(), gen_ty);
+                    }
                 }
 
                 generics

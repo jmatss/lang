@@ -40,7 +40,13 @@ impl Generics {
     }
 
     pub fn len(&self) -> usize {
-        (self.names.len() + self.types.len()) / 2
+        if self.names.is_empty() {
+            self.types.len()
+        } else if self.types.is_empty() {
+            self.names.len()
+        } else {
+            (self.names.len() + self.types.len()) / 2
+        }
     }
 
     pub fn is_empty(&self) -> bool {

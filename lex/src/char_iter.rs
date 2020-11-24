@@ -122,6 +122,10 @@ impl<'a> CharIter<'a> {
         }
     }
 
+    pub fn mark(&mut self) -> usize {
+        self.iter.mark()
+    }
+
     /// Rewinds the iterator to the previous character.
     pub fn rewind(&mut self) -> bool {
         if self.is_valid_char_of_size(4) {
@@ -147,6 +151,10 @@ impl<'a> CharIter<'a> {
             }
         }
         true
+    }
+
+    pub fn rewind_to_mark(&mut self, mark: usize) {
+        self.iter.rewind_to_mark(mark);
     }
 
     /// Checks if the previos character is a valid char of byte length `n`.

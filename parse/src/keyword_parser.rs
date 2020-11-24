@@ -15,7 +15,6 @@ use common::{
     },
 };
 use lex::token::{Kw, LexTokenKind, Sym};
-use log::warn;
 
 pub struct KeyworkParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
