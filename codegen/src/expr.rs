@@ -1,12 +1,11 @@
 use crate::generator::CodeGen;
 use common::{
     error::CustomResult,
-    r#type::{inner_ty::InnerTy, ty::Ty},
     token::{
         expr::{ArrayInit, Expr, FuncCall, StructInit},
         lit::Lit,
     },
-    util,
+    ty::{inner_ty::InnerTy, ty::Ty},
 };
 use inkwell::{
     types::{AnyTypeEnum, BasicTypeEnum},

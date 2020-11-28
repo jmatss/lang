@@ -1,7 +1,6 @@
 use analyze::AnalyzeContext;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
-    r#type::{inner_ty::InnerTy, ty::Ty},
     token::ast::Token,
     token::block::BlockHeader,
     token::{
@@ -9,6 +8,7 @@ use common::{
         expr::{Expr, Var},
         lit::Lit,
     },
+    ty::{inner_ty::InnerTy, ty::Ty},
     util, BlockId,
 };
 use inkwell::{

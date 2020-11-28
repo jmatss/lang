@@ -7,7 +7,7 @@ use super::{
 
 use crate::{
     error::{CustomResult, LangError, LangErrorKind},
-    r#type::{inner_ty::InnerTy, ty::Ty},
+    ty::{inner_ty::InnerTy, ty::Ty},
     util,
 };
 

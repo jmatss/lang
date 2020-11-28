@@ -53,33 +53,24 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
             let analyze_context = self.analyze_context.borrow();
 
             if let Some(method_call) = bin_op.rhs.eval_to_func_call() {
-                // Get the type of the lhs, this will be the structure type that
-                // the method is called on.
-                let lhs_ty = match bin_op.lhs.get_expr_type() {
-                    Ok(ty) => ty,
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
-                };
-
                 match bin_op.operator {
                     // Instance structure access/method call.
                     BinOperator::Dot => {
                         let arg = Argument::new(Some(THIS_VAR_NAME.into()), *bin_op.lhs.clone());
-                        method_call.arguments.insert(0, arg);
 
+                        method_call.arguments.insert(0, arg);
                         method_call.is_method = true;
-                        method_call.method_structure = Some(lhs_ty);
 
                         *expr = Expr::FuncCall(method_call.clone());
                     }
 
-                    // Static structure access/method call.
+                    // Static structure access/method call. The lhs should be a
+                    // hardcoded path/struct in this case, so can set the type
+                    // of the `method_structure` directly.
                     BinOperator::DoubleColon => match bin_op.lhs.as_ref() {
-                        Expr::Type(_) => {
+                        Expr::Type(lhs_ty) => {
                             method_call.is_method = true;
-                            method_call.method_structure = Some(lhs_ty);
+                            method_call.method_structure = Some(lhs_ty.clone());
 
                             *expr = Expr::FuncCall(method_call.clone());
                         }

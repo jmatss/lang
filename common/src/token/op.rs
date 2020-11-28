@@ -1,5 +1,5 @@
 use super::expr::Expr;
-use crate::r#type::ty::Ty;
+use crate::ty::ty::Ty;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Op {

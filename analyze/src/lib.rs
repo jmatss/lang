@@ -1,22 +1,12 @@
-mod block;
-mod call_args;
-mod decl_func;
-mod decl_type;
-mod decl_var;
-mod defer;
-mod indexing;
-mod method;
-mod type_context;
-mod type_converter;
-mod type_inferencer;
-mod type_solver;
+mod decl;
+mod mid;
+mod post;
+mod pre;
+mod ty;
 //mod unitialized;
 
-use block::BlockAnalyzer;
-use call_args::CallArgs;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
-    r#type::ty::Ty,
     token::{
         ast::AstToken,
         block::{Enum, Function, Interface, Struct},
@@ -24,20 +14,23 @@ use common::{
         stmt::Path,
     },
     traverser::AstTraverser,
+    ty::ty::Ty,
     BlockId,
 };
-use decl_func::DeclFuncAnalyzer;
-use decl_type::DeclTypeAnalyzer;
-use decl_var::DeclVarAnalyzer;
-use defer::DeferAnalyzer;
-use indexing::IndexingAnalyzer;
+use decl::block::BlockAnalyzer;
+use decl::func::DeclFuncAnalyzer;
+use decl::ty::DeclTypeAnalyzer;
+use decl::var::DeclVarAnalyzer;
 use log::debug;
-use method::MethodAnalyzer;
+use mid::defer::DeferAnalyzer;
+use post::call_args::CallArgs;
+use pre::indexing::IndexingAnalyzer;
+use pre::method::MethodAnalyzer;
 use std::{cell::RefCell, collections::HashMap};
-use type_context::TypeContext;
-use type_converter::TypeConverter;
-use type_inferencer::TypeInferencer;
-use type_solver::TypeSolver;
+use ty::context::TypeContext;
+use ty::converter::TypeConverter;
+use ty::inferencer::TypeInferencer;
+use ty::solver::TypeSolver;
 
 // TODO: Error if a function that doesn't have a return type has a return in it.
 // TODO: Make it so that one doesn't have to recreate a new AstVisitor for every

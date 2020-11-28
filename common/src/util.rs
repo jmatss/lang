@@ -1,4 +1,4 @@
-use crate::r#type::generics::Generics;
+use crate::ty::generics::Generics;
 
 /// Concatenates a structure name and a method name to create the name that will
 /// be used to refer to this function. The name is concatenated with a dash.

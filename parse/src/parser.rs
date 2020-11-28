@@ -5,7 +5,6 @@ use crate::{
 use common::{
     error::{CustomResult, LangError, LangErrorKind::ParseError},
     iter::TokenIter,
-    r#type::{generics::Generics, ty::Ty},
     token::ast::Token,
     token::{
         ast::AstToken,
@@ -13,6 +12,7 @@ use common::{
         expr::{Argument, Expr, Var},
         stmt::{Path, Stmt},
     },
+    ty::{generics::Generics, ty::Ty},
     BlockId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};

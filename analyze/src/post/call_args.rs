@@ -1,11 +1,11 @@
 use common::{
     error::CustomResult,
     error::LangError,
-    r#type::{inner_ty::InnerTy, ty::Ty},
     token::expr::Argument,
     token::expr::FuncCall,
     token::expr::{StructInit, Var},
     traverser::TraverseContext,
+    ty::{inner_ty::InnerTy, ty::Ty},
     util,
     visitor::Visitor,
 };

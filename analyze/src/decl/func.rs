@@ -1,7 +1,6 @@
 use crate::{AnalyzeContext, BlockInfo};
 use common::{
     error::LangError,
-    r#type::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     token::ast::Token,
     token::expr::Var,
     token::{
@@ -11,6 +10,7 @@ use common::{
         stmt::Stmt,
     },
     traverser::TraverseContext,
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     visitor::Visitor,
     BlockId,
 };

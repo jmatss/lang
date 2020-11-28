@@ -10,7 +10,7 @@ use crate::{
         CustomResult, LangError,
         LangErrorKind::{self, AnalyzeError},
     },
-    r#type::{generics::Generics, inner_ty::InnerTy, ty::Ty},
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     util, BlockId,
 };
 

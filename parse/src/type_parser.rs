@@ -1,7 +1,7 @@
 use crate::parser::ParseTokenIter;
 use common::{
     error::CustomResult,
-    r#type::{
+    ty::{
         generics::{Generics, GenericsKind},
         inner_ty::InnerTy,
         ty::Ty,

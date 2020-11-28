@@ -1,9 +1,7 @@
 use std::collections::{hash_map::Entry, HashMap};
 
-use crate::type_context::{SubResult, TypeContext};
 use common::{
     error::LangError,
-    r#type::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     token::op::UnOperator,
     token::{
         ast::AstToken,
@@ -13,9 +11,12 @@ use common::{
         stmt::Stmt,
     },
     traverser::TraverseContext,
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     util,
     visitor::Visitor,
 };
+
+use super::context::{SubResult, TypeContext};
 
 pub struct TypeSolver<'a> {
     type_context: &'a mut TypeContext<'a>,
@@ -96,17 +97,22 @@ impl<'a> TypeSolver<'a> {
         gen_struct_ty.name = full_name.clone();
 
         // For every member of the struct, replace any generic types with
-        // the type of the struct_init generics.
+        // the type of the struct_init generics. Also replace any reference
+        // to the old name with the new full name (containing generics).
         if let Some(members) = &mut gen_struct_ty.members {
             for member in members {
                 if let Some(ty) = &mut member.ret_type {
                     ty.replace_generics_impl(&generics);
+                    // TODO: remove
+                    //ty.replace_generics_full_name(&struct_init.name, &full_name)
                 }
             }
         }
 
         // For every method of the struct, replace any generic types with
-        // the type of the struct_init generics.
+        // the type of the struct_init generics. Also replace any reference
+        // to the old name with the new full name (containing generics).
+        //
         // The methods are just pointers inside the "Struct" struct, so need to
         // dereference and create copies of the methods.
         if let Some(methods) = &mut gen_struct_ty.methods {
@@ -119,6 +125,8 @@ impl<'a> TypeSolver<'a> {
                     for param in parameters {
                         if let Some(ty) = &mut param.ret_type {
                             ty.replace_generics_impl(&generics);
+                            // TODO: remove
+                            //ty.replace_generics_full_name(&struct_init.name, &full_name);
                         }
                     }
                 }
@@ -204,6 +212,13 @@ impl<'a> Visitor for TypeSolver<'a> {
         if let Some(ty) = &mut func_call.ret_type {
             if let Some(structure_ty) = &mut func_call.method_structure {
                 self.subtitute_type(structure_ty, true);
+
+                // TODO: Fix this, seems very random to fix this here.
+                // The `method_structure` might possible be a pointer to the
+                // structure, need to get the actual structure type in that case.
+                if let Ty::Pointer(ty) = structure_ty {
+                    *structure_ty = *ty.clone();
+                }
             }
             self.subtitute_type(ty, true);
         } else {

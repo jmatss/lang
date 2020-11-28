@@ -15,6 +15,6 @@ pub mod error;
 pub mod iter;
 pub mod token;
 pub mod traverser;
-pub mod r#type;
+pub mod ty;
 pub mod util;
 pub mod visitor;

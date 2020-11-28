@@ -5,7 +5,6 @@ use crate::{
 };
 use common::{
     error::CustomResult,
-    r#type::generics::GenericsKind,
     token::ast::Token,
     token::{
         ast::AstToken,
@@ -13,6 +12,7 @@ use common::{
         expr::Var,
         stmt::{Modifier, Path, Stmt},
     },
+    ty::generics::GenericsKind,
 };
 use lex::token::{Kw, LexTokenKind, Sym};
 

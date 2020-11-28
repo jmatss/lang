@@ -1,7 +1,7 @@
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
-    r#type::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     token::expr::Expr,
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
 };
 use either::Either;
 use log::debug;
@@ -661,6 +661,20 @@ impl<'a> TypeContext<'a> {
                 }
 
                 Ty::CompoundType(inner_ty, generics) => (inner_ty, generics),
+
+                // TODO: Is this valid? Solve this in a better way. There are currently
+                //       two points in the code where this fix is needed.
+                // The type given to the `UnknownStructureMethod` might possibly
+                // have been a pointer to the structure instead of the structure
+                // type itself.
+                Ty::Pointer(ty_box) => {
+                    if let Ty::CompoundType(inner_ty, generics) = ty_box.as_ref() {
+                        (inner_ty, generics)
+                    } else {
+                        self.cur_ty = local_cur_ty.clone();
+                        return SubResult::UnSolved(local_cur_ty);
+                    }
+                }
 
                 _ => {
                     return SubResult::Err(self.analyze_context.err(format!(

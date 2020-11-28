@@ -1,7 +1,5 @@
-use crate::type_context::TypeContext;
 use common::{
     error::LangError,
-    r#type::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     token::ast::Token,
     token::{
         ast::AstToken,
@@ -9,13 +7,17 @@ use common::{
         expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
         lit::Lit,
         op::{BinOp, BinOperator, UnOp, UnOperator},
+        stmt::Modifier,
         stmt::Stmt,
     },
     traverser::TraverseContext,
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     visitor::Visitor,
 };
 use either::Either;
 use log::debug;
+
+use super::context::TypeContext;
 
 // TODO: Better error messages. Ex. if two types arent't compatible,
 //       print information about where the types "came" from.
@@ -31,11 +33,14 @@ use log::debug;
 pub struct TypeInferencer<'a, 'b> {
     type_context: &'a mut TypeContext<'b>,
 
-    // TODO: Ugly fix, do this in some other way.
     /// Keep a copy of the current function which body is being traversed.
     /// This will let the statements/exprs etc. inside the function know
     /// about the types of the parameters and the return type.
     cur_func: Option<Function>,
+
+    /// The identifier of the last seen implement block. This allows methods
+    /// to see which impl block they belong to.
+    cur_impl: Option<String>,
 
     /// Contains the current match expression. Its type needs to be the same
     /// as the type in the match cases.
@@ -54,6 +59,7 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
         Self {
             type_context,
             cur_func: None,
+            cur_impl: None,
             cur_match_expr: None,
             type_id: 0,
             errors: Vec::default(),
@@ -181,7 +187,43 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Assign the return type of the function to the function call expr.
     /// Also tie the types of the function parameter to argument types.
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
-        let func_ty = if let Some(structure_ty) = &func_call.method_structure {
+        let func_ret_ty = if func_call.is_method {
+            // Get the "owning" structure type of this method. If it isn't set
+            // explicitly, it should be set as a expression in the first argument
+            // with the name "this".
+            let structure_ty = if let Some(structure_ty) = &func_call.method_structure {
+                structure_ty.clone()
+            } else if let Some(first_arg) = func_call.arguments.first() {
+                if first_arg.name.as_ref().map_or(false, |name| name == "this") {
+                    match first_arg.value.get_expr_type() {
+                        Ok(ty) => {
+                            // Set the `method_structure` for the function call
+                            // now that the "this" argument has been set to a
+                            // type (known or unknown type, doesn't matter, just
+                            // need to be set to that it can be tied to a structure).
+                            // At this point the type might be wrapped in a pointer.
+                            func_call.method_structure = Some(ty.clone());
+
+                            ty
+                        }
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    }
+                } else {
+                    panic!(
+                        "First arg of method with no method_structure set not \"this\": {:#?}",
+                        func_call
+                    );
+                }
+            } else {
+                panic!(
+                    "No params for method with no method_structure set: {:#?}",
+                    func_call
+                );
+            };
+
             // Insert constraints between the function call argument type and
             // the method parameter types that will be figured out later.
             let mut idx: u64 = 0;
@@ -214,7 +256,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 //       somewhere else.
                 // Don't add a constraint if the argument has the same type as
                 // the structure.
-                if &arg_expr_ty != structure_ty {
+                if arg_expr_ty != structure_ty {
                     self.type_context.insert_constraint(arg_ty, arg_expr_ty);
                 }
 
@@ -222,7 +264,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
 
             // The expected return type of the function call.
-            Ty::UnknownStructureMethod(Box::new(structure_ty.clone()), func_call.name.clone())
+            Ty::UnknownStructureMethod(Box::new(structure_ty), func_call.name.clone())
         } else {
             let func = match self
                 .type_context
@@ -308,7 +350,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
         };
 
-        func_call.ret_type = Some(func_ty);
+        func_call.ret_type = Some(func_ret_ty);
     }
 
     /// Adds the correct type for the struct init and ties the types of the struct
@@ -688,11 +730,42 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    /// Save the current function in a place so that the stmts/exprs in the body
-    /// can access the types of the parameters and the return type of the func.
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Function(func), ..) = &ast_token.token {
+        if let Token::Block(BlockHeader::Function(func), ..) = &mut ast_token.token {
+            // If this is a method and the first argument is named "this", set
+            // the type of it to the structure that this method belongs to
+            // (which already is stored in `method_structore`).
+            if let Some(first_arg) = func.parameters.as_mut().and_then(|args| args.first_mut()) {
+                if &first_arg.name == "this" {
+                    if let Some(structure) = func.method_structure.clone() {
+                        let ty = if func.modifiers.contains(&Modifier::This) {
+                            structure
+                        } else if func.modifiers.contains(&Modifier::ThisPointer) {
+                            Ty::Pointer(Box::new(structure))
+                        } else {
+                            // TODO: This should be caught somewhere else earlier.
+                            //       Keyword is not allowed to be used as parameter
+                            //       names. Make this a unreachable at that point.
+                            panic!(
+                                "First parameter to function named keyword \"this\": {:#?}",
+                                func
+                            );
+                        };
+
+                        first_arg.ret_type = Some(ty);
+                    }
+                }
+            }
+
+            // Save the current function in a place so that the stmts/exprs in the body
+            // can access the types of the parameters and the return type of the func.
             self.cur_func = Some(*func.clone());
+        }
+    }
+
+    fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let Token::Block(BlockHeader::Implement(ident), ..) = &ast_token.token {
+            self.cur_impl = Some(ident.clone());
         }
     }
 

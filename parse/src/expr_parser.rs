@@ -5,14 +5,14 @@ use crate::{
 };
 use common::{
     error::CustomResult,
-    r#type::{
-        generics::{Generics, GenericsKind},
-        inner_ty::InnerTy,
-        ty::Ty,
-    },
     token::{
         expr::{ArrayInit, Expr, FuncCall, StructInit},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
+    },
+    ty::{
+        generics::{Generics, GenericsKind},
+        inner_ty::InnerTy,
+        ty::Ty,
     },
 };
 use lex::token::{LexTokenKind, Sym};

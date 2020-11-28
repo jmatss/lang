@@ -91,6 +91,33 @@ impl Ty {
         }
     }
 
+    /// Recursively replaces any structure types with idents that matches the
+    /// old structure name. These will be replaced with the new full name containing
+    /// references to the generics.
+    pub fn replace_generics_full_name(&mut self, old_name: &str, full_name: &str) {
+        match self {
+            Ty::CompoundType(inner_ty, _) => match inner_ty {
+                InnerTy::Struct(ident)
+                | InnerTy::Enum(ident)
+                | InnerTy::Interface(ident)
+                | InnerTy::UnknownIdent(ident, ..) => {
+                    if ident == old_name {
+                        *ident = full_name.into();
+                    }
+                }
+                _ => (),
+            },
+
+            Ty::Pointer(ty)
+            | Ty::Array(ty, ..)
+            | Ty::UnknownStructureMember(ty, ..)
+            | Ty::UnknownStructureMethod(ty, ..)
+            | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownArrayMember(ty) => ty.replace_generics_full_name(old_name, full_name),
+            _ => (),
+        }
+    }
+
     pub fn is_int(&self) -> bool {
         self.get_inner().map_or(false, |ty| ty.is_int())
     }
