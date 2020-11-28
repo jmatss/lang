@@ -38,11 +38,6 @@ pub fn compile(
     output_path: &str,
     optimize: bool,
 ) -> CustomResult<()> {
-    let file_type = FileType::Object;
-    machine
-        .write_to_file(&module, file_type, output_path.as_ref())
-        .map_err(|e| LangError::new(e.to_string(), CompileError))?;
-
     if optimize {
         let func_pass_manager: PassManager<FunctionValue> = PassManager::create(module);
         func_pass_manager.add_instruction_combining_pass();
@@ -77,5 +72,8 @@ pub fn compile(
         module_pass_manager.run_on(module);
     }
 
-    Ok(())
+    let file_type = FileType::Object;
+    machine
+        .write_to_file(&module, file_type, output_path.as_ref())
+        .map_err(|e| LangError::new(e.to_string(), CompileError))
 }
