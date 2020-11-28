@@ -5,7 +5,7 @@ use common::{
         expr::{ArrayInit, Expr, FuncCall, StructInit},
         lit::Lit,
     },
-    types::Type,
+    ty::{inner_ty::InnerTy, ty::Ty},
 };
 use inkwell::{
     types::{AnyTypeEnum, BasicTypeEnum},
@@ -42,16 +42,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         let any_value = match expr {
             Expr::Lit(lit, ty_opt) => self.compile_lit(lit, ty_opt),
-            Expr::FuncCall(func_call) => {
-                // Since this is a method call, the function will have been renamed
-                // so that its name is unique for the struct instead of unqiue
-                // for the whole program. Rename this method call to the same
-                // name as the method.
-                if let Some(struct_name) = &func_call.method_struct {
-                    func_call.name = common::util::to_method_name(struct_name, &func_call.name)
-                }
-                self.compile_func_call(func_call)
-            }
+            Expr::FuncCall(func_call) => self.compile_func_call(func_call),
             Expr::Op(op) => self.compile_op(op, expr_ty),
             Expr::StructInit(struct_init) => self.compile_struct_init(struct_init),
             Expr::ArrayInit(array_init) => self.compile_array_init(array_init),
@@ -82,7 +73,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub fn compile_lit(
         &mut self,
         lit: &Lit,
-        ty_opt: &Option<Type>,
+        ty_opt: &Option<Ty>,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         match lit {
             Lit::String(str_lit) => {
@@ -139,79 +130,82 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_lit_int(
         &mut self,
         lit: &str,
-        gen_ty_opt: &Option<Type>,
+        gen_ty_opt: &Option<Ty>,
         radix: u32,
     ) -> CustomResult<IntValue<'ctx>> {
         // TODO: Where should the integer literal conversion be made?
 
-        Ok(match gen_ty_opt {
-            Some(ty) => match ty {
-                Type::I8 => {
-                    let val = i8::from_str_radix(lit, radix)? as u64;
-                    self.context.i8_type().const_int(val, true)
-                }
-                Type::U8 => {
-                    let val = u8::from_str_radix(lit, radix)? as u64;
-                    self.context.i8_type().const_int(val, false)
-                }
-                Type::I16 => {
-                    let val = i16::from_str_radix(lit, radix)? as u64;
-                    self.context.i16_type().const_int(val, true)
-                }
-                Type::U16 => {
-                    let val = u16::from_str_radix(lit, radix)? as u64;
-                    self.context.i16_type().const_int(val, false)
-                }
-                Type::I32 => {
-                    let val = i32::from_str_radix(lit, radix)? as u64;
-                    self.context.i32_type().const_int(val, true)
-                }
-                Type::U32 => {
-                    let val = u32::from_str_radix(lit, radix)? as u64;
-                    self.context.i32_type().const_int(val, false)
-                }
-                Type::I64 => {
-                    let val = i64::from_str_radix(lit, radix)? as u64;
-                    self.context.i64_type().const_int(val, true)
-                }
-                Type::U64 => {
-                    let val = u64::from_str_radix(lit, radix)? as u64;
-                    self.context.i64_type().const_int(val, false)
-                }
-                Type::I128 => {
-                    let val = i128::from_str_radix(lit, radix)? as u64;
-                    self.context.i128_type().const_int(val, true)
-                }
-                Type::U128 => {
-                    let val = u128::from_str_radix(lit, radix)? as u64;
-                    self.context.i128_type().const_int(val, false)
-                }
-                _ => return Err(self.err(format!("Invalid literal integer type: {:?}", ty))),
-            },
-            // TODO: What should the default int size be? Signed 32 atm.
-            None => {
+        let inner_ty = match gen_ty_opt {
+            Some(Ty::CompoundType(inner_ty, _)) => inner_ty.clone(),
+            None => InnerTy::default_int(),
+            _ => {
+                return Err(self.err(format!("Literal integer type invalid: {:#?}", gen_ty_opt)));
+            }
+        };
+
+        Ok(match inner_ty {
+            InnerTy::I8 => {
+                let val = i8::from_str_radix(lit, radix)? as u64;
+                self.context.i8_type().const_int(val, true)
+            }
+            InnerTy::U8 => {
+                let val = u8::from_str_radix(lit, radix)? as u64;
+                self.context.i8_type().const_int(val, false)
+            }
+            InnerTy::I16 => {
+                let val = i16::from_str_radix(lit, radix)? as u64;
+                self.context.i16_type().const_int(val, true)
+            }
+            InnerTy::U16 => {
+                let val = u16::from_str_radix(lit, radix)? as u64;
+                self.context.i16_type().const_int(val, false)
+            }
+            InnerTy::I32 => {
                 let val = i32::from_str_radix(lit, radix)? as u64;
                 self.context.i32_type().const_int(val, true)
             }
+            InnerTy::U32 => {
+                let val = u32::from_str_radix(lit, radix)? as u64;
+                self.context.i32_type().const_int(val, false)
+            }
+            InnerTy::I64 => {
+                let val = i64::from_str_radix(lit, radix)? as u64;
+                self.context.i64_type().const_int(val, true)
+            }
+            InnerTy::U64 => {
+                let val = u64::from_str_radix(lit, radix)? as u64;
+                self.context.i64_type().const_int(val, false)
+            }
+            InnerTy::I128 => {
+                let val = i128::from_str_radix(lit, radix)? as u64;
+                self.context.i128_type().const_int(val, true)
+            }
+            InnerTy::U128 => {
+                let val = u128::from_str_radix(lit, radix)? as u64;
+                self.context.i128_type().const_int(val, false)
+            }
+            _ => return Err(self.err(format!("Invalid literal integer type: {:?}", gen_ty_opt))),
         })
     }
 
     // TODO: Better conversion of the float literal.
-    // TODO: f32 as default.
     fn compile_lit_float(
         &mut self,
         lit: &str,
-        gen_ty_opt: &Option<Type>,
+        gen_ty_opt: &Option<Ty>,
     ) -> CustomResult<FloatValue<'ctx>> {
-        Ok(match gen_ty_opt {
-            Some(ty) => match ty {
-                Type::F32 => self.context.f32_type().const_float(lit.parse()?),
-                Type::F64 => self.context.f64_type().const_float(lit.parse()?),
-                // TODO: What should the default float size be?
-                _ => return Err(self.err(format!("Invalid literal float type: {:?}", ty))),
-            },
-            // TODO: What should the default float size be? F32 atm.
-            None => self.context.f32_type().const_float(lit.parse()?),
+        let inner_ty = match gen_ty_opt {
+            Some(Ty::CompoundType(inner_ty, _)) => inner_ty.clone(),
+            None => InnerTy::default_float(),
+            _ => {
+                return Err(self.err(format!("Literal float type invalid: {:#?}", gen_ty_opt)));
+            }
+        };
+
+        Ok(match inner_ty {
+            InnerTy::F32 => self.context.f32_type().const_float(lit.parse()?),
+            InnerTy::F64 => self.context.f64_type().const_float(lit.parse()?),
+            _ => return Err(self.err(format!("Invalid literal float type: {:?}", gen_ty_opt))),
         })
     }
 
@@ -223,7 +217,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         func_call: &mut FuncCall,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        if let Some(func_ptr) = self.module.get_function(&func_call.name) {
+        if let Some(func_ptr) = self.module.get_function(&func_call.full_name()?) {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
             // functions are supported to be compatible with C code.
@@ -276,10 +270,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         struct_init: &mut StructInit,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        let struct_type = if let Some(inner) = self.module.get_struct_type(&struct_init.name) {
+        let full_name = struct_init.full_name()?;
+
+        let struct_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
             inner
         } else {
-            return Err(self.err(format!("Unable to get struct: {}", &struct_init.name)));
+            return Err(self.err(format!(
+                "Unable to get struct with name \"{}\". Struct init: {:#?}",
+                full_name, struct_init
+            )));
         };
 
         // Checks to see if the amount of arguments are different from the

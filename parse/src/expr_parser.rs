@@ -1,8 +1,7 @@
-use std::collections::BTreeMap;
-
 use crate::{
     parser::ParseTokenIter,
     token::{get_if_expr_op, Fix, Operator, Output},
+    type_parser::TypeParser,
 };
 use common::{
     error::CustomResult,
@@ -10,7 +9,11 @@ use common::{
         expr::{ArrayInit, Expr, FuncCall, StructInit},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
-    types::Type,
+    ty::{
+        generics::{Generics, GenericsKind},
+        inner_ty::InnerTy,
+        ty::Ty,
+    },
 };
 use lex::token::{LexTokenKind, Sym};
 use log::debug;
@@ -72,6 +75,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     /// See https://www.andr.mu/logs/the-shunting-yard-algorithm/ for a good
     /// explanation of the algorithm.
     fn shunting_yard(&mut self) -> CustomResult<()> {
+        let mark = self.iter.mark();
+
         while let Some(lex_token) = self.iter.next_skip_space() {
             debug!("SHUNTING: {:?}", &lex_token);
 
@@ -131,7 +136,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 // Array init. Example: "var x = [1, 2, 3]"
                 LexTokenKind::Sym(Sym::SquareBracketBegin) => {
                     // The `parse_arg_list` function expects the start symbol
-                    self.iter.rewind()?;
+                    self.iter.rewind_to_mark(mark);
 
                     let start_symbol = Sym::SquareBracketBegin;
                     let end_symbol = Sym::SquareBracketEnd;
@@ -367,6 +372,30 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
     // TODO: Seems like this gives incorrect column when parsed in some way.
     fn parse_expr_ident(&mut self, ident: &str) -> CustomResult<Expr> {
+        // If the identifier is followed by a "PointyBracketBegin" it can either
+        // be a start of a generic list for structures/function, or it can also
+        // be a "LessThan" compare operation. Try to parse it as a generic list,
+        // if it fails assume that it is a lt compare.
+        let mut mark = self.iter.mark();
+
+        let generics = if let Some(lex_token) = self.iter.peek_skip_space() {
+            if let LexTokenKind::Sym(Sym::PointyBracketBegin) = lex_token.kind {
+                match TypeParser::new(self.iter, None).parse_type_generics(GenericsKind::Impl) {
+                    Ok(generics) => Some(generics),
+                    Err(_) => {
+                        self.iter.rewind_to_mark(mark);
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        mark = self.iter.mark();
+
         // TODO: The peek doesn't skip line break, so can't ex. do a struct
         //       init with a line break at the start.
         // The identifier will be either a function call, a type or a reference
@@ -378,24 +407,23 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     let start_symbol = Sym::ParenthesisBegin;
                     let end_symbol = Sym::ParenthesisEnd;
                     let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
-                    let func_call = FuncCall::new(ident.into(), arguments);
+                    let func_call = FuncCall::new(ident.into(), arguments, generics);
                     Ok(Expr::FuncCall(func_call))
                 }
 
-                // TODO: Add possiblity to specify generic types.
                 // Struct construction.
                 LexTokenKind::Sym(Sym::CurlyBracketBegin) => {
                     let start_symbol = Sym::CurlyBracketBegin;
                     let end_symbol = Sym::CurlyBracketEnd;
                     let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
-                    let struct_init = StructInit::new(ident.into(), arguments);
+                    let struct_init = StructInit::new(ident.into(), arguments, generics);
                     Ok(Expr::StructInit(struct_init))
                 }
 
                 // Static method call, this is the lhs type.
-                LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(Type::CompoundType(
-                    ident.into(),
-                    BTreeMap::default(),
+                LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(Ty::CompoundType(
+                    InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
+                    Generics::new(),
                 ))),
 
                 _ => {
@@ -409,7 +437,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             | Operator::BinaryOperator(BinOperator::Of) => {
                                 // Put back the old `lex_token` contaning this
                                 // identifier and parse as type.
-                                self.iter.rewind()?;
+                                self.iter.rewind_to_mark(mark);
+
                                 let ty = self.iter.parse_type(None)?;
                                 return Ok(Expr::Type(ty));
                             }

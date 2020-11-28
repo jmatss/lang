@@ -154,7 +154,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         func_id: BlockId,
         body: &mut [AstToken],
     ) -> CustomResult<()> {
-        let fn_val = if let Some(fn_val) = self.module.get_function(&func.name) {
+        let fn_val = if let Some(fn_val) = self.module.get_function(&func.full_name()?) {
             fn_val
         } else {
             return Err(self.err(format!(
@@ -238,7 +238,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 } else {
                     return Err(self.err(format!(
                         "Bad type for parameter with name\"{}\" in function \"{}\".",
-                        &param.name, &func.name
+                        &param.name,
+                        &func.full_name()?
                     )));
                 }
             }
@@ -267,7 +268,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .fn_type(param_types.as_slice(), func.is_var_arg)
         };
 
-        Ok(self.module.add_function(&func.name, fn_type, linkage_opt))
+        Ok(self
+            .module
+            .add_function(&func.full_name()?, fn_type, linkage_opt))
     }
 
     fn compile_anon(&mut self, id: BlockId, body: &mut [AstToken]) -> CustomResult<()> {

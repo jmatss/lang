@@ -5,9 +5,10 @@ use common::{
     token::expr::FuncCall,
     token::expr::{StructInit, Var},
     traverser::TraverseContext,
+    ty::{inner_ty::InnerTy, ty::Ty},
+    util,
     visitor::Visitor,
 };
-use log::warn;
 
 use crate::AnalyzeContext;
 
@@ -159,12 +160,36 @@ impl<'a> Visitor for CallArgs<'a> {
     }
 
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
-        // If this is a function contained in a struct (method), one needs to
+        // If this is a function contained in a structure (method), one needs to
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
-        let func_res = if let Some(struct_name) = &func_call.method_struct {
+        let func_res = if let Some(ty) = &func_call.method_structure {
+            let full_struct_name = match ty {
+                Ty::CompoundType(inner_ty, generics) => match inner_ty {
+                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
+                        util::to_generic_struct_name(ident, generics)
+                    }
+                    _ => {
+                        let err = self.analyze_context.err(format!(
+                            "Bad inner type for func call method_structure: {:#?}",
+                            func_call
+                        ));
+                        self.errors.push(err);
+                        return;
+                    }
+                },
+                _ => {
+                    let err = self.analyze_context.err(format!(
+                        "method structure not valid type for func call: {:#?}",
+                        func_call
+                    ));
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
             self.analyze_context
-                .get_method_mut(struct_name, &func_call.name, ctx.block_id)
+                .get_method_mut(&full_struct_name, &func_call.name, ctx.block_id)
         } else {
             self.analyze_context
                 .get_func_mut(&func_call.name, ctx.block_id)
@@ -204,10 +229,16 @@ impl<'a> Visitor for CallArgs<'a> {
     }
 
     fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
-        let struct_ = match self
-            .analyze_context
-            .get_struct(&struct_init.name, ctx.block_id)
-        {
+        // TODO: Something similar for enums and interfaces?
+        let full_name = match struct_init.full_name() {
+            Ok(full_name) => full_name,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
+        let struct_ = match self.analyze_context.get_struct(&full_name, ctx.block_id) {
             Ok(struct_) => struct_,
             Err(err) => {
                 self.errors.push(err);

@@ -1,6 +1,5 @@
 use std::collections::{hash_map::Entry, HashMap};
 
-use crate::type_context::{SubResult, TypeContext};
 use common::{
     error::LangError,
     token::op::UnOperator,
@@ -12,10 +11,12 @@ use common::{
         stmt::Stmt,
     },
     traverser::TraverseContext,
-    types::Type,
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     util,
     visitor::Visitor,
 };
+
+use super::context::{SubResult, TypeContext};
 
 pub struct TypeSolver<'a> {
     type_context: &'a mut TypeContext<'a>,
@@ -41,7 +42,7 @@ impl<'a> TypeSolver<'a> {
         }
     }
 
-    fn subtitute_type(&mut self, ty: &mut Type, finalize: bool) {
+    fn subtitute_type(&mut self, ty: &mut Ty, finalize: bool) {
         match self.type_context.solve_substitution(ty, finalize) {
             SubResult::Solved(sub_ty) => {
                 *ty = sub_ty;
@@ -61,27 +62,14 @@ impl<'a> TypeSolver<'a> {
 
     /// Creates new instances of structs that have had their generics replaced
     /// with the actual real types that will be used.
-    ///
-    /// When this function is called, the "Type" of the struct init will have the
-    /// new correct name containing generics. The "name" field itself will NOT
-    /// have the new name, so it needs to be updated.
+    /// All the types will still have the normal/old name without generics,
+    /// but need to modify it for the "lookup" structs so that they are unique.
     fn create_generic_struct(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
-        let (new_name, struct_init_generics) = if let Type::CompoundType(new_name, generics) =
-            &struct_init.ret_type.as_ref().unwrap()
-        {
-            (new_name, generics)
-        } else {
-            unreachable!("create_generic_struct with no generics");
-        };
-
-        struct_init.name = new_name.clone();
-        let old_name = util::from_generic_struct_name(new_name);
-
         // Get the actual struct implementation and create a copy of it.
         let mut gen_struct_ty = match self
             .type_context
             .analyze_context
-            .get_struct(&old_name, ctx.block_id)
+            .get_struct(&struct_init.name, ctx.block_id)
         {
             Ok(struct_ty) => struct_ty.clone(),
             Err(err) => {
@@ -90,34 +78,55 @@ impl<'a> TypeSolver<'a> {
             }
         };
 
-        // Give the new copy of the struct type the "new name" containing
+        let full_name = match struct_init.full_name() {
+            Ok(full_name) => full_name,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
+        let generics = if let Some(generics) = struct_init.generics() {
+            generics.clone()
+        } else {
+            Generics::new()
+        };
+
+        // Give the new copy of the struct type the "full name" containing
         // information about the generic arguments.
-        gen_struct_ty.name = new_name.clone();
+        gen_struct_ty.name = full_name.clone();
 
         // For every member of the struct, replace any generic types with
-        // the type of the struct_init generics.
+        // the type of the struct_init generics. Also replace any reference
+        // to the old name with the new full name (containing generics).
         if let Some(members) = &mut gen_struct_ty.members {
             for member in members {
                 if let Some(ty) = &mut member.ret_type {
-                    ty.replace_generics_impl(struct_init_generics);
+                    ty.replace_generics_impl(&generics);
+                    // TODO: remove
+                    //ty.replace_generics_full_name(&struct_init.name, &full_name)
                 }
             }
         }
 
         // For every method of the struct, replace any generic types with
-        // the type of the struct_init generics.
+        // the type of the struct_init generics. Also replace any reference
+        // to the old name with the new full name (containing generics).
+        //
         // The methods are just pointers inside the "Struct" struct, so need to
         // dereference and create copies of the methods.
         if let Some(methods) = &mut gen_struct_ty.methods {
             let mut new_methods = HashMap::default();
 
             for (method_name, method) in methods {
-                let mut new_method = unsafe { method.as_mut() }.unwrap().clone();
+                let mut new_method = unsafe { method.as_ref() }.unwrap().clone();
 
                 if let Some(parameters) = &mut new_method.parameters {
                     for param in parameters {
                         if let Some(ty) = &mut param.ret_type {
-                            ty.replace_generics_impl(struct_init_generics);
+                            ty.replace_generics_impl(&generics);
+                            // TODO: remove
+                            //ty.replace_generics_full_name(&struct_init.name, &full_name);
                         }
                     }
                 }
@@ -125,14 +134,13 @@ impl<'a> TypeSolver<'a> {
                 new_methods.insert(method_name.clone(), new_method);
             }
 
-            self.generic_struct_methods
-                .insert(new_name.clone(), new_methods);
+            self.generic_struct_methods.insert(full_name, new_methods);
         }
 
         // This new struct variable will be added as a new struct type stored
         // in `self.generic_structs` and will then be inserted into the
         // AST later on by another "class" ("type_converter").
-        match self.generic_structs.entry(old_name) {
+        match self.generic_structs.entry(struct_init.name.clone()) {
             Entry::Occupied(ref mut o) => {
                 o.get_mut().push(gen_struct_ty);
             }
@@ -202,52 +210,16 @@ impl<'a> Visitor for TypeSolver<'a> {
 
     fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
         if let Some(ty) = &mut func_call.ret_type {
-            // Insert the, now known, struct name into the func call if this is
-            // a method call on a instance.
-            if func_call.is_method {
-                if let Some(this_arg) = func_call
-                    .arguments
-                    .first_mut()
-                    .filter(|arg| arg.name == Some("this".into()))
-                {
-                    match &this_arg.value.get_expr_type() {
-                        Ok(Type::Pointer(struct_ty)) => {
-                            if let Type::CompoundType(struct_name, _) = struct_ty.as_ref() {
-                                func_call.method_struct = Some(struct_name.clone());
-                            } else {
-                                let err = self.type_context.analyze_context.err(format!(
-                                    "First argument of method call \"{}\" not a pointer to struct type (\"this\"/\"self\"): {:?}",
-                                    &func_call.name, this_arg
-                                ));
-                                self.errors.push(err);
-                                return;
-                            }
-                        }
+            if let Some(structure_ty) = &mut func_call.method_structure {
+                self.subtitute_type(structure_ty, true);
 
-                        Ok(Type::CompoundType(struct_name, ..)) => {
-                            func_call.method_struct = Some(struct_name.clone());
-                        }
-
-                        Err(err) => {
-                            self.errors.push(err.clone());
-                            return;
-                        }
-
-                        _ => {
-                            let err = self.type_context.analyze_context.err(format!(
-                                "First argument of method call \"{}\" not a struct or pointer to struct (\"this\"/\"self\"): {:?}",
-                                &func_call.name, this_arg
-                            ));
-                            self.errors.push(err);
-                            return;
-                        }
-                    }
-                } else {
-                    // If the first argument isn't called "this", this is a
-                    // static method call, so no need to do the logic above.
+                // TODO: Fix this, seems very random to fix this here.
+                // The `method_structure` might possible be a pointer to the
+                // structure, need to get the actual structure type in that case.
+                if let Ty::Pointer(ty) = structure_ty {
+                    *structure_ty = *ty.clone();
                 }
             }
-
             self.subtitute_type(ty, true);
         } else {
             let err = self.type_context.analyze_context.err(format!(
@@ -269,11 +241,11 @@ impl<'a> Visitor for TypeSolver<'a> {
             // If this is a struct without generics, there is nothing more to do,
             // do early return from here.
             match ty {
-                Type::CompoundType(_, generics) if !generics.is_empty() => {
-                    self.create_generic_struct(struct_init, ctx);
+                Ty::CompoundType(_, generics) => {
+                    if !generics.is_empty() {
+                        self.create_generic_struct(struct_init, ctx);
+                    }
                 }
-
-                Type::CompoundType(..) => (),
 
                 _ => {
                     let err = self.type_context.analyze_context.err(format!(
@@ -333,34 +305,77 @@ impl<'a> Visitor for TypeSolver<'a> {
             *member_ty = un_op.ret_type.clone();
 
             match un_op.value.get_expr_type() {
-                Ok(Type::CompoundType(ref struct_name, ref generics)) => {
-                    // The struct type will have been resolved by this point.
-                    // This means that name of the struct will have been changed
-                    // for structs containing generics to include the generics
-                    // in its name. Need to use the old struct since the new ones
-                    // aren't created until the `type_converter` stage.
-                    let old_struct_name = if !generics.is_empty() && struct_name.contains(':') {
-                        util::from_generic_struct_name(&struct_name)
+                // TODO: Implement for enum and interface as well.
+                Ok(Ty::CompoundType(InnerTy::Struct(ref old_name), ref generics)) => {
+                    let idx = if generics.is_empty() {
+                        match self.type_context.analyze_context.get_struct_member_index(
+                            old_name,
+                            member_name,
+                            ctx.block_id,
+                        ) {
+                            Ok(idx) => idx,
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        }
                     } else {
-                        struct_name.clone()
+                        // The struct type will have been resolved by this point
+                        // so that the a struct with the real types for generics have
+                        // been created and can be found in `self.generic_structs`.
+                        let new_name = util::to_generic_struct_name(old_name, generics);
+
+                        // TODO: Find a cleaner way to do this.
+                        let empty_struct = Struct::new("".into());
+                        if let Some(new_structs) = self.generic_structs.get(old_name) {
+                            let mut new_struct = &empty_struct;
+                            let mut is_found = false;
+
+                            for curr_new_struct in new_structs {
+                                if curr_new_struct.name == new_name {
+                                    is_found = true;
+                                    new_struct = curr_new_struct;
+                                    break;
+                                }
+                            }
+
+                            if is_found {
+                                if let Some(idx) = new_struct.member_index(member_name) {
+                                    idx as u64
+                                } else {
+                                    let err = self.type_context.analyze_context.err(format!(
+                                        "Unable to find member \"{}\" in struct: {:#?}",
+                                        member_name, new_struct
+                                    ));
+                                    self.errors.push(err);
+                                    return;
+                                }
+                            } else {
+                                let err = self.type_context.analyze_context.err(format!(
+                                    "Unable to find generic struct in new_struct list: {:#?}",
+                                    un_op
+                                ));
+                                self.errors.push(err);
+                                return;
+                            }
+                        } else {
+                            let err = self
+                                .type_context
+                                .analyze_context
+                                .err(format!("Unable to find generic struct: {:#?}", un_op));
+                            self.errors.push(err);
+                            return;
+                        }
                     };
 
-                    match self.type_context.analyze_context.get_struct_member_index(
-                        &old_struct_name,
-                        member_name,
-                        ctx.block_id,
-                    ) {
-                        Ok(idx) => *member_idx = Some(idx),
-                        Err(err) => {
-                            self.errors.push(err);
-                        }
-                    }
+                    *member_idx = Some(idx as u64);
                 }
 
                 // TODO:
                 Err(err) => {
                     self.errors.push(err);
                 }
+
                 _ => {
                     let err = self.type_context.analyze_context.err(format!(
                         "Expression that was struct accessed wasn't struct or compound, was: {:#?}",

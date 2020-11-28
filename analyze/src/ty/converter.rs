@@ -76,10 +76,10 @@ impl<'a> TypeConverter<'a> {
                 return;
             }
 
-            // Insert the new struct variants that have replaced the
-            // generic parameters with an actual real type.
-            // These new struct will be insterted both into the AST
-            // and into the struct lookup table (in AnalyzeContext).
+            // Insert the new struct variants that have replaced the generic
+            // parameters with an actual real type. These new struct will be
+            // inserted both into the AST and into the struct lookup table
+            // (in AnalyzeContext).
             match self.generic_structs.entry(struct_.name.clone()) {
                 Entry::Occupied(ref mut o) => {
                     for generic_struct in o.get_mut() {

@@ -8,8 +8,8 @@ use common::{
         expr::{Expr, Var},
         lit::Lit,
     },
-    types::Type,
-    BlockId,
+    ty::{inner_ty::InnerTy, ty::Ty},
+    util, BlockId,
 };
 use inkwell::{
     basic_block::BasicBlock,
@@ -222,17 +222,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let linkage = Linkage::External;
                     self.compile_func_proto(&func, Some(linkage))?;
                 }
-                BlockHeader::Implement(struct_name) => {
+                BlockHeader::Implement(_) => {
                     for ast_token in body.iter_mut() {
                         if let Token::Block(BlockHeader::Function(func), ..) = &mut ast_token.token
                         {
-                            // Since this is a method, rename it so that its name is
-                            // "unique per struct" instead of unqiue for the whole
-                            // program. One also has to rename the method calls to
-                            // this specific method. This will be done when compiling
-                            // the method call.
                             let linkage = Linkage::External;
-                            func.name = common::util::to_method_name(struct_name, &func.name);
                             self.compile_func_proto(&func, Some(linkage))?;
                         }
                     }
@@ -303,7 +297,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         match self.analyze_context.get_var(&var.name, self.cur_block_id) {
             Ok(var_decl) => {
-                debug!("Compiling var var_decl: {:?}", &var_decl);
+                debug!("Compiling var var_decl: {:#?}", &var_decl);
 
                 // Constants are never "compiled" into instructions, they are handled
                 // "internaly" in this code during compilation.
@@ -395,12 +389,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile_type(&self, ty: &Type) -> CustomResult<AnyTypeEnum<'ctx>> {
+    pub(super) fn compile_type(&self, ty: &Ty) -> CustomResult<AnyTypeEnum<'ctx>> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Generic;
 
         Ok(match ty {
-            Type::Pointer(ref ptr) => {
+            Ty::Pointer(ref ptr) => {
                 // Get the type of the inner type and wrap into a "PointerType".
                 match self.compile_type(ptr)? {
                     AnyTypeEnum::ArrayType(ty) => ty.ptr_type(address_space).into(),
@@ -420,7 +414,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             // TODO: Calculate array size that contains ther things than just
             //       a single integer literal
-            Type::Array(inner_ty, dim_opt) => {
+            Ty::Array(inner_ty, dim_opt) => {
                 let lit_dim = if let Some(dim) = dim_opt {
                     match dim.as_ref() {
                         Expr::Lit(lit, _) => match lit {
@@ -459,34 +453,54 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
 
-            Type::Void => AnyTypeEnum::VoidType(self.context.void_type()),
-            Type::Character => AnyTypeEnum::IntType(self.context.i32_type()),
-            // TODO: What type should the string be?
-            Type::String => {
-                AnyTypeEnum::PointerType(self.context.i8_type().ptr_type(address_space))
-            }
-            Type::Boolean => AnyTypeEnum::IntType(self.context.bool_type()),
-            Type::I8 => AnyTypeEnum::IntType(self.context.i8_type()),
-            Type::U8 => AnyTypeEnum::IntType(self.context.i8_type()),
-            Type::I16 => AnyTypeEnum::IntType(self.context.i16_type()),
-            Type::U16 => AnyTypeEnum::IntType(self.context.i16_type()),
-            Type::I32 => AnyTypeEnum::IntType(self.context.i32_type()),
-            Type::U32 => AnyTypeEnum::IntType(self.context.i32_type()),
-            Type::F32 => AnyTypeEnum::FloatType(self.context.f32_type()),
-            Type::I64 => AnyTypeEnum::IntType(self.context.i64_type()),
-            Type::U64 => AnyTypeEnum::IntType(self.context.i64_type()),
-            Type::F64 => AnyTypeEnum::FloatType(self.context.f64_type()),
-            Type::I128 => AnyTypeEnum::IntType(self.context.i128_type()),
-            Type::U128 => AnyTypeEnum::IntType(self.context.i128_type()),
+            // TODO: Implement for other types (enum/interface) as well.
+            Ty::CompoundType(inner_ty, generics) => {
+                match inner_ty {
+                    InnerTy::Struct(ident) => {
+                        let ident = if !generics.is_empty() {
+                            util::to_generic_struct_name(ident, generics)
+                        } else {
+                            ident.clone()
+                        };
 
-            Type::CompoundType(struct_name, _) => {
-                if let Some(struct_type) = self.module.get_struct_type(struct_name) {
-                    struct_type.clone().into()
-                } else {
-                    return Err(self.err(format!(
-                        "Unable to find custom compound type: {}",
-                        struct_name
-                    )));
+                        if let Some(struct_type) = self.module.get_struct_type(&ident) {
+                            struct_type.clone().into()
+                        } else {
+                            return Err(self.err(format!(
+                                "Unable to find custom compound type with name: {:#?}",
+                                ident
+                            )));
+                        }
+                    }
+                    InnerTy::Enum(_) => {
+                        panic!("TODO: Enum")
+                    }
+                    InnerTy::Interface(_) => {
+                        panic!("TODO: interface")
+                    }
+                    InnerTy::Void => AnyTypeEnum::VoidType(self.context.void_type()),
+                    InnerTy::Character => AnyTypeEnum::IntType(self.context.i32_type()),
+                    // TODO: What type should the string be?
+                    InnerTy::String => {
+                        AnyTypeEnum::PointerType(self.context.i8_type().ptr_type(address_space))
+                    }
+                    InnerTy::Boolean => AnyTypeEnum::IntType(self.context.bool_type()),
+                    InnerTy::I8 => AnyTypeEnum::IntType(self.context.i8_type()),
+                    InnerTy::U8 => AnyTypeEnum::IntType(self.context.i8_type()),
+                    InnerTy::I16 => AnyTypeEnum::IntType(self.context.i16_type()),
+                    InnerTy::U16 => AnyTypeEnum::IntType(self.context.i16_type()),
+                    InnerTy::I32 => AnyTypeEnum::IntType(self.context.i32_type()),
+                    InnerTy::U32 => AnyTypeEnum::IntType(self.context.i32_type()),
+                    InnerTy::F32 => AnyTypeEnum::FloatType(self.context.f32_type()),
+                    InnerTy::I64 => AnyTypeEnum::IntType(self.context.i64_type()),
+                    InnerTy::U64 => AnyTypeEnum::IntType(self.context.i64_type()),
+                    InnerTy::F64 => AnyTypeEnum::FloatType(self.context.f64_type()),
+                    InnerTy::I128 => AnyTypeEnum::IntType(self.context.i128_type()),
+                    InnerTy::U128 => AnyTypeEnum::IntType(self.context.i128_type()),
+
+                    _ => {
+                        return Err(self.err(format!("Invalid type during type codegen: {:?}", ty)))
+                    }
                 }
             }
 

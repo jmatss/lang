@@ -6,9 +6,12 @@ use super::{
     stmt::Modifier,
 };
 use crate::{
-    error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
-    types::Type,
-    BlockId,
+    error::{
+        CustomResult, LangError,
+        LangErrorKind::{self, AnalyzeError},
+    },
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
+    util, BlockId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -17,11 +20,11 @@ pub enum Expr {
     //       implied. For numbers the postfix notation might be converted to a
     //       "As" so that the type doesn't need to be stored in the literal,
     //       it will be stored in the surrounding expression.
-    Lit(Lit, Option<Type>),
+    Lit(Lit, Option<Ty>),
 
     // TODO: Is it ok to have type as a expression? This lets one handle binary
     //       operators like ex. "as" in a simple way.
-    Type(Type),
+    Type(Ty),
     Var(Var),
     FuncCall(FuncCall),
     StructInit(StructInit),
@@ -31,7 +34,7 @@ pub enum Expr {
 }
 
 impl Expr {
-    pub fn get_expr_type(&self) -> CustomResult<Type> {
+    pub fn get_expr_type(&self) -> CustomResult<Ty> {
         Ok(match self {
             Expr::Lit(_, Some(ty)) | Expr::Type(ty) => ty.clone(),
             Expr::Var(var) => {
@@ -94,6 +97,7 @@ impl Expr {
         })
     }
 
+    #[allow(clippy::match_like_matches_macro)]
     pub fn is_var(&self) -> bool {
         match self {
             Expr::Var(_) => true,
@@ -237,7 +241,7 @@ impl Expr {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Var {
     pub name: String,
-    pub ret_type: Option<Type>,
+    pub ret_type: Option<Ty>,
     pub modifiers: Option<Vec<Modifier>>,
     pub default_value: Option<Box<Expr>>,
     pub is_const: bool,
@@ -246,7 +250,7 @@ pub struct Var {
 impl Var {
     pub fn new(
         name: String,
-        ret_type: Option<Type>,
+        ret_type: Option<Ty>,
         modifiers: Option<Vec<Modifier>>,
         default_value: Option<Box<Expr>>,
         is_const: bool,
@@ -265,27 +269,82 @@ impl Var {
 pub struct FuncCall {
     pub name: String,
     pub arguments: Vec<Argument>,
-    pub ret_type: Option<Type>,
+    pub ret_type: Option<Ty>,
 
-    // TODO: Is this needed? Currently set in type solver and the used when
-    //       renaming the method call in codegen. The codegen could get the
-    //       name of the struct from the ret type of the first argument in the
-    //       method call, but would be more work.
-    /// Will be set if this is a method call i.e. a function being a member of
-    /// a struct. The String will be the name of the struct.
-    pub method_struct: Option<String>,
+    /// Will be set if the function call "hardcoded" generics. Otherwise the
+    /// generics will be fetched from the type of this function call.
+    pub generics: Option<Generics>,
 
+    /// Will be set if this is a method call. It will be set to the structure
+    /// that this method is called on.
+    pub method_structure: Option<Ty>,
     pub is_method: bool,
 }
 
 impl FuncCall {
-    pub fn new(name: String, arguments: Vec<Argument>) -> Self {
+    pub fn new(name: String, arguments: Vec<Argument>, generics: Option<Generics>) -> Self {
         Self {
             name,
             arguments,
             ret_type: None,
-            method_struct: None,
+            generics,
+            method_structure: None,
             is_method: false,
+        }
+    }
+
+    /// Returns the generics. If generics was set at the function call, this
+    /// function will replace the types of the types parsed during type inference
+    /// with type specified at the func call.
+    pub fn generics(&mut self) -> Option<&Generics> {
+        if let Some(Ty::CompoundType(_, ty_generics)) = &mut self.ret_type {
+            Some(ty_generics)
+        } else {
+            None
+        }
+
+        /*
+        if let Some(generics) = &self.generics {
+            for (self_gen, ty_gen) in generics.iter_types().zip(ty_generics.iter_types_mut()) {
+                *ty_gen = self_gen.clone();
+            }
+        }
+
+        Some(ty_generics)
+        */
+    }
+
+    /// Returns the "full name" which is the name containing possible structure
+    /// and generics as well.
+    ///
+    /// Format:
+    ///   "<STRUCTURE_NAME>:<GENERICS>-<FUNCTION_NAME>"
+    pub fn full_name(&mut self) -> CustomResult<String> {
+        let generics = if let Some(generics) = self.generics() {
+            generics.clone()
+        } else {
+            Generics::new()
+        };
+
+        if let Some(ty) = &self.method_structure {
+            let structure_name = if let Ty::CompoundType(inner_ty, _) = ty {
+                match inner_ty {
+                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
+                        ident
+                    }
+                    _ => unreachable!("Method call on non structure type: {:#?}", self),
+                }
+            } else {
+                return Err(LangError::new(
+                    format!("Unable to get full name for method call: {:#?}", self),
+                    LangErrorKind::GeneralError,
+                ));
+            };
+
+            Ok(util::to_method_name(structure_name, &generics, &self.name))
+        } else {
+            // TODO: Possible generics on functions, need to handle it here.
+            Ok(self.name.clone())
         }
     }
 }
@@ -294,15 +353,61 @@ impl FuncCall {
 pub struct StructInit {
     pub name: String,
     pub arguments: Vec<Argument>,
-    pub ret_type: Option<Type>,
+    pub ret_type: Option<Ty>,
+    pub generics: Option<Generics>,
 }
 
 impl StructInit {
-    pub fn new(name: String, arguments: Vec<Argument>) -> Self {
+    pub fn new(name: String, arguments: Vec<Argument>, generics: Option<Generics>) -> Self {
         Self {
             name,
             arguments,
             ret_type: None,
+            generics,
+        }
+    }
+
+    /// Returns the generics. If generics was set at the struct init call, this
+    /// function will replace the types of the types parsed during type inference
+    /// with type specified at the init call.
+    pub fn generics(&mut self) -> Option<&Generics> {
+        if let Some(Ty::CompoundType(_, ty_generics)) = &mut self.ret_type {
+            Some(ty_generics)
+        } else {
+            panic!("Struct init type not struct.");
+        }
+
+        /*
+        if let Some(generics) = &self.generics {
+            for (self_gen, ty_gen) in generics.iter_types().zip(ty_generics.iter_types_mut()) {
+                *ty_gen = self_gen.clone();
+            }
+        }
+
+        Some(ty_generics)
+        */
+    }
+
+    /// Returns the "full name" which is the name containing possible generics
+    /// as well.
+    pub fn full_name(&mut self) -> CustomResult<String> {
+        let generics = if let Some(generics) = self.generics() {
+            generics.clone()
+        } else {
+            Generics::new()
+        };
+
+        if let Some(ty) = &self.ret_type {
+            if let Ty::CompoundType(InnerTy::Struct(ident), _) = ty {
+                Ok(util::to_generic_struct_name(ident, &generics))
+            } else {
+                Err(LangError::new(
+                    format!("Unable to get full name for struct init: {:#?}", self),
+                    LangErrorKind::GeneralError,
+                ))
+            }
+        } else {
+            unreachable!("Struct init has no type: {:#?}", self);
         }
     }
 }
@@ -310,7 +415,7 @@ impl StructInit {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ArrayInit {
     pub arguments: Vec<Argument>,
-    pub ret_type: Option<Type>,
+    pub ret_type: Option<Ty>,
 }
 
 impl ArrayInit {

@@ -4,7 +4,12 @@ use super::{
     expr::{Expr, Var},
     stmt::Modifier,
 };
-use crate::types::Type;
+
+use crate::{
+    error::{CustomResult, LangError, LangErrorKind},
+    ty::{inner_ty::InnerTy, ty::Ty},
+    util,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockHeader {
@@ -94,7 +99,7 @@ pub enum BlockHeader {
 pub struct Struct {
     pub name: String,
     pub generic_params: Option<Vec<String>>,
-    pub implements: Option<Vec<Type>>,
+    pub implements: Option<Vec<Ty>>,
     pub members: Option<Vec<Var>>, // TODO: extends: Vec<Type>
 
     /// The key is the name of the method.
@@ -111,29 +116,41 @@ impl Struct {
             methods: None,
         }
     }
+
+    /// Returns the index of the member with name `member_name` in this struct.
+    pub fn member_index(&self, member_name: &str) -> Option<usize> {
+        if let Some(members) = &self.members {
+            for (idx, member) in members.iter().enumerate() {
+                if member.name == member_name {
+                    return Some(idx);
+                }
+            }
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
-    pub generics: Option<Vec<Type>>,
+    pub generics: Option<Vec<Ty>>,
     pub parameters: Option<Vec<Var>>,
-    pub ret_type: Option<Type>,
+    pub ret_type: Option<Ty>,
     pub modifiers: Vec<Modifier>,
     pub is_var_arg: bool,
 
     /// Will be set if this is a function in a "impl" block which means that
-    /// this is a function tied to a struct. The string will be the struct name
+    /// this is a function tied to a struct. The type will be the structure
     /// (or the "ident" of the impl block if other than struct are allowed).
-    pub method_struct: Option<String>,
+    pub method_structure: Option<Ty>,
 }
 
 impl Function {
     pub fn new(
         name: String,
-        generics: Option<Vec<Type>>,
+        generics: Option<Vec<Ty>>,
         parameters: Option<Vec<Var>>,
-        ret_type: Option<Type>,
+        ret_type: Option<Ty>,
         modifiers: Vec<Modifier>,
         is_var_arg: bool,
     ) -> Self {
@@ -144,7 +161,35 @@ impl Function {
             ret_type,
             is_var_arg,
             modifiers,
-            method_struct: None,
+            method_structure: None,
+        }
+    }
+
+    /// Returns the "full name" which is the name containing possible structure
+    /// and generics as well.
+    ///
+    /// Format:
+    ///   "<STRUCTURE_NAME>:<GENERICS>-<FUNCTION_NAME>"
+    pub fn full_name(&self) -> CustomResult<String> {
+        if let Some(ty) = &self.method_structure {
+            let (structure_name, generics) = if let Ty::CompoundType(inner_ty, generics) = ty {
+                match inner_ty {
+                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
+                        (ident, generics)
+                    }
+                    _ => unreachable!("Method on non structure type: {:#?}", self),
+                }
+            } else {
+                return Err(LangError::new(
+                    format!("Unable to get full name for method: {:#?}", self),
+                    LangErrorKind::GeneralError,
+                ));
+            };
+
+            Ok(util::to_method_name(structure_name, generics, &self.name))
+        } else {
+            // TODO: Possible generics on functions, need to handle it here.
+            Ok(self.name.clone())
         }
     }
 
@@ -158,23 +203,34 @@ impl Function {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Enum {
     pub name: String,
-    pub generics: Vec<Type>,
+    pub generics: Option<Vec<String>>,
+    pub members: Option<Vec<Var>>,
+    // TODO: extends: Vec<Type>
 }
 
 impl Enum {
-    pub fn new(name: String, generics: Vec<Type>) -> Self {
-        Enum { name, generics }
+    pub fn new(name: String, generics: Option<Vec<String>>, members: Option<Vec<Var>>) -> Self {
+        Enum {
+            name,
+            generics,
+            members,
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Interface {
     pub name: String,
-    pub generics: Vec<Type>,
+    pub generics: Option<Vec<String>>,
+    pub members: Option<Vec<Var>>,
 }
 
 impl Interface {
-    pub fn new(name: String, generics: Vec<Type>) -> Self {
-        Interface { name, generics }
+    pub fn new(name: String, generics: Option<Vec<String>>, members: Option<Vec<Var>>) -> Self {
+        Interface {
+            name,
+            generics,
+            members,
+        }
     }
 }

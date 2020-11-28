@@ -17,6 +17,7 @@ impl<'a, I: Clone> TokenIter<'a, I> {
 
     /// Get the next item from the iterator.
     #[inline]
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<I> {
         let item = self.iter.get(self.pos);
         self.pos += 1;
@@ -33,6 +34,13 @@ impl<'a, I: Clone> TokenIter<'a, I> {
         }
     }
 
+    /// Returns the current position. This can be used to rewind the iterator
+    /// to the given position at a later stage.
+    #[inline]
+    pub fn mark(&mut self) -> usize {
+        self.pos
+    }
+
     /// Rewinds back one item in the iterator.
     /// If the returned bool is false, this operation tried to rewind to a
     /// position before the actual iterator (pos < 0).
@@ -44,6 +52,12 @@ impl<'a, I: Clone> TokenIter<'a, I> {
         } else {
             false
         }
+    }
+
+    /// Rewinds back the iterator to the latest mark.
+    #[inline]
+    pub fn rewind_to_mark(&mut self, mark: usize) {
+        self.pos = mark;
     }
 
     /// Puts back a iter into the iterator.
@@ -102,6 +116,7 @@ impl<'a, I: Clone> TokenIter<'a, I> {
 
     /// Peeks and clones the four upcoming items in the iterator.
     #[inline]
+    #[allow(clippy::type_complexity)]
     pub fn peek_four(&mut self) -> Option<(I, Option<I>, Option<I>, Option<I>)> {
         if let Some(first) = self.peek_at_n(0) {
             Some((

@@ -12,9 +12,9 @@ function main() -> i32
     var x = test_struct.a
     test_struct.b = 3.4
 
-    assert(x == 123)
-    Assert.equals_f64(test_struct.b, 3.4, 0.001)
-    //assert(test_struct.b == 3.4)
+    printf("x: %d, test_struct.b: %f", x, test_struct.b)
+    Assert::equals_i32(x, 123, "abc123")
+    Assert::equals_f64(test_struct.b, 3.4, 0.001)
 
     return 0
 }

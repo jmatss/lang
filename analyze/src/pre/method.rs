@@ -7,7 +7,6 @@ use common::{
         op::{BinOperator, Op},
     },
     traverser::TraverseContext,
-    types::Type,
     visitor::Visitor,
 };
 
@@ -55,7 +54,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
 
             if let Some(method_call) = bin_op.rhs.eval_to_func_call() {
                 match bin_op.operator {
-                    // Struct access/method call.
+                    // Instance structure access/method call.
                     BinOperator::Dot => {
                         let arg = Argument::new(Some(THIS_VAR_NAME.into()), *bin_op.lhs.clone());
 
@@ -65,17 +64,20 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
                         *expr = Expr::FuncCall(method_call.clone());
                     }
 
-                    // Static struct access/method call.
+                    // Static structure access/method call. The lhs should be a
+                    // hardcoded path/struct in this case, so can set the type
+                    // of the `method_structure` directly.
                     BinOperator::DoubleColon => match bin_op.lhs.as_ref() {
-                        Expr::Type(Type::CompoundType(ident, _)) => {
+                        Expr::Type(lhs_ty) => {
                             method_call.is_method = true;
-                            method_call.method_struct = Some(ident.clone());
+                            method_call.method_structure = Some(lhs_ty.clone());
 
                             *expr = Expr::FuncCall(method_call.clone());
                         }
+
                         _ => {
                             let err = analyze_context.err(format!(
-                                "Lhs of DoubleColon not a Struct type, was: {:?}",
+                                "Lhs of DoubleColon not a UnknownIdent type, was: {:?}",
                                 bin_op.lhs
                             ));
                             self.errors.push(err);
