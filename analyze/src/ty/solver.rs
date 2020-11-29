@@ -1,4 +1,8 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    rc::Rc,
+};
 
 use common::{
     error::LangError,
@@ -23,11 +27,11 @@ pub struct TypeSolver<'a> {
 
     /// Will contain all generic structs that have had the generic types substituted
     /// with real types. The key is the name of the struct (WITHOUT generics).
-    pub generic_structs: HashMap<String, Vec<Struct>>,
+    pub generic_structs: HashMap<String, Vec<Rc<RefCell<Struct>>>>,
 
     // The outer key is the struct name WITH generics.
     // The inner key is the name of the method.
-    pub generic_struct_methods: HashMap<String, HashMap<String, Function>>,
+    pub generic_struct_methods: HashMap<String, HashMap<String, Rc<RefCell<Function>>>>,
 
     errors: Vec<LangError>,
 }
@@ -71,7 +75,7 @@ impl<'a> TypeSolver<'a> {
             .analyze_context
             .get_struct(&struct_init.name, ctx.block_id)
         {
-            Ok(struct_ty) => struct_ty.clone(),
+            Ok(struct_ty) => struct_ty.borrow().clone(),
             Err(err) => {
                 self.errors.push(err);
                 return;
@@ -101,11 +105,15 @@ impl<'a> TypeSolver<'a> {
         // to the old name with the new full name (containing generics).
         if let Some(members) = &mut gen_struct_ty.members {
             for member in members {
-                if let Some(ty) = &mut member.ret_type {
+                let mut new_member = member.borrow().clone();
+
+                if let Some(ty) = &mut new_member.ret_type {
                     ty.replace_generics_impl(&generics);
                     // TODO: remove
                     //ty.replace_generics_full_name(&struct_init.name, &full_name)
                 }
+
+                *member = Rc::new(RefCell::new(new_member));
             }
         }
 
@@ -113,17 +121,17 @@ impl<'a> TypeSolver<'a> {
         // the type of the struct_init generics. Also replace any reference
         // to the old name with the new full name (containing generics).
         //
-        // The methods are just pointers inside the "Struct" struct, so need to
-        // dereference and create copies of the methods.
+        // The methods are RCs inside the "Struct" struct which means that they
+        // are still tied to the "old" struct, need create copies of the methods.
         if let Some(methods) = &mut gen_struct_ty.methods {
             let mut new_methods = HashMap::default();
 
             for (method_name, method) in methods {
-                let mut new_method = unsafe { method.as_ref() }.unwrap().clone();
+                let new_method = Rc::new(RefCell::new(method.borrow().clone()));
 
-                if let Some(parameters) = &mut new_method.parameters {
+                if let Some(parameters) = &mut new_method.borrow_mut().parameters {
                     for param in parameters {
-                        if let Some(ty) = &mut param.ret_type {
+                        if let Some(ty) = &mut param.borrow_mut().ret_type {
                             ty.replace_generics_impl(&generics);
                             // TODO: remove
                             //ty.replace_generics_full_name(&struct_init.name, &full_name);
@@ -131,7 +139,8 @@ impl<'a> TypeSolver<'a> {
                     }
                 }
 
-                new_methods.insert(method_name.clone(), new_method);
+                *method = new_method;
+                new_methods.insert(method_name.clone(), Rc::clone(&method));
             }
 
             self.generic_struct_methods.insert(full_name, new_methods);
@@ -142,10 +151,10 @@ impl<'a> TypeSolver<'a> {
         // AST later on by another "class" ("type_converter").
         match self.generic_structs.entry(struct_init.name.clone()) {
             Entry::Occupied(ref mut o) => {
-                o.get_mut().push(gen_struct_ty);
+                o.get_mut().push(Rc::new(RefCell::new(gen_struct_ty)));
             }
             Entry::Vacant(v) => {
-                v.insert(vec![gen_struct_ty]);
+                v.insert(vec![Rc::new(RefCell::new(gen_struct_ty))]);
             }
         }
     }
@@ -326,13 +335,13 @@ impl<'a> Visitor for TypeSolver<'a> {
                         let new_name = util::to_generic_struct_name(old_name, generics);
 
                         // TODO: Find a cleaner way to do this.
-                        let empty_struct = Struct::new("".into());
+                        let empty_struct = Rc::new(RefCell::new(Struct::new("".into())));
                         if let Some(new_structs) = self.generic_structs.get(old_name) {
                             let mut new_struct = &empty_struct;
                             let mut is_found = false;
 
                             for curr_new_struct in new_structs {
-                                if curr_new_struct.name == new_name {
+                                if curr_new_struct.borrow().name == new_name {
                                     is_found = true;
                                     new_struct = curr_new_struct;
                                     break;
@@ -340,7 +349,7 @@ impl<'a> Visitor for TypeSolver<'a> {
                             }
 
                             if is_found {
-                                if let Some(idx) = new_struct.member_index(member_name) {
+                                if let Some(idx) = new_struct.borrow().member_index(member_name) {
                                     idx as u64
                                 } else {
                                     let err = self.type_context.analyze_context.err(format!(
@@ -389,12 +398,12 @@ impl<'a> Visitor for TypeSolver<'a> {
 
     fn visit_var_decl(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         if let Stmt::VariableDecl(var, _) = stmt {
-            if let Some(ty) = &mut var.ret_type {
+            if let Some(ty) = &mut var.borrow_mut().ret_type {
                 self.subtitute_type(ty, true);
             } else {
                 let err = self.type_context.analyze_context.err(format!(
                     "Unable to find infer type for var decl ret_type: {:?}",
-                    stmt
+                    var
                 ));
                 self.errors.push(err);
             }

@@ -26,7 +26,7 @@ use mid::defer::DeferAnalyzer;
 use post::call_args::CallArgs;
 use pre::indexing::IndexingAnalyzer;
 use pre::method::MethodAnalyzer;
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, cell::RefMut, collections::HashMap, rc::Rc};
 use ty::context::TypeContext;
 use ty::converter::TypeConverter;
 use ty::inferencer::TypeInferencer;
@@ -215,11 +215,11 @@ pub struct AnalyzeContext {
     /// part of the code. The BlockId represent the outer scope for a item.
     /// For variables it will be the scope in which they are declared in and for
     /// the rest, the BlockId will be the parent block.
-    variables: HashMap<(String, BlockId), *mut Var>,
-    functions: HashMap<(String, BlockId), *mut Function>,
-    structs: HashMap<(String, BlockId), *mut Struct>,
-    enums: HashMap<(String, BlockId), *mut Enum>,
-    interfaces: HashMap<(String, BlockId), *mut Interface>,
+    variables: HashMap<(String, BlockId), Rc<RefCell<Var>>>,
+    functions: HashMap<(String, BlockId), Rc<RefCell<Function>>>,
+    structs: HashMap<(String, BlockId), Rc<RefCell<Struct>>>,
+    enums: HashMap<(String, BlockId), Rc<RefCell<Enum>>>,
+    interfaces: HashMap<(String, BlockId), Rc<RefCell<Interface>>>,
 
     pub block_info: HashMap<BlockId, BlockInfo>,
     pub use_paths: Vec<Path>,
@@ -388,25 +388,39 @@ impl AnalyzeContext {
     }
 
     /// Given a name of a declaration `ident` and the block in which this
+    /// declaration was declared, `decl_block_id`, returns a reference to the
+    /// declaration in the AST.
+    fn get<'a, T>(
+        &self,
+        ident: &str,
+        decl_block_id: BlockId,
+        map: &'a HashMap<(String, BlockId), Rc<RefCell<T>>>,
+    ) -> CustomResult<Rc<RefCell<T>>> {
+        let key = (ident.into(), decl_block_id);
+
+        if let Some(item) = map.get(&key) {
+            Ok(Rc::clone(item))
+        } else {
+            Err(self.err(format!(
+                "Unable to find decl with name \"{}\" in decl block ID {}.",
+                ident, decl_block_id
+            )))
+        }
+    }
+
+    /// Given a name of a declaration `ident` and the block in which this
     /// declaration was declared, `decl_block_id`, returns a mutable reference
     /// to the declaration in the AST.
     fn get_mut<'a, T>(
         &self,
         ident: &str,
         decl_block_id: BlockId,
-        map: &HashMap<(String, BlockId), *mut T>,
-    ) -> CustomResult<&'a mut T> {
+        map: &'a HashMap<(String, BlockId), Rc<RefCell<T>>>,
+    ) -> CustomResult<RefMut<'a, T>> {
         let key = (ident.into(), decl_block_id);
 
-        if let Some(ptr) = map.get(&key) {
-            if let Some(ref_) = unsafe { ptr.as_mut() } {
-                Ok(ref_)
-            } else {
-                panic!(
-                    "Invalid pointer to decl with name \"{}\" in decl block ID {}.",
-                    ident, decl_block_id
-                );
-            }
+        if let Some(item) = map.get(&key) {
+            Ok(item.borrow_mut())
         } else {
             Err(self.err(format!(
                 "Unable to find decl with name \"{}\" in decl block ID {}.",
@@ -417,100 +431,92 @@ impl AnalyzeContext {
 
     /// Given a name of a variable `ident` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
-    pub fn get_var(&self, ident: &str, id: BlockId) -> CustomResult<&Var> {
-        Ok(self.get_var_mut(ident, id)?)
+    pub fn get_var(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Var>>> {
+        let decl_block_id = self.get_var_decl_scope(ident, id)?;
+        self.get(ident, decl_block_id, &self.variables)
     }
 
     /// Given a name of a variable `ident` and a block scope `id`, returns
     /// a mutable reference to the declaration in the AST.
-    pub fn get_var_mut(&self, ident: &str, id: BlockId) -> CustomResult<&mut Var> {
+    pub fn get_var_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Var>> {
         let decl_block_id = self.get_var_decl_scope(ident, id)?;
         self.get_mut(ident, decl_block_id, &self.variables)
     }
 
     /// Given a name of a function `ident` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
-    pub fn get_func(&self, ident: &str, id: BlockId) -> CustomResult<&Function> {
-        Ok(self.get_func_mut(ident, id)?)
+    pub fn get_func(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Function>>> {
+        let decl_block_id = self.get_func_decl_scope(ident, id)?;
+        self.get(ident, decl_block_id, &self.functions)
     }
 
     /// Given a name of a function `ident` and a block scope `id`, returns
     /// a mutable reference to the declaration in the AST.
-    pub fn get_func_mut(&self, ident: &str, id: BlockId) -> CustomResult<&mut Function> {
+    pub fn get_func_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Function>> {
         let decl_block_id = self.get_func_decl_scope(ident, id)?;
         self.get_mut(ident, decl_block_id, &self.functions)
     }
 
     /// Given a name of a struct `ident` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
-    pub fn get_struct(&self, ident: &str, id: BlockId) -> CustomResult<&Struct> {
-        Ok(self.get_struct_mut(ident, id)?)
+    pub fn get_struct(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Struct>>> {
+        let decl_block_id = self.get_struct_decl_scope(ident, id)?;
+        self.get(ident, decl_block_id, &self.structs)
     }
 
     /// Given a name of a struct `ident` and a block scope `id`, returns
     /// a mutable reference to the declaration in the AST.
-    pub fn get_struct_mut(&self, ident: &str, id: BlockId) -> CustomResult<&mut Struct> {
+    pub fn get_struct_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Struct>> {
         let decl_block_id = self.get_struct_decl_scope(ident, id)?;
         self.get_mut(ident, decl_block_id, &self.structs)
     }
 
     /// Given a name of a enum `ident` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
-    pub fn get_enum(&self, ident: &str, id: BlockId) -> CustomResult<&Enum> {
-        Ok(self.get_enum_mut(ident, id)?)
+    pub fn get_enum(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Enum>>> {
+        let decl_block_id = self.get_enum_decl_scope(ident, id)?;
+        self.get(ident, decl_block_id, &self.enums)
     }
 
     /// Given a name of a enum `ident` and a block scope `id`, returns
     /// a mutable reference to the declaration in the AST.
-    pub fn get_enum_mut(&self, ident: &str, id: BlockId) -> CustomResult<&mut Enum> {
+    pub fn get_enum_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Enum>> {
         let decl_block_id = self.get_enum_decl_scope(ident, id)?;
         self.get_mut(ident, decl_block_id, &self.enums)
     }
 
     /// Given a name of a interface `ident` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
-    pub fn get_interface(&self, ident: &str, id: BlockId) -> CustomResult<&Interface> {
-        Ok(self.get_interface_mut(ident, id)?)
+    pub fn get_interface(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Interface>>> {
+        let decl_block_id = self.get_interface_decl_scope(ident, id)?;
+        self.get(ident, decl_block_id, &self.interfaces)
     }
 
     /// Given a name of a interface `ident` and a block scope `id`, returns
     /// a mutable reference to the declaration in the AST.
-    pub fn get_interface_mut(&self, ident: &str, id: BlockId) -> CustomResult<&mut Interface> {
+    pub fn get_interface_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Interface>> {
         let decl_block_id = self.get_interface_decl_scope(ident, id)?;
         self.get_mut(ident, decl_block_id, &self.interfaces)
     }
 
     /// Given a name of a struct `struct_`, a name of a method `func` and a
     /// block scope `id`, returns a reference to the declaration in the AST.
-    pub fn get_method(&self, struct_: &str, func: &str, id: BlockId) -> CustomResult<&Function> {
-        Ok(self.get_method_mut(struct_, func, id)?)
-    }
-
-    /// Given a name of a struct `struct_`, a name of a method `func` and a
-    /// block scope `id`, returns a reference mutable to the declaration in
-    /// the AST.
-    pub fn get_method_mut(
+    pub fn get_method(
         &self,
         struct_name: &str,
         func_name: &str,
         id: BlockId,
-    ) -> CustomResult<&mut Function> {
+    ) -> CustomResult<Rc<RefCell<Function>>> {
         let decl_block_id = self.get_struct_decl_scope(struct_name, id)?;
         let struct_ = self.get_struct(struct_name, decl_block_id)?;
+        let struct_ = struct_.borrow();
 
-        if let Some(ptr) = struct_
+        if let Some(method) = struct_
             .methods
             .as_ref()
             .and_then(|ref map| map.get(func_name))
         {
-            if let Some(ref_) = unsafe { ptr.as_mut() } {
-                Ok(ref_)
-            } else {
-                panic!(
-                    "Invalid pointer to method with name \"{}\" in struct {:#?}.",
-                    &func_name, &struct_
-                );
-            }
+            Ok(Rc::clone(method))
         } else {
             Err(self.err(format!(
                 "Unable to find method named \"{}\" in struct \"{:#?}\".",
@@ -524,11 +530,12 @@ impl AnalyzeContext {
     pub fn insert_method(
         &mut self,
         struct_name: &str,
-        func: &mut Function,
+        func: Rc<RefCell<Function>>,
         id: BlockId,
     ) -> CustomResult<()> {
         let decl_block_id = self.get_struct_decl_scope(struct_name, id)?;
-        let struct_ = self.get_struct_mut(struct_name, decl_block_id)?;
+        let struct_ = self.get_struct(struct_name, decl_block_id)?;
+        let mut struct_ = struct_.borrow_mut();
 
         let methods = if let Some(methods) = &mut struct_.methods {
             methods
@@ -537,8 +544,8 @@ impl AnalyzeContext {
             struct_.methods.as_mut().unwrap()
         };
 
-        let ptr = func as *mut Function;
-        methods.insert(func.name.clone(), ptr);
+        let func_name = func.borrow().name.clone();
+        methods.insert(func_name, Rc::clone(&func));
 
         Ok(())
     }
@@ -551,11 +558,16 @@ impl AnalyzeContext {
         struct_name: &str,
         member_name: &str,
         id: BlockId,
-    ) -> CustomResult<&Var> {
+    ) -> CustomResult<Rc<RefCell<Var>>> {
         let struct_ = self.get_struct(struct_name, id)?;
+        let struct_ = struct_.borrow_mut();
+
         if let Some(members) = &struct_.members {
-            if let Some(var) = members.iter().find(|member| member.name == member_name) {
-                Ok(var)
+            if let Some(var) = members
+                .iter()
+                .find(|member| member.borrow().name == member_name)
+            {
+                Ok(Rc::clone(var))
             } else {
                 Err(self.err(format!(
                     "Unable to find member with name \"{}\" in struct \"{}\".",
@@ -579,7 +591,11 @@ impl AnalyzeContext {
         member_name: &str,
         id: BlockId,
     ) -> CustomResult<u64> {
-        if let Some(idx) = self.get_struct(struct_name, id)?.member_index(member_name) {
+        if let Some(idx) = self
+            .get_struct(struct_name, id)?
+            .borrow()
+            .member_index(member_name)
+        {
             Ok(idx as u64)
         } else {
             Err(self.err(format!(
@@ -597,11 +613,16 @@ impl AnalyzeContext {
         enum_name: &str,
         member_name: &str,
         id: BlockId,
-    ) -> CustomResult<&Var> {
+    ) -> CustomResult<Rc<RefCell<Var>>> {
         let enum_ = self.get_enum(enum_name, id)?;
+        let enum_ = enum_.borrow_mut();
+
         if let Some(members) = &enum_.members {
-            if let Some(var) = members.iter().find(|member| member.name == member_name) {
-                Ok(var)
+            if let Some(var) = members
+                .iter()
+                .find(|member| member.borrow().name == member_name)
+            {
+                Ok(Rc::clone(var))
             } else {
                 Err(self.err(format!(
                     "Unable to find member with name \"{}\" in enum \"{}\".",
@@ -618,44 +639,52 @@ impl AnalyzeContext {
 
     /// Given a function or method `func`, finds the parameter with the name
     // `param_name` and also its index.
-    fn get_param(&self, func: &Function, param_name: &str) -> CustomResult<(u64, Var)> {
-        if let Some(params) = &func.parameters {
+    fn get_param(
+        &self,
+        func: Rc<RefCell<Function>>,
+        param_name: &str,
+    ) -> CustomResult<(usize, Var)> {
+        if let Some(params) = &func.borrow().parameters {
             for (idx, param) in params.iter().enumerate() {
-                if param_name == param.name {
-                    return Ok((idx as u64, param.clone()));
+                if param_name == param.borrow().name {
+                    return Ok((idx, param.borrow().clone()));
                 }
             }
 
             Err(self.err(format!(
                 "Unable to find param with name \"{}\" in function with name \"{}\".",
-                &param_name, &func.name,
+                &param_name,
+                &func.borrow().name,
             )))
         } else {
             Err(self.err(format!(
                 "Function \"{}\" had no parameters, expected param with name: {}",
-                &func.name, &param_name
+                &func.borrow().name,
+                &param_name
             )))
         }
     }
 
     /// Given a function or method `func`, finds the parameter with the name
-    // `param_name` and also its index.
-    fn get_param_with_idx(&self, func: &Function, idx: u64) -> CustomResult<Var> {
-        if let Some(params) = &func.parameters {
+    /// `param_name` and also its index.
+    fn get_param_with_idx(&self, func: Rc<RefCell<Function>>, idx: usize) -> CustomResult<Var> {
+        if let Some(params) = &func.borrow().parameters {
             for (i, param) in params.iter().enumerate() {
-                if idx == i as u64 {
-                    return Ok(param.clone());
+                if idx == i {
+                    return Ok(param.borrow().clone());
                 }
             }
 
             Err(self.err(format!(
                 "Unable to find param with index \"{}\" in function with name \"{}\".",
-                idx, &func.name,
+                idx,
+                &func.borrow().name,
             )))
         } else {
             Err(self.err(format!(
                 "Function \"{}\" had no parameters, expected param with index: {}",
-                &func.name, idx
+                &func.borrow().name,
+                idx
             )))
         }
     }
@@ -663,7 +692,7 @@ impl AnalyzeContext {
     /// Given a function or method `func`, finds the index of the parameter with
     /// the name `param_name`. The index indicates the position of the parameter
     /// in the struct parameter list.
-    fn get_param_idx(&self, func: &Function, param_name: &str) -> CustomResult<u64> {
+    fn get_param_idx(&self, func: Rc<RefCell<Function>>, param_name: &str) -> CustomResult<usize> {
         Ok(self.get_param(func, param_name)?.0)
     }
 
@@ -677,7 +706,7 @@ impl AnalyzeContext {
         method_name: &str,
         param_name: &str,
         id: BlockId,
-    ) -> CustomResult<u64> {
+    ) -> CustomResult<usize> {
         let method = self.get_method(struct_name, method_name, id)?;
         self.get_param_idx(method, param_name)
     }
@@ -689,20 +718,21 @@ impl AnalyzeContext {
         func_name: &str,
         param_name: &str,
         id: BlockId,
-    ) -> CustomResult<u64> {
+    ) -> CustomResult<usize> {
         let func = self.get_func(func_name, id)?;
         self.get_param_idx(func, param_name)
     }
 
     /// Given a function or method `func`, finds the type of the parameter with
     /// the name `param_name`.
-    fn get_param_type(&self, func: &Function, idx: u64) -> CustomResult<Ty> {
-        if let Some(ty) = &self.get_param_with_idx(func, idx)?.ret_type {
+    fn get_param_type(&self, func: Rc<RefCell<Function>>, idx: usize) -> CustomResult<Ty> {
+        if let Some(ty) = &self.get_param_with_idx(Rc::clone(&func), idx)?.ret_type {
             Ok(ty.clone())
         } else {
             Err(self.err(format!(
                 "Parameter at index \"{}\" in function \"{}\" has no type set.",
-                idx, func.name
+                idx,
+                func.borrow().name
             )))
         }
     }
@@ -715,7 +745,7 @@ impl AnalyzeContext {
         &self,
         struct_name: &str,
         method_name: &str,
-        idx: u64,
+        idx: usize,
         id: BlockId,
     ) -> CustomResult<Ty> {
         let method = self.get_method(struct_name, method_name, id)?;
@@ -724,7 +754,12 @@ impl AnalyzeContext {
 
     /// Finds the function with the name `func_name` in a scope containing the block
     /// with ID `id` and returns the type of the parameter with name `param_name`.
-    pub fn get_func_param_type(&self, func_name: &str, idx: u64, id: BlockId) -> CustomResult<Ty> {
+    pub fn get_func_param_type(
+        &self,
+        func_name: &str,
+        idx: usize,
+        id: BlockId,
+    ) -> CustomResult<Ty> {
         let func = self.get_func(func_name, id)?;
         self.get_param_type(func, idx)
     }

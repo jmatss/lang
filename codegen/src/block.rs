@@ -88,7 +88,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
             BlockHeader::Function(func) => {
-                self.compile_func(&func, id, body)?;
+                self.compile_func(&func.borrow(), id, body)?;
             }
             BlockHeader::Implement(_) => {
                 for ast_token in body {
@@ -97,7 +97,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     {
                         // The method will already have been renamed to be prefixed
                         // with the struct name, so no need to do it here.
-                        self.compile_func(&func, *func_id, func_body)?;
+                        self.compile_func(&func.borrow(), *func_id, func_body)?;
                     }
                 }
             }
@@ -179,14 +179,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // TODO: How does this work with variadic parameters?
         // Get names for the parameters and alloc space in the functions stack.
         for (i, arg) in fn_val.get_param_iter().enumerate() {
-            let param = params.get(i).ok_or_else(|| {
-                self.err(format!(
-                    "No param at index {} for function {}",
-                    i, &func.name
-                ))
-            })?;
+            let param = params
+                .get(i)
+                .ok_or_else(|| {
+                    self.err(format!(
+                        "No param at index {} for function {}",
+                        i, &func.name
+                    ))
+                })?
+                .borrow();
 
-            let ptr = self.create_entry_block_alloca(param)?;
+            let ptr = self.create_entry_block_alloca(&param)?;
             self.builder.build_store(ptr, arg);
 
             let key = (param.name.clone(), func_id);
@@ -231,6 +234,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let param_types = if let Some(params) = &func.parameters {
             let mut inner_types = Vec::with_capacity(params.len());
             for param in params {
+                let param = param.borrow();
+
                 if let Some(param_type_struct) = &param.ret_type {
                     let any_type = self.compile_type(&param_type_struct)?;
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
@@ -475,6 +480,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let member_types = if let Some(members) = &struct_.members {
             let mut v = Vec::with_capacity(members.len());
             for member in members {
+                let member = member.borrow();
+
                 if let Some(member_type_struct) = &member.ret_type {
                     let any_type = self.compile_type(&member_type_struct)?;
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;

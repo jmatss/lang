@@ -34,6 +34,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
 
             Stmt::VariableDecl(var, expr_opt) => {
+                let var = var.borrow();
+
                 self.compile_var_decl(&var)?;
                 if let Some(expr) = expr_opt {
                     let any_value = self.compile_expr(expr, ExprTy::RValue)?;
@@ -50,7 +52,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // TODO: Add other external declares other than func (var, struct etc.)
             Stmt::ExternalDecl(func) => {
                 let linkage = Linkage::External;
-                self.compile_func_proto(&func, Some(linkage))?;
+                self.compile_func_proto(&func.borrow(), Some(linkage))?;
                 Ok(())
             }
             Stmt::Assignment(assign_op, lhs, rhs) => {

@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use common::{
     error::CustomResult,
     error::LangError,
@@ -31,7 +33,11 @@ impl<'a> CallArgs<'a> {
         }
     }
 
-    fn reorder_func_call(&mut self, func_call: &mut FuncCall, params: &[Var]) -> CustomResult<()> {
+    fn reorder_func_call(
+        &mut self,
+        func_call: &mut FuncCall,
+        params: &[Rc<RefCell<Var>>],
+    ) -> CustomResult<()> {
         let mut idx: u64 = 0;
         while idx < func_call.arguments.len() as u64 {
             let arg = func_call
@@ -45,7 +51,7 @@ impl<'a> CallArgs<'a> {
                 let mut new_idx = 0;
                 let mut found = false;
                 for param in params {
-                    if arg_name == &param.name {
+                    if arg_name == &param.borrow().name {
                         found = true;
                         break;
                     }
@@ -76,7 +82,7 @@ impl<'a> CallArgs<'a> {
     fn reorder_struct_init(
         &mut self,
         struct_init: &mut StructInit,
-        members: &[Var],
+        members: &[Rc<RefCell<Var>>],
     ) -> CustomResult<()> {
         let mut idx: u64 = 0;
         while idx < struct_init.arguments.len() as u64 {
@@ -91,7 +97,7 @@ impl<'a> CallArgs<'a> {
                 let mut new_idx = 0;
                 let mut found = false;
                 for member in members {
-                    if arg_name == &member.name {
+                    if arg_name == &member.borrow().name {
                         found = true;
                         break;
                     }
@@ -122,7 +128,7 @@ impl<'a> CallArgs<'a> {
     fn default_args(
         &self,
         func_call: &mut FuncCall,
-        params: &[Var],
+        params: &[Rc<RefCell<Var>>],
         is_variadic: bool,
     ) -> CustomResult<()> {
         // If here are more parameters in the function that there are arguments
@@ -133,6 +139,8 @@ impl<'a> CallArgs<'a> {
         if !is_variadic && func_call.arguments.len() < params.len() {
             let start_idx = func_call.arguments.len();
             for param in params[start_idx..].iter() {
+                let param = param.borrow();
+
                 if let Some(default_value) = &param.default_value {
                     let default_arg =
                         Argument::new(Some(param.name.clone()), *default_value.clone());
@@ -189,10 +197,9 @@ impl<'a> Visitor for CallArgs<'a> {
             };
 
             self.analyze_context
-                .get_method_mut(&full_struct_name, &func_call.name, ctx.block_id)
+                .get_method(&full_struct_name, &func_call.name, ctx.block_id)
         } else {
-            self.analyze_context
-                .get_func_mut(&func_call.name, ctx.block_id)
+            self.analyze_context.get_func(&func_call.name, ctx.block_id)
         };
 
         let func = match func_res {
@@ -202,6 +209,8 @@ impl<'a> Visitor for CallArgs<'a> {
                 return;
             }
         };
+
+        let func = func.borrow();
 
         // Get the parameters for the function. This will be used to reorder
         // the arguments in the function call correctly.
@@ -248,6 +257,7 @@ impl<'a> Visitor for CallArgs<'a> {
 
         // Get the members of the struct. This will be used to reorder the
         // arguments in the struct init call correctly.
+        let struct_ = struct_.borrow();
         let members = if let Some(members) = &struct_.members {
             members
         } else {

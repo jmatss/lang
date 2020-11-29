@@ -1,12 +1,11 @@
 use crate::AnalyzeContext;
 use common::{
     error::LangError,
-    token::expr::Var,
     token::{ast::AstToken, stmt::Stmt},
     traverser::TraverseContext,
     visitor::Visitor,
 };
-use std::{cell::RefCell, collections::hash_map::Entry};
+use std::{cell::RefCell, collections::hash_map::Entry, rc::Rc};
 
 /// Gathers information about all variable declarations found in the AST and
 /// inserts them into the `analyze_context`.
@@ -42,14 +41,14 @@ impl<'a> Visitor for DeclVarAnalyzer<'a> {
         if let Stmt::VariableDecl(var, _) = stmt {
             let mut analyze_context = self.analyze_context.borrow_mut();
 
-            let key = (var.name.clone(), ctx.block_id);
+            let key = (var.borrow().name.clone(), ctx.block_id);
             if let Entry::Vacant(v) = analyze_context.variables.entry(key) {
-                let var_ptr = var as *mut Var;
-                v.insert(var_ptr);
+                v.insert(Rc::clone(var));
             } else {
                 let err = analyze_context.err(format!(
                     "A variable with name \"{}\" already declared in this scope ({}).",
-                    &var.name, ctx.block_id
+                    &var.borrow().name,
+                    ctx.block_id
                 ));
                 self.errors.push(err);
             }

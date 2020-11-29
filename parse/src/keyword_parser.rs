@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
     parser::{ParseTokenIter, DEFAULT_STOP_CONDS},
     token::get_modifier_token,
@@ -388,7 +390,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 }
             };
 
-            Ok(Token::Stmt(Stmt::ExternalDecl(Box::new(func))))
+            Ok(Token::Stmt(Stmt::ExternalDecl(Rc::new(RefCell::new(func)))))
         } else {
             Err(self
                 .iter
@@ -446,7 +448,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         };
 
         let is_const = false;
-        let var = Var::new(ident, var_type, None, None, is_const);
+        let var = Rc::new(RefCell::new(Var::new(
+            ident, var_type, None, None, is_const,
+        )));
         let var_decl = Stmt::VariableDecl(var, expr_opt);
         Ok(Token::Stmt(var_decl))
     }
@@ -518,7 +522,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// The "function" keyword has already been consumed when this function is called.
     fn parse_func(&mut self) -> CustomResult<AstToken> {
         let func = self.parse_func_proto()?;
-        let func_header = BlockHeader::Function(Box::new(func));
+        let func_header = BlockHeader::Function(Rc::new(RefCell::new(func)));
         self.iter.next_block(func_header)
     }
 
@@ -608,6 +612,12 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let end_symbol = Sym::ParenthesisEnd;
         let (params, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol, None)?;
 
+        // Wrap the params into RC & RefCell.
+        let params = params
+            .iter()
+            .map(|var| Rc::new(RefCell::new(var.clone())))
+            .collect::<Vec<_>>();
+
         // If the next token is a "Arrow" ("->"), assume that the return type
         // of the function is specified afterwards. If there are no arrow,
         // assume that the function returns void.
@@ -674,9 +684,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // Parse the members of the struct.
         let start_symbol = Sym::CurlyBracketBegin;
         let end_symbol = Sym::CurlyBracketEnd;
-        let (mut members, is_var_arg) =
-            self.iter
-                .parse_par_list(start_symbol, end_symbol, generics)?;
+        let (members, is_var_arg) = self
+            .iter
+            .parse_par_list(start_symbol, end_symbol, generics)?;
+
+        let mut members = members
+            .iter()
+            .map(|m| Rc::new(RefCell::new(m.clone())))
+            .collect::<Vec<_>>();
 
         if is_var_arg {
             return Err(self.iter.err(format!(
@@ -686,7 +701,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
 
         for member in &mut members {
-            if let Some(ret_ty) = &mut member.ret_type {
+            if let Some(ret_ty) = &mut member.borrow_mut().ret_type {
                 // Replace any generics with the type "Generic" instead of
                 // the type "CompoundType".
                 if let Some(gens) = generics {
@@ -695,7 +710,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             } else {
                 self.iter.err(format!(
                     "Member \"{}\" in struct \"{}\" has no type set.",
-                    &member.name, &ident
+                    &member.borrow().name,
+                    &ident
                 ));
             }
         }
@@ -710,7 +726,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         struct_.generic_params =
             generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
         struct_.members = members_opt;
-        let header = BlockHeader::Struct(Box::new(struct_));
+        let header = BlockHeader::Struct(Rc::new(RefCell::new(struct_)));
 
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);

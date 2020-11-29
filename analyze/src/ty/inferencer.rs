@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use common::{
     error::LangError,
     token::ast::Token,
@@ -36,7 +38,7 @@ pub struct TypeInferencer<'a, 'b> {
     /// Keep a copy of the current function which body is being traversed.
     /// This will let the statements/exprs etc. inside the function know
     /// about the types of the parameters and the return type.
-    cur_func: Option<Function>,
+    cur_func: Option<Rc<RefCell<Function>>>,
 
     /// The identifier of the last seen implement block. This allows methods
     /// to see which impl block they belong to.
@@ -157,8 +159,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
         };
 
-        let var_decl_ty = if let Some(ty) = &var_decl.ret_type {
-            ty.clone()
+        let var_decl_ty = if let Some(ty) = var_decl.borrow().ret_type.clone() {
+            ty
         } else {
             let err = self
                 .type_context
@@ -226,8 +228,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             // Insert constraints between the function call argument type and
             // the method parameter types that will be figured out later.
-            let mut idx: u64 = 0;
-            for arg in &func_call.arguments {
+            for (idx, arg) in func_call.arguments.iter().enumerate() {
                 // If the argument is a named argument, give the argument name
                 // to the new "UnknownMethodArgument" to try and figure out the
                 // position of the argument through it. Otherwise use the index.
@@ -259,8 +260,6 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 if arg_expr_ty != structure_ty {
                     self.type_context.insert_constraint(arg_ty, arg_expr_ty);
                 }
-
-                idx += 1;
             }
 
             // The expected return type of the function call.
@@ -271,7 +270,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 .analyze_context
                 .get_func(&func_call.name, ctx.block_id)
             {
-                Ok(func) => func.clone(),
+                Ok(func) => func,
                 Err(err) => {
                     self.errors.push(err);
                     return;
@@ -285,9 +284,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // The "similar" logic for methods will be done during type solving
             // in `type_context` since at this point there is no way to know
             // the type of the struct and indirectly the method.
-            if let Some(params) = &func.parameters {
-                let mut idx: u64 = 0;
-                for arg in &func_call.arguments {
+            if let Some(params) = &func.borrow().parameters {
+                for (idx, arg) in func_call.arguments.iter().enumerate() {
                     // If the argument is a named argument, get the index for the
                     // named parameter instead of using the index of its position
                     // in the function call.
@@ -315,14 +313,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         }
                     };
 
-                    if func.is_var_arg && inner_idx >= params.len() as u64 {
-                        idx += 1;
+                    if func.borrow().is_var_arg && inner_idx >= params.len() {
                         continue;
                     }
 
                     let par_ty = if let Some(ty) = &params
                         .get(inner_idx as usize)
-                        .map(|param| param.ret_type.clone())
+                        .map(|param| param.borrow().ret_type.clone())
                         .flatten()
                     {
                         ty.clone()
@@ -330,7 +327,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         let err = self.type_context.analyze_context.err(
                             format!(
                                 "Type for parameter \"{:?}\" with index {} in function \"{}\" set to None.",
-                                arg.name, inner_idx, func.name
+                                arg.name, inner_idx, func.borrow().name
                             ),
                         );
                         self.errors.push(err);
@@ -338,13 +335,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     };
 
                     self.type_context.insert_constraint(arg_ty, par_ty);
-
-                    idx += 1;
                 }
             }
 
-            if let Some(ty) = &func.ret_type {
-                ty.clone()
+            let func = func.borrow();
+            if let Some(ty) = func.ret_type.clone() {
+                ty
             } else {
                 Ty::CompoundType(InnerTy::Void, Generics::new())
             }
@@ -361,13 +357,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             .analyze_context
             .get_struct(&struct_init.name, ctx.block_id)
         {
-            Ok(struct_) => struct_.clone(),
+            Ok(struct_) => struct_,
             Err(err) => {
                 self.errors.push(err);
                 return;
             }
         };
 
+        let struct_ = struct_.borrow();
         if let Some(members) = &struct_.members {
             // Gets a map if the generics that maps the ident of the generic
             // (ex. "T", "U" etc.) to a new unknown generic type. This is needed
@@ -463,15 +460,17 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 match arg.value.get_expr_type() {
                     Ok(arg_ty) => {
                         if let Some(member) = members.get(index) {
-                            let mut member = member.clone();
+                            // Make a copy of the type to allow for multiple
+                            // struct inits with different types for the generics.
+                            let mut new_member = member.borrow().clone();
 
                             // Get the "actual" type of the member. If it contains
                             // a generic, it needs to get the actual unknown
                             // generic type from the `unknown_generics` map.
                             // Otherwise reuse the already set type.
-                            let member_type = if let Some(member_type) = &mut member.ret_type {
-                                member_type.replace_generics_impl(&generics);
-                                member_type.clone()
+                            let member_type = if let Some(ty) = &mut new_member.ret_type {
+                                ty.replace_generics_impl(&generics);
+                                ty.clone()
                             } else {
                                 let err = self.type_context.analyze_context.err(format!(
                                     "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
@@ -496,7 +495,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                             .clone()
                                             .expect("Will always be set at this point"),
                                     ),
-                                    member.name.clone(),
+                                    new_member.name.clone(),
                                 ),
                             );
                         } else {
@@ -732,15 +731,21 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Function(func), ..) = &mut ast_token.token {
+            let func_ref = func.borrow_mut();
+
             // If this is a method and the first argument is named "this", set
             // the type of it to the structure that this method belongs to
             // (which already is stored in `method_structore`).
-            if let Some(first_arg) = func.parameters.as_mut().and_then(|args| args.first_mut()) {
+            if let Some(first_arg) = func_ref.parameters.as_ref().and_then(|args| args.first()) {
+                let mut first_arg = first_arg.borrow_mut();
+
                 if &first_arg.name == "this" {
-                    if let Some(structure) = func.method_structure.clone() {
-                        let ty = if func.modifiers.contains(&Modifier::This) {
+                    if let Some(structure) = &func_ref.method_structure {
+                        let structure = structure.clone();
+
+                        let ty = if func_ref.modifiers.contains(&Modifier::This) {
                             structure
-                        } else if func.modifiers.contains(&Modifier::ThisPointer) {
+                        } else if func_ref.modifiers.contains(&Modifier::ThisPointer) {
                             Ty::Pointer(Box::new(structure))
                         } else {
                             // TODO: This should be caught somewhere else earlier.
@@ -748,7 +753,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             //       names. Make this a unreachable at that point.
                             panic!(
                                 "First parameter to function named keyword \"this\": {:#?}",
-                                func
+                                func_ref
                             );
                         };
 
@@ -759,7 +764,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             // Save the current function in a place so that the stmts/exprs in the body
             // can access the types of the parameters and the return type of the func.
-            self.cur_func = Some(*func.clone());
+            self.cur_func = Some(Rc::clone(func));
         }
     }
 
@@ -774,7 +779,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     fn visit_return(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         if let Stmt::Return(expr_opt) = stmt {
             if let Some(func) = &self.cur_func {
-                let func_ret_ty = if let Some(ty) = &func.ret_type {
+                let func_ret_ty = if let Some(ty) = &func.borrow().ret_type {
                     ty.clone()
                 } else {
                     Ty::CompoundType(InnerTy::Void, Generics::new())
@@ -873,6 +878,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// should be of the same type, add as constraints.
     fn visit_var_decl(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         if let Stmt::VariableDecl(var, expr_opt) = stmt {
+            let mut var = var.borrow_mut();
+
             // No way to do type inference of rhs on var decl with no init value.
             let rhs_ty_opt = if expr_opt.is_some() {
                 match self.type_context.get_expr_type(expr_opt.as_ref()) {

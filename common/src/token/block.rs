@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use super::{
     expr::{Expr, Var},
@@ -18,13 +18,10 @@ pub enum BlockHeader {
     // Default == None, i.e. if there are no current block. Ex. at the start of a file.
     Default,
 
-    // Box the structs so that they are allocated on the heap and aren't moved
-    // around when modification on the AST happens. This will allow one to keep
-    // raw pointers to them without risk of the addresses changing.
-    Function(Box<Function>),
-    Struct(Box<Struct>),
-    Enum(Box<Enum>),
-    Interface(Box<Interface>),
+    Function(Rc<RefCell<Function>>),
+    Struct(Rc<RefCell<Struct>>),
+    Enum(Rc<RefCell<Enum>>),
+    Interface(Rc<RefCell<Interface>>),
 
     /// The string is the name of the structure that this impl block implements
     /// and the body of this block will contain the functions.
@@ -100,10 +97,10 @@ pub struct Struct {
     pub name: String,
     pub generic_params: Option<Vec<String>>,
     pub implements: Option<Vec<Ty>>,
-    pub members: Option<Vec<Var>>, // TODO: extends: Vec<Type>
+    pub members: Option<Vec<Rc<RefCell<Var>>>>, // TODO: extends: Vec<Type>
 
     /// The key is the name of the method.
-    pub methods: Option<HashMap<String, *mut Function>>,
+    pub methods: Option<HashMap<String, Rc<RefCell<Function>>>>,
 }
 
 impl Struct {
@@ -121,7 +118,7 @@ impl Struct {
     pub fn member_index(&self, member_name: &str) -> Option<usize> {
         if let Some(members) = &self.members {
             for (idx, member) in members.iter().enumerate() {
-                if member.name == member_name {
+                if member.borrow().name == member_name {
                     return Some(idx);
                 }
             }
@@ -134,7 +131,7 @@ impl Struct {
 pub struct Function {
     pub name: String,
     pub generics: Option<Vec<Ty>>,
-    pub parameters: Option<Vec<Var>>,
+    pub parameters: Option<Vec<Rc<RefCell<Var>>>>,
     pub ret_type: Option<Ty>,
     pub modifiers: Vec<Modifier>,
     pub is_var_arg: bool,
@@ -149,7 +146,7 @@ impl Function {
     pub fn new(
         name: String,
         generics: Option<Vec<Ty>>,
-        parameters: Option<Vec<Var>>,
+        parameters: Option<Vec<Rc<RefCell<Var>>>>,
         ret_type: Option<Ty>,
         modifiers: Vec<Modifier>,
         is_var_arg: bool,
@@ -204,12 +201,16 @@ impl Function {
 pub struct Enum {
     pub name: String,
     pub generics: Option<Vec<String>>,
-    pub members: Option<Vec<Var>>,
+    pub members: Option<Vec<Rc<RefCell<Var>>>>,
     // TODO: extends: Vec<Type>
 }
 
 impl Enum {
-    pub fn new(name: String, generics: Option<Vec<String>>, members: Option<Vec<Var>>) -> Self {
+    pub fn new(
+        name: String,
+        generics: Option<Vec<String>>,
+        members: Option<Vec<Rc<RefCell<Var>>>>,
+    ) -> Self {
         Enum {
             name,
             generics,
@@ -222,11 +223,15 @@ impl Enum {
 pub struct Interface {
     pub name: String,
     pub generics: Option<Vec<String>>,
-    pub members: Option<Vec<Var>>,
+    pub members: Option<Vec<Rc<RefCell<Var>>>>,
 }
 
 impl Interface {
-    pub fn new(name: String, generics: Option<Vec<String>>, members: Option<Vec<Var>>) -> Self {
+    pub fn new(
+        name: String,
+        generics: Option<Vec<String>>,
+        members: Option<Vec<Rc<RefCell<Var>>>>,
+    ) -> Self {
         Interface {
             name,
             generics,

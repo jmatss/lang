@@ -14,8 +14,8 @@ use common::{
     visitor::Visitor,
     BlockId,
 };
-use log::debug;
-use std::cell::RefCell;
+
+use std::{cell::RefCell, rc::Rc};
 
 /// Gathers information about all function/method declarations found in the AST
 /// and inserts them into the `analyze_context`. This includes external function
@@ -33,12 +33,10 @@ impl<'a> DeclFuncAnalyzer<'a> {
         }
     }
 
-    fn analyze_func_header(&mut self, func: &mut Function, func_id: BlockId) {
-        let mut analyze_context = self.analyze_context.borrow_mut();
-
+    fn analyze_func_header(&mut self, func: &mut Rc<RefCell<Function>>, func_id: BlockId) {
         // The function will be added in the scope of its parent, so fetch the
         // block id for the parent.
-        let parent_id = match analyze_context.get_parent(func_id) {
+        let parent_id = match self.analyze_context.borrow().get_parent(func_id) {
             Ok(parent_id) => parent_id,
             Err(err) => {
                 self.errors.push(err);
@@ -48,13 +46,21 @@ impl<'a> DeclFuncAnalyzer<'a> {
 
         // If true: Function already declared somewhere, make sure that the
         // current declaration and the previous one matches.
-        if let Ok(prev_func) = analyze_context.get_func(&func.name, parent_id) {
+        if let Ok(prev_func) = self
+            .analyze_context
+            .borrow()
+            .get_func(&func.borrow().name, parent_id)
+        {
+            let func = func.borrow();
+
             let empty_vec = Vec::new();
             let cur_func_params = if let Some(params) = &func.parameters {
                 params
             } else {
                 &empty_vec
             };
+
+            let prev_func = prev_func.borrow();
             let prev_func_params = if let Some(params) = &prev_func.parameters {
                 params
             } else {
@@ -71,7 +77,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
                     cur_func_params.len(),
                     prev_func_params.len(),
                 );
-                let err = analyze_context.err(err_msg);
+                let err = self.analyze_context.borrow().err(err_msg);
                 self.errors.push(err);
             } else {
                 for (i, (cur_param, prev_param)) in cur_func_params
@@ -79,13 +85,16 @@ impl<'a> DeclFuncAnalyzer<'a> {
                     .zip(prev_func_params.iter())
                     .enumerate()
                 {
+                    let cur_param = cur_param.borrow();
+                    let prev_param = prev_param.borrow();
+
                     if cur_param.name != prev_param.name {
                         let err_msg = format!(
                             "Two declarations of function \"{}\" have parameters with different names. \
                             Parameter at position {}. Prev name: {:?}, current name: {:?}.",
                             &func.name, i, &cur_param.name, &prev_param.name
                         );
-                        let err = analyze_context.err(err_msg);
+                        let err = self.analyze_context.borrow().err(err_msg);
                         self.errors.push(err);
                     }
                     if cur_param.ret_type != prev_param.ret_type {
@@ -100,38 +109,51 @@ impl<'a> DeclFuncAnalyzer<'a> {
                             Prev type: {:?}, current type: {:?}",
                             &func.name, i, &param_name, cur_param.ret_type, prev_param.ret_type
                         );
-                        let err = analyze_context.err(err_msg);
+                        let err = self.analyze_context.borrow().err(err_msg);
                         self.errors.push(err);
                     }
                 }
             }
-        } else {
-            // Add the function into decl lookup maps.
-            let key = (func.name.clone(), parent_id);
-            let func_ptr = func as *mut Function;
-            analyze_context.functions.insert(key, func_ptr);
 
-            debug!("XADDRESS FUNC_DECL -- name: {} {:?}", &func.name, func_ptr);
+            // Need to do early return and not do the logic below in a else block
+            // to make rust not fail becaose of the `analyze_context` borrw.
+            return;
+        }
 
-            // Add the parameters as variables in the function scope decl lookup.
-            if let Some(params) = &mut func.parameters {
-                for param in params {
-                    let param_key = (param.name.clone(), func_id);
-                    let param_ptr = param as *mut Var;
-                    analyze_context.variables.insert(param_key, param_ptr);
-                }
+        // Add the function into decl lookup maps.
+        let key = (func.borrow().name.clone(), parent_id);
+        self.analyze_context
+            .borrow_mut()
+            .functions
+            .insert(key, Rc::clone(func));
+
+        // Add the parameters as variables in the function scope decl lookup.
+        if let Some(params) = &func.borrow().parameters {
+            for param in params {
+                let param_key = (param.borrow().name.clone(), func_id);
+                self.analyze_context
+                    .borrow_mut()
+                    .variables
+                    .insert(param_key, Rc::clone(param));
             }
         }
     }
 
-    fn analyze_method_header(&mut self, struct_name: &str, func: &mut Function, func_id: BlockId) {
-        let mut analyze_context = self.analyze_context.borrow_mut();
-
+    fn analyze_method_header(
+        &mut self,
+        struct_name: &str,
+        func: &mut Rc<RefCell<Function>>,
+        func_id: BlockId,
+    ) {
         // TODO: Make this work for all structures.
 
         // The method will be added in the scope of its wrapping struct, so
         // fetch the block id for the struct.
-        let struct_decl_id = match analyze_context.get_struct_decl_scope(struct_name, func_id) {
+        let struct_decl_id = match self
+            .analyze_context
+            .borrow()
+            .get_struct_decl_scope(struct_name, func_id)
+        {
             Ok(struct_decl_id) => struct_decl_id,
             Err(err) => {
                 self.errors.push(err);
@@ -142,8 +164,9 @@ impl<'a> DeclFuncAnalyzer<'a> {
         // TODO: Should probably be changed to something better.
         // If this is a non-static method, the first parameter should be a
         // reference(/pointer) to "this"/"self".
-        if !func.is_static() {
+        if !func.borrow().is_static() {
             static THIS_VAR_NAME: &str = "this";
+            let mut func = func.borrow_mut();
 
             let inner_ty = InnerTy::Struct(struct_name.into());
             let generics = Generics::new();
@@ -153,7 +176,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
             } else if func.modifiers.contains(&Modifier::ThisPointer) {
                 Ty::Pointer(Box::new(Ty::CompoundType(inner_ty, generics)))
             } else {
-                let err = analyze_context.err(format!(
+                let err = self.analyze_context.borrow().err(format!(
                     "Non static function did not contain \"this\" or \"this ptr\" reference. Struct name: {}, func: {:#?}.",
                     struct_name, func
                 ));
@@ -161,7 +184,13 @@ impl<'a> DeclFuncAnalyzer<'a> {
                 return;
             };
 
-            let var = Var::new(THIS_VAR_NAME.into(), Some(ty), None, None, false);
+            let var = Rc::new(RefCell::new(Var::new(
+                THIS_VAR_NAME.into(),
+                Some(ty),
+                None,
+                None,
+                false,
+            )));
             if let Some(ref mut params) = func.parameters {
                 params.insert(0, var);
             } else {
@@ -170,17 +199,23 @@ impl<'a> DeclFuncAnalyzer<'a> {
         }
 
         // Insert this method into `methods` in the analyze context.
-        if let Err(err) = analyze_context.insert_method(struct_name, func, struct_decl_id) {
+        if let Err(err) = self.analyze_context.borrow_mut().insert_method(
+            struct_name,
+            Rc::clone(func),
+            struct_decl_id,
+        ) {
             self.errors.push(err);
             return;
         }
 
         // Add the parameters as variables in the method scope.
-        if let Some(params) = &mut func.parameters {
+        if let Some(params) = &mut func.borrow_mut().parameters {
             for param in params {
-                let param_key = (param.name.clone(), func_id);
-                let param_ptr = param as *mut Var;
-                analyze_context.variables.insert(param_key, param_ptr);
+                let param_key = (param.borrow().name.clone(), func_id);
+                self.analyze_context
+                    .borrow_mut()
+                    .variables
+                    .insert(param_key, Rc::clone(param));
             }
         }
     }
@@ -228,7 +263,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
 
             for body_token in body {
                 if let Token::Block(BlockHeader::Function(func), ..) = &mut body_token.token {
-                    func.method_structure = Some(ty.clone());
+                    func.borrow_mut().method_structure = Some(ty.clone());
                 } else {
                     let err = analyze_context.err(format!(
                         "AST token in impl block with name \"{}\" not a function: {:?}",
@@ -242,7 +277,13 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
 
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Token::Block(BlockHeader::Function(func), func_id, ..) = &mut ast_token.token {
-            if let Some(structure_ty) = func.method_structure.clone() {
+            let structure_ty = if let Some(structure_ty) = func.borrow().method_structure.clone() {
+                Some(structure_ty)
+            } else {
+                None
+            };
+
+            if let Some(structure_ty) = structure_ty {
                 if let Ty::CompoundType(inner_ty, _) = structure_ty {
                     match inner_ty {
                         InnerTy::Struct(ident)
@@ -279,11 +320,8 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
             //       declarations of a function that they have the same
             //       parameters & return type.
             // External declarations should always be in the default block.
-            let key = (func.name.clone(), BlockInfo::DEFAULT_BLOCK_ID);
-            let func_ptr = func.as_mut() as *mut Function;
-            analyze_context.functions.insert(key, func_ptr);
-
-            debug!("XADDRESS ExternDecl -- name: {} {:?}", &func.name, func_ptr);
+            let key = (func.borrow().name.clone(), BlockInfo::DEFAULT_BLOCK_ID);
+            analyze_context.functions.insert(key, Rc::clone(func));
         }
     }
 }

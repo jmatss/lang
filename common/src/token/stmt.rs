@@ -7,15 +7,14 @@ use crate::{
     error::{CustomResult, LangError, LangErrorKind::GeneralError},
     ENV_VAR,
 };
-use std::path::PathBuf;
+use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
     Return(Option<Expr>),
-    // Yield ~= Break with a value
+    /// Yield ~= Break with a value
     Yield(Expr),
     Break,
-    // Continue == Next
     Continue,
 
     Use(Path),
@@ -25,7 +24,7 @@ pub enum Stmt {
     Increment(Expr),
     Decrement(Expr),
 
-    // Defer -> Run this expression at the end of the current block scope.
+    /// Defer -> Run this expression at the end of the current block scope.
     /// The "Defer" is the place in the code where the "defer <expr>" was written
     /// in the actual source code.
     /// "DeferExec" statements will be added during the analyzing stage
@@ -34,29 +33,28 @@ pub enum Stmt {
     Defer(Expr),
     DeferExec(Expr),
 
-    // The lhs can't be a "Variable" directly since it needs to support
-    // ex. array indexing and dereferencing. But evaluationg the lhs expressions
-    // MUST evaluate to a variable.
-    // The valid lhs expressions are (Variable or wrapping a Variable):
-    //   Variable
-    //   bin op:
-    //     Dot (both lhs and rhs as Variables)
-    //   un op:
-    //     Deref
-    //     Address
-    // The "middle expr" is the lhs and the "right expr" is the rhs of the assignment.
+    /// The lhs can't be a "Variable" directly since it needs to support
+    /// ex. array indexing and dereferencing. But evaluationg the lhs expressions
+    /// MUST evaluate to a variable.
+    /// The valid lhs expressions are (Variable or wrapping a Variable):
+    ///   Variable
+    ///   bin op:
+    ///     Dot (both lhs and rhs as Variables)
+    ///   un op:
+    ///     Deref
+    ///     Address
+    /// The "middle expr" is the lhs and the "right expr" is the rhs of the assignment.
     Assignment(AssignOperator, Expr, Expr),
 
-    // Used both for "var" and "const" variables. The expr options will be Some
-    // if this var decl also has han initializer.
-    VariableDecl(Var, Option<Expr>),
+    /// Used both for "var" and "const" variables. The expr options will be Some
+    /// if this var decl also has han initializer.
+    VariableDecl(Rc<RefCell<Var>>, Option<Expr>),
 
     // TODO: Implement extern for variables as well.
-    // Declaration of extern functions. Box to prevent the address of the Function
-    // to move around. This will allow for stable use of raw pointers.
-    ExternalDecl(Box<Function>),
+    /// Declaration of extern functions.
+    ExternalDecl(Rc<RefCell<Function>>),
 
-    // static, private etc.
+    /// static, private etc.
     Modifier(Modifier),
 }
 

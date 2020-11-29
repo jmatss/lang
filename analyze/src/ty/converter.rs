@@ -1,4 +1,8 @@
-use std::collections::{hash_map::Entry, HashMap, HashSet};
+use std::{
+    cell::{Ref, RefCell},
+    collections::{hash_map::Entry, HashMap, HashSet},
+    rc::Rc,
+};
 
 use common::{
     error::LangError,
@@ -20,10 +24,10 @@ pub struct TypeConverter<'a> {
     analyze_context: &'a mut AnalyzeContext,
 
     /// The key is the name of the original struct (WITHOUT generics in the name).
-    generic_structs: HashMap<String, Vec<Struct>>,
+    generic_structs: HashMap<String, Vec<Rc<RefCell<Struct>>>>,
     /// The outer key is the name of the modified struct (WITH generics in the name).
     /// The inner key is the name of the method.
-    generic_struct_methods: HashMap<String, HashMap<String, Function>>,
+    generic_struct_methods: HashMap<String, HashMap<String, Rc<RefCell<Function>>>>,
 
     /// A set of the "implement" blocks that is to be removed from the AST.
     /// These are blocks that belongs to structs that have been removed because
@@ -41,8 +45,8 @@ pub struct TypeConverter<'a> {
 impl<'a> TypeConverter<'a> {
     pub fn new(
         analyze_context: &'a mut AnalyzeContext,
-        generic_structs: HashMap<String, Vec<Struct>>,
-        generic_struct_methods: HashMap<String, HashMap<String, Function>>,
+        generic_structs: HashMap<String, Vec<Rc<RefCell<Struct>>>>,
+        generic_struct_methods: HashMap<String, HashMap<String, Rc<RefCell<Function>>>>,
     ) -> Self {
         Self {
             analyze_context,
@@ -55,7 +59,7 @@ impl<'a> TypeConverter<'a> {
 
     fn modify_struct(
         &mut self,
-        struct_: &Struct,
+        struct_: Ref<Struct>,
         body_token: &AstToken,
         body: &mut Vec<AstToken>,
         i: usize,
@@ -89,13 +93,14 @@ impl<'a> TypeConverter<'a> {
                         );
 
                         // Insert the new struct into the lookup table.
-                        let key = (generic_struct.name.clone(), parent_id);
-                        let ptr = generic_struct as *mut Struct;
-                        self.analyze_context.structs.insert(key, ptr);
+                        let key = (generic_struct.borrow().name.clone(), parent_id);
+                        self.analyze_context
+                            .structs
+                            .insert(key, Rc::clone(generic_struct));
 
                         // Create a new AST token that will be inserted
                         // into the AST.
-                        let header = BlockHeader::Struct(Box::new(generic_struct.clone()));
+                        let header = BlockHeader::Struct(Rc::clone(generic_struct));
                         let struct_body = Vec::with_capacity(0);
 
                         let token = Token::Block(header, old_id, struct_body);
@@ -166,7 +171,7 @@ impl<'a> Visitor for TypeConverter<'a> {
                 // Modify and create the new structs. The old struct will also
                 // be removed.
                 if let Token::Block(BlockHeader::Struct(struct_), old_id, ..) = &body_token.token {
-                    self.modify_struct(struct_, &body_token, body, i, *old_id, *parent_id)
+                    self.modify_struct(struct_.borrow(), &body_token, body, i, *old_id, *parent_id)
                 }
 
                 i += 1;
@@ -187,10 +192,11 @@ impl<'a> Visitor for TypeConverter<'a> {
                         match self.generic_structs.entry(struct_name.into()) {
                             Entry::Occupied(ref mut o) => {
                                 for generic_struct in o.get_mut() {
-                                    // Get the actual struct instance.
-                                    let mut struct_ = match self
+                                    // Get the actual struct instance that have had
+                                    // the generics implemented.
+                                    let struct_ = match self
                                         .analyze_context
-                                        .get_struct_mut(&generic_struct.name, *old_id)
+                                        .get_struct(&generic_struct.borrow().name, *old_id)
                                     {
                                         Ok(struct_) => struct_,
                                         Err(err) => {
@@ -199,7 +205,7 @@ impl<'a> Visitor for TypeConverter<'a> {
                                         }
                                     };
 
-                                    struct_.methods = Some(HashMap::default());
+                                    struct_.borrow_mut().methods = Some(HashMap::default());
 
                                     // Make a clone of the old implement block.
                                     // Change the name of this new impl block
@@ -213,7 +219,7 @@ impl<'a> Visitor for TypeConverter<'a> {
                                         new_impl_body,
                                     ) = &mut new_impl_token.token
                                     {
-                                        *ident = generic_struct.name.clone();
+                                        *ident = generic_struct.borrow().name.clone();
                                         new_impl_body
                                     } else {
                                         unreachable!()
@@ -228,30 +234,31 @@ impl<'a> Visitor for TypeConverter<'a> {
                                         {
                                             let new_func = if let Some(new_func) = self
                                                 .generic_struct_methods
-                                                .get_mut(&generic_struct.name)
-                                                .map(|m| m.remove(&inner_func.name))
+                                                .get_mut(&generic_struct.borrow().name)
+                                                .map(|m| m.remove(&inner_func.borrow().name))
                                                 .flatten()
                                             {
                                                 new_func
                                             } else {
                                                 let err = self.analyze_context.err(format!(
                                                     "Unable to get func \"{}\" when creating new impl block for struct_init \"{}\".",
-                                                    &inner_func.name,
-                                                    &generic_struct.name
+                                                    &inner_func.borrow().name,
+                                                    &generic_struct.borrow().name
                                                 ));
                                                 self.errors.push(err);
                                                 return;
                                             };
 
-                                            let new_func_name = new_func.name.clone();
-                                            *inner_func = Box::new(new_func);
+                                            let new_func_name = new_func.borrow().name.clone();
+                                            *inner_func = Rc::clone(&new_func);
 
                                             // Make the field "methods" in the
                                             // "Struct" struct point to the newly
                                             // created method.
-                                            if let Some(methods) = &mut struct_.methods {
-                                                let ptr = inner_func.as_mut() as *mut Function;
-                                                methods.insert(new_func_name, ptr);
+                                            if let Some(methods) = &mut struct_.borrow_mut().methods
+                                            {
+                                                methods
+                                                    .insert(new_func_name, Rc::clone(&inner_func));
                                             }
                                         }
                                     }

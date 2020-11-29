@@ -34,7 +34,7 @@ pub enum Ty {
     /// Unknown method argument of the struct/enum/interface type "Type" with
     /// the name "String". The "Either" is either the name of the argument or
     /// the index of the argument in the method call if no argument name is set.
-    UnknownMethodArgument(Box<Ty>, String, Either<String, u64>),
+    UnknownMethodArgument(Box<Ty>, String, Either<String, usize>),
 
     /// Unknown type of array member of array with type "Type".
     UnknownArrayMember(Box<Ty>),

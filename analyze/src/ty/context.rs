@@ -579,12 +579,12 @@ impl<'a> TypeContext<'a> {
                 }
             };
 
-            if let Some(ty) = &var.ret_type {
+            let var = var.borrow();
+            if let Some(mut new_ty) = var.ret_type.clone() {
                 // Since this fetched the actual structue "template" that is used
                 // by all, the generics will still be the "Generics". Need to
                 // replace them with the actual type for this specific use of
                 // the structure.
-                let mut new_ty = ty.clone();
                 new_ty.replace_generics_impl(generics);
 
                 // Add a substitution from the "UnknownStructureMember" to the
@@ -721,8 +721,8 @@ impl<'a> TypeContext<'a> {
                 }
             };
 
-            if let Some(ty) = &method.ret_type {
-                let mut new_ty = ty.clone();
+            let method = method.borrow();
+            if let Some(mut new_ty) = method.ret_type.clone() {
                 new_ty.replace_generics_impl(generics);
 
                 // Add a substitution from the "UnknownStructureMethod" to the

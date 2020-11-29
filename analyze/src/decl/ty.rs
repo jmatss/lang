@@ -2,14 +2,11 @@ use crate::AnalyzeContext;
 use common::{
     error::LangError,
     token::ast::Token,
-    token::{
-        ast::AstToken,
-        block::{BlockHeader, Enum, Interface, Struct},
-    },
+    token::{ast::AstToken, block::BlockHeader},
     traverser::TraverseContext,
     visitor::Visitor,
 };
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
 /// Gathers information about all type declarations found in the AST and inserts
 /// them into the `analyze_context`. This includes  structs, enums and interfaces.
@@ -55,21 +52,21 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
                 }
             };
 
-            if let Ok(prev_struct) = analyze_context.get_struct(&struct_.name, *struct_id) {
+            if let Ok(prev_struct) = analyze_context.get_struct(&struct_.borrow().name, *struct_id)
+            {
                 // TODO: Should this be done in the same way as function, that
                 //       one just checks that the declarations are equals and doesn't
                 //       throw a exception? This would allow for "extern" declarations
                 //       but might be problematic if it two defines.
                 let err = analyze_context.err(format!(
                     "A struct with name \"{}\" already defined.",
-                    prev_struct.name
+                    prev_struct.borrow().name
                 ));
                 self.errors.push(err);
             } else {
                 // Add the struct into decl lookup maps.
-                let key = (struct_.name.clone(), parent_id);
-                let struct_ptr = struct_.as_mut() as *mut Struct;
-                analyze_context.structs.insert(key, struct_ptr);
+                let key = (struct_.borrow().name.clone(), parent_id);
+                analyze_context.structs.insert(key, Rc::clone(struct_));
             }
         }
     }
@@ -88,21 +85,20 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
                 }
             };
 
-            if let Ok(prev_enum) = analyze_context.get_enum(&enum_.name, *enum_id) {
+            if let Ok(prev_enum) = analyze_context.get_enum(&enum_.borrow().name, *enum_id) {
                 // TODO: Should this be done in the same way as function, that
                 //       one just checks that the declarations are equals and doesn't
                 //       throw a exception? This would allow for "extern" declarations
                 //       but might be problematic if it two defines.
                 let err = analyze_context.err(format!(
                     "A enum with name \"{}\" already defined.",
-                    prev_enum.name
+                    prev_enum.borrow().name
                 ));
                 self.errors.push(err);
             } else {
                 // Add the enum into decl lookup maps.
-                let key = (enum_.name.clone(), parent_id);
-                let enum_ptr = enum_.as_mut() as *mut Enum;
-                analyze_context.enums.insert(key, enum_ptr);
+                let key = (enum_.borrow().name.clone(), parent_id);
+                analyze_context.enums.insert(key, Rc::clone(enum_));
             }
         }
     }
@@ -123,21 +119,22 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
                 }
             };
 
-            if let Ok(prev_enum) = analyze_context.get_interface(&interface.name, *interface_id) {
+            if let Ok(prev_interface) =
+                analyze_context.get_interface(&interface.borrow().name, *interface_id)
+            {
                 // TODO: Should this be done in the same way as function, that
                 //       one just checks that the declarations are equals and doesn't
                 //       throw a exception? This would allow for "extern" declarations
                 //       but might be problematic if it two defines.
                 let err = analyze_context.err(format!(
                     "A interface with name \"{}\" already defined.",
-                    prev_enum.name
+                    prev_interface.borrow().name
                 ));
                 self.errors.push(err);
             } else {
                 // Add the interface into decl lookup maps.
-                let key = (interface.name.clone(), parent_id);
-                let interface_ptr = interface.as_mut() as *mut Interface;
-                analyze_context.interfaces.insert(key, interface_ptr);
+                let key = (interface.borrow().name.clone(), parent_id);
+                analyze_context.interfaces.insert(key, Rc::clone(interface));
             }
         }
     }

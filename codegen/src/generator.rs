@@ -185,7 +185,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             match header {
                 BlockHeader::Struct(struct_) => {
-                    self.compile_struct(&struct_)?;
+                    self.compile_struct(&struct_.borrow())?;
                 }
                 BlockHeader::Enum(enum_) => {
                     panic!("TODO: Enum");
@@ -220,14 +220,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             match header {
                 BlockHeader::Function(func) => {
                     let linkage = Linkage::External;
-                    self.compile_func_proto(&func, Some(linkage))?;
+                    self.compile_func_proto(&func.borrow(), Some(linkage))?;
                 }
                 BlockHeader::Implement(_) => {
                     for ast_token in body.iter_mut() {
                         if let Token::Block(BlockHeader::Function(func), ..) = &mut ast_token.token
                         {
                             let linkage = Linkage::External;
-                            self.compile_func_proto(&func, Some(linkage))?;
+                            self.compile_func_proto(&func.borrow(), Some(linkage))?;
                         }
                     }
                 }
@@ -302,7 +302,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 // Constants are never "compiled" into instructions, they are handled
                 // "internaly" in this code during compilation.
                 if !var.is_const {
-                    let ptr = self.alloca_var(var_decl)?;
+                    let ptr = self.alloca_var(&var_decl.borrow())?;
                     self.variables.insert(key, ptr);
                 }
 
