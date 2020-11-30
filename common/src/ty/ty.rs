@@ -92,9 +92,9 @@ impl Ty {
     }
 
     /// Recursively replaces any structure types with idents that matches the
-    /// old structure name. These will be replaced with the new full name containing
-    /// references to the generics.
-    pub fn replace_generics_full_name(&mut self, old_name: &str, full_name: &str) {
+    /// old structure name. These will be replaced with the new type with the
+    /// generics "replaced"/"implemented".
+    pub fn replace_self(&mut self, old_name: &str, new_self_ty: &Ty) {
         match self {
             Ty::CompoundType(inner_ty, _) => match inner_ty {
                 InnerTy::Struct(ident)
@@ -102,7 +102,7 @@ impl Ty {
                 | InnerTy::Interface(ident)
                 | InnerTy::UnknownIdent(ident, ..) => {
                     if ident == old_name {
-                        *ident = full_name.into();
+                        *self = new_self_ty.clone();
                     }
                 }
                 _ => (),
@@ -113,7 +113,7 @@ impl Ty {
             | Ty::UnknownStructureMember(ty, ..)
             | Ty::UnknownStructureMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
-            | Ty::UnknownArrayMember(ty) => ty.replace_generics_full_name(old_name, full_name),
+            | Ty::UnknownArrayMember(ty) => ty.replace_self(old_name, new_self_ty),
             _ => (),
         }
     }

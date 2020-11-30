@@ -1,9 +1,9 @@
 use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
-    token::ast::Token,
     token::{
         ast::AstToken,
+        ast::Token,
         block::{BlockHeader, Function, Struct},
         expr::{Expr, Var},
     },
@@ -95,8 +95,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     if let Token::Block(BlockHeader::Function(func), func_id, func_body) =
                         &mut ast_token.token
                     {
-                        // The method will already have been renamed to be prefixed
-                        // with the struct name, so no need to do it here.
                         self.compile_func(&func.borrow(), *func_id, func_body)?;
                     }
                 }

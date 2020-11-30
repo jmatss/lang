@@ -19,6 +19,7 @@ use common::{
     util,
     visitor::Visitor,
 };
+use log::warn;
 
 use super::context::{SubResult, TypeContext};
 
@@ -70,7 +71,7 @@ impl<'a> TypeSolver<'a> {
     /// but need to modify it for the "lookup" structs so that they are unique.
     fn create_generic_struct(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
         // Get the actual struct implementation and create a copy of it.
-        let mut gen_struct_ty = match self
+        let mut gen_struct = match self
             .type_context
             .analyze_context
             .get_struct(&struct_init.name, ctx.block_id)
@@ -98,19 +99,24 @@ impl<'a> TypeSolver<'a> {
 
         // Give the new copy of the struct type the "full name" containing
         // information about the generic arguments.
-        gen_struct_ty.name = full_name.clone();
+        gen_struct.name = full_name.clone();
+
+        // Is used to replace all old references to the struct without generics
+        // replaced. This will be done for all members/methods and also the
+        // `method_structure` indicating which struct a method belongs to.
+        let gen_struct_ty =
+            Ty::CompoundType(InnerTy::Struct(struct_init.name.clone()), generics.clone());
 
         // For every member of the struct, replace any generic types with
         // the type of the struct_init generics. Also replace any reference
         // to the old name with the new full name (containing generics).
-        if let Some(members) = &mut gen_struct_ty.members {
+        if let Some(members) = &mut gen_struct.members {
             for member in members {
                 let mut new_member = member.borrow().clone();
 
                 if let Some(ty) = &mut new_member.ret_type {
                     ty.replace_generics_impl(&generics);
-                    // TODO: remove
-                    //ty.replace_generics_full_name(&struct_init.name, &full_name)
+                    ty.replace_self(&struct_init.name, &gen_struct_ty);
                 }
 
                 *member = Rc::new(RefCell::new(new_member));
@@ -123,7 +129,7 @@ impl<'a> TypeSolver<'a> {
         //
         // The methods are RCs inside the "Struct" struct which means that they
         // are still tied to the "old" struct, need create copies of the methods.
-        if let Some(methods) = &mut gen_struct_ty.methods {
+        if let Some(methods) = &mut gen_struct.methods {
             let mut new_methods = HashMap::default();
 
             for (method_name, method) in methods {
@@ -131,13 +137,18 @@ impl<'a> TypeSolver<'a> {
 
                 if let Some(parameters) = &mut new_method.borrow_mut().parameters {
                     for param in parameters {
-                        if let Some(ty) = &mut param.borrow_mut().ret_type {
+                        let new_param = Rc::new(RefCell::new(param.borrow().clone()));
+
+                        if let Some(ty) = &mut new_param.borrow_mut().ret_type {
                             ty.replace_generics_impl(&generics);
-                            // TODO: remove
-                            //ty.replace_generics_full_name(&struct_init.name, &full_name);
+                            ty.replace_self(&struct_init.name, &gen_struct_ty);
                         }
+
+                        *param = new_param;
                     }
                 }
+
+                new_method.borrow_mut().method_structure = Some(gen_struct_ty.clone());
 
                 *method = new_method;
                 new_methods.insert(method_name.clone(), Rc::clone(&method));
@@ -151,10 +162,10 @@ impl<'a> TypeSolver<'a> {
         // AST later on by another "class" ("type_converter").
         match self.generic_structs.entry(struct_init.name.clone()) {
             Entry::Occupied(ref mut o) => {
-                o.get_mut().push(Rc::new(RefCell::new(gen_struct_ty)));
+                o.get_mut().push(Rc::new(RefCell::new(gen_struct)));
             }
             Entry::Vacant(v) => {
-                v.insert(vec![Rc::new(RefCell::new(gen_struct_ty))]);
+                v.insert(vec![Rc::new(RefCell::new(gen_struct))]);
             }
         }
     }

@@ -296,22 +296,12 @@ impl FuncCall {
     /// Returns the generics. If generics was set at the function call, this
     /// function will replace the types of the types parsed during type inference
     /// with type specified at the func call.
-    pub fn generics(&mut self) -> Option<&Generics> {
-        if let Some(Ty::CompoundType(_, ty_generics)) = &mut self.ret_type {
-            Some(ty_generics)
+    pub fn generics(&self) -> Option<&Generics> {
+        if let Some(generics) = &self.generics {
+            Some(generics)
         } else {
             None
         }
-
-        /*
-        if let Some(generics) = &self.generics {
-            for (self_gen, ty_gen) in generics.iter_types().zip(ty_generics.iter_types_mut()) {
-                *ty_gen = self_gen.clone();
-            }
-        }
-
-        Some(ty_generics)
-        */
     }
 
     /// Returns the "full name" which is the name containing possible structure
@@ -319,29 +309,36 @@ impl FuncCall {
     ///
     /// Format:
     ///   "<STRUCTURE_NAME>:<GENERICS>-<FUNCTION_NAME>"
-    pub fn full_name(&mut self) -> CustomResult<String> {
-        let generics = if let Some(generics) = self.generics() {
-            generics.clone()
+    pub fn full_name(&self) -> CustomResult<String> {
+        let func_call_generics = if let Some(generics) = self.generics() {
+            Some(generics.clone())
         } else {
-            Generics::new()
+            None
         };
 
         if let Some(ty) = &self.method_structure {
-            let structure_name = if let Ty::CompoundType(inner_ty, _) = ty {
-                match inner_ty {
-                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
-                        ident
+            let (structure_name, func_generics) =
+                if let Ty::CompoundType(inner_ty, func_generics) = ty {
+                    match inner_ty {
+                        InnerTy::Struct(ident)
+                        | InnerTy::Enum(ident)
+                        | InnerTy::Interface(ident) => (ident, func_generics),
+                        _ => unreachable!("Method call on non structure type: {:#?}", self),
                     }
-                    _ => unreachable!("Method call on non structure type: {:#?}", self),
-                }
+                } else {
+                    return Err(LangError::new(
+                        format!("Unable to get full name for method call: {:#?}", self),
+                        LangErrorKind::GeneralError,
+                    ));
+                };
+
+            let generics = if let Some(func_call_generics) = &func_call_generics {
+                func_call_generics
             } else {
-                return Err(LangError::new(
-                    format!("Unable to get full name for method call: {:#?}", self),
-                    LangErrorKind::GeneralError,
-                ));
+                func_generics
             };
 
-            Ok(util::to_method_name(structure_name, &generics, &self.name))
+            Ok(util::to_method_name(structure_name, generics, &self.name))
         } else {
             // TODO: Possible generics on functions, need to handle it here.
             Ok(self.name.clone())
@@ -370,35 +367,33 @@ impl StructInit {
     /// Returns the generics. If generics was set at the struct init call, this
     /// function will replace the types of the types parsed during type inference
     /// with type specified at the init call.
-    pub fn generics(&mut self) -> Option<&Generics> {
-        if let Some(Ty::CompoundType(_, ty_generics)) = &mut self.ret_type {
+    pub fn generics(&self) -> Option<&Generics> {
+        if let Some(generics) = &self.generics {
+            Some(generics)
+        } else if let Some(Ty::CompoundType(_, ty_generics)) = &self.ret_type {
             Some(ty_generics)
         } else {
             panic!("Struct init type not struct.");
         }
-
-        /*
-        if let Some(generics) = &self.generics {
-            for (self_gen, ty_gen) in generics.iter_types().zip(ty_generics.iter_types_mut()) {
-                *ty_gen = self_gen.clone();
-            }
-        }
-
-        Some(ty_generics)
-        */
     }
 
     /// Returns the "full name" which is the name containing possible generics
     /// as well.
     pub fn full_name(&mut self) -> CustomResult<String> {
-        let generics = if let Some(generics) = self.generics() {
-            generics.clone()
+        let struct_init_generics = if let Some(generics) = self.generics() {
+            Some(generics.clone())
         } else {
-            Generics::new()
+            None
         };
 
         if let Some(ty) = &self.ret_type {
-            if let Ty::CompoundType(InnerTy::Struct(ident), _) = ty {
+            if let Ty::CompoundType(InnerTy::Struct(ident), struct_generics) = ty {
+                let generics = if let Some(struct_init_generics) = struct_init_generics {
+                    struct_init_generics
+                } else {
+                    struct_generics.clone()
+                };
+
                 Ok(util::to_generic_struct_name(ident, &generics))
             } else {
                 Err(LangError::new(
