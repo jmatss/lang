@@ -19,10 +19,10 @@ function main() -> i32
 
     // TODO: Make this work, should be possible:
     //var expected_i32: i8 = 1
-    var expected_i32: i32 = 1
-    var expected_u64: u64 = 2
-    var expected_f32: f32 = 123.
-    var expected_f64: f64 = 456.
+    var expected_i32 = 1
+    var expected_u64 = 2
+    var expected_f32 = 123.
+    var expected_f64 = 456.
 
     printf("expected_i32: %d, test_struct_i32.inner: %d\n", expected_i32, test_struct_i32.inner)
     assert(expected_i32 == test_struct_i32.inner)

@@ -88,6 +88,10 @@ impl Generics {
         }
     }
 
+    pub fn insert_lookup(&mut self, name: String, idx: usize) {
+        self.lookup.insert(name, idx);
+    }
+
     pub fn insert_name(&mut self, name: String) {
         if !self.names.contains(&name) {
             self.names.push(name);

@@ -310,7 +310,7 @@ impl FuncCall {
     /// Format:
     ///   "<STRUCTURE_NAME>:<GENERICS>-<FUNCTION_NAME>"
     pub fn full_name(&self) -> CustomResult<String> {
-        let func_call_generics = if let Some(generics) = self.generics() {
+        let mut func_call_generics = if let Some(generics) = self.generics() {
             Some(generics.clone())
         } else {
             None
@@ -332,7 +332,13 @@ impl FuncCall {
                     ));
                 };
 
-            let generics = if let Some(func_call_generics) = &func_call_generics {
+            let generics = if let Some(func_call_generics) = &mut func_call_generics {
+                // TODO: This is done every time this function is called.
+                //       Better way to do this?
+                for (idx, name) in func_generics.iter_names().enumerate() {
+                    func_call_generics.insert_lookup(name.clone(), idx);
+                }
+
                 func_call_generics
             } else {
                 func_generics
@@ -367,13 +373,22 @@ impl StructInit {
     /// Returns the generics. If generics was set at the struct init call, this
     /// function will replace the types of the types parsed during type inference
     /// with type specified at the init call.
-    pub fn generics(&self) -> Option<&Generics> {
-        if let Some(generics) = &self.generics {
-            Some(generics)
-        } else if let Some(Ty::CompoundType(_, ty_generics)) = &self.ret_type {
-            Some(ty_generics)
+    pub fn generics(&mut self) -> Option<&Generics> {
+        let ty_generics = if let Some(Ty::CompoundType(_, ty_generics)) = &self.ret_type {
+            ty_generics
         } else {
             panic!("Struct init type not struct.");
+        };
+
+        if let Some(generics) = &mut self.generics {
+            // TODO: This is done every time this function is called and the names
+            //       are overwritten if they already are set. Better way to do this?
+            for (idx, name) in ty_generics.iter_names().enumerate() {
+                generics.insert_lookup(name.clone(), idx);
+            }
+            Some(generics)
+        } else {
+            Some(ty_generics)
         }
     }
 
