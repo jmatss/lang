@@ -8,8 +8,8 @@ use common::{
     error::LangError,
     token::op::UnOperator,
     token::{
-        ast::AstToken,
-        block::{Function, Struct},
+        ast::{AstToken, Token},
+        block::{BlockHeader, Function, Struct},
         expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
         op::{BinOp, UnOp},
         stmt::Stmt,
@@ -225,6 +225,18 @@ impl<'a> Visitor for TypeSolver<'a> {
                 .analyze_context
                 .err(format!("Unable to find infer type for var: {:?}", var));
             self.errors.push(err);
+        }
+    }
+
+    fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let Token::Block(BlockHeader::Function(func), ..) = &mut ast_token.token {
+            if let Some(params) = &func.borrow().parameters {
+                for param in params {
+                    if let Some(param_ty) = &mut param.borrow_mut().ret_type {
+                        self.subtitute_type(param_ty, true);
+                    }
+                }
+            }
         }
     }
 

@@ -1,2 +1,2 @@
-external function malloc(size: i32) -> {void}
-external function free(ptr: {void})
+external function malloc(size: i32) -> {i8}
+external function free(ptr: {i8})

@@ -469,6 +469,13 @@ impl<'a> TypeContext<'a> {
                     }
 
                     SubResult::UnSolved(sub_ty) => {
+                        if ty.contains_unknown_any() {
+                            if let Err(err) = self.insert_substitution(*ty.clone(), sub_ty.clone())
+                            {
+                                return SubResult::Err(err);
+                            }
+                        }
+
                         *ty = Box::new(sub_ty);
                         self.cur_ty = local_cur_ty.clone();
                         SubResult::UnSolved(local_cur_ty)
@@ -507,8 +514,11 @@ impl<'a> TypeContext<'a> {
             // the current, but doesn't hurt to replace with itself.
             let sub_ty = match self.solve_substitution(ty, finalize) {
                 SubResult::Solved(sub_ty) | SubResult::UnSolved(sub_ty) => {
-                    self.cur_ty =
-                        Ty::UnknownStructureMember(Box::new(sub_ty.clone()), member_name.clone());
+                    if ty.contains_unknown_any() {
+                        if let Err(err) = self.insert_substitution(*ty.clone(), sub_ty.clone()) {
+                            return SubResult::Err(err);
+                        }
+                    }
 
                     *ty = Box::new(sub_ty.clone());
                     sub_ty
@@ -806,6 +816,16 @@ impl<'a> TypeContext<'a> {
                 }
 
                 Ty::CompoundType(inner_ty, generics) => (inner_ty, generics),
+
+                // TODO: Solve nested ty in better way.
+                Ty::Pointer(ty_box) => {
+                    if let Ty::CompoundType(inner_ty, generics) = ty_box.as_ref() {
+                        (inner_ty, generics)
+                    } else {
+                        self.cur_ty = local_cur_ty.clone();
+                        return SubResult::UnSolved(local_cur_ty);
+                    }
+                }
 
                 _ => {
                     return SubResult::Err(self.analyze_context.err(format!(

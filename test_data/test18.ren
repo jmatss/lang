@@ -9,11 +9,11 @@ struct TestStruct
 
 implement TestStruct
 {
-    function add(input: i32) -> i32
+    function {this} add(input: i32) -> i32
     {
-        this.a = 20
-        this.b.* = 2.0
-        return this.a + this.c + input
+        this.*.a = 20
+        this.*.b.* = 2.0
+        return this.*.a + this.*.c + input
     }
 }
 
@@ -22,7 +22,7 @@ function main() -> i32
     var b = 1.0
     var test_struct = TestStruct { 10, b.&, 2 }
 
-    var actual_result = test_struct.add(8)
+    var actual_result = test_struct.&.add(8)
 
     printf("b: %f", b as f64)
     printf("\ntest_struct.a: %d, test_struct.b.*: %f, test_struct.c: %d", test_struct.a, test_struct.b.*, test_struct.c)
