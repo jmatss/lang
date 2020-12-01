@@ -411,8 +411,8 @@ impl Ty {
         // Start by jsut looking at the outer most types and then interatively
         // look deeper to find differences.
         for i in 1..=MAX_DEPTH {
-            let self_prec = self.precedence_priv(0, i);
-            let other_prec = other.precedence_priv(0, i);
+            let self_prec = self.precedence_priv(0, i, false);
+            let other_prec = other.precedence_priv(0, i, false);
 
             if self_prec != other_prec {
                 return self_prec < other_prec;
@@ -433,72 +433,83 @@ impl Ty {
     /// given `self` recursively with the highest precedence. This includes the
     /// generics.
     ///
+    /// If the "highest precedence type" is NOT found in the generic parameter
+    /// list, it will get the number incremented by one. This means that if two
+    /// types contains have the same "highest type", the one with the highest
+    /// type in the generic parameter list is prefered.
+    ///
     /// Examples:
-    ///   i32<UnknownIdent>       =>  2
-    ///   ExampleStruct<i32, T>   =>  6 (where T is generic)
+    ///   i32<UnknownIdent>       =>  4
+    ///   ExampleStruct<i32, T>   =>  12 (where T is generic)
     ///
     /// Precedence:
-    ///   0  contains primitive
-    ///   1  contains structure (struct/enum/interface)
-    ///   2  contains unknown structure (UnknownIdent)
-    ///      contains unknown structure member (UnknownStructureMember)
-    ///      contains unknown structure method (UnknownStructureMethod)
-    ///      contains unknown structure method argument (UnknownMethodArgument)
-    ///   3  contains pointer
-    ///      contains array
-    ///   4  contains unknown int (UnknownInt)
-    ///      contains unknown float (UnknownFloat)
-    ///   5  contains unknown array member (UnknownArrayMember)
-    ///   6  contains generic (Generic)
-    ///   7  contains unknown (Unknown)
-    fn precedence_priv(&self, mut highest: usize, depth: usize) -> usize {
+    ///   0   contains primitive
+    ///   2   contains structure (struct/enum/interface)
+    ///   4   contains unknown structure (UnknownIdent)
+    ///       contains unknown structure member (UnknownStructureMember)
+    ///       contains unknown structure method (UnknownStructureMethod)
+    ///       contains unknown structure method argument (UnknownMethodArgument)
+    ///   6   contains pointer
+    ///       contains array
+    ///   8   contains unknown array member (UnknownArrayMember)
+    ///   10  contains unknown int (UnknownInt)
+    ///       contains unknown float (UnknownFloat)
+    ///   12  contains generic (Generic)
+    ///   14  contains unknown (Unknown)
+    fn precedence_priv(&self, mut highest: usize, depth: usize, is_generic_param: bool) -> usize {
         if depth == 0 {
             return highest;
         }
 
         let next_depth = depth - 1;
 
+        // Add a extra precedence point if this type was NOT found in the generic
+        // parameter list. This ensures that if two types have the same highest
+        // "precedence type", if one of them has that type in the generic list,
+        // that type will be prefered.
+        let extra = if is_generic_param { 0 } else { 1 };
+
         match self {
             Ty::CompoundType(inner_ty, generics) => {
                 for generic in generics.iter_types() {
                     // The generics are treated as being at the same depth as
                     // the current type.
-                    highest = generic.precedence_priv(highest, depth);
+                    highest = generic.precedence_priv(highest, depth, true);
                 }
 
                 if inner_ty.is_primitive() {
-                    usize::max(highest, 0)
+                    usize::max(highest, extra)
                 } else if inner_ty.is_structure() {
-                    usize::max(highest, 1)
+                    usize::max(highest, 2 + extra)
                 } else {
                     match inner_ty {
-                        InnerTy::UnknownIdent(..) => usize::max(highest, 2),
+                        InnerTy::UnknownIdent(..) => usize::max(highest, 4 + extra),
                         InnerTy::UnknownInt(..) | InnerTy::UnknownFloat(_) => {
-                            usize::max(highest, 4)
+                            usize::max(highest, 10 + extra)
                         }
-                        InnerTy::Unknown(..) => usize::max(highest, 7),
+                        InnerTy::Unknown(..) => usize::max(highest, 14 + extra),
                         _ => unreachable!("All other inner types already \"matched\"."),
                     }
                 }
             }
 
             Ty::Pointer(ty) | Ty::Array(ty, _) => {
-                highest = usize::max(highest, 3);
-                ty.precedence_priv(highest, next_depth)
+                highest = usize::max(highest, 6 + extra);
+                ty.precedence_priv(highest, next_depth, is_generic_param)
             }
 
-            Ty::Generic(_) => usize::max(highest, 6),
+            Ty::Generic(_) => usize::max(highest, 12 + extra),
 
             Ty::UnknownStructureMember(ty, _)
             | Ty::UnknownStructureMethod(ty, _)
             | Ty::UnknownMethodArgument(ty, _, _) => {
-                highest = usize::max(highest, 2);
-                ty.precedence_priv(highest, next_depth)
+                highest = usize::max(highest, 4 + extra);
+                ty.precedence_priv(highest, next_depth, is_generic_param)
             }
 
             Ty::UnknownArrayMember(ty) => {
-                highest = usize::max(highest, 5);
-                ty.precedence_priv(highest, next_depth)
+                highest = usize::max(highest, 8 + extra);
+                ty.precedence_priv(highest, next_depth, is_generic_param)
             }
         }
     }

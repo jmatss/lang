@@ -4,7 +4,7 @@ use common::{
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
 };
 use either::Either;
-use log::debug;
+use log::{debug, warn};
 use std::collections::{hash_map, HashMap};
 
 use crate::{AnalyzeContext, BlockInfo};
@@ -262,7 +262,7 @@ impl<'a> TypeContext<'a> {
         // of loop.
         if from == to || self.causes_loop(&from, &to) {
             debug!(
-                "Substitution to self or causes loop -- from unsolved: {:?}, to solved: {:?}",
+                "Substitution to self or causes loop -- from: {:?}, to: {:?}",
                 &from, &to
             );
             return Ok(());
@@ -918,28 +918,46 @@ impl<'a> TypeContext<'a> {
             // type of the array if it has been found.
             match self.solve_substitution(&ty, finalize) {
                 SubResult::Solved(sub_ty) => {
-                    *ty = Box::new(sub_ty.clone());
-                    self.cur_ty = local_cur_ty;
+                    warn!("SOLVED -- ty: {:#?}\nsub_ty: {:#?}", ty, sub_ty);
 
-                    if let Err(err) = self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
-                    {
-                        SubResult::Err(err)
+                    let sub_result = if let Ty::Array(real_ty, _) = sub_ty {
+                        if real_ty.contains_unknown_any() {
+                            if let Err(err) =
+                                self.insert_substitution(*ty.clone(), *real_ty.clone())
+                            {
+                                SubResult::Err(err)
+                            } else {
+                                SubResult::Solved(*real_ty)
+                            }
+                        } else {
+                            SubResult::Solved(*real_ty)
+                        }
                     } else {
-                        SubResult::Solved(sub_ty)
-                    }
+                        SubResult::Err(self.analyze_context.err(format!(
+                            "Epected type to be array. unknown: {:#?}, solved: {:#?}",
+                            ty, sub_ty
+                        )))
+                    };
+
+                    self.cur_ty = local_cur_ty;
+                    sub_result
                 }
 
                 SubResult::UnSolved(un_sub_ty) => {
-                    *ty = Box::new(un_sub_ty.clone());
-                    self.cur_ty = local_cur_ty;
+                    warn!("UNSOLVED -- ty: {:#?}\nun_sub_ty: {:#?}", ty, un_sub_ty);
 
-                    if let Err(err) =
-                        self.insert_substitution(self.cur_ty.clone(), un_sub_ty.clone())
+                    let un_sub_full_ty = Ty::UnknownArrayMember(Box::new(un_sub_ty));
+
+                    let sub_result = if let Err(err) =
+                        self.insert_substitution(local_cur_ty.clone(), un_sub_full_ty.clone())
                     {
                         SubResult::Err(err)
                     } else {
-                        SubResult::UnSolved(un_sub_ty)
-                    }
+                        SubResult::UnSolved(un_sub_full_ty.clone())
+                    };
+
+                    self.cur_ty = un_sub_full_ty;
+                    sub_result
                 }
 
                 res => res,
