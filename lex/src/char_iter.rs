@@ -7,6 +7,9 @@ pub struct CharIter<'a> {
     iter: TokenIter<'a, u8>,
 }
 
+// TODO: Clean up this ugly logic. Make moving forward and backwards over a char
+//       cleaner.
+
 impl<'a> CharIter<'a> {
     pub fn new(content: &'a mut [u8]) -> Self {
         Self {
@@ -128,17 +131,16 @@ impl<'a> CharIter<'a> {
 
     /// Rewinds the iterator to the previous character.
     pub fn rewind(&mut self) -> bool {
-        if self.is_valid_char_of_size(4) {
-            self.iter.rewind_n(4)
-        } else if self.is_valid_char_of_size(3) {
-            self.iter.rewind_n(3)
-        } else if self.is_valid_char_of_size(2) {
-            self.iter.rewind_n(2)
-        } else if self.is_valid_char_of_size(1) {
-            self.iter.rewind_n(1)
-        } else {
-            false
+        let mut rewinded = false;
+
+        for i in (1..=4).rev() {
+            if self.is_valid_char_of_size(i) {
+                rewinded = self.iter.rewind_n(i);
+                break;
+            }
         }
+
+        rewinded
     }
 
     /// Puts back a item into the iterator.
