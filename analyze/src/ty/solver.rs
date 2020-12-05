@@ -52,13 +52,21 @@ impl<'a> TypeSolver<'a> {
             SubResult::Solved(sub_ty) => {
                 *ty = sub_ty;
             }
-            SubResult::UnSolved(un_sub_ty) => {
+
+            SubResult::UnSolved(un_sub_ty) if finalize => {
                 let err = self.type_context.analyze_context.err(format!(
                     "Unable to resolve type {:?}. Got back unsolved: {:?}.",
                     ty, un_sub_ty
                 ));
+                warn!(
+                    "ERROR HERE -- Unable to resolve type {:?}. Got back unsolved: {:?}.",
+                    ty, un_sub_ty
+                );
                 self.errors.push(err);
             }
+
+            SubResult::UnSolved(un_sub_ty) => *ty = un_sub_ty,
+
             SubResult::Err(err) => {
                 self.errors.push(err);
             }

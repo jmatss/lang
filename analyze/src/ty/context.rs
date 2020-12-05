@@ -63,6 +63,14 @@ impl SubResult {
             SubResult::Err(err) => Err(err.clone()),
         }
     }
+
+    pub fn is_solved(&self) -> bool {
+        matches!(self, SubResult::Solved(_))
+    }
+
+    pub fn is_unsolved(&self) -> bool {
+        matches!(self, SubResult::UnSolved(_))
+    }
 }
 
 impl<'a> TypeContext<'a> {
@@ -79,11 +87,40 @@ impl<'a> TypeContext<'a> {
 
     // TODO: Will trying to solve the constraints all the time cause the function
     //       to be to slow?
-    /// Inserts a constraint. After a new constraint is inserted, it will try
-    /// to solve all constraints.
+    /// Inserts a constraint.
     pub fn insert_constraint(&mut self, lhs: Ty, rhs: Ty) {
         if !self.constraints.contains(&(lhs.clone(), rhs.clone())) {
             debug!("Insert constraint -- lhs: {:?}, rhs: {:?}", &lhs, &rhs);
+
+            // Create constraints for the "inner" types if possible.
+            match (&lhs, &rhs) {
+                (Ty::CompoundType(_, lhs_gens), Ty::CompoundType(_, rhs_gens)) => {
+                    for (lhs_gen, rhs_gen) in lhs_gens.iter_types().zip(rhs_gens.iter_types()) {
+                        self.insert_constraint(lhs_gen.clone(), rhs_gen.clone());
+                    }
+                }
+
+                (Ty::Pointer(lhs_inner), Ty::Pointer(rhs_inner))
+                | (Ty::Array(lhs_inner, _), Ty::Array(rhs_inner, _))
+                | (
+                    Ty::UnknownStructureMember(lhs_inner, _),
+                    Ty::UnknownStructureMember(rhs_inner, _),
+                )
+                | (
+                    Ty::UnknownStructureMethod(lhs_inner, _),
+                    Ty::UnknownStructureMethod(rhs_inner, _),
+                )
+                | (
+                    Ty::UnknownMethodArgument(lhs_inner, _, _),
+                    Ty::UnknownMethodArgument(rhs_inner, _, _),
+                )
+                | (Ty::UnknownArrayMember(lhs_inner), Ty::UnknownArrayMember(rhs_inner)) => {
+                    self.insert_constraint(*lhs_inner.clone(), *rhs_inner.clone());
+                }
+
+                _ => (),
+            }
+
             self.constraints.push((lhs, rhs));
         } else {
             debug!(
@@ -99,9 +136,14 @@ impl<'a> TypeContext<'a> {
         // being "forced" are solved. After that run it again to "force" solve
         // the types when there are no other options left.
         if finalize {
-            self.solve_constraints_priv(false)?;
+            // Run twice. The first time two completly unsolvable types are NOT
+            // mapped. The second run they will be "forced" to map even though
+            // they might not be solved.
+            self.solve_constraints_priv(false, false)?;
+            self.solve_constraints_priv(false, true)?;
         }
-        self.solve_constraints_priv(finalize)
+
+        self.solve_constraints_priv(finalize, true)
     }
 
     // TODO: Solve infinite recursive solves when generics get implemented.
@@ -111,16 +153,45 @@ impl<'a> TypeContext<'a> {
     /// must be solved and inserted as substitutions, otherwise `Error` will be
     /// returned. If `finalize` is set to false, it doesn't matter that all
     /// types wasn't solvable, `Ok` will be returned.
-    fn solve_constraints_priv(&mut self, finalize: bool) -> Result<(), Vec<LangError>> {
+    ///
+    /// See the comment for the function `solve_constraint` for an explanation
+    /// of the parameter `map_unsolvables`.
+    fn solve_constraints_priv(
+        &mut self,
+        finalize: bool,
+        map_unsolvables: bool,
+    ) -> Result<(), Vec<LangError>> {
         let mut errors = Vec::default();
 
-        // Takes the first constraint in the list, removes it and then tries
-        // to solve it. Repeats until there are no more constarints.
-        while !self.constraints.is_empty() {
-            let (lhs, rhs) = self.constraints.swap_remove(0);
+        // Loops over the constraints multiple times if needed until all solvable
+        // constraints have been solved.
+        loop {
+            let start_constraint_len = self.constraints.len();
 
-            if let Err(mut errs) = self.solve_constraint(lhs, rhs, finalize) {
-                errors.append(&mut errs);
+            let mut i = 0;
+            while i < self.constraints.len() {
+                let (lhs, rhs) = self.constraints.get(i).cloned().unwrap();
+
+                match self.solve_constraint(lhs, rhs, finalize, map_unsolvables) {
+                    Ok(true) => {
+                        self.constraints.swap_remove(i);
+                    }
+                    Ok(false) => {
+                        i += 1;
+                    }
+                    Err(mut errs) => {
+                        errors.append(&mut errs);
+                        self.constraints.swap_remove(i);
+                    }
+                }
+            }
+
+            // If all constraints have been solved (indicated by a empty constraint
+            // vector) or if the current amount of constraints are the same as the
+            // start amount (before the while loop above ran), no more constraints
+            // can be solved; break out of the outer loop.
+            if self.constraints.is_empty() || start_constraint_len == self.constraints.len() {
+                break;
             }
         }
 
@@ -131,15 +202,29 @@ impl<'a> TypeContext<'a> {
         }
     }
 
-    fn solve_constraint(&mut self, lhs: Ty, rhs: Ty, finalize: bool) -> Result<(), Vec<LangError>> {
+    /// The `map_unsolvables` indicates what should happen when both lhs and rhs
+    /// are unsolvable. If `map_unsolvables` is set to true, a new substitution
+    /// will be created; if it is set to false, the constraint will be "skipped"
+    /// and no new substitution will be created.
+    ///
+    /// This is done, similar to `finalize`, to let types that are 100% solvable
+    /// be solved before starting to force types that aren't 100% solvable to be
+    /// solved.
+    fn solve_constraint(
+        &mut self,
+        lhs: Ty,
+        rhs: Ty,
+        finalize: bool,
+        map_unsolvables: bool,
+    ) -> Result<bool, Vec<LangError>> {
         let mut errors = Vec::default();
 
         let lhs_sub = self.solve_substitution(&lhs, finalize);
         let rhs_sub = self.solve_substitution(&rhs, finalize);
 
         debug!(
-            "Solving constraint -- finalize: {}\nlhs: {:#?}\nlhs_sub: {:#?}\nrhs: {:#?}\nrhs_sub: {:#?}",
-            finalize, &lhs, &lhs_sub, &rhs, &rhs_sub
+            "Solving constraint -- finalize: {}, map_unsolvables: {}\nlhs: {:#?}\nlhs_sub: {:#?}\nrhs: {:#?}\nrhs_sub: {:#?}",
+            finalize, map_unsolvables, &lhs, &lhs_sub, &rhs, &rhs_sub
         );
 
         // Get the inner types of the sub results. If there are any errors,
@@ -176,32 +261,43 @@ impl<'a> TypeContext<'a> {
         // The reason this matching is done down here instead of in the
         // "inner" chech match above is just to allow for the compatible
         // check inbetween.
-        match (lhs_sub, rhs_sub) {
+        let is_solved = match (lhs_sub, rhs_sub) {
             (SubResult::Solved(to), SubResult::UnSolved(from))
             | (SubResult::UnSolved(from), SubResult::Solved(to)) => {
                 if let Err(err) = self.insert_substitution(from, to) {
-                    errors.push(err)
+                    errors.push(err);
+                    return Err(errors);
+                } else {
+                    true
                 }
             }
 
-            (SubResult::UnSolved(first), SubResult::UnSolved(second)) => {
+            (SubResult::UnSolved(first), SubResult::UnSolved(second)) if map_unsolvables => {
                 match self.get_mapping_direction(first, second) {
                     Ok((from, to)) => {
                         if let Err(err) = self.insert_substitution(from, to) {
-                            errors.push(err)
+                            errors.push(err);
+                            return Err(errors);
+                        } else {
+                            true
                         }
                     }
-                    Err(err) => errors.push(err),
-                };
+                    Err(err) => {
+                        errors.push(err);
+                        return Err(errors);
+                    }
+                }
             }
+
+            (SubResult::UnSolved(_), SubResult::UnSolved(_)) if !map_unsolvables => false,
 
             // Nothing to do if both are solved, the substitution have already
             // been completed. Any errors have already been reported in the logic
             // above, so no need to report them again.
-            _ => (),
-        }
+            _ => true,
+        };
 
-        Ok(())
+        Ok(is_solved)
     }
 
     /// Takes in two types and sorts them in the correct "mapping order" i.e.
@@ -340,15 +436,12 @@ impl<'a> TypeContext<'a> {
                     Ty::CompoundType(..) => {
                         return self.solve_compound_type(finalize);
                     }
-
                     Ty::Pointer(..) | Ty::Array(..) => {
                         return self.solve_aggregate(finalize);
                     }
-
                     Ty::Generic(..) => {
                         return self.solve_generic(finalize);
                     }
-
                     Ty::UnknownStructureMember(..) => {
                         return self.solve_unknown_structure_member(finalize);
                     }
@@ -382,35 +475,30 @@ impl<'a> TypeContext<'a> {
         // Since this function will call other functions that updates `cur_ty`
         // recursively, need to save a local copy that will be restored before
         // this function returns.
-        let mut local_cur_ty = self.cur_ty.clone();
+        let cur_ty_backup = self.cur_ty.clone();
+        let mut cur_ty_modified = self.cur_ty.clone();
         let mut is_solved;
 
-        if let Ty::CompoundType(inner_ty, generics) = &mut local_cur_ty {
+        if let Ty::CompoundType(inner_ty, generics) = &mut cur_ty_modified {
             is_solved = true;
 
             // All inner types needs to be solved. If any of them can't be solved,
             // this whole aggregate type will count as unsolvable.
             for gen_ty in generics.iter_types_mut() {
-                match self.solve_substitution(gen_ty, finalize) {
-                    SubResult::Solved(sub_ty) => {
+                let result = self.solve_substitution(gen_ty, finalize);
+                match &result {
+                    SubResult::Solved(sub_ty) | SubResult::UnSolved(sub_ty) => {
                         *gen_ty = sub_ty.clone();
-                        if let Err(err) = self.insert_substitution(gen_ty.clone(), sub_ty) {
-                            return SubResult::Err(err);
+                        if result.is_unsolved() {
+                            is_solved = false;
                         }
                     }
-                    SubResult::UnSolved(sub_ty) => {
-                        *gen_ty = sub_ty.clone();
-                        if let Err(err) = self.insert_substitution(gen_ty.clone(), sub_ty) {
-                            return SubResult::Err(err);
-                        }
-                        is_solved = false;
-                    }
-                    err => return err,
+                    err => return err.clone(),
                 }
             }
 
             // Make a check to see if the inner type is solved as well.
-            // If this is to be finalized, solve the unkown ints and floats.
+            // If this is to be finalized, solve the unknown ints and floats.
             match inner_ty {
                 InnerTy::UnknownInt(_, _) if finalize => {
                     *inner_ty = InnerTy::default_int();
@@ -440,11 +528,11 @@ impl<'a> TypeContext<'a> {
                 _ => (),
             }
 
-            self.cur_ty = local_cur_ty.clone();
+            self.cur_ty = cur_ty_backup;
             if is_solved {
-                SubResult::Solved(local_cur_ty)
+                SubResult::Solved(cur_ty_modified)
             } else {
-                SubResult::UnSolved(local_cur_ty)
+                SubResult::UnSolved(cur_ty_modified)
             }
         } else {
             unreachable!("This function will only be called when it is a compound type.");
@@ -457,18 +545,14 @@ impl<'a> TypeContext<'a> {
         // Since this function will call other functions that updates `cur_ty`
         // recursively, need to save a local copy that will be restored before
         // this function returns.
-        let mut local_cur_ty = self.cur_ty.clone();
+        let cur_ty_backup = self.cur_ty.clone();
+        let mut cur_ty_modified = self.cur_ty.clone();
 
-        match &mut local_cur_ty {
+        match &mut cur_ty_modified {
             Ty::Pointer(ty) | Ty::Array(ty, _) => {
-                match self.solve_substitution(ty.as_ref(), finalize) {
-                    SubResult::Solved(sub_ty) => {
-                        *ty = Box::new(sub_ty);
-                        self.cur_ty = local_cur_ty.clone();
-                        SubResult::Solved(local_cur_ty)
-                    }
-
-                    SubResult::UnSolved(sub_ty) => {
+                let result = self.solve_substitution(ty.as_ref(), finalize);
+                match &result {
+                    SubResult::Solved(sub_ty) | SubResult::UnSolved(sub_ty) => {
                         if ty.contains_unknown_any() {
                             if let Err(err) = self.insert_substitution(*ty.clone(), sub_ty.clone())
                             {
@@ -476,12 +560,17 @@ impl<'a> TypeContext<'a> {
                             }
                         }
 
-                        *ty = Box::new(sub_ty);
-                        self.cur_ty = local_cur_ty.clone();
-                        SubResult::UnSolved(local_cur_ty)
+                        *ty = Box::new(sub_ty.clone());
+
+                        self.cur_ty = cur_ty_backup;
+                        if result.is_solved() {
+                            SubResult::Solved(cur_ty_modified)
+                        } else {
+                            SubResult::UnSolved(cur_ty_modified)
+                        }
                     }
 
-                    err => err,
+                    err => err.clone(),
                 }
             }
 
@@ -502,28 +591,20 @@ impl<'a> TypeContext<'a> {
         // Since this function will call other functions that updates `cur_ty`
         // recursively, need to save a local copy that will be restored before
         // this function returns.
-        let mut local_cur_ty = self.cur_ty.clone();
+        let cur_ty_backup = self.cur_ty.clone();
+        let mut cur_ty_modified = self.cur_ty.clone();
 
-        if let Ty::UnknownStructureMember(ty, member_name) = &mut local_cur_ty {
+        if let Ty::UnknownStructureMember(ty, member_name) = &mut cur_ty_modified {
             // Work around to make borrow checker happy (so that one can use
             // `local_cur_ty` further down in this block).
             let member_name = member_name.clone();
 
-            // Get any possible substitution and replace the current type with
-            // the new substituted type. The returned value might be the same as
-            // the current, but doesn't hurt to replace with itself.
+            // Get any possible substitution.
             let sub_ty = match self.solve_substitution(ty, finalize) {
                 SubResult::Solved(sub_ty) | SubResult::UnSolved(sub_ty) => {
-                    if ty.contains_unknown_any() {
-                        if let Err(err) = self.insert_substitution(*ty.clone(), sub_ty.clone()) {
-                            return SubResult::Err(err);
-                        }
-                    }
-
                     *ty = Box::new(sub_ty.clone());
                     sub_ty
                 }
-
                 err => return err,
             };
 
@@ -532,8 +613,8 @@ impl<'a> TypeContext<'a> {
                 | Ty::UnknownStructureMember(..)
                 | Ty::UnknownStructureMethod(..)
                 | Ty::UnknownMethodArgument(..) => {
-                    self.cur_ty = local_cur_ty.clone();
-                    return SubResult::UnSolved(local_cur_ty);
+                    self.cur_ty = cur_ty_backup;
+                    return SubResult::UnSolved(cur_ty_modified);
                 }
 
                 Ty::CompoundType(inner_ty, generics) => (inner_ty, generics),
@@ -545,9 +626,6 @@ impl<'a> TypeContext<'a> {
                     )))
                 }
             };
-
-            // Re-set cur_ty after the possible modification above.
-            self.cur_ty = local_cur_ty.clone();
 
             // TODO: Don't hardcode default id.
             let id = BlockInfo::DEFAULT_BLOCK_ID;
@@ -578,13 +656,15 @@ impl<'a> TypeContext<'a> {
                 }
 
                 _ => {
+                    self.cur_ty = cur_ty_backup;
+
                     return if finalize {
                         SubResult::Err(self.analyze_context.err(format!(
                             "Invalid inner type when solving UnknownStructureMember: {:#?}",
                             inner_ty
                         )))
                     } else {
-                        SubResult::UnSolved(self.cur_ty.clone())
+                        SubResult::UnSolved(cur_ty_modified)
                     };
                 }
             };
@@ -599,29 +679,11 @@ impl<'a> TypeContext<'a> {
 
                 // Add a substitution from the "UnknownStructureMember" to the
                 // actual type fetched from the member of the structure.
-                match self.solve_substitution(&new_ty, finalize) {
-                    SubResult::Solved(sub_ty) => {
-                        if let Err(err) =
-                            self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
-                        {
-                            SubResult::Err(err)
-                        } else {
-                            SubResult::Solved(sub_ty)
-                        }
-                    }
-
-                    SubResult::UnSolved(un_sub_ty) => {
-                        if let Err(err) =
-                            self.insert_substitution(self.cur_ty.clone(), un_sub_ty.clone())
-                        {
-                            SubResult::Err(err)
-                        } else {
-                            SubResult::UnSolved(un_sub_ty)
-                        }
-                    }
-
-                    res => res,
+                if let Err(err) = self.insert_substitution(cur_ty_backup, new_ty.clone()) {
+                    return SubResult::Err(err);
                 }
+
+                self.solve_substitution(&new_ty, finalize)
             } else {
                 SubResult::Err(self.analyze_context.err(format!(
                     "Type not set for member \"{}\" in structure \"{}\"",
@@ -639,25 +701,19 @@ impl<'a> TypeContext<'a> {
         // Since this function will call other functions that updates `cur_ty`
         // recursively, need to save a local copy that will be restored before
         // this function returns.
-        let mut local_cur_ty = self.cur_ty.clone();
+        let cur_ty_backup = self.cur_ty.clone();
+        let mut cur_ty_modified = self.cur_ty.clone();
 
-        if let Ty::UnknownStructureMethod(ty, method_name) = &mut local_cur_ty {
+        if let Ty::UnknownStructureMethod(ty, method_name) = &mut cur_ty_modified {
             // Work around to make borrow checker happy (so that one can use
             // `local_cur_ty` further down in this block).
             let method_name = method_name.clone();
 
-            // Get any possible substitution and replace the current type with
-            // the new substituted type. The returned value might be the same as
-            // the current, but doesn't hurt to replace with itself.
             let sub_ty = match self.solve_substitution(ty, finalize) {
                 SubResult::Solved(sub_ty) | SubResult::UnSolved(sub_ty) => {
-                    self.cur_ty =
-                        Ty::UnknownStructureMethod(Box::new(sub_ty.clone()), method_name.clone());
-
                     *ty = Box::new(sub_ty.clone());
                     sub_ty
                 }
-
                 err => return err,
             };
 
@@ -666,8 +722,8 @@ impl<'a> TypeContext<'a> {
                 | Ty::UnknownStructureMember(..)
                 | Ty::UnknownStructureMethod(..)
                 | Ty::UnknownMethodArgument(..) => {
-                    self.cur_ty = local_cur_ty.clone();
-                    return SubResult::UnSolved(local_cur_ty);
+                    self.cur_ty = cur_ty_backup;
+                    return SubResult::UnSolved(cur_ty_modified);
                 }
 
                 Ty::CompoundType(inner_ty, generics) => (inner_ty, generics),
@@ -681,8 +737,8 @@ impl<'a> TypeContext<'a> {
                     if let Ty::CompoundType(inner_ty, generics) = ty_box.as_ref() {
                         (inner_ty, generics)
                     } else {
-                        self.cur_ty = local_cur_ty.clone();
-                        return SubResult::UnSolved(local_cur_ty);
+                        self.cur_ty = cur_ty_backup;
+                        return SubResult::UnSolved(cur_ty_modified);
                     }
                 }
 
@@ -693,9 +749,6 @@ impl<'a> TypeContext<'a> {
                     )))
                 }
             };
-
-            // Re-set cur_ty after the possible modification above.
-            self.cur_ty = local_cur_ty.clone();
 
             // TODO: Don't hardcode default id.
             let id = BlockInfo::DEFAULT_BLOCK_ID;
@@ -726,7 +779,8 @@ impl<'a> TypeContext<'a> {
                             inner_ty
                         )))
                     } else {
-                        SubResult::UnSolved(self.cur_ty.clone())
+                        self.cur_ty = cur_ty_backup;
+                        SubResult::UnSolved(cur_ty_modified)
                     };
                 }
             };
@@ -737,33 +791,15 @@ impl<'a> TypeContext<'a> {
 
                 // Add a substitution from the "UnknownStructureMethod" to the
                 // actual type fetched from the method of the structure.
-                match self.solve_substitution(&new_ty, finalize) {
-                    SubResult::Solved(sub_ty) => {
-                        if let Err(err) =
-                            self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
-                        {
-                            SubResult::Err(err)
-                        } else {
-                            SubResult::Solved(sub_ty)
-                        }
-                    }
-
-                    SubResult::UnSolved(un_sub_ty) => {
-                        if let Err(err) =
-                            self.insert_substitution(self.cur_ty.clone(), un_sub_ty.clone())
-                        {
-                            SubResult::Err(err)
-                        } else {
-                            SubResult::UnSolved(un_sub_ty)
-                        }
-                    }
-
-                    res => res,
+                if let Err(err) = self.insert_substitution(cur_ty_backup, new_ty.clone()) {
+                    return SubResult::Err(err);
                 }
+
+                self.solve_substitution(&new_ty, finalize)
             } else {
                 // The return type of the method is None == Void.
                 let ty = Ty::CompoundType(InnerTy::Void, Generics::new());
-                if let Err(err) = self.insert_substitution(self.cur_ty.clone(), ty.clone()) {
+                if let Err(err) = self.insert_substitution(cur_ty_backup, ty.clone()) {
                     SubResult::Err(err)
                 } else {
                     SubResult::Solved(ty)
@@ -780,9 +816,10 @@ impl<'a> TypeContext<'a> {
         // Since this function will call other functions that updates `cur_ty`
         // recursively, need to save a local copy that will be restored before
         // this function returns.
-        let mut local_cur_ty = self.cur_ty.clone();
+        let cur_ty_backup = self.cur_ty.clone();
+        let mut cur_ty_modified = self.cur_ty.clone();
 
-        if let Ty::UnknownMethodArgument(ty, method_name, name_or_idx) = &mut local_cur_ty {
+        if let Ty::UnknownMethodArgument(ty, method_name, name_or_idx) = &mut cur_ty_modified {
             // Work around to make borrow checker happy (so that one can use
             // `local_cur_ty` further down in this block).
             let method_name = method_name.clone();
@@ -793,16 +830,9 @@ impl<'a> TypeContext<'a> {
             // the current, but doesn't hurt to replace with itself.
             let sub_ty = match self.solve_substitution(ty, finalize) {
                 SubResult::Solved(sub_ty) | SubResult::UnSolved(sub_ty) => {
-                    self.cur_ty = Ty::UnknownMethodArgument(
-                        Box::new(sub_ty.clone()),
-                        method_name.clone(),
-                        name_or_idx.clone(),
-                    );
-
                     *ty = Box::new(sub_ty.clone());
                     sub_ty
                 }
-
                 err => return err,
             };
 
@@ -811,8 +841,8 @@ impl<'a> TypeContext<'a> {
                 | Ty::UnknownStructureMember(..)
                 | Ty::UnknownStructureMethod(..)
                 | Ty::UnknownMethodArgument(..) => {
-                    self.cur_ty = local_cur_ty.clone();
-                    return SubResult::UnSolved(local_cur_ty);
+                    self.cur_ty = cur_ty_backup;
+                    return SubResult::UnSolved(cur_ty_modified);
                 }
 
                 Ty::CompoundType(inner_ty, generics) => (inner_ty, generics),
@@ -822,8 +852,8 @@ impl<'a> TypeContext<'a> {
                     if let Ty::CompoundType(inner_ty, generics) = ty_box.as_ref() {
                         (inner_ty, generics)
                     } else {
-                        self.cur_ty = local_cur_ty.clone();
-                        return SubResult::UnSolved(local_cur_ty);
+                        self.cur_ty = cur_ty_backup;
+                        return SubResult::UnSolved(cur_ty_modified);
                     }
                 }
 
@@ -834,9 +864,6 @@ impl<'a> TypeContext<'a> {
                     )))
                 }
             };
-
-            // Re-set cur_ty after the possible modification above.
-            self.cur_ty = local_cur_ty.clone();
 
             let struct_name = match inner_ty {
                 InnerTy::Struct(struct_name) => struct_name,
@@ -856,7 +883,8 @@ impl<'a> TypeContext<'a> {
                             inner_ty
                         )))
                     } else {
-                        SubResult::UnSolved(self.cur_ty.clone())
+                        self.cur_ty = cur_ty_backup;
+                        SubResult::UnSolved(cur_ty_modified)
                     };
                 }
             };
@@ -898,28 +926,11 @@ impl<'a> TypeContext<'a> {
 
             // Add a substitution from the "UnknownMethodArgument" to the
             // actual type fetched from the method of the structure.
-            match self.solve_substitution(&arg_ty, finalize) {
-                SubResult::Solved(sub_ty) => {
-                    if let Err(err) = self.insert_substitution(self.cur_ty.clone(), sub_ty.clone())
-                    {
-                        SubResult::Err(err)
-                    } else {
-                        SubResult::Solved(sub_ty)
-                    }
-                }
-
-                SubResult::UnSolved(un_sub_ty) => {
-                    if let Err(err) =
-                        self.insert_substitution(self.cur_ty.clone(), un_sub_ty.clone())
-                    {
-                        SubResult::Err(err)
-                    } else {
-                        SubResult::UnSolved(un_sub_ty)
-                    }
-                }
-
-                res => res,
+            if let Err(err) = self.insert_substitution(cur_ty_backup, arg_ty.clone()) {
+                return SubResult::Err(err);
             }
+
+            self.solve_substitution(&arg_ty, finalize)
         } else {
             unreachable!(
                 "This function will only be called when it is a UnknownMethodArgument type."
@@ -931,25 +942,21 @@ impl<'a> TypeContext<'a> {
         // Since this function will call other functions that updates `cur_ty`
         // recursively, need to save a local copy that will be restored before
         // this function returns.
-        let mut local_cur_ty = self.cur_ty.clone();
+        let cur_ty_backup = self.cur_ty.clone();
+        let mut cur_ty_modified = self.cur_ty.clone();
 
-        if let Ty::UnknownArrayMember(ty) = &mut local_cur_ty {
+        if let Ty::UnknownArrayMember(ty) = &mut cur_ty_modified {
             // Add a substitution from the "UnknownArrayMember" to the actual
             // type of the array if it has been found.
             match self.solve_substitution(&ty, finalize) {
                 SubResult::Solved(sub_ty) => {
                     warn!("SOLVED -- ty: {:#?}\nsub_ty: {:#?}", ty, sub_ty);
 
-                    let sub_result = if let Ty::Array(real_ty, _) = sub_ty {
-                        if real_ty.contains_unknown_any() {
-                            if let Err(err) =
-                                self.insert_substitution(*ty.clone(), *real_ty.clone())
-                            {
-                                SubResult::Err(err)
-                            } else {
-                                SubResult::Solved(*real_ty)
-                            }
+                    if let Ty::Array(real_ty, _) = sub_ty {
+                        if let Err(err) = self.insert_substitution(*ty.clone(), *real_ty.clone()) {
+                            SubResult::Err(err)
                         } else {
+                            self.cur_ty = cur_ty_backup;
                             SubResult::Solved(*real_ty)
                         }
                     } else {
@@ -957,27 +964,16 @@ impl<'a> TypeContext<'a> {
                             "Epected type to be array. unknown: {:#?}, solved: {:#?}",
                             ty, sub_ty
                         )))
-                    };
-
-                    self.cur_ty = local_cur_ty;
-                    sub_result
+                    }
                 }
 
                 SubResult::UnSolved(un_sub_ty) => {
                     warn!("UNSOLVED -- ty: {:#?}\nun_sub_ty: {:#?}", ty, un_sub_ty);
 
-                    let un_sub_full_ty = Ty::UnknownArrayMember(Box::new(un_sub_ty));
+                    *ty = Box::new(un_sub_ty);
 
-                    let sub_result = if let Err(err) =
-                        self.insert_substitution(local_cur_ty.clone(), un_sub_full_ty.clone())
-                    {
-                        SubResult::Err(err)
-                    } else {
-                        SubResult::UnSolved(un_sub_full_ty.clone())
-                    };
-
-                    self.cur_ty = un_sub_full_ty;
-                    sub_result
+                    self.cur_ty = cur_ty_backup;
+                    SubResult::UnSolved(cur_ty_modified)
                 }
 
                 res => res,
