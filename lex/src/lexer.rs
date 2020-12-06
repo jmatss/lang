@@ -199,7 +199,7 @@ impl<'a> LexTokenIter<'a> {
     // TODO: number containing scientifical notaion (e/E).
     /// Returns the number (int or float) at the current position of the iterator.
     fn get_number(&mut self) -> LexTokenKind {
-        let radix = if let Some(('0', Some(sep_char))) = self.iter.next_two() {
+        let radix = if let Some(('0', Some(sep_char))) = self.iter.peek_two() {
             match sep_char.to_ascii_uppercase() {
                 'X' => 16,
                 'B' => 2,
@@ -211,11 +211,9 @@ impl<'a> LexTokenIter<'a> {
             10
         };
 
-        if radix == 10 {
-            // Rewind the position of the iterator to include the two read
-            // characters from above since they aren't part of a prefix.
-            self.iter.rewind_n(2);
-        } else {
+        if radix != 10 {
+            // Skip and count the prefix for numbers that isn't radix 10.
+            self.iter.skip(2);
             self.column_nr += 2;
         }
 

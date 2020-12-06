@@ -7,9 +7,6 @@ pub struct CharIter<'a> {
     iter: TokenIter<'a, u8>,
 }
 
-// TODO: Clean up this ugly logic. Make moving forward and backwards over a char
-//       cleaner.
-
 impl<'a> CharIter<'a> {
     pub fn new(content: &'a mut [u8]) -> Self {
         Self {
@@ -20,54 +17,26 @@ impl<'a> CharIter<'a> {
     /// Gets the next char from the iterator.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<char> {
-        let (b1, b2, b3, b4) = self.iter.peek_four()?;
+        let mut n = 0;
+        let byte_size = 4;
 
-        // Check if this is a one byte character.
-        let b1 = if let Some(c) = std::char::from_u32(b1 as u32) {
-            self.iter.skip(1);
-            return Some(c);
-        } else {
-            b1 as u32
-        };
+        // UTF-8 characters can contain 4 bytes. This loop starts by looking at
+        // a single byte and for every iteration increases the amount of bytes
+        // that it tries to convert to a character.
+        for i in 0..4 {
+            if let Some(b) = self.iter.peek_at_n(i) {
+                n <<= byte_size;
+                n |= b as u32;
 
-        // Check if this is a two byte character.
-        let b2 = if let Some(b2) = b2 {
-            let n = (b1 << 8 | (b2 as u32)) as u32;
-            if let Some(c) = std::char::from_u32(n) {
-                self.iter.skip(2);
-                return Some(c);
+                if let Some(c) = std::char::from_u32(n) {
+                    self.iter.skip(i + 1);
+                    return Some(c);
+                }
             } else {
-                b2 as u32
-            }
-        } else {
-            self.iter.skip(1);
-            return None;
-        };
-
-        // Check if this is a three byte character.
-        let b3 = if let Some(b3) = b3 {
-            let n = (b1 << 16 | b2 << 8 | (b3 as u32)) as u32;
-            if let Some(c) = std::char::from_u32(n) {
-                self.iter.skip(3);
-                return Some(c);
-            } else {
-                b3 as u32
-            }
-        } else {
-            self.iter.skip(2);
-            return None;
-        };
-
-        // Check if this is a four byte character.
-        if let Some(b4) = b4 {
-            let n = (b1 << 24 | b2 << 16 | b3 << 8 | (b4 as u32)) as u32;
-            if let Some(c) = std::char::from_u32(n) {
-                self.iter.skip(4);
-                return Some(c);
+                break;
             }
         }
 
-        self.iter.skip(3);
         None
     }
 
@@ -80,42 +49,40 @@ impl<'a> CharIter<'a> {
         }
     }
 
-    /// Peeks and clones the two upcoming items in the iterator.
+    /// Peeks and clones the next upcoming items in the iterator.
     pub fn peek(&mut self) -> Option<char> {
-        let old_pos = self.iter.pos;
-
-        let res = self.next();
-
-        self.iter.pos = old_pos;
-        res
+        let mark = self.iter.mark();
+        if let Some(res) = self.next() {
+            self.iter.rewind_to_mark(mark);
+            Some(res)
+        } else {
+            None
+        }
     }
 
     /// Peeks and clones the two upcoming items in the iterator.
     pub fn peek_two(&mut self) -> Option<(char, Option<char>)> {
-        let old_pos = self.iter.pos;
-
-        let res = if let Some(c1) = self.next() {
-            Some((c1, self.next()))
+        let mark = self.iter.mark();
+        if let Some(c1) = self.next() {
+            let c2 = self.next();
+            self.iter.rewind_to_mark(mark);
+            Some((c1, c2))
         } else {
             None
-        };
-
-        self.iter.pos = old_pos;
-        res
+        }
     }
 
     /// Peeks and clones the three upcoming items in the iterator.
     pub fn peek_three(&mut self) -> Option<(char, Option<char>, Option<char>)> {
-        let old_pos = self.iter.pos;
-
-        let res = if let Some(c1) = self.next() {
-            Some((c1, self.next(), self.next()))
+        let mark = self.iter.mark();
+        if let Some(c1) = self.next() {
+            let c2 = self.next();
+            let c3 = self.next();
+            self.iter.rewind_to_mark(mark);
+            Some((c1, c2, c3))
         } else {
             None
-        };
-
-        self.iter.pos = old_pos;
-        res
+        }
     }
 
     /// Skips the next `n` characters.
@@ -125,22 +92,16 @@ impl<'a> CharIter<'a> {
         }
     }
 
-    pub fn mark(&mut self) -> usize {
-        self.iter.mark()
-    }
-
-    /// Rewinds the iterator to the previous character.
+    /// Rewinds the iterator to the previous character. This function can be used
+    /// for an arbitrary amount of rewinds. If just a single character needs to
+    /// be rewinded after a `next()` call, use `rewind_prev()`.
     pub fn rewind(&mut self) -> bool {
-        let mut rewinded = false;
-
         for i in (1..=4).rev() {
             if self.is_valid_char_of_size(i) {
-                rewinded = self.iter.rewind_n(i);
-                break;
+                return self.iter.rewind_n(i);
             }
         }
-
-        rewinded
+        false
     }
 
     /// Puts back a item into the iterator.
@@ -155,14 +116,10 @@ impl<'a> CharIter<'a> {
         true
     }
 
-    pub fn rewind_to_mark(&mut self, mark: usize) {
-        self.iter.rewind_to_mark(mark);
-    }
-
     /// Checks if the previos character is a valid char of byte length `n`.
     fn is_valid_char_of_size(&mut self, n: usize) -> bool {
         let mut is_valid = false;
-        let old_pos = self.iter.pos;
+        let mark = self.iter.mark();
 
         if self.iter.rewind_n(n) {
             if let Some(c) = self.next() {
@@ -172,7 +129,7 @@ impl<'a> CharIter<'a> {
             }
         }
 
-        self.iter.pos = old_pos;
+        self.iter.rewind_to_mark(mark);
         is_valid
     }
 }

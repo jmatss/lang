@@ -3,7 +3,7 @@
 //       the only function that needs to modify the iter.
 
 pub struct TokenIter<'a, I: Clone> {
-    pub pos: usize,
+    pos: usize,
     iter: &'a mut [I],
 }
 
