@@ -88,13 +88,12 @@ impl<'a> CharIter<'a> {
     /// Skips the next `n` characters.
     pub fn skip(&mut self, n: usize) {
         for _ in 0..n {
-            self.iter.next();
+            self.next();
         }
     }
 
     /// Rewinds the iterator to the previous character. This function can be used
-    /// for an arbitrary amount of rewinds. If just a single character needs to
-    /// be rewinded after a `next()` call, use `rewind_prev()`.
+    /// for an arbitrary amount of rewinds.
     pub fn rewind(&mut self) -> bool {
         for i in (1..=4).rev() {
             if self.is_valid_char_of_size(i) {
