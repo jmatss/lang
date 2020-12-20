@@ -11,7 +11,9 @@ use common::{
         block::Function,
         block::{BlockHeader, Struct},
     },
+    traverser::AstTraverser,
     traverser::TraverseContext,
+    ty::ty::Ty,
     visitor::Visitor,
     BlockId,
 };
@@ -19,12 +21,14 @@ use log::debug;
 
 use crate::AnalyzeContext;
 
+use super::generic_replace::GenericsReplacer;
+
 pub struct TypeConverter<'a> {
     /// Needed to look up structs.
     analyze_context: &'a mut AnalyzeContext,
 
     /// The key is the name of the original struct (WITHOUT generics in the name).
-    generic_structs: HashMap<String, Vec<Rc<RefCell<Struct>>>>,
+    generic_structs: HashMap<String, Vec<(Rc<RefCell<Struct>>, Ty)>>,
     /// The outer key is the name of the modified struct (WITH generics in the name).
     /// The inner key is the name of the method.
     generic_struct_methods: HashMap<String, HashMap<String, Rc<RefCell<Function>>>>,
@@ -45,7 +49,7 @@ pub struct TypeConverter<'a> {
 impl<'a> TypeConverter<'a> {
     pub fn new(
         analyze_context: &'a mut AnalyzeContext,
-        generic_structs: HashMap<String, Vec<Rc<RefCell<Struct>>>>,
+        generic_structs: HashMap<String, Vec<(Rc<RefCell<Struct>>, Ty)>>,
         generic_struct_methods: HashMap<String, HashMap<String, Rc<RefCell<Function>>>>,
     ) -> Self {
         Self {
@@ -86,7 +90,7 @@ impl<'a> TypeConverter<'a> {
             // (in AnalyzeContext).
             match self.generic_structs.entry(struct_.name.clone()) {
                 Entry::Occupied(ref mut o) => {
-                    for generic_struct in o.get_mut() {
+                    for (generic_struct, _) in o.get_mut() {
                         debug!(
                             "Creating new generic struct in block id {}: {:#?}",
                             old_id, generic_struct
@@ -191,7 +195,7 @@ impl<'a> Visitor for TypeConverter<'a> {
                     if self.impls_to_be_modified.contains(struct_name) {
                         match self.generic_structs.entry(struct_name.into()) {
                             Entry::Occupied(ref mut o) => {
-                                for generic_struct in o.get_mut() {
+                                for (generic_struct, gen_struct_ty) in o.get_mut() {
                                     // Get the actual struct instance that have had
                                     // the generics implemented.
                                     let struct_ = match self
@@ -229,8 +233,11 @@ impl<'a> Visitor for TypeConverter<'a> {
                                     // new method block. This new method block
                                     // will be inserted into a new impl block.
                                     for method in new_impl_body {
-                                        if let Token::Block(BlockHeader::Function(inner_func), ..) =
-                                            &mut method.token
+                                        if let Token::Block(
+                                            BlockHeader::Function(inner_func),
+                                            _,
+                                            body,
+                                        ) = &mut method.token
                                         {
                                             let new_func = if let Some(new_func) = self
                                                 .generic_struct_methods
@@ -251,6 +258,25 @@ impl<'a> Visitor for TypeConverter<'a> {
 
                                             let new_func_name = new_func.borrow().name.clone();
                                             *inner_func = Rc::clone(&new_func);
+
+                                            // Replace all found generic types
+                                            // in the function bodies with the actual
+                                            // generics implementation.
+                                            if let Some(Ty::CompoundType(_, generics_impl)) =
+                                                &inner_func.borrow().method_structure
+                                            {
+                                                let mut generics_replacer = GenericsReplacer::new(
+                                                    generics_impl,
+                                                    &struct_name,
+                                                    gen_struct_ty,
+                                                );
+
+                                                for body_token in body {
+                                                    AstTraverser::new()
+                                                        .add_visitor(&mut generics_replacer)
+                                                        .traverse(body_token);
+                                                }
+                                            };
 
                                             // Make the field "methods" in the
                                             // "Struct" struct point to the newly

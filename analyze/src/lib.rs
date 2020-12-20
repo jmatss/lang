@@ -23,10 +23,11 @@ use decl::ty::DeclTypeAnalyzer;
 use decl::var::DeclVarAnalyzer;
 use log::debug;
 use mid::defer::DeferAnalyzer;
+use mid::generics::GenericsAnalyzer;
 use post::call_args::CallArgs;
 use pre::indexing::IndexingAnalyzer;
 use pre::method::MethodAnalyzer;
-use std::{cell::RefCell, cell::RefMut, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, cell::RefMut, collections::HashMap, fmt::Debug, rc::Rc};
 use ty::context::TypeContext;
 use ty::converter::TypeConverter;
 use ty::inferencer::TypeInferencer;
@@ -101,10 +102,12 @@ pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>
         .traverse(ast_root)
         .take_errors()?;
 
-    debug!("Running DeferAnalyzer");
+    debug!("Running DeferAnalyzer, running GenericsAnalyzer");
     let mut defer_analyzer = DeferAnalyzer::new(&analyze_context);
+    let mut generics_analyzer = GenericsAnalyzer::new();
     AstTraverser::new()
         .add_visitor(&mut defer_analyzer)
+        .add_visitor(&mut generics_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 
@@ -333,13 +336,16 @@ impl AnalyzeContext {
         ident: &str,
         id: BlockId,
         map: &HashMap<(String, BlockId), T>,
-    ) -> CustomResult<BlockId> {
+    ) -> CustomResult<BlockId>
+    where
+        T: Debug,
+    {
         if map.get(&(ident.into(), id)).is_some() {
             Ok(id)
         } else if id == BlockInfo::DEFAULT_BLOCK_ID {
             Err(self.err(format!(
-                "Unable to find decl for \"{}\", ended in up root block.",
-                ident
+                "Unable to find decl for \"{}\", ended in up root block.\n map: {:#?}",
+                ident, map
             )))
         } else {
             // Unable to find declaration in the current block scope. See
@@ -499,7 +505,7 @@ impl AnalyzeContext {
         self.get_mut(ident, decl_block_id, &self.interfaces)
     }
 
-    /// Given a name of a struct `struct_`, a name of a method `func` and a
+    /// Given a name of a struct `struct_name`, a name of a method `func` and a
     /// block scope `id`, returns a reference to the declaration in the AST.
     pub fn get_method(
         &self,
@@ -523,6 +529,27 @@ impl AnalyzeContext {
                 &func_name, &struct_,
             )))
         }
+    }
+
+    /// Given a name of a struct `struct_name` and a block scope `id`, returns
+    /// references to all methods declared for the structure in the AST.
+    pub fn get_methods(
+        &self,
+        struct_name: &str,
+        id: BlockId,
+    ) -> CustomResult<Vec<Rc<RefCell<Function>>>> {
+        let decl_block_id = self.get_struct_decl_scope(struct_name, id)?;
+        let struct_ = self.get_struct(struct_name, decl_block_id)?;
+
+        let mut methods = Vec::default();
+
+        if let Some(inner_methods) = struct_.borrow().methods.as_ref() {
+            for method in inner_methods.values() {
+                methods.push(Rc::clone(method));
+            }
+        }
+
+        Ok(methods)
     }
 
     /// Inserts the given method `func` into the struct with name `struct_name`

@@ -1,4 +1,8 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    rc::Rc,
+};
 
 use common::{
     error::LangError,
@@ -17,7 +21,7 @@ use common::{
     visitor::Visitor,
 };
 use either::Either;
-use log::debug;
+use log::{debug, warn};
 
 use super::context::TypeContext;
 
@@ -40,10 +44,6 @@ pub struct TypeInferencer<'a, 'b> {
     /// about the types of the parameters and the return type.
     cur_func: Option<Rc<RefCell<Function>>>,
 
-    /// The identifier of the last seen implement block. This allows methods
-    /// to see which impl block they belong to.
-    cur_impl: Option<String>,
-
     /// Contains the current match expression. Its type needs to be the same
     /// as the type in the match cases.
     cur_match_expr: Option<Expr>,
@@ -61,7 +61,6 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
         Self {
             type_context,
             cur_func: None,
-            cur_impl: None,
             cur_match_expr: None,
             type_id: 0,
             errors: Vec::default(),
@@ -225,6 +224,72 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     func_call
                 );
             };
+
+            // If the structure type is know and contains generics, this logic
+            // will fetch thes structure and add the combine the names for the
+            // generics found in the structure declaration with potential
+            if let Some(Ty::CompoundType(inner_ty, generic_types)) = &mut func_call.method_structure
+            {
+                match inner_ty {
+                    InnerTy::Struct(ident)
+                    | InnerTy::Enum(ident)
+                    | InnerTy::Interface(ident)
+                    | InnerTy::UnknownIdent(ident, ..) => {
+                        let generic_names = if let Ok(struct_) = self
+                            .type_context
+                            .analyze_context
+                            .get_struct(ident, ctx.block_id)
+                        {
+                            struct_
+                                .borrow()
+                                .generic_params
+                                .clone()
+                                .unwrap_or_else(Vec::default)
+                        } else if let Ok(enum_) = self
+                            .type_context
+                            .analyze_context
+                            .get_enum(ident, ctx.block_id)
+                        {
+                            enum_.borrow().generics.clone().unwrap_or_else(Vec::default)
+                        } else if let Ok(interface) = self
+                            .type_context
+                            .analyze_context
+                            .get_interface(ident, ctx.block_id)
+                        {
+                            interface
+                                .borrow()
+                                .generics
+                                .clone()
+                                .unwrap_or_else(Vec::default)
+                        } else {
+                            Vec::default()
+                        };
+
+                        let mut generics = Generics::new();
+                        let mut idx = 0;
+
+                        for (gen_name, gen_ty) in generic_names
+                            .iter()
+                            .cloned()
+                            .zip(generic_types.iter_types().cloned())
+                        {
+                            generics.insert(gen_name, gen_ty);
+                            idx += 1;
+                        }
+
+                        // If not all of the generics have implements, just insert
+                        // the remanining generics as names without impls.
+                        while idx < generic_names.len() {
+                            let gen_name = generic_names.get(idx).expect("Known to be inbounds.");
+                            generics.insert_lookup(gen_name.clone(), idx);
+                            generics.insert_name(gen_name.clone());
+                        }
+
+                        *generic_types = generics;
+                    }
+                    _ => (),
+                }
+            }
 
             // Insert constraints between the function call argument type and
             // the method parameter types that will be figured out later.
@@ -394,7 +459,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     for generic_name in generic_names {
                         let unknown_ident =
                             self.new_unknown_ident(&format!("generic_{}", generic_name));
-                        let gen_ty = Ty::Generic(unknown_ident);
+                        let gen_ty = Ty::GenericImpl(generic_name.clone(), unknown_ident, None);
 
                         generics.insert(generic_name.clone(), gen_ty);
                     }
@@ -735,7 +800,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             // If this is a method and the first argument is named "this", set
             // the type of it to the structure that this method belongs to
-            // (which already is stored in `method_structore`).
+            // (which already is stored in `method_structure`).
             if let Some(first_arg) = func_ref.parameters.as_ref().and_then(|args| args.first()) {
                 let mut first_arg = first_arg.borrow_mut();
 
@@ -768,9 +833,127 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Implement(ident), ..) = &ast_token.token {
-            self.cur_impl = Some(ident.clone());
+    // TODO: Clean up this logic, can merge stuff from `visit_struct` and `visit_impl`.
+
+    // TODO: Implement for interfaces and enums.
+    /// Tie the generics in this specific struct to each other with constraints.
+    /// Ties the generics in the struct members, method parameters and method
+    /// return types.
+    fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let Token::Block(BlockHeader::Struct(struct_), ..) = &ast_token.token {
+            let struct_ = struct_.borrow();
+
+            // Populate this map with the "Generic(ident)" types where the key
+            // is the name of the generic and the value is a list of all the
+            // Generics that should have constraints between each other.
+            let mut generics: HashMap<_, Vec<_>> = HashMap::default();
+
+            // Gather all "Generic" types found in the members types into the
+            // `generics` map. All the generic types in every entry will then
+            // be tied together so that they all get infered to the same type.
+            if let Some(members) = &struct_.members {
+                for member in members {
+                    let member = member.borrow();
+
+                    if let Some(ty) = &member.ret_type {
+                        let inner_generics = if let Some(inner_generics) = ty.get_generics() {
+                            inner_generics
+                        } else {
+                            continue;
+                        };
+
+                        for gen_ty in inner_generics {
+                            let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                                ident
+                            } else {
+                                unreachable!("gen_ty not generic: {:#?}", gen_ty);
+                            };
+
+                            match generics.entry(ident.clone()) {
+                                Entry::Occupied(mut o) => {
+                                    o.get_mut().push(gen_ty);
+                                }
+                                Entry::Vacant(v) => {
+                                    v.insert(vec![gen_ty]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(methods) = &struct_.methods {
+                for method in methods.values() {
+                    // Gather "Generic" types from method parameters.
+                    if let Some(params) = &method.borrow().parameters {
+                        for param in params {
+                            if let Some(ty) = param.borrow().ret_type.as_ref() {
+                                let inner_generics = if let Some(inner_generics) = ty.get_generics()
+                                {
+                                    inner_generics
+                                } else {
+                                    continue;
+                                };
+
+                                for gen_ty in inner_generics {
+                                    let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                                        ident
+                                    } else {
+                                        unreachable!("gen_ty not generic: {:#?}", gen_ty);
+                                    };
+
+                                    match generics.entry(ident.clone()) {
+                                        Entry::Occupied(mut o) => {
+                                            o.get_mut().push(gen_ty);
+                                        }
+                                        Entry::Vacant(v) => {
+                                            v.insert(vec![gen_ty]);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Gather "Generic" types from method return type.
+                    if let Some(ret_ty) = &mut method.borrow().ret_type.as_ref() {
+                        let inner_generics = if let Some(inner_generics) = ret_ty.get_generics() {
+                            inner_generics
+                        } else {
+                            continue;
+                        };
+
+                        for gen_ty in inner_generics {
+                            let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                                ident
+                            } else {
+                                unreachable!("gen_ty not generic: {:#?}", gen_ty);
+                            };
+
+                            match generics.entry(ident.clone()) {
+                                Entry::Occupied(mut o) => {
+                                    o.get_mut().push(gen_ty);
+                                }
+                                Entry::Vacant(v) => {
+                                    v.insert(vec![gen_ty]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Tie the types of the generics with the same ident to each other.
+            for ident_generics in generics.values() {
+                for i in 0..ident_generics.len() {
+                    let left = ident_generics.get(i).cloned().unwrap();
+
+                    for j in i + 1..ident_generics.len() {
+                        let right = ident_generics.get(j).cloned().unwrap();
+                        self.type_context.insert_constraint(left.clone(), right)
+                    }
+                }
+            }
         }
     }
 

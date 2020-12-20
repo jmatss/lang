@@ -48,9 +48,7 @@ pub struct ExprParser<'a, 'b> {
     /// expression or the function call.
     ///
     /// If this is set to a negative number, a "ParenthesisEnd" was found that
-    /// didn't belong to this expression, assume end of expression. The extra
-    /// "ParenthesisEnd" will be saved in the var `parenthesis_token` so that
-    /// it can be put back into the iterator.
+    /// didn't belong to this expression, assume end of expression.
     parenthesis_count: isize,
 }
 
@@ -423,7 +421,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 // Static method call, this is the lhs type.
                 LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(Ty::CompoundType(
                     InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
-                    Generics::new(),
+                    generics.unwrap_or_else(Generics::new),
                 ))),
 
                 _ => {
@@ -442,10 +440,12 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                                 let ty = self.iter.parse_type(None)?;
                                 return Ok(Expr::Type(ty));
                             }
+
                             _ => (),
                         }
                     }
 
+                    // Otherwise this is just a regular variable name.
                     let var = self.iter.parse_var_type(ident)?;
                     Ok(Expr::Var(var))
                 }

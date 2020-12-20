@@ -20,8 +20,21 @@ pub enum Ty {
     Array(Box<Ty>, Option<Box<Expr>>),
 
     /// A generic type. Ex. a generic "T" on a struct would be represented
-    /// as a "Generic" containing the string "T".
-    Generic(String),
+    /// as a "Generic" containing the string "T". The boxed Ty is a potential
+    /// type that might replace this generic. This is the type that has been
+    /// found through the usage of the type in the function body (inferred),
+    /// but might not be the final type since it might be overriden by ex. a
+    /// inferred or "hardcoded" type given from outside the function.
+    Generic(String, Option<Box<Ty>>),
+
+    /// A generic type that represent the actual implementation of a generic
+    /// type. This is a type that is inferred from either outside the struct/function
+    /// with the generic, or it is "hardcoded" at the struct init or function call.
+    ///
+    /// The first String is the name of the generic type (ex. "T").
+    /// The second String is a unique ID that is used to differentiate between
+    /// the generic impls.
+    GenericImpl(String, String, Option<Box<Ty>>),
 
     /// Unknown member of the struct/enum/interface type "Type" with the member
     /// name "String".
@@ -59,7 +72,7 @@ impl Ty {
                     generic.replace_generics(generic_names);
                 }
 
-                *self = Ty::Generic(ident.clone());
+                *self = Ty::Generic(ident.clone(), None);
             }
 
             Ty::Pointer(ty) | Ty::Array(ty, _) => ty.replace_generics(generic_names),
@@ -68,14 +81,37 @@ impl Ty {
         }
     }
 
-    /// Recursively replaces any "Generic" types with any matches from the
-    /// `generics_impl` map. I.e. any "Generic" type that has a ident that is a
-    /// key in the `generics_impl` will be replaced with the value in the map.
+    /// Recursively replaces any "Generic" types with the actual implementation
+    /// type. I.e. any "Generic" type that has a ident that is a key in the
+    /// `generics_impl` will be replaced with the value in the map.
+    ///
+    /// The types given in `generics_impl` will be weighted agains the inferred
+    /// type in the "Ty::Generic(ident, ty)" `ty` type, and the type with the
+    /// highest precedence will be used.
     pub fn replace_generics_impl(&mut self, generics_impl: &Generics) {
         match self {
-            Ty::Generic(ident) => {
-                if let Some(new_ty) = generics_impl.get(ident) {
-                    *self = new_ty.clone();
+            Ty::Generic(ident, inferred_ty) => {
+                // TODO: Will this specific generic always be found in the
+                //       `generics_impl` map?
+                if let Some(impl_ty) = generics_impl.get(ident) {
+                    let preferred_ty = if let Some(inferred_ty) = inferred_ty {
+                        warn!(
+                            "REPLACE -- impl_ty: {:#?}, inferred_ty: {:#?}",
+                            impl_ty, inferred_ty
+                        );
+
+                        if impl_ty.precedence(inferred_ty) {
+                            impl_ty
+                        } else {
+                            inferred_ty
+                        }
+                    } else {
+                        impl_ty
+                    };
+
+                    warn!("REPLACE -- preferred_ty: {:#?}", preferred_ty);
+
+                    *self = preferred_ty.clone();
                 }
             }
 
@@ -88,6 +124,38 @@ impl Ty {
             Ty::Pointer(ty) | Ty::Array(ty, _) => ty.replace_generics_impl(generics_impl),
 
             _ => (),
+        }
+    }
+
+    /// Gets a vector of all "Generic" types that is contained in the given
+    /// type `self`.
+    pub fn get_generics(&self) -> Option<Vec<Ty>> {
+        let mut generics = Vec::default();
+
+        match self {
+            Ty::Generic(..) => generics.push(self.clone()),
+
+            Ty::CompoundType(_, comp_generics) => {
+                for generic in comp_generics.iter_types() {
+                    if let Some(mut inner_generics) = generic.get_generics() {
+                        generics.append(&mut inner_generics);
+                    }
+                }
+            }
+
+            Ty::Pointer(ty) | Ty::Array(ty, _) => {
+                if let Some(mut inner_generics) = ty.get_generics() {
+                    generics.append(&mut inner_generics);
+                }
+            }
+
+            _ => (),
+        }
+
+        if !generics.is_empty() {
+            Some(generics)
+        } else {
+            None
         }
     }
 
@@ -183,10 +251,9 @@ impl Ty {
     }
 
     pub fn is_generic(&self) -> bool {
-        if let Ty::Generic(..) = self {
-            true
-        } else {
-            false
+        match self {
+            Ty::Generic(..) | Ty::GenericImpl(..) => true,
+            _ => false,
         }
     }
 
@@ -298,12 +365,13 @@ impl Ty {
             | Ty::UnknownMethodArgument(ty, _, _)
             | Ty::UnknownArrayMember(ty) => ty.contains_inner_ty(inner_ty),
 
-            Ty::Generic(..) => false,
+            Ty::Generic(..) | Ty::GenericImpl(..) => false,
         }
     }
 
     pub fn contains_generic(&self) -> bool {
-        self.contains_ty(&Ty::Generic("DOES_NOT_MATTER".into()))
+        self.contains_ty(&Ty::Generic("DOES_NOT_MATTER".into(), None))
+            | self.contains_ty(&Ty::GenericImpl("".into(), "".into(), None))
     }
 
     pub fn contains_unknown_any(&self) -> bool {
@@ -408,7 +476,7 @@ impl Ty {
 
         // TODO: Makes this in a more effective way so that one doesn't have to
         //       re-calculate the "1..i" every iteration.
-        // Start by jsut looking at the outer most types and then interatively
+        // Start by just looking at the outer most types and then interatively
         // look deeper to find differences.
         for i in 1..=MAX_DEPTH {
             let self_prec = self.precedence_priv(0, i, false);
@@ -455,7 +523,8 @@ impl Ty {
     ///   10  contains unknown int (UnknownInt)
     ///       contains unknown float (UnknownFloat)
     ///   12  contains generic (Generic)
-    ///   14  contains unknown (Unknown)
+    ///   14  contains generic implementation (GenericImpl)
+    ///   16  contains unknown (Unknown)
     fn precedence_priv(&self, mut highest: usize, depth: usize, is_generic_param: bool) -> usize {
         if depth == 0 {
             return highest;
@@ -487,7 +556,7 @@ impl Ty {
                         InnerTy::UnknownInt(..) | InnerTy::UnknownFloat(_) => {
                             usize::max(highest, 10 + extra)
                         }
-                        InnerTy::Unknown(..) => usize::max(highest, 14 + extra),
+                        InnerTy::Unknown(..) => usize::max(highest, 16 + extra),
                         _ => unreachable!("All other inner types already \"matched\"."),
                     }
                 }
@@ -498,7 +567,8 @@ impl Ty {
                 ty.precedence_priv(highest, next_depth, is_generic_param)
             }
 
-            Ty::Generic(_) => usize::max(highest, 12 + extra),
+            Ty::GenericImpl(..) => usize::max(highest, 12 + extra),
+            Ty::Generic(..) => usize::max(highest, 14 + extra),
 
             Ty::UnknownStructureMember(ty, _)
             | Ty::UnknownStructureMethod(ty, _)

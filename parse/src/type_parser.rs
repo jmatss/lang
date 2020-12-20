@@ -52,7 +52,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     // the `self.generics` map. Otherwise return it as a
                     // "UnknownIdent" wrapped in a "CompoundType".
                     if let Some(true) = self.generics.map(|g| g.contains(ident)) {
-                        Ok(Ty::Generic(ident.clone()))
+                        Ok(Ty::Generic(ident.clone(), None))
                     } else {
                         let inner_ty = InnerTy::ident_to_type(&ident, self.iter.current_block_id());
                         let generics = self.parse_type_generics(GenericsKind::Impl)?;

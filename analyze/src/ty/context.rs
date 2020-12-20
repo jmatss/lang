@@ -71,6 +71,10 @@ impl SubResult {
     pub fn is_unsolved(&self) -> bool {
         matches!(self, SubResult::UnSolved(_))
     }
+
+    pub fn is_err(&self) -> bool {
+        matches!(self, SubResult::Err(_))
+    }
 }
 
 impl<'a> TypeContext<'a> {
@@ -425,9 +429,13 @@ impl<'a> TypeContext<'a> {
             debug!("Substituting, i: {} -- cur_ty: {:?}", i, self.cur_ty);
             i += 1;
 
-            // TODO: Is it ok to put this fetch at the start, is there a possibility
-            //       that the inner types won't be solved if that is the case?
-            if self.substitutions.contains_key(&self.cur_ty) {
+            if let Ty::Generic(..) = self.cur_ty {
+                return self.solve_generic(finalize);
+            }
+
+            if self.cur_ty.is_generic() {
+                return self.solve_generic(finalize);
+            } else if self.substitutions.contains_key(&self.cur_ty) {
                 // Set the substitute type as the current type and and try to
                 // solve the type iteratively.
                 self.cur_ty = self.substitutions.get(&self.cur_ty).unwrap().clone();
@@ -438,9 +446,6 @@ impl<'a> TypeContext<'a> {
                     }
                     Ty::Pointer(..) | Ty::Array(..) => {
                         return self.solve_aggregate(finalize);
-                    }
-                    Ty::Generic(..) => {
-                        return self.solve_generic(finalize);
                     }
                     Ty::UnknownStructureMember(..) => {
                         return self.solve_unknown_structure_member(finalize);
@@ -453,6 +458,9 @@ impl<'a> TypeContext<'a> {
                     }
                     Ty::UnknownArrayMember(..) => {
                         return self.solve_unknown_array_member(finalize);
+                    }
+                    Ty::Generic(..) | Ty::GenericImpl(..) => {
+                        unreachable!("Type was Generic or GenericImpl.");
                     }
                 }
             }
@@ -582,9 +590,50 @@ impl<'a> TypeContext<'a> {
 
     /// Solves generic types.
     fn solve_generic(&mut self, finalize: bool) -> SubResult {
-        // TODO: Nothing to do here atm, will there be a time when something
-        //       needs to be done in this function or can it be removed?
-        SubResult::UnSolved(self.cur_ty.clone())
+        let mut cur_ty_backup = self.cur_ty.clone();
+
+        match self.cur_ty {
+            Ty::Generic(..) => {
+                match self.substitutions.get(&self.cur_ty).cloned() {
+                    // Only substitue Generics with GenericImpl, all other type of mapping
+                    // should NOT be used to replace the Generic.
+                    Some(gen_impl @ Ty::GenericImpl(..)) => {
+                        cur_ty_backup = gen_impl;
+                    }
+
+                    Some(sub_ty) => {
+                        if let err @ SubResult::Err(_) = self.solve_substitution(&sub_ty, finalize)
+                        {
+                            return err;
+                        }
+                    }
+
+                    _ => (),
+                }
+
+                // TODO: IS this OK? The "Generic" types should only be a part of structs
+                //       and their impl methods that are to be removed. New structs/impl
+                //       have been created with the generics replaced. Need to make sure
+                //       that it is actually the case somewhere else later in the code.
+                //       These structs/impls will be removed in the `converter` stage
+                //       which is after the current `solver` stage.
+                if finalize {
+                    SubResult::Solved(cur_ty_backup)
+                } else {
+                    SubResult::UnSolved(cur_ty_backup)
+                }
+            }
+
+            Ty::GenericImpl(..) => {
+                if let Some(ty) = self.substitutions.get(&self.cur_ty).cloned() {
+                    self.solve_substitution(&ty, finalize)
+                } else {
+                    SubResult::UnSolved(cur_ty_backup)
+                }
+            }
+
+            _ => unreachable!(),
+        }
     }
 
     fn solve_unknown_structure_member(&mut self, finalize: bool) -> SubResult {
@@ -953,7 +1002,9 @@ impl<'a> TypeContext<'a> {
                     warn!("SOLVED -- ty: {:#?}\nsub_ty: {:#?}", ty, sub_ty);
 
                     if let Ty::Array(real_ty, _) = sub_ty {
-                        if let Err(err) = self.insert_substitution(*ty.clone(), *real_ty.clone()) {
+                        if let Err(err) =
+                            self.insert_substitution(cur_ty_backup.clone(), *real_ty.clone())
+                        {
                             SubResult::Err(err)
                         } else {
                             self.cur_ty = cur_ty_backup;

@@ -28,10 +28,12 @@ pub struct TypeSolver<'a> {
 
     /// Will contain all generic structs that have had the generic types substituted
     /// with real types. The key is the name of the struct (WITHOUT generics).
-    pub generic_structs: HashMap<String, Vec<Rc<RefCell<Struct>>>>,
+    /// The `Ty` in the value is the type of the struct including name+generics.
+    pub generic_structs: HashMap<String, Vec<(Rc<RefCell<Struct>>, Ty)>>,
 
     // The outer key is the struct name WITH generics.
     // The inner key is the name of the method.
+    // The inner value is the block ID for the function and the function itself.
     pub generic_struct_methods: HashMap<String, HashMap<String, Rc<RefCell<Function>>>>,
 
     errors: Vec<LangError>,
@@ -78,6 +80,25 @@ impl<'a> TypeSolver<'a> {
     /// All the types will still have the normal/old name without generics,
     /// but need to modify it for the "lookup" structs so that they are unique.
     fn create_generic_struct(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
+        let full_name = match struct_init.full_name() {
+            Ok(full_name) => full_name,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
+        // See if a struct with these generics already exists. If that is the
+        // case, nothing to do here, a struct with the same generic impls have
+        // already been created. Early return.
+        if let Some(struct_impls) = self.generic_structs.get(&struct_init.name) {
+            for (struct_impl, _) in struct_impls {
+                if struct_impl.borrow().name == full_name {
+                    return;
+                }
+            }
+        }
+
         // Get the actual struct implementation and create a copy of it.
         let mut gen_struct = match self
             .type_context
@@ -85,14 +106,6 @@ impl<'a> TypeSolver<'a> {
             .get_struct(&struct_init.name, ctx.block_id)
         {
             Ok(struct_ty) => struct_ty.borrow().clone(),
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
-
-        let full_name = match struct_init.full_name() {
-            Ok(full_name) => full_name,
             Err(err) => {
                 self.errors.push(err);
                 return;
@@ -122,10 +135,17 @@ impl<'a> TypeSolver<'a> {
             for member in members {
                 let mut new_member = member.borrow().clone();
 
+                warn!(
+                    "REPLACE MEMBER -- gen_struct.name: {}, member: {:#?}",
+                    gen_struct.name, new_member
+                );
+
                 if let Some(ty) = &mut new_member.ret_type {
                     ty.replace_generics_impl(&generics);
                     ty.replace_self(&struct_init.name, &gen_struct_ty);
                 }
+
+                warn!("RESULT -- member: {:#?}", new_member);
 
                 *member = Rc::new(RefCell::new(new_member));
             }
@@ -143,17 +163,31 @@ impl<'a> TypeSolver<'a> {
             for (method_name, method) in methods {
                 let new_method = Rc::new(RefCell::new(method.borrow().clone()));
 
+                // Replace generics in parameters.
                 if let Some(parameters) = &mut new_method.borrow_mut().parameters {
                     for param in parameters {
                         let new_param = Rc::new(RefCell::new(param.borrow().clone()));
+
+                        warn!(
+                            "REPLACE PARAM -- method_name: {}, param: {:#?}",
+                            method_name, new_param
+                        );
 
                         if let Some(ty) = &mut new_param.borrow_mut().ret_type {
                             ty.replace_generics_impl(&generics);
                             ty.replace_self(&struct_init.name, &gen_struct_ty);
                         }
 
+                        warn!("RESULT -- param: {:#?}", new_param);
+
                         *param = new_param;
                     }
+                }
+
+                // Replace generics in return type.
+                if let Some(ret_ty) = &mut new_method.borrow_mut().ret_type {
+                    ret_ty.replace_generics_impl(&generics);
+                    ret_ty.replace_self(&struct_init.name, &gen_struct_ty)
                 }
 
                 new_method.borrow_mut().method_structure = Some(gen_struct_ty.clone());
@@ -170,10 +204,12 @@ impl<'a> TypeSolver<'a> {
         // AST later on by another "class" ("type_converter").
         match self.generic_structs.entry(struct_init.name.clone()) {
             Entry::Occupied(ref mut o) => {
-                o.get_mut().push(Rc::new(RefCell::new(gen_struct)));
+                let entry = (Rc::new(RefCell::new(gen_struct)), gen_struct_ty);
+                o.get_mut().push(entry);
             }
             Entry::Vacant(v) => {
-                v.insert(vec![Rc::new(RefCell::new(gen_struct))]);
+                let entry = vec![(Rc::new(RefCell::new(gen_struct)), gen_struct_ty)];
+                v.insert(entry);
             }
         }
     }
@@ -371,7 +407,7 @@ impl<'a> Visitor for TypeSolver<'a> {
                             let mut new_struct = &empty_struct;
                             let mut is_found = false;
 
-                            for curr_new_struct in new_structs {
+                            for (curr_new_struct, _) in new_structs {
                                 if curr_new_struct.borrow().name == new_name {
                                     is_found = true;
                                     new_struct = curr_new_struct;

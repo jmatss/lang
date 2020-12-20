@@ -688,7 +688,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             .iter
             .parse_par_list(start_symbol, end_symbol, generics)?;
 
-        let mut members = members
+        let members = members
             .iter()
             .map(|m| Rc::new(RefCell::new(m.clone())))
             .collect::<Vec<_>>();
@@ -698,22 +698,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 "Found invalid var_arg symbol in struct with name: {}",
                 &ident
             )));
-        }
-
-        for member in &mut members {
-            if let Some(ret_ty) = &mut member.borrow_mut().ret_type {
-                // Replace any generics with the type "Generic" instead of
-                // the type "CompoundType".
-                if let Some(gens) = generics {
-                    ret_ty.replace_generics(&gens.iter_names().cloned().collect::<Vec<_>>());
-                }
-            } else {
-                self.iter.err(format!(
-                    "Member \"{}\" in struct \"{}\" has no type set.",
-                    &member.borrow().name,
-                    &ident
-                ));
-            }
         }
 
         let members_opt = if !members.is_empty() {

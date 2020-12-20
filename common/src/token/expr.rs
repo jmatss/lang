@@ -97,6 +97,69 @@ impl Expr {
         })
     }
 
+    pub fn get_expr_type_mut(&mut self) -> CustomResult<&mut Ty> {
+        Ok(match self {
+            Expr::Lit(_, Some(ty)) | Expr::Type(ty) => ty,
+            Expr::Var(var) => {
+                if let Some(ty) = &mut var.ret_type {
+                    ty
+                } else {
+                    return Err(LangError::new(
+                        "Type of var was None.".into(),
+                        AnalyzeError {
+                            line_nr: 0,
+                            column_nr: 0,
+                        },
+                    ));
+                }
+            }
+            Expr::FuncCall(func_call) if func_call.ret_type.is_some() => {
+                if let Some(ty) = &mut func_call.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::StructInit(struct_init) if struct_init.ret_type.is_some() => {
+                if let Some(ty) = &mut struct_init.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::ArrayInit(array_init) if array_init.ret_type.is_some() => {
+                if let Some(ty) = &mut array_init.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::Op(Op::BinOp(bin_op)) if bin_op.ret_type.is_some() => {
+                if let Some(ty) = &mut bin_op.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::Op(Op::UnOp(un_op)) if un_op.ret_type.is_some() => {
+                if let Some(ty) = &mut un_op.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            _ => {
+                return Err(LangError::new(
+                    "Unable to get type of expr.".into(),
+                    AnalyzeError {
+                        line_nr: 0,
+                        column_nr: 0,
+                    },
+                ))
+            }
+        })
+    }
+
     #[allow(clippy::match_like_matches_macro)]
     pub fn is_var(&self) -> bool {
         match self {
