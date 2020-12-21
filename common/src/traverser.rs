@@ -270,6 +270,15 @@ impl<'a> AstTraverser<'a> {
                     v.visit_func_call(func_call, &self.traverse_context)
                 }
             }
+            Expr::BuiltInCall(built_in_call) => {
+                for arg in &mut built_in_call.arguments {
+                    self.traverse_expr(&mut arg.value);
+                }
+                debug!("Visiting built in call");
+                for v in self.visitors.iter_mut() {
+                    v.visit_built_in_call(built_in_call, &self.traverse_context)
+                }
+            }
             Expr::StructInit(struct_init) => {
                 for arg in &mut struct_init.arguments {
                     self.traverse_expr(&mut arg.value);

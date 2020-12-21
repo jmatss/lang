@@ -459,6 +459,9 @@ impl<'a> TypeContext<'a> {
                     Ty::UnknownArrayMember(..) => {
                         return self.solve_unknown_array_member(finalize);
                     }
+                    Ty::Any => {
+                        return self.solve_any(finalize);
+                    }
                     Ty::Generic(..) | Ty::GenericImpl(..) => {
                         unreachable!("Type was Generic or GenericImpl.");
                     }
@@ -636,6 +639,19 @@ impl<'a> TypeContext<'a> {
         }
     }
 
+    /// Solves "Any" types. If a Any type has a mapping in the substitution map,
+    /// this function won't be called.
+    fn solve_any(&mut self, finalize: bool) -> SubResult {
+        if finalize {
+            SubResult::Err(
+                self.analyze_context
+                    .err(format!("Unable to solve \"Any\" type: {:#?}", self.cur_ty)),
+            )
+        } else {
+            SubResult::UnSolved(self.cur_ty.clone())
+        }
+    }
+
     fn solve_unknown_structure_member(&mut self, finalize: bool) -> SubResult {
         // Since this function will call other functions that updates `cur_ty`
         // recursively, need to save a local copy that will be restored before
@@ -719,7 +735,7 @@ impl<'a> TypeContext<'a> {
             };
 
             let var = var.borrow();
-            if let Some(mut new_ty) = var.ret_type.clone() {
+            if let Some(mut new_ty) = var.ty.clone() {
                 // Since this fetched the actual structue "template" that is used
                 // by all, the generics will still be the "Generics". Need to
                 // replace them with the actual type for this specific use of

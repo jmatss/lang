@@ -29,7 +29,7 @@ impl Visitor for GenericsAnalyzer {
                 // Rewrite the generics for the members.
                 if let Some(members) = &struct_.members {
                     for member in members {
-                        if let Some(ty) = member.borrow_mut().ret_type.as_mut() {
+                        if let Some(ty) = member.borrow_mut().ty.as_mut() {
                             ty.replace_generics(&generics)
                         }
                     }
@@ -43,7 +43,7 @@ impl Visitor for GenericsAnalyzer {
                         // Rewrite the generics for the parameters.
                         if let Some(params) = &method.borrow().parameters {
                             for param in params {
-                                if let Some(ty) = param.borrow_mut().ret_type.as_mut() {
+                                if let Some(ty) = param.borrow_mut().ty.as_mut() {
                                     ty.replace_generics(&generics);
                                 }
                             }

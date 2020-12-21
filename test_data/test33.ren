@@ -1,0 +1,43 @@
+//use std.assert
+
+external function printf(format: {u8}, ...) -> i32
+
+struct TestStruct<T>
+{
+    inner: T,
+}
+
+implement TestStruct
+{
+    function this instance_method(value: T) -> T
+    {
+        return this.inner
+    }
+
+    function static_method(value: T) -> T
+    {
+        return value
+    }
+}
+
+function main() -> i32
+{
+    var i: i64 = 123
+    var f: f64 = 456.
+
+    var ts1 = TestStruct { i }
+    var ts2 = TestStruct { f }
+    var ts3 = TestStruct<i8> { 78 }
+
+    ts1.instance_method(456)
+    ts2.instance_method(123.)
+    ts3.instance_method(90)
+
+    // TODO: Get static methods to work.
+    //var static_res_i = TestStruct<i64>::static_method(i)
+    //var static_res_f: f64 = TestStruct<f64>::static_method(f)
+
+    printf("inner: %lld", ts1.inner)
+
+    return 0
+}

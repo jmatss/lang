@@ -15,9 +15,14 @@ pub enum Ty {
     /// A pointer to a type.
     Pointer(Box<Ty>),
 
-    // The Option in the "Array" enum indicates the size. If it is None, assume
-    // size is unknown (probably slice).
+    /// The Option in the "Array" enum indicates the size. If it is None, assume
+    /// size is unknown (probably slice).
     Array(Box<Ty>, Option<Box<Expr>>),
+
+    /// Represents a type that can be of any type. This will ex. be used for
+    /// functions that takes a Type as a parameter, then the parameter type
+    /// would be "Any".
+    Any,
 
     /// A generic type. Ex. a generic "T" on a struct would be represented
     /// as a "Generic" containing the string "T". The boxed Ty is a potential
@@ -250,6 +255,14 @@ impl Ty {
         }
     }
 
+    pub fn is_any(&self) -> bool {
+        if let Ty::Any = self {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_generic(&self) -> bool {
         match self {
             Ty::Generic(..) | Ty::GenericImpl(..) => true,
@@ -312,6 +325,8 @@ impl Ty {
             | (Ty::Pointer(_), Ty::Pointer(_))
             | (Ty::Array(_, _), Ty::Array(_, _))
             | (Ty::Generic(..), Ty::Generic(..))
+            | (Ty::Any, Ty::Any)
+            | (Ty::GenericImpl(..), Ty::GenericImpl(..))
             | (Ty::UnknownStructureMember(_, _), Ty::UnknownStructureMember(_, _))
             | (Ty::UnknownStructureMethod(_, _), Ty::UnknownStructureMethod(_, _))
             | (Ty::UnknownMethodArgument(_, _, _), Ty::UnknownMethodArgument(_, _, _))
@@ -365,13 +380,17 @@ impl Ty {
             | Ty::UnknownMethodArgument(ty, _, _)
             | Ty::UnknownArrayMember(ty) => ty.contains_inner_ty(inner_ty),
 
-            Ty::Generic(..) | Ty::GenericImpl(..) => false,
+            Ty::Generic(..) | Ty::GenericImpl(..) | Ty::Any => false,
         }
     }
 
     pub fn contains_generic(&self) -> bool {
         self.contains_ty(&Ty::Generic("DOES_NOT_MATTER".into(), None))
             | self.contains_ty(&Ty::GenericImpl("".into(), "".into(), None))
+    }
+
+    pub fn contains_any(&self) -> bool {
+        self.contains_ty(&Ty::Any)
     }
 
     pub fn contains_unknown_any(&self) -> bool {
@@ -447,6 +466,8 @@ impl Ty {
             || other.is_unknown_any()
             || self.is_generic()
             || other.is_generic()
+            || self.is_any()
+            || other.is_any()
         {
             return true;
         }
@@ -522,9 +543,10 @@ impl Ty {
     ///   8   contains unknown array member (UnknownArrayMember)
     ///   10  contains unknown int (UnknownInt)
     ///       contains unknown float (UnknownFloat)
-    ///   12  contains generic (Generic)
-    ///   14  contains generic implementation (GenericImpl)
+    ///   12  contains generic implementation (GenericImpl)
+    ///   14  contains generic (Generic)
     ///   16  contains unknown (Unknown)
+    ///   18  contains any (Any)
     fn precedence_priv(&self, mut highest: usize, depth: usize, is_generic_param: bool) -> usize {
         if depth == 0 {
             return highest;
@@ -569,6 +591,7 @@ impl Ty {
 
             Ty::GenericImpl(..) => usize::max(highest, 12 + extra),
             Ty::Generic(..) => usize::max(highest, 14 + extra),
+            Ty::Any => usize::max(highest, 18 + extra),
 
             Ty::UnknownStructureMember(ty, _)
             | Ty::UnknownStructureMethod(ty, _)

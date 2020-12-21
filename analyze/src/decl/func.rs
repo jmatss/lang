@@ -97,7 +97,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
                         let err = self.analyze_context.borrow().err(err_msg);
                         self.errors.push(err);
                     }
-                    if cur_param.ret_type != prev_param.ret_type {
+                    if cur_param.ty != prev_param.ty {
                         let param_name = if cur_param.name == prev_param.name {
                             cur_param.name.clone()
                         } else {
@@ -107,7 +107,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
                             "Two declarations of function \"{}\" have parameters with different types. \
                             Parameter at position {} with name \"{}\". \
                             Prev type: {:?}, current type: {:?}",
-                            &func.name, i, &param_name, cur_param.ret_type, prev_param.ret_type
+                            &func.name, i, &param_name, cur_param.ty, prev_param.ty
                         );
                         let err = self.analyze_context.borrow().err(err_msg);
                         self.errors.push(err);

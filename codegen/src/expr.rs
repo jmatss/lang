@@ -2,7 +2,7 @@ use crate::generator::CodeGen;
 use common::{
     error::CustomResult,
     token::{
-        expr::{ArrayInit, Expr, FuncCall, StructInit},
+        expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit},
         lit::Lit,
     },
     ty::{inner_ty::InnerTy, ty::Ty},
@@ -43,6 +43,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let any_value = match expr {
             Expr::Lit(lit, ty_opt) => self.compile_lit(lit, ty_opt),
             Expr::FuncCall(func_call) => self.compile_func_call(func_call),
+            Expr::BuiltInCall(built_in_call) => self.compile_built_in_call(built_in_call),
             Expr::Op(op) => self.compile_op(op, expr_ty),
             Expr::StructInit(struct_init) => self.compile_struct_init(struct_init),
             Expr::ArrayInit(array_init) => self.compile_array_init(array_init),
@@ -68,6 +69,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         self.prev_expr = Some(any_value);
         Ok(any_value)
+    }
+
+    /// Compiles a expression containing a Type. If the given `expr` doesn't
+    /// contains a type, a error will be returned.
+    pub(super) fn compile_type_expr(&mut self, expr: &mut Expr) -> CustomResult<AnyTypeEnum<'ctx>> {
+        if let Expr::Type(ty) = expr {
+            self.compile_type(ty)
+        } else {
+            Err(self.analyze_context.err(format!(
+                "Tried to compile expression as type, but wasn't type: {:#?}",
+                expr
+            )))
+        }
     }
 
     pub fn compile_lit(
@@ -263,6 +277,45 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 &func_call.name,
                 &func_call.full_name()
             )))
+        }
+    }
+
+    // TODO: Temporarily treats functions return void as return i32 "0".
+    //       Should make a custom value ex rusts "()" instead.
+    /// Generates a built-in call. Returns the return value of the compiled
+    /// built-in function.
+    pub fn compile_built_in_call(
+        &mut self,
+        built_in_call: &mut BuiltInCall,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
+        match built_in_call.name.as_ref() {
+            // Gets the size of a specified type. The size is returned as a
+            // unsigned 32 bit integer.
+            "size_of" => {
+                if let Some(ty_arg) = built_in_call
+                    .generics
+                    .as_ref()
+                    .map(|gs| gs.iter_types().next())
+                    .flatten()
+                {
+                    let ty = self.compile_type(ty_arg)?;
+
+                    if let Some(size) = ty.size_of() {
+                        Ok(size.const_cast(self.context.i32_type(), false).into())
+                    } else {
+                        Err(self.analyze_context.err(format!(
+                            "Tried to take @size_of non sized type: {:#?}",
+                            built_in_call
+                        )))
+                    }
+                } else {
+                    unreachable!("Argument count check in Analyze.");
+                }
+            }
+
+            _ => {
+                unreachable!("Bad built in name: {:#?}", built_in_call);
+            }
         }
     }
 

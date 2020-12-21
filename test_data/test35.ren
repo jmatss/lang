@@ -1,0 +1,27 @@
+use std.assert
+
+struct TestStruct
+{
+    a: i64,
+    b: f64,
+}
+
+function main() -> i32
+{
+    var size_i = @size_of<i32>()
+    var size_f = @size_of<f64>()
+    var size_s = @size_of<TestStruct>()
+
+    // Size in bytes, so might not be true for all architectures.
+
+    assert(size_i == 4)
+    printf("i32 size: %d", size_i)
+    
+    assert(size_f == 8)
+    printf("\nf64 size: %d", size_f)
+    
+    assert(size_s == 16)
+    printf("\nTestStruct{i64,f64} size: %d", size_s)
+
+    return 0
+}

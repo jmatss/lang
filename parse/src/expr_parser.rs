@@ -6,7 +6,7 @@ use crate::{
 use common::{
     error::CustomResult,
     token::{
-        expr::{ArrayInit, Expr, FuncCall, StructInit},
+        expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
     ty::{
@@ -115,6 +115,44 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 LexTokenKind::Lit(lit) => {
                     let expr = Expr::Lit(lit, None);
                     self.shunt_operand(expr)?;
+                }
+
+                // "Built-in" function call.
+                LexTokenKind::Sym(Sym::At) => {
+                    let next_token = self.iter.next_skip_space();
+
+                    // TODO: Most of the logic below is taken from `self.parse_expr_ident`.
+                    //       Merge the logic.
+                    let generics = if let Some(lex_token) = self.iter.peek_skip_space() {
+                        if let LexTokenKind::Sym(Sym::PointyBracketBegin) = lex_token.kind {
+                            match TypeParser::new(self.iter, None)
+                                .parse_type_generics(GenericsKind::Impl)
+                            {
+                                Ok(generics) => Some(generics),
+                                Err(_) => {
+                                    self.iter.rewind_to_mark(mark);
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let Some(LexTokenKind::Ident(ident)) = next_token.clone().map(|t| t.kind) {
+                        let start_symbol = Sym::ParenthesisBegin;
+                        let end_symbol = Sym::ParenthesisEnd;
+                        let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
+                        let built_in_call = BuiltInCall::new(ident, arguments, generics);
+                        self.shunt_operand(Expr::BuiltInCall(built_in_call))?;
+                    } else {
+                        return Err(self.iter.err(format!(
+                            "Expected ident after '@' (built-in call), got: {:?}",
+                            next_token
+                        )));
+                    }
                 }
 
                 // Array access.

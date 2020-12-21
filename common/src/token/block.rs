@@ -205,6 +205,33 @@ pub struct Enum {
     // TODO: extends: Vec<Type>
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuiltIn {
+    pub name: &'static str,
+    pub parameters: Vec<Var>,
+    pub generics: Option<Vec<Ty>>,
+    pub ret_type: Ty,
+    pub is_var_arg: bool,
+}
+
+impl BuiltIn {
+    pub fn new(
+        name: &'static str,
+        parameters: Vec<Var>,
+        generics: Option<Vec<Ty>>,
+        ret_type: Ty,
+        is_var_arg: bool,
+    ) -> Self {
+        BuiltIn {
+            name,
+            parameters,
+            generics,
+            ret_type,
+            is_var_arg,
+        }
+    }
+}
+
 impl Enum {
     pub fn new(
         name: String,

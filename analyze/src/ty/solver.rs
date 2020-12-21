@@ -10,7 +10,7 @@ use common::{
     token::{
         ast::{AstToken, Token},
         block::{BlockHeader, Function, Struct},
-        expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
+        expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit, Var},
         op::{BinOp, UnOp},
         stmt::Stmt,
     },
@@ -140,7 +140,7 @@ impl<'a> TypeSolver<'a> {
                     gen_struct.name, new_member
                 );
 
-                if let Some(ty) = &mut new_member.ret_type {
+                if let Some(ty) = &mut new_member.ty {
                     ty.replace_generics_impl(&generics);
                     ty.replace_self(&struct_init.name, &gen_struct_ty);
                 }
@@ -173,7 +173,7 @@ impl<'a> TypeSolver<'a> {
                             method_name, new_param
                         );
 
-                        if let Some(ty) = &mut new_param.borrow_mut().ret_type {
+                        if let Some(ty) = &mut new_param.borrow_mut().ty {
                             ty.replace_generics_impl(&generics);
                             ty.replace_self(&struct_init.name, &gen_struct_ty);
                         }
@@ -261,7 +261,7 @@ impl<'a> Visitor for TypeSolver<'a> {
     }
 
     fn visit_var(&mut self, var: &mut Var, _ctx: &TraverseContext) {
-        if let Some(ty) = &mut var.ret_type {
+        if let Some(ty) = &mut var.ty {
             self.subtitute_type(ty, true);
         } else {
             let err = self
@@ -276,7 +276,7 @@ impl<'a> Visitor for TypeSolver<'a> {
         if let Token::Block(BlockHeader::Function(func), ..) = &mut ast_token.token {
             if let Some(params) = &func.borrow().parameters {
                 for param in params {
-                    if let Some(param_ty) = &mut param.borrow_mut().ret_type {
+                    if let Some(param_ty) = &mut param.borrow_mut().ty {
                         self.subtitute_type(param_ty, true);
                     }
                 }
@@ -286,16 +286,6 @@ impl<'a> Visitor for TypeSolver<'a> {
 
     fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
         if let Some(ty) = &mut func_call.ret_type {
-            if let Some(structure_ty) = &mut func_call.method_structure {
-                self.subtitute_type(structure_ty, true);
-
-                // TODO: Fix this, seems very random to fix this here.
-                // The `method_structure` might possible be a pointer to the
-                // structure, need to get the actual structure type in that case.
-                if let Ty::Pointer(ty) = structure_ty {
-                    *structure_ty = *ty.clone();
-                }
-            }
             self.subtitute_type(ty, true);
         } else {
             let err = self.type_context.analyze_context.err(format!(
@@ -303,6 +293,43 @@ impl<'a> Visitor for TypeSolver<'a> {
                 func_call
             ));
             self.errors.push(err);
+        }
+
+        if let Some(structure_ty) = &mut func_call.method_structure {
+            self.subtitute_type(structure_ty, true);
+
+            // TODO: Fix this, seems very random to fix this here.
+            // The `method_structure` might possible be a pointer to the
+            // structure, need to get the actual structure type in that case.
+            if let Ty::Pointer(ty) = structure_ty {
+                *structure_ty = *ty.clone();
+            }
+        }
+
+        // Solve the generic types.
+        if let Some(generics) = &mut func_call.generics {
+            for generic_ty in generics.iter_types_mut() {
+                self.subtitute_type(generic_ty, true);
+            }
+        }
+    }
+
+    fn visit_built_in_call(&mut self, built_in_call: &mut BuiltInCall, _ctx: &TraverseContext) {
+        if let Some(ty) = &mut built_in_call.ret_type {
+            self.subtitute_type(ty, true);
+        } else {
+            let err = self.type_context.analyze_context.err(format!(
+                "Unable to find infer type for built-in call: {:?}",
+                built_in_call
+            ));
+            self.errors.push(err);
+        }
+
+        // Solve the generic types.
+        if let Some(generics) = &mut built_in_call.generics {
+            for generic_ty in generics.iter_types_mut() {
+                self.subtitute_type(generic_ty, true);
+            }
         }
     }
 
@@ -465,7 +492,7 @@ impl<'a> Visitor for TypeSolver<'a> {
 
     fn visit_var_decl(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         if let Stmt::VariableDecl(var, _) = stmt {
-            if let Some(ty) = &mut var.borrow_mut().ret_type {
+            if let Some(ty) = &mut var.borrow_mut().ty {
                 self.subtitute_type(ty, true);
             } else {
                 let err = self.type_context.analyze_context.err(format!(

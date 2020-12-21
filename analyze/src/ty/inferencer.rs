@@ -10,7 +10,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{BlockHeader, Function},
-        expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
+        expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit, Var},
         lit::Lit,
         op::{BinOp, BinOperator, UnOp, UnOperator},
         stmt::Modifier,
@@ -21,7 +21,7 @@ use common::{
     visitor::Visitor,
 };
 use either::Either;
-use log::{debug, warn};
+use log::debug;
 
 use super::context::TypeContext;
 
@@ -158,7 +158,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
         };
 
-        let var_decl_ty = if let Some(ty) = var_decl.borrow().ret_type.clone() {
+        let var_decl_ty = if let Some(ty) = var_decl.borrow().ty.clone() {
             ty
         } else {
             let err = self
@@ -169,14 +169,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             return;
         };
 
-        let var_ty = if let Some(ty) = &var.ret_type {
+        let var_ty = if let Some(ty) = &var.ty {
             ty.clone()
         } else {
             let new_type = Ty::CompoundType(
                 InnerTy::Unknown(self.new_unknown_ident(&format!("var_use({})", var.name))),
                 Generics::new(),
             );
-            var.ret_type = Some(new_type.clone());
+            var.ty = Some(new_type.clone());
             new_type
         };
 
@@ -384,7 +384,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
                     let par_ty = if let Some(ty) = &params
                         .get(inner_idx as usize)
-                        .map(|param| param.borrow().ret_type.clone())
+                        .map(|param| param.borrow().ty.clone())
                         .flatten()
                     {
                         ty.clone()
@@ -411,7 +411,99 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
         };
 
+        // TODO: Is it correct to directly set the return type for the function
+        //       call? Should be inserted as a constraint instead? Will this
+        //       affect generics?
         func_call.ret_type = Some(func_ret_ty);
+    }
+
+    fn visit_built_in_call(&mut self, built_in_call: &mut BuiltInCall, _ctx: &TraverseContext) {
+        let built_in = match self
+            .type_context
+            .analyze_context
+            .get_built_in(&built_in_call.name)
+        {
+            Ok(built_in) => built_in.clone(),
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
+        // TODO: Tie the types of the parameters as well. To lazy to implement atm.
+
+        // Make sure that the amount of arguments are equal to the amount of parameters.
+        if built_in_call.arguments.len() != built_in.parameters.len() {
+            let err = self.type_context.analyze_context.err(format!(
+                "Incorrect amount of arguments given for built-in call to \"{}\". Expected amount: {}, got: {}",
+                &built_in.name,
+                built_in.parameters.len(),
+                built_in_call.arguments.len()
+            ));
+            self.errors.push(err);
+            return;
+        }
+
+        // Make sure that the amount of generic arguments are equals to the
+        // amount of generic parameters.
+        if !(built_in.generics.is_none() && built_in_call.generics.is_none()) {
+            let built_in_gens = if let Some(built_in_gens) = &built_in.generics {
+                built_in_gens
+            } else {
+                let err = self.type_context.analyze_context.err(format!(
+                    "Built-in function doesn't have generics, but call has generics. Built-in: {:#?}, call: {:#?}",
+                    &built_in,
+                    &built_in_call
+                ));
+                self.errors.push(err);
+                return;
+            };
+
+            let built_in_call_gens = if let Some(built_in_call_gens) = &built_in_call.generics {
+                built_in_call_gens
+            } else {
+                let err = self.type_context.analyze_context.err(format!(
+                    "Built-in function have generic parameters, but call doesn't. Built-in: {:#?}, call: {:#?}",
+                    &built_in,
+                    &built_in_call
+                ));
+                self.errors.push(err);
+                return;
+            };
+
+            if built_in_gens.len() != built_in_call_gens.len() {
+                let err = self.type_context.analyze_context.err(format!(
+                    "Incorrect amount of generic arguments given for built-in call to \"{}\". Expected amount: {}, got: {}",
+                    &built_in.name,
+                    built_in_gens.len(),
+                    built_in_call_gens.len()
+                ));
+                self.errors.push(err);
+                return;
+            }
+
+            for (idx, (built_in_gen, built_in_call_gen)) in built_in_gens
+                .iter()
+                .zip(built_in_call_gens.iter_types())
+                .enumerate()
+            {
+                if !built_in_gen.is_compatible(built_in_call_gen) {
+                    let err = self.type_context.analyze_context.err(format!(
+                        "Generic parameter at index {} not compatible. Built-in: {:#?}, call: {:#?}",
+                        idx,
+                        built_in,
+                        built_in_call,
+                    ));
+                    self.errors.push(err);
+                    return;
+                }
+            }
+        }
+
+        // TODO: Is it correct to directly set the return type for the function
+        //       call? Should be inserted as a constraint instead? Will this
+        //       affect generics?
+        built_in_call.ret_type = Some(built_in.ret_type);
     }
 
     /// Adds the correct type for the struct init and ties the types of the struct
@@ -533,7 +625,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             // a generic, it needs to get the actual unknown
                             // generic type from the `unknown_generics` map.
                             // Otherwise reuse the already set type.
-                            let member_type = if let Some(ty) = &mut new_member.ret_type {
+                            let member_type = if let Some(ty) = &mut new_member.ty {
                                 ty.replace_generics_impl(&generics);
                                 ty.clone()
                             } else {
@@ -822,7 +914,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             );
                         };
 
-                        first_arg.ret_type = Some(ty);
+                        first_arg.ty = Some(ty);
                     }
                 }
             }
@@ -855,7 +947,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 for member in members {
                     let member = member.borrow();
 
-                    if let Some(ty) = &member.ret_type {
+                    if let Some(ty) = &member.ty {
                         let inner_generics = if let Some(inner_generics) = ty.get_generics() {
                             inner_generics
                         } else {
@@ -887,7 +979,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     // Gather "Generic" types from method parameters.
                     if let Some(params) = &method.borrow().parameters {
                         for param in params {
-                            if let Some(ty) = param.borrow().ret_type.as_ref() {
+                            if let Some(ty) = param.borrow().ty.as_ref() {
                                 let inner_generics = if let Some(inner_generics) = ty.get_generics()
                                 {
                                     inner_generics
@@ -1079,23 +1171,23 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // Create a unkown type if a type isn't already set. For simplicity
             // this new type will always be set, but it will contain the old type
             // if a type was already set.
-            let new_type = if var.ret_type.is_some() {
-                var.ret_type.clone()
+            let new_type = if var.ty.is_some() {
+                var.ty.clone()
             } else {
                 Some(Ty::CompoundType(
                     InnerTy::Unknown(self.new_unknown_ident(&format!("var_decl({})", var.name))),
                     Generics::new(),
                 ))
             };
-            var.ret_type = new_type;
+            var.ty = new_type;
 
-            let lhs_ty = if let Some(ty) = &var.ret_type {
+            let lhs_ty = if let Some(ty) = &var.ty {
                 ty.clone()
             } else {
                 let err = self
                     .type_context
                     .analyze_context
-                    .err(format!("Lhs of var decl has no type: {:?}", var.ret_type));
+                    .err(format!("Lhs of var decl has no type: {:?}", var.ty));
                 self.errors.push(err);
                 return;
             };

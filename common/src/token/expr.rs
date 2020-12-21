@@ -27,6 +27,7 @@ pub enum Expr {
     Type(Ty),
     Var(Var),
     FuncCall(FuncCall),
+    BuiltInCall(BuiltInCall),
     StructInit(StructInit),
     ArrayInit(ArrayInit),
     //MacroCall(Option<MacroCall>),
@@ -38,7 +39,7 @@ impl Expr {
         Ok(match self {
             Expr::Lit(_, Some(ty)) | Expr::Type(ty) => ty.clone(),
             Expr::Var(var) => {
-                if let Some(ty) = &var.ret_type {
+                if let Some(ty) = &var.ty {
                     ty.clone()
                 } else {
                     return Err(LangError::new(
@@ -52,6 +53,13 @@ impl Expr {
             }
             Expr::FuncCall(func_call) if func_call.ret_type.is_some() => {
                 if let Some(ty) = &func_call.ret_type {
+                    ty.clone()
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::BuiltInCall(built_in_call) if built_in_call.ret_type.is_some() => {
+                if let Some(ty) = &built_in_call.ret_type {
                     ty.clone()
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -101,7 +109,7 @@ impl Expr {
         Ok(match self {
             Expr::Lit(_, Some(ty)) | Expr::Type(ty) => ty,
             Expr::Var(var) => {
-                if let Some(ty) = &mut var.ret_type {
+                if let Some(ty) = &mut var.ty {
                     ty
                 } else {
                     return Err(LangError::new(
@@ -115,6 +123,13 @@ impl Expr {
             }
             Expr::FuncCall(func_call) if func_call.ret_type.is_some() => {
                 if let Some(ty) = &mut func_call.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::BuiltInCall(built_in_call) if built_in_call.ret_type.is_some() => {
+                if let Some(ty) = &mut built_in_call.ret_type {
                     ty
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -304,7 +319,7 @@ impl Expr {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Var {
     pub name: String,
-    pub ret_type: Option<Ty>,
+    pub ty: Option<Ty>,
     pub modifiers: Option<Vec<Modifier>>,
     pub default_value: Option<Box<Expr>>,
     pub is_const: bool,
@@ -313,14 +328,14 @@ pub struct Var {
 impl Var {
     pub fn new(
         name: String,
-        ret_type: Option<Ty>,
+        ty: Option<Ty>,
         modifiers: Option<Vec<Modifier>>,
         default_value: Option<Box<Expr>>,
         is_const: bool,
     ) -> Self {
         Var {
             name,
-            ret_type,
+            ty,
             modifiers,
             default_value,
             is_const,
@@ -411,6 +426,25 @@ impl FuncCall {
         } else {
             // TODO: Possible generics on functions, need to handle it here.
             Ok(self.name.clone())
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BuiltInCall {
+    pub name: String,
+    pub arguments: Vec<Argument>,
+    pub ret_type: Option<Ty>,
+    pub generics: Option<Generics>,
+}
+
+impl BuiltInCall {
+    pub fn new(name: String, arguments: Vec<Argument>, generics: Option<Generics>) -> Self {
+        Self {
+            name,
+            arguments,
+            ret_type: None,
+            generics,
         }
     }
 }

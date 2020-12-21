@@ -234,7 +234,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             for param in params {
                 let param = param.borrow();
 
-                if let Some(param_type_struct) = &param.ret_type {
+                if let Some(param_type_struct) = &param.ty {
                     let any_type = self.compile_type(&param_type_struct)?;
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
                     inner_types.push(basic_type);
@@ -480,7 +480,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             for member in members {
                 let member = member.borrow();
 
-                if let Some(member_type_struct) = &member.ret_type {
+                if let Some(member_type_struct) = &member.ty {
                     let any_type = self.compile_type(&member_type_struct)?;
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
                     v.push(basic_type);

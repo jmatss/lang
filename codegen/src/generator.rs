@@ -262,7 +262,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub(super) fn alloca_var(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
-        if let Some(var_type) = &var.ret_type {
+        if let Some(var_type) = &var.ty {
             Ok(match self.compile_type(&var_type)? {
                 AnyTypeEnum::ArrayType(ty) => {
                     let sign_extend = false;
@@ -319,7 +319,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> CustomResult<InstructionValue<'ctx>> {
         debug!(
             "Compile var_store, var name: {:?}\nret_type: {:#?}\nbasic_value: {:#?}.",
-            &var.name, &var.ret_type, &basic_value
+            &var.name, &var.ty, &basic_value
         );
 
         // TODO: Const isn't working atm.

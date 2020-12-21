@@ -9,7 +9,7 @@ use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
     token::{
         ast::AstToken,
-        block::{Enum, Function, Interface, Struct},
+        block::{BuiltIn, Enum, Function, Interface, Struct},
         expr::Var,
         stmt::Path,
     },
@@ -224,6 +224,9 @@ pub struct AnalyzeContext {
     enums: HashMap<(String, BlockId), Rc<RefCell<Enum>>>,
     interfaces: HashMap<(String, BlockId), Rc<RefCell<Interface>>>,
 
+    /// Contains all built-in "functions".
+    built_ins: HashMap<&'static str, BuiltIn>,
+
     pub block_info: HashMap<BlockId, BlockInfo>,
     pub use_paths: Vec<Path>,
 
@@ -247,6 +250,8 @@ impl AnalyzeContext {
             structs: HashMap::default(),
             enums: HashMap::default(),
             interfaces: HashMap::default(),
+
+            built_ins: decl::built_in::init_built_ins(),
 
             block_info: HashMap::default(),
             use_paths: Vec::default(),
@@ -461,6 +466,15 @@ impl AnalyzeContext {
     pub fn get_func_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Function>> {
         let decl_block_id = self.get_func_decl_scope(ident, id)?;
         self.get_mut(ident, decl_block_id, &self.functions)
+    }
+
+    pub fn get_built_in(&self, ident: &str) -> CustomResult<&BuiltIn> {
+        self.built_ins.get(ident).ok_or_else(|| {
+            self.err(format!(
+                "Unable to find built-in function with name \"{}\".",
+                ident
+            ))
+        })
     }
 
     /// Given a name of a struct `ident` and a block scope `id`, returns
@@ -753,7 +767,7 @@ impl AnalyzeContext {
     /// Given a function or method `func`, finds the type of the parameter with
     /// the name `param_name`.
     fn get_param_type(&self, func: Rc<RefCell<Function>>, idx: usize) -> CustomResult<Ty> {
-        if let Some(ty) = &self.get_param_with_idx(Rc::clone(&func), idx)?.ret_type {
+        if let Some(ty) = &self.get_param_with_idx(Rc::clone(&func), idx)?.ty {
             Ok(ty.clone())
         } else {
             Err(self.err(format!(
