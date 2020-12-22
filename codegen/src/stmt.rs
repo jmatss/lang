@@ -15,25 +15,25 @@ use log::debug;
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_stmt(&mut self, stmt: &mut Stmt) -> CustomResult<()> {
         match stmt {
-            Stmt::Return(expr_opt) => self.compile_return(expr_opt),
-            Stmt::Yield(expr) => self.compile_yield(expr),
-            Stmt::Break => self.compile_break(),
-            Stmt::Continue => self.compile_continue(),
-            Stmt::Use(path) => self.compile_use(path),
-            Stmt::Package(path) => self.compile_package(path),
-            Stmt::Increment(expr) => self.compile_inc(expr),
-            Stmt::Decrement(expr) => self.compile_dec(expr),
+            Stmt::Return(expr_opt, ..) => self.compile_return(expr_opt),
+            Stmt::Yield(expr, ..) => self.compile_yield(expr),
+            Stmt::Break(..) => self.compile_break(),
+            Stmt::Continue(..) => self.compile_continue(),
+            Stmt::Use(path, ..) => self.compile_use(path),
+            Stmt::Package(path, ..) => self.compile_package(path),
+            Stmt::Increment(expr, ..) => self.compile_inc(expr),
+            Stmt::Decrement(expr, ..) => self.compile_dec(expr),
             Stmt::Modifier(modifier) => self.compile_modifier(modifier),
 
             // Only the "DeferExecution" are compiled into code, the "Defer" is
             // only used during analyzing.
-            Stmt::Defer(_) => Ok(()),
+            Stmt::Defer(..) => Ok(()),
             Stmt::DeferExec(expr) => {
                 self.compile_expr(expr, ExprTy::RValue)?;
                 Ok(())
             }
 
-            Stmt::VariableDecl(var, expr_opt) => {
+            Stmt::VariableDecl(var, expr_opt, ..) => {
                 let var = var.borrow();
 
                 self.compile_var_decl(&var)?;
@@ -50,12 +50,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Ok(())
             }
             // TODO: Add other external declares other than func (var, struct etc.)
-            Stmt::ExternalDecl(func) => {
+            Stmt::ExternalDecl(func, ..) => {
                 let linkage = Linkage::External;
                 self.compile_func_proto(&func.borrow(), Some(linkage))?;
                 Ok(())
             }
-            Stmt::Assignment(assign_op, lhs, rhs) => {
+            Stmt::Assignment(assign_op, lhs, rhs, ..) => {
                 self.compile_assign(assign_op, lhs, rhs)?;
                 Ok(())
             }

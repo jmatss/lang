@@ -41,15 +41,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         expr_ty: ExprTy,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         let any_value = match expr {
-            Expr::Lit(lit, ty_opt) => self.compile_lit(lit, ty_opt),
+            Expr::Lit(lit, ty_opt, ..) => self.compile_lit(lit, ty_opt),
             Expr::FuncCall(func_call) => self.compile_func_call(func_call),
             Expr::BuiltInCall(built_in_call) => self.compile_built_in_call(built_in_call),
             Expr::Op(op) => self.compile_op(op, expr_ty),
             Expr::StructInit(struct_init) => self.compile_struct_init(struct_init),
             Expr::ArrayInit(array_init) => self.compile_array_init(array_init),
-            Expr::Type(ty) => {
+            Expr::Type(ty, ..) => {
                 // TODO: Does something need to be done here? Does a proper value
                 //       need to be returned? For now just return a dummy value.
+                // Returns a "null" value of the given type. For now, this lets
+                // one "store types" in variables in a hacky way. In the future
+                // it should be possible to store types in variables without
+                // having to init them with a value.
                 Ok(match self.compile_type(&ty)? {
                     AnyTypeEnum::ArrayType(ty) => ty.const_zero().into(),
                     AnyTypeEnum::FloatType(ty) => ty.const_zero().into(),
@@ -69,19 +73,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         self.prev_expr = Some(any_value);
         Ok(any_value)
-    }
-
-    /// Compiles a expression containing a Type. If the given `expr` doesn't
-    /// contains a type, a error will be returned.
-    pub(super) fn compile_type_expr(&mut self, expr: &mut Expr) -> CustomResult<AnyTypeEnum<'ctx>> {
-        if let Expr::Type(ty) = expr {
-            self.compile_type(ty)
-        } else {
-            Err(self.analyze_context.err(format!(
-                "Tried to compile expression as type, but wasn't type: {:#?}",
-                expr
-            )))
-        }
     }
 
     pub fn compile_lit(

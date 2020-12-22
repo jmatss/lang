@@ -4,8 +4,8 @@ use crate::{
 };
 use common::{
     error::{CustomResult, LangError, LangErrorKind::ParseError},
+    file::FilePosition,
     iter::TokenIter,
-    token::ast::Token,
     token::{
         ast::AstToken,
         block::BlockHeader,
@@ -59,11 +59,9 @@ pub struct ParseTokenIter<'a> {
     /// every block will be given a unique ID.
     block_id: BlockId,
 
-    /// Current line number (or rather last seen line number).
-    pub cur_line_nr: u64,
-
-    /// Current column number (or rather last seen column number).
-    pub cur_column_nr: u64,
+    /// Contains information about the file position of the current lex token
+    /// that is being parsed. This will be used to create better errors messages.
+    file_pos: FilePosition,
 
     /// Contains references to "use" statements. They will be pushed when parsed
     /// and the popped when they have been included/imported.
@@ -88,25 +86,19 @@ impl<'a> ParseTokenIter<'a> {
         Self {
             iter: TokenIter::new(<&mut [LexToken]>::default()),
             block_id: start_block_id,
-            cur_line_nr: 1,
-            cur_column_nr: 1,
             uses: Vec::default(),
+            file_pos: FilePosition::default(),
             root_block_body: Vec::default(),
             root_block_id,
         }
     }
 
     pub fn take_root_block(&mut self) -> AstToken {
-        let token = Token::Block(
+        AstToken::Block(
             BlockHeader::Default,
             self.root_block_id,
             std::mem::take(&mut self.root_block_body),
-        );
-        AstToken {
-            token,
-            line_nr: 1,
-            column_nr: 1,
-        }
+        )
     }
 
     pub fn parse(&mut self, lex_tokens: &mut [LexToken]) -> Result<(), Vec<LangError>> {
@@ -141,12 +133,12 @@ impl<'a> ParseTokenIter<'a> {
         loop {
             match self.next_token() {
                 Ok(parse_token) => {
-                    match parse_token.token {
-                        Token::EOF => {
+                    match &parse_token {
+                        AstToken::EOF => {
                             cur_block_body.push(parse_token);
                             break;
                         }
-                        Token::Stmt(Stmt::Use(ref path)) => {
+                        AstToken::Stmt(Stmt::Use(path, _)) => {
                             self.uses.push(path.clone());
                         }
                         _ => (),
@@ -190,8 +182,7 @@ impl<'a> ParseTokenIter<'a> {
             // TODO: Clean up this mess with a mix of ParseToken/ParseTokenKind
             //       (some arms returns ParseTokens, others cascades ParseTokenKinds).
 
-            self.cur_line_nr = lex_token.line_nr;
-            self.cur_column_nr = lex_token.column_nr;
+            self.file_pos = lex_token.file_pos.clone();
 
             // Skip any "break" and white space symbols. Call this function
             // recursively to get an "actual" token.
@@ -202,9 +193,7 @@ impl<'a> ParseTokenIter<'a> {
             }
 
             Ok(match lex_token.kind {
-                LexTokenKind::Kw(keyword) => {
-                    self.parse_keyword(keyword, lex_token.line_nr, lex_token.column_nr)?
-                }
+                LexTokenKind::Kw(keyword) => self.parse_keyword(keyword, &lex_token.file_pos)?,
 
                 // Skip line breaks, white spaces and semi colons. Just return
                 // the symbol and let the caller decide what to do with it.
@@ -227,25 +216,20 @@ impl<'a> ParseTokenIter<'a> {
 
                     // If the next token after the expr is a assign operator,
                     // this is a assignment. Otherwise, this is just a "regular" expr.
-                    let token = if let Some(next) = self.peek_skip_space() {
+                    if let Some(next) = self.peek_skip_space() {
                         if let Some(assign_op) = get_if_stmt_op(&next) {
                             self.next_skip_space(); // Consume the assign op.
                             let rhs = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                            let stmt = Stmt::Assignment(assign_op, expr, rhs);
-                            Token::Stmt(stmt)
+                            let stmt =
+                                Stmt::Assignment(assign_op, expr, rhs, Some(self.file_pos.clone()));
+                            AstToken::Stmt(stmt)
                         } else {
-                            Token::Expr(expr)
+                            AstToken::Expr(expr)
                         }
                     } else {
                         // If there are no more tokens after this expr has been
                         // parsed, there can be no rhs, this is NOT a assignment.
-                        Token::Expr(expr)
-                    };
-
-                    AstToken {
-                        token,
-                        line_nr: lex_token.line_nr,
-                        column_nr: lex_token.column_nr,
+                        AstToken::Expr(expr)
                     }
                 }
 
@@ -259,23 +243,11 @@ impl<'a> ParseTokenIter<'a> {
 
                 LexTokenKind::Sym(Sym::Increment) => {
                     let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                    let token = Token::Stmt(Stmt::Increment(expr));
-
-                    AstToken {
-                        token,
-                        line_nr: lex_token.line_nr,
-                        column_nr: lex_token.column_nr,
-                    }
+                    AstToken::Stmt(Stmt::Increment(expr, Some(self.file_pos.clone())))
                 }
                 LexTokenKind::Sym(Sym::Decrement) => {
                     let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                    let token = Token::Stmt(Stmt::Decrement(expr));
-
-                    AstToken {
-                        token,
-                        line_nr: lex_token.line_nr,
-                        column_nr: lex_token.column_nr,
-                    }
+                    AstToken::Stmt(Stmt::Decrement(expr, Some(self.file_pos.clone())))
                 }
 
                 // Error if the iterator finds a lonely symbol of these types:
@@ -298,27 +270,13 @@ impl<'a> ParseTokenIter<'a> {
                     // everything together as an expression.
                     self.rewind_to_mark(mark);
                     let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                    let token = Token::Expr(expr);
-
-                    AstToken {
-                        token,
-                        line_nr: lex_token.line_nr,
-                        column_nr: lex_token.column_nr,
-                    }
+                    AstToken::Expr(expr)
                 }
 
-                LexTokenKind::EOF => AstToken {
-                    token: Token::EOF,
-                    line_nr: lex_token.line_nr,
-                    column_nr: lex_token.column_nr,
-                },
+                LexTokenKind::EOF => AstToken::EOF,
             })
         } else {
-            Ok(AstToken {
-                token: Token::EOF,
-                line_nr: self.cur_line_nr,
-                column_nr: self.cur_column_nr,
-            })
+            Ok(AstToken::EOF)
         }
     }
 
@@ -327,14 +285,13 @@ impl<'a> ParseTokenIter<'a> {
     pub fn next_block(&mut self, header: BlockHeader) -> CustomResult<AstToken> {
         let mut block_tokens = Vec::new();
         let block_id = self.reserve_block_id();
-        let line_nr: u64;
-        let column_nr: u64;
+
+        // TODO: Add logic to calculate FilePosition for blocks.
 
         // Ensure that the block starts with a "CurlyBracketBegin".
         if let Some(lex_token) = self.next_skip_space_line() {
             if let LexTokenKind::Sym(Sym::CurlyBracketBegin) = lex_token.kind {
-                line_nr = lex_token.line_nr;
-                column_nr = lex_token.column_nr;
+                //lex_token.file_pos.clone()
             } else {
                 return Err(self.err(format!(
                     "Received invalid token at start of block: {:?}",
@@ -359,21 +316,15 @@ impl<'a> ParseTokenIter<'a> {
             block_tokens.push(token);
         }
 
-        let token = Token::Block(header, block_id, block_tokens);
-        Ok(AstToken {
-            token,
-            line_nr,
-            column_nr,
-        })
+        Ok(AstToken::Block(header, block_id, block_tokens))
     }
 
     pub fn parse_keyword(
         &mut self,
         keyword: Kw,
-        line_nr: u64,
-        column_nr: u64,
+        file_pos: &FilePosition,
     ) -> CustomResult<AstToken> {
-        KeyworkParser::parse(self, keyword, line_nr, column_nr)
+        KeyworkParser::parse(self, keyword, file_pos)
     }
 
     pub fn parse_expr(&mut self, stop_conds: &[Sym]) -> CustomResult<Expr> {
@@ -389,18 +340,25 @@ impl<'a> ParseTokenIter<'a> {
     pub fn parse_var_type(&mut self, ident: &str) -> CustomResult<Var> {
         // If the next token is a colon, a type is specified after this variable.
         // Parse it and set the `var_type` inside the variable.
-        let var_type = if let Some(next_token) = self.peek_skip_space() {
+        let (var_type, file_pos) = if let Some(next_token) = self.peek_skip_space() {
             if let LexTokenKind::Sym(Sym::Colon) = next_token.kind {
                 self.next_skip_space(); // Skip the colon.
-                Some(self.parse_type(None)?)
+                (Some(self.parse_type(None)?), Some(next_token.file_pos))
             } else {
-                None
+                (None, None)
             }
         } else {
-            None
+            (None, None)
         };
 
-        Ok(Var::new(ident.into(), var_type, None, None, false))
+        Ok(Var::new(
+            ident.into(),
+            var_type,
+            None,
+            None,
+            file_pos,
+            false,
+        ))
     }
 
     /// Parses a list of arguments. This can be used on generic list containing
@@ -596,9 +554,15 @@ impl<'a> ParseTokenIter<'a> {
                                 None
                             };
 
-                        let const_ = false;
-                        let parameter =
-                            Var::new(ident, Some(var_type), None, default_value, const_);
+                        let is_const = false;
+                        let parameter = Var::new(
+                            ident,
+                            Some(var_type),
+                            None,
+                            default_value,
+                            Some(lex_token.file_pos),
+                            is_const,
+                        );
                         parameters.push(parameter);
                     }
 
@@ -682,8 +646,7 @@ impl<'a> ParseTokenIter<'a> {
     pub fn rewind(&mut self) -> CustomResult<()> {
         if self.iter.rewind() {
             if let Some(cur_token) = self.iter.peek() {
-                self.cur_line_nr = cur_token.line_nr;
-                self.cur_column_nr = cur_token.column_nr;
+                self.file_pos = cur_token.file_pos;
             }
             Ok(())
         } else {
@@ -718,8 +681,7 @@ impl<'a> ParseTokenIter<'a> {
     #[inline]
     pub fn next_skip_space(&mut self) -> Option<LexToken> {
         while let Some(lex_token) = self.iter.next() {
-            self.cur_line_nr = lex_token.line_nr;
-            self.cur_column_nr = lex_token.column_nr;
+            self.file_pos = lex_token.file_pos;
 
             match lex_token.kind {
                 LexTokenKind::Sym(Sym::WhiteSpace(_)) => {
@@ -740,8 +702,7 @@ impl<'a> ParseTokenIter<'a> {
     #[inline]
     pub fn next_skip_space_line(&mut self) -> Option<LexToken> {
         while let Some(lex_token) = self.iter.next() {
-            self.cur_line_nr = lex_token.line_nr;
-            self.cur_column_nr = lex_token.column_nr;
+            self.file_pos = lex_token.file_pos;
 
             match lex_token.kind {
                 LexTokenKind::Sym(Sym::WhiteSpace(_))
@@ -829,8 +790,7 @@ impl<'a> ParseTokenIter<'a> {
         LangError::new_backtrace(
             msg,
             ParseError {
-                line_nr: self.cur_line_nr,
-                column_nr: self.cur_column_nr,
+                file_pos: self.file_pos.clone(),
             },
             true,
         )

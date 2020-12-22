@@ -33,12 +33,12 @@ impl<'a> Visitor for DeclVarAnalyzer<'a> {
     }
 
     fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.analyze_context.borrow_mut().line_nr = ast_token.line_nr;
-        self.analyze_context.borrow_mut().column_nr = ast_token.column_nr;
+        self.analyze_context.borrow_mut().file_pos =
+            ast_token.file_pos().cloned().unwrap_or_default();
     }
 
     fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
-        if let Stmt::VariableDecl(var, _) = stmt {
+        if let Stmt::VariableDecl(var, ..) = stmt {
             let mut analyze_context = self.analyze_context.borrow_mut();
 
             let key = (var.borrow().name.clone(), ctx.block_id);

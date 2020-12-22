@@ -7,7 +7,7 @@ use crate::{
 };
 use common::{
     error::CustomResult,
-    token::ast::Token,
+    file::FilePosition,
     token::{
         ast::AstToken,
         block::{BlockHeader, Function, Struct},
@@ -18,31 +18,26 @@ use common::{
 };
 use lex::token::{Kw, LexTokenKind, Sym};
 
+// TODO: Better logic for handling file position. Currently it only looks at the
+//       the first token. Need to consider the whole block parsed.
+
 pub struct KeyworkParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
-
-    // TODO: Rework how line_nr and column_nr are stored/parsed during parsing.
-    line_nr: u64,
-    column_nr: u64,
+    file_pos: &'a FilePosition,
 }
 
 impl<'a, 'b> KeyworkParser<'a, 'b> {
     pub fn parse(
         iter: &'a mut ParseTokenIter<'b>,
         keyword: Kw,
-        line_nr: u64,
-        column_nr: u64,
+        file_pos: &'a FilePosition,
     ) -> CustomResult<AstToken> {
-        let mut keyword_parser = Self {
-            iter,
-            line_nr,
-            column_nr,
-        };
+        let mut keyword_parser = Self { iter, file_pos };
         keyword_parser.parse_keyword(keyword)
     }
 
     fn parse_keyword(&mut self, keyword: Kw) -> CustomResult<AstToken> {
-        let token = match keyword {
+        match keyword {
             // Parses all the else(x)/else blocks after aswell.
             Kw::If => self.parse_if(),
             Kw::Else => Err(self.iter.err("Else keyword in keyword parser.".into())),
@@ -81,20 +76,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             Kw::Defer => self.parse_defer(),
 
             Kw::Test => Err(self.iter.err("\"Test\" keyword not implemented.".into())),
-        }?;
-
-        Ok(AstToken {
-            token,
-            line_nr: self.line_nr,
-            column_nr: self.column_nr,
-        })
+        }
     }
 
     /// Parses the matching `IfCase`s into a `If` block. This includes all "else"
     /// blocks aswell.
     ///   "if <expr> { ... } [ [ else <expr> { ... } ] else { ... } ]"
     /// The "if" keyword has already been consumed when this function is called.
-    fn parse_if(&mut self) -> CustomResult<Token> {
+    fn parse_if(&mut self) -> CustomResult<AstToken> {
         let mut if_cases = Vec::new();
         let block_id = self.iter.reserve_block_id();
 
@@ -133,13 +122,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             }
         }
 
-        Ok(Token::Block(BlockHeader::If, block_id, if_cases))
+        Ok(AstToken::Block(BlockHeader::If, block_id, if_cases))
     }
 
     /// Parses a `Match` block and all its cases.
     ///   "match <expr> { <expr> { ... } [...] }"
     /// The "match" keyword has already been consumed when this function is called.
-    fn parse_match(&mut self) -> CustomResult<Token> {
+    fn parse_match(&mut self) -> CustomResult<AstToken> {
         let mut match_cases = Vec::new();
         let block_id = self.iter.reserve_block_id();
 
@@ -163,7 +152,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             }
         }
 
-        Ok(Token::Block(
+        Ok(AstToken::Block(
             BlockHeader::Match(match_expr),
             block_id,
             match_cases,
@@ -237,7 +226,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     ///   "return <expr>"
     ///   "return"
     /// The "return" keyword has already been consumed when this function is called.
-    fn parse_return(&mut self) -> CustomResult<Token> {
+    fn parse_return(&mut self) -> CustomResult<AstToken> {
         // If the next lex token is a "LineBreak", no expression is given after
         // this "return" keyword. Assume it is a return for a function with no
         // return value.
@@ -251,35 +240,41 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             None
         };
 
-        Ok(Token::Stmt(Stmt::Return(expr)))
+        Ok(AstToken::Stmt(Stmt::Return(
+            expr,
+            Some(self.file_pos.clone()),
+        )))
     }
 
     /// Parses a yield statement.
     ///   "yield <expr>"
     /// The "yield" keyword has already been consumed when this function is called.
-    fn parse_yield(&mut self) -> CustomResult<Token> {
+    fn parse_yield(&mut self) -> CustomResult<AstToken> {
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
-        Ok(Token::Stmt(Stmt::Yield(expr)))
+        Ok(AstToken::Stmt(Stmt::Yield(
+            expr,
+            Some(self.file_pos.clone()),
+        )))
     }
 
     /// Parses a break statement.
     ///   "break"
     /// The "break" keyword has already been consumed when this function is called.
-    fn parse_break(&mut self) -> CustomResult<Token> {
-        Ok(Token::Stmt(Stmt::Break))
+    fn parse_break(&mut self) -> CustomResult<AstToken> {
+        Ok(AstToken::Stmt(Stmt::Break(Some(self.file_pos.clone()))))
     }
 
     /// Parses a continue statement.
     ///   "continue"
     /// The "continue" keyword has already been consumed when this function is called.
-    fn parse_continue(&mut self) -> CustomResult<Token> {
-        Ok(Token::Stmt(Stmt::Continue))
+    fn parse_continue(&mut self) -> CustomResult<AstToken> {
+        Ok(AstToken::Stmt(Stmt::Continue(Some(self.file_pos.clone()))))
     }
 
     /// Parses a use statement.
     ///   "use <path>"  (where path is a dot separated list of idents)
     /// The "use" keyword has already been consumed when this function is called.
-    fn parse_use(&mut self) -> CustomResult<Token> {
+    fn parse_use(&mut self) -> CustomResult<AstToken> {
         let mut path_parts = Vec::new();
 
         loop {
@@ -322,13 +317,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
 
         let path = Path::new(path_parts);
-        Ok(Token::Stmt(Stmt::Use(path)))
+        Ok(AstToken::Stmt(Stmt::Use(path, Some(self.file_pos.clone()))))
     }
 
     /// Parses a package statement.
     ///   "package <path>"  (where path is a dot separated list of idents)
     /// The "package" keyword has already been consumed when this function is called.
-    fn parse_package(&mut self) -> CustomResult<Token> {
+    fn parse_package(&mut self) -> CustomResult<AstToken> {
         let mut path_parts = Vec::new();
 
         loop {
@@ -371,14 +366,17 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
 
         let path = Path::new(path_parts);
-        Ok(Token::Stmt(Stmt::Package(path)))
+        Ok(AstToken::Stmt(Stmt::Package(
+            path,
+            Some(self.file_pos.clone()),
+        )))
     }
 
     // TODO: External only valid for functions atm, add for variables.
     /// Parses a external statement.
     ///   "external <function_prototype>"
     /// The "external" keyword has already been consumed when this function is called.
-    fn parse_external(&mut self) -> CustomResult<Token> {
+    fn parse_external(&mut self) -> CustomResult<AstToken> {
         if let Some(lex_token) = self.iter.next_skip_space_line() {
             let func = match lex_token.kind {
                 LexTokenKind::Kw(Kw::Function) => self.parse_func_proto()?,
@@ -390,7 +388,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 }
             };
 
-            Ok(Token::Stmt(Stmt::ExternalDecl(Rc::new(RefCell::new(func)))))
+            Ok(AstToken::Stmt(Stmt::ExternalDecl(
+                Rc::new(RefCell::new(func)),
+                Some(self.file_pos.clone()),
+            )))
         } else {
             Err(self
                 .iter
@@ -401,11 +402,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a var statement.
     ///   "var <ident> [: <type>] [= <expr>]"
     /// The "var" keyword has already been consumed when this function is called.
-    fn parse_var_decl(&mut self) -> CustomResult<Token> {
+    fn parse_var_decl(&mut self) -> CustomResult<AstToken> {
         // Start by parsing the identifier
-        let ident = if let Some(lex_token) = self.iter.next_skip_space() {
+        let (ident, file_pos) = if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Ident(ident) = lex_token.kind {
-                ident
+                (ident, lex_token.file_pos)
             } else {
                 return Err(self.iter.err(format!(
                     "Expected ident when parsing \"var\", got: {:?}",
@@ -449,10 +450,15 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let is_const = false;
         let var = Rc::new(RefCell::new(Var::new(
-            ident, var_type, None, None, is_const,
+            ident,
+            var_type,
+            None,
+            None,
+            Some(file_pos),
+            is_const,
         )));
-        let var_decl = Stmt::VariableDecl(var, expr_opt);
-        Ok(Token::Stmt(var_decl))
+        let var_decl = Stmt::VariableDecl(var, expr_opt, Some(file_pos));
+        Ok(AstToken::Stmt(var_decl))
     }
 
     /*
@@ -655,7 +661,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a struct header.
     ///   "struct <ident> [ < <generic>, ... > ] { [<ident>: <type>] [[,] ...] }"
     /// The "struct" keyword has already been consumed when this function is called.
-    fn parse_struct(&mut self) -> CustomResult<Token> {
+    fn parse_struct(&mut self) -> CustomResult<AstToken> {
         // Start by parsing the identifier
         let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
             if let LexTokenKind::Ident(ident) = lex_token.kind {
@@ -715,7 +721,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);
 
-        Ok(Token::Block(header, block_id, body))
+        Ok(AstToken::Block(header, block_id, body))
     }
 
     // TODO: Generics
@@ -744,9 +750,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         // Iterate through the tokens in the body and make sure that all tokens
         // are functions.
-        if let Token::Block(BlockHeader::Implement(_), _, body) = &impl_token.token {
+        if let AstToken::Block(BlockHeader::Implement(_), _, body) = &impl_token {
             for ast_token in body {
-                if let Token::Block(BlockHeader::Function(_), ..) = ast_token.token {
+                if let AstToken::Block(BlockHeader::Function(_), ..) = ast_token {
                     // Do nothing, the token is of correct type.
                 } else {
                     return Err(self.iter.err(format!(
@@ -768,8 +774,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a defer statement.
     ///   "defer <expr>"
     /// The "defer" keyword has already been consumed when this function is called.
-    fn parse_defer(&mut self) -> CustomResult<Token> {
+    fn parse_defer(&mut self) -> CustomResult<AstToken> {
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
-        Ok(Token::Stmt(Stmt::Defer(expr)))
+        Ok(AstToken::Stmt(Stmt::Defer(
+            expr,
+            Some(self.file_pos.clone()),
+        )))
     }
 }

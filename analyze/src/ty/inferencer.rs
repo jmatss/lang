@@ -6,7 +6,7 @@ use std::{
 
 use common::{
     error::LangError,
-    token::ast::Token,
+    file::FilePosition,
     token::{
         ast::AstToken,
         block::{BlockHeader, Function},
@@ -72,11 +72,15 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
     /// the column number (C) and a free text to give the unkown type some more
     /// context for readability.
     fn new_unknown_ident(&mut self, text: &str) -> String {
-        let cur_line_nr = self.type_context.analyze_context.line_nr;
-        let cur_column_nr = self.type_context.analyze_context.column_nr;
+        let file_nr = self.type_context.analyze_context.file_pos.file_nr;
+        let line_nr = self.type_context.analyze_context.file_pos.line_nr;
+        let column_nr = self.type_context.analyze_context.file_pos.column_nr;
+        let offset = self.type_context.analyze_context.file_pos.offset;
+        let length = self.type_context.analyze_context.file_pos.length;
+
         let type_ident = format!(
-            "ID:{}-R:{}-C:{}-{}",
-            self.type_id, cur_line_nr, cur_column_nr, text
+            "ID:{}-F:{}-R:{}-C:{}-O:{}-L:{}-{}",
+            self.type_id, file_nr, line_nr, column_nr, offset, length, text
         );
         self.type_id += 1;
         type_ident
@@ -93,14 +97,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     }
 
     fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.type_context.analyze_context.line_nr = ast_token.line_nr;
-        self.type_context.analyze_context.column_nr = ast_token.column_nr;
+        self.type_context.analyze_context.file_pos =
+            ast_token.file_pos().cloned().unwrap_or_default();
     }
 
     /// Solve the constraints at the EOF. Also debug log the results.
     fn visit_eof(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.type_context.analyze_context.line_nr = 0;
-        self.type_context.analyze_context.column_nr = 0;
+        self.type_context.analyze_context.file_pos = FilePosition::default();
 
         let mut result = self.type_context.solve_constraints(true);
         if let Err(errors) = &mut result {
@@ -119,7 +122,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// analyzing step is done.
 
     fn visit_lit(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
-        if let Expr::Lit(lit, gen_ty_opt) = expr {
+        if let Expr::Lit(lit, gen_ty_opt, ..) = expr {
             if gen_ty_opt.is_none() {
                 let inner_ty = match lit {
                     Lit::String(_) => {
@@ -709,7 +712,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         // TODO: What should the type of the index for the array size be?
         let array_index_type = Ty::CompoundType(InnerTy::U32, Generics::new());
         let dim = array_init.arguments.len();
-        let dim_expr = Expr::Lit(Lit::Integer(dim.to_string(), 10), Some(array_index_type));
+        let dim_expr = Expr::Lit(
+            Lit::Integer(dim.to_string(), 10),
+            Some(array_index_type),
+            Some(FilePosition::default()),
+        );
 
         // Add a constraint for all arguments that they are members of the same
         // array type and and also add constraint between all the values in the
@@ -773,7 +780,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             BinOperator::In | BinOperator::Is | BinOperator::Of => (),
 
             BinOperator::As => {
-                if let Expr::Type(rhs_ty) = &*bin_op.rhs {
+                if let Expr::Type(rhs_ty, ..) = &*bin_op.rhs {
                     // The rhs of a "as" will be a hardcoded type. The lhs
                     // doesn't have to be the same type (since it should be
                     // casted at this point), but the return type of the bin op
@@ -886,8 +893,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Function(func), ..) = &mut ast_token.token {
+    fn visit_func(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Function(func), ..) = &mut ast_token {
             let func_ref = func.borrow_mut();
 
             // If this is a method and the first argument is named "this", set
@@ -932,7 +939,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Ties the generics in the struct members, method parameters and method
     /// return types.
     fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Struct(struct_), ..) = &ast_token.token {
+        if let AstToken::Block(BlockHeader::Struct(struct_), ..) = &ast_token {
             let struct_ = struct_.borrow();
 
             // Populate this map with the "Generic(ident)" types where the key
@@ -1052,7 +1059,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Need to make sure that a return statement has the same type as the
     /// function return type. Add it as a constraint.
     fn visit_return(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
-        if let Stmt::Return(expr_opt) = stmt {
+        if let Stmt::Return(expr_opt, ..) = stmt {
             if let Some(func) = &self.cur_func {
                 let func_ret_ty = if let Some(ty) = &func.borrow().ret_type {
                     ty.clone()
@@ -1085,15 +1092,15 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Save the current match expr in a place so that the match cases in the body
     /// can access the type of the expr.
     fn visit_match(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Match(expr), ..) = &ast_token.token {
+        if let AstToken::Block(BlockHeader::Match(expr), ..) = &ast_token {
             self.cur_match_expr = Some(expr.clone());
         }
     }
 
     /// Need to make sure that the match expr and the match case exprs have the
     /// same type. Add it as a constraint.
-    fn visit_match_case(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token.token {
+    fn visit_match_case(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token {
             if let Some(match_expr) = self.cur_match_expr.clone() {
                 let match_expr_ty = match match_expr.get_expr_type() {
                     Ok(expr_ty) => expr_ty,
@@ -1126,7 +1133,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// The types of the lhs and rhs of a assignment should be of the same type.
     /// Add it as a constraint.
     fn visit_assignment(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
-        if let Stmt::Assignment(_, lhs, rhs) = stmt {
+        if let Stmt::Assignment(_, lhs, rhs, ..) = stmt {
             debug!("ASSIGNMENT\nlhs: {:#?}\nrhs: {:#?}", lhs, rhs);
 
             let lhs_ty = match lhs.get_expr_type() {
@@ -1152,7 +1159,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// The types of the lhs and rhs of a variable declaration with a init value
     /// should be of the same type, add as constraints.
     fn visit_var_decl(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
-        if let Stmt::VariableDecl(var, expr_opt) = stmt {
+        if let Stmt::VariableDecl(var, expr_opt, ..) = stmt {
             let mut var = var.borrow_mut();
 
             // No way to do type inference of rhs on var decl with no init value.
@@ -1200,7 +1207,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     }
 
     fn visit_inc(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
-        if let Stmt::Increment(expr) = stmt {
+        if let Stmt::Increment(expr, ..) = stmt {
             let expr_ty = match expr.get_expr_type() {
                 Ok(ty) => ty,
                 Err(err) => {
@@ -1219,7 +1226,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     }
 
     fn visit_dec(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
-        if let Stmt::Increment(expr) = stmt {
+        if let Stmt::Increment(expr, ..) = stmt {
             let expr_ty = match expr.get_expr_type() {
                 Ok(ty) => ty,
                 Err(err) => {

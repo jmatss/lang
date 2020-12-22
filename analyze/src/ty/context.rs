@@ -1,5 +1,6 @@
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
+    file::FilePosition,
     token::expr::Expr,
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
 };
@@ -1058,8 +1059,7 @@ impl<'a> TypeContext<'a> {
             Err(LangError::new(
                 "expr opt set to None.".into(),
                 AnalyzeError {
-                    line_nr: 0,
-                    column_nr: 0,
+                    file_pos: FilePosition::default(),
                 },
             ))
         }

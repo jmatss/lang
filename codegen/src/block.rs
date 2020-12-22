@@ -1,9 +1,9 @@
 use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
+    file::FilePosition,
     token::{
         ast::AstToken,
-        ast::Token,
         block::{BlockHeader, Function, Struct},
         expr::{Expr, Var},
     },
@@ -40,15 +40,16 @@ impl<'ctx> BranchInfo<'ctx> {
     pub fn get_if_case(
         &self,
         index: usize,
-        line_nr: u64,
-        column_nr: u64,
+        file_pos: &FilePosition,
     ) -> CustomResult<BasicBlock<'ctx>> {
         if let Some(basic_block) = self.if_cases.get(index) {
             Ok(*basic_block)
         } else {
             Err(LangError::new(
                 format!("Unable to get if_case with index: {}", index),
-                CodeGenError { line_nr, column_nr },
+                CodeGenError {
+                    file_pos: file_pos.clone(),
+                },
             ))
         }
     }
@@ -58,15 +59,16 @@ impl<'ctx> BranchInfo<'ctx> {
     pub fn get_if_branch(
         &self,
         index: usize,
-        line_nr: u64,
-        column_nr: u64,
+        file_pos: &FilePosition,
     ) -> CustomResult<BasicBlock<'ctx>> {
         if let Some(basic_block) = self.if_branches.get(index) {
             Ok(*basic_block)
         } else {
             Err(LangError::new(
                 format!("Unable to get if_branch with index: {}", index),
-                CodeGenError { line_nr, column_nr },
+                CodeGenError {
+                    file_pos: file_pos.clone(),
+                },
             ))
         }
     }
@@ -91,9 +93,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.compile_func(&func.borrow(), id, body)?;
             }
             BlockHeader::Implement(_) => {
-                for ast_token in body {
-                    if let Token::Block(BlockHeader::Function(func), func_id, func_body) =
-                        &mut ast_token.token
+                for mut ast_token in body {
+                    if let AstToken::Block(BlockHeader::Function(func), func_id, func_body) =
+                        &mut ast_token
                     {
                         self.compile_func(&func.borrow(), *func_id, func_body)?;
                     }
@@ -336,7 +338,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let mut branch_info = BranchInfo::new();
         branch_info.if_branches.push(cur_block);
         for (i, if_case) in body.iter().enumerate() {
-            if let Token::Block(BlockHeader::IfCase(expr_opt), _, _) = &if_case.token {
+            if let AstToken::Block(BlockHeader::IfCase(expr_opt), _, _) = &if_case {
                 // Skip adding a branch block if this is the first case (since it
                 // has the branch block `cur_block`). Also only add a branch block
                 // if this `if_case` contains a expression that can be "branched on".
@@ -381,14 +383,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         // Iterate through all "if cases" in this if-statement and compile them.
-        for (index, if_case) in body.iter_mut().enumerate() {
+        for (index, mut if_case) in body.iter_mut().enumerate() {
             self.cur_block_id = id;
 
-            if let Token::Block(
+            if let AstToken::Block(
                 BlockHeader::IfCase(ref mut expr_opt),
                 inner_id,
                 ref mut inner_body,
-            ) = &mut if_case.token
+            ) = &mut if_case
             {
                 self.compile_if_case(
                     expr_opt,
@@ -420,13 +422,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         body: &mut [AstToken],
         branch_info: &BranchInfo<'ctx>,
     ) -> CustomResult<()> {
-        let if_case_block = branch_info.get_if_case(index, self.cur_line_nr, self.cur_column_nr)?;
+        let if_case_block = branch_info.get_if_case(index, &self.cur_file_pos)?;
 
         // If this is a if case with a expression, the branch condition should
         // be evaluated and branched from the branch block.
         if let Some(br_expr) = br_expr_opt {
-            let branch_block =
-                branch_info.get_if_branch(index, self.cur_line_nr, self.cur_column_nr)?;
+            let branch_block = branch_info.get_if_branch(index, &self.cur_file_pos)?;
 
             // If there are no more branch blocks, set the next branch block to
             // the merge block if there are no more if_cases or set it to the
@@ -435,10 +436,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if index + 1 >= branch_info.if_cases.len() {
                     self.get_merge_block(id)?
                 } else {
-                    branch_info.get_if_case(index + 1, self.cur_line_nr, self.cur_column_nr)?
+                    branch_info.get_if_case(index + 1, &self.cur_file_pos)?
                 }
             } else {
-                branch_info.get_if_branch(index + 1, self.cur_line_nr, self.cur_column_nr)?
+                branch_info.get_if_branch(index + 1, &self.cur_file_pos)?
             };
 
             // TODO: Return error instead of panicing inside the

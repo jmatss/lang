@@ -10,6 +10,7 @@ use crate::{
         CustomResult, LangError,
         LangErrorKind::{self, AnalyzeError},
     },
+    file::FilePosition,
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     util, BlockId,
 };
@@ -20,11 +21,11 @@ pub enum Expr {
     //       implied. For numbers the postfix notation might be converted to a
     //       "As" so that the type doesn't need to be stored in the literal,
     //       it will be stored in the surrounding expression.
-    Lit(Lit, Option<Ty>),
+    Lit(Lit, Option<Ty>, Option<FilePosition>),
 
     // TODO: Is it ok to have type as a expression? This lets one handle binary
     //       operators like ex. "as" in a simple way.
-    Type(Ty),
+    Type(Ty, Option<FilePosition>),
     Var(Var),
     FuncCall(FuncCall),
     BuiltInCall(BuiltInCall),
@@ -37,7 +38,7 @@ pub enum Expr {
 impl Expr {
     pub fn get_expr_type(&self) -> CustomResult<Ty> {
         Ok(match self {
-            Expr::Lit(_, Some(ty)) | Expr::Type(ty) => ty.clone(),
+            Expr::Lit(_, Some(ty), _) | Expr::Type(ty, _) => ty.clone(),
             Expr::Var(var) => {
                 if let Some(ty) = &var.ty {
                     ty.clone()
@@ -45,8 +46,7 @@ impl Expr {
                     return Err(LangError::new(
                         format!("Type of var was None: {:?}", var),
                         AnalyzeError {
-                            line_nr: 0,
-                            column_nr: 0,
+                            file_pos: FilePosition::default(),
                         },
                     ));
                 }
@@ -97,8 +97,7 @@ impl Expr {
                 return Err(LangError::new(
                     "Unable to get type of expr.".into(),
                     AnalyzeError {
-                        line_nr: 0,
-                        column_nr: 0,
+                        file_pos: FilePosition::default(),
                     },
                 ))
             }
@@ -107,7 +106,7 @@ impl Expr {
 
     pub fn get_expr_type_mut(&mut self) -> CustomResult<&mut Ty> {
         Ok(match self {
-            Expr::Lit(_, Some(ty)) | Expr::Type(ty) => ty,
+            Expr::Lit(_, Some(ty), _) | Expr::Type(ty, _) => ty,
             Expr::Var(var) => {
                 if let Some(ty) = &mut var.ty {
                     ty
@@ -115,8 +114,7 @@ impl Expr {
                     return Err(LangError::new(
                         "Type of var was None.".into(),
                         AnalyzeError {
-                            line_nr: 0,
-                            column_nr: 0,
+                            file_pos: FilePosition::default(),
                         },
                     ));
                 }
@@ -167,12 +165,26 @@ impl Expr {
                 return Err(LangError::new(
                     "Unable to get type of expr.".into(),
                     AnalyzeError {
-                        line_nr: 0,
-                        column_nr: 0,
+                        file_pos: FilePosition::default(),
                     },
                 ))
             }
         })
+    }
+
+    pub fn file_pos(&self) -> Option<&FilePosition> {
+        match self {
+            Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) => file_pos.as_ref(),
+            Expr::Var(var) => var.file_pos.as_ref(),
+            Expr::FuncCall(func_call) => func_call.file_pos.as_ref(),
+            Expr::BuiltInCall(built_in_call) => built_in_call.file_pos.as_ref(),
+            Expr::StructInit(struct_init) => struct_init.file_pos.as_ref(),
+            Expr::ArrayInit(array_init) => array_init.file_pos.as_ref(),
+            Expr::Op(op) => match op {
+                Op::BinOp(bin_op) => bin_op.file_pos.as_ref(),
+                Op::UnOp(un_op) => un_op.file_pos.as_ref(),
+            },
+        }
     }
 
     #[allow(clippy::match_like_matches_macro)]
@@ -322,6 +334,7 @@ pub struct Var {
     pub ty: Option<Ty>,
     pub modifiers: Option<Vec<Modifier>>,
     pub default_value: Option<Box<Expr>>,
+    pub file_pos: Option<FilePosition>,
     pub is_const: bool,
 }
 
@@ -331,6 +344,7 @@ impl Var {
         ty: Option<Ty>,
         modifiers: Option<Vec<Modifier>>,
         default_value: Option<Box<Expr>>,
+        file_pos: Option<FilePosition>,
         is_const: bool,
     ) -> Self {
         Var {
@@ -338,6 +352,7 @@ impl Var {
             ty,
             modifiers,
             default_value,
+            file_pos,
             is_const,
         }
     }
@@ -353,6 +368,8 @@ pub struct FuncCall {
     /// generics will be fetched from the type of this function call.
     pub generics: Option<Generics>,
 
+    pub file_pos: Option<FilePosition>,
+
     /// Will be set if this is a method call. It will be set to the structure
     /// that this method is called on.
     pub method_structure: Option<Ty>,
@@ -360,12 +377,18 @@ pub struct FuncCall {
 }
 
 impl FuncCall {
-    pub fn new(name: String, arguments: Vec<Argument>, generics: Option<Generics>) -> Self {
+    pub fn new(
+        name: String,
+        arguments: Vec<Argument>,
+        generics: Option<Generics>,
+        file_pos: Option<FilePosition>,
+    ) -> Self {
         Self {
             name,
             arguments,
             ret_type: None,
             generics,
+            file_pos,
             method_structure: None,
             is_method: false,
         }
@@ -436,15 +459,22 @@ pub struct BuiltInCall {
     pub arguments: Vec<Argument>,
     pub ret_type: Option<Ty>,
     pub generics: Option<Generics>,
+    pub file_pos: Option<FilePosition>,
 }
 
 impl BuiltInCall {
-    pub fn new(name: String, arguments: Vec<Argument>, generics: Option<Generics>) -> Self {
+    pub fn new(
+        name: String,
+        arguments: Vec<Argument>,
+        generics: Option<Generics>,
+        file_pos: Option<FilePosition>,
+    ) -> Self {
         Self {
             name,
             arguments,
             ret_type: None,
             generics,
+            file_pos,
         }
     }
 }
@@ -455,15 +485,22 @@ pub struct StructInit {
     pub arguments: Vec<Argument>,
     pub ret_type: Option<Ty>,
     pub generics: Option<Generics>,
+    pub file_pos: Option<FilePosition>,
 }
 
 impl StructInit {
-    pub fn new(name: String, arguments: Vec<Argument>, generics: Option<Generics>) -> Self {
+    pub fn new(
+        name: String,
+        arguments: Vec<Argument>,
+        generics: Option<Generics>,
+        file_pos: Option<FilePosition>,
+    ) -> Self {
         Self {
             name,
             arguments,
             ret_type: None,
             generics,
+            file_pos,
         }
     }
 
@@ -523,13 +560,15 @@ impl StructInit {
 pub struct ArrayInit {
     pub arguments: Vec<Argument>,
     pub ret_type: Option<Ty>,
+    pub file_pos: Option<FilePosition>,
 }
 
 impl ArrayInit {
-    pub fn new(arguments: Vec<Argument>) -> Self {
+    pub fn new(arguments: Vec<Argument>, file_pos: Option<FilePosition>) -> Self {
         Self {
             arguments,
             ret_type: None,
+            file_pos,
         }
     }
 }

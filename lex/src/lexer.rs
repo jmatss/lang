@@ -1,25 +1,28 @@
 use super::token::LexTokenKind;
 use crate::token::Sym;
 use crate::{char_iter::CharIter, token::LexToken};
-use common::error::LangError;
+use common::{
+    error::LangError,
+    file::{FileId, FileInfo, FilePosition},
+};
 use common::{
     error::{CustomResult, LangErrorKind::LexError},
     token::lit::Lit,
 };
-use log::debug;
+use log::{debug, warn};
 use std::fs::File;
 use std::io::Read;
 
 /// Lexes the characters in the source code to LexToken's and returns a vector
 /// containing all lex tokens.
-pub fn lex(filename: &str) -> Result<Vec<LexToken>, Vec<LangError>> {
+pub fn lex(file_nr: FileId, file_info: &FileInfo) -> Result<Vec<LexToken>, Vec<LangError>> {
     let mut contents = String::new();
 
-    File::open(filename)
+    File::open(&file_info.full_path())
         .and_then(|mut f| f.read_to_string(&mut contents))
         .map_err(|e| vec![e.into()])?;
 
-    let mut iter = LexTokenIter::new(unsafe { contents.as_bytes_mut() });
+    let mut iter = LexTokenIter::new(unsafe { contents.as_bytes_mut() }, file_nr);
     let mut lex_token_vec = Vec::new();
     let mut errors = Vec::new();
 
@@ -45,19 +48,36 @@ pub struct LexTokenIter<'a> {
     /// Use to iterate over the character tokens.
     iter: CharIter<'a>,
 
+    /// Number of the file that is currently being parsed. This is mapped to a
+    /// directory/filename.
+    file_nr: u64,
+
+    /// The offset (in bytes) inside the current file.
+    offset: u64,
+
     /// Current line number (or rather last seen line number).
     line_nr: u64,
 
     /// Current column number (or rather last seen column number).
     column_nr: u64,
+
+    /// Keeps track of the previously created file position. This can be handly
+    /// ex. when finding errors. Before doing any calculations, the position is
+    /// stored in this variable. If a error happens while the new position isn't
+    /// fully calculated, this variable will information about the current valid
+    /// token position.
+    file_pos: FilePosition,
 }
 
 impl<'a> LexTokenIter<'a> {
-    pub fn new(content: &'a mut [u8]) -> Self {
+    pub fn new(content: &'a mut [u8], file_nr: u64) -> Self {
         Self {
             iter: CharIter::new(content),
+            file_nr,
+            offset: 0,
             line_nr: 1,
             column_nr: 1,
+            file_pos: FilePosition::default(),
         }
     }
 
@@ -68,8 +88,11 @@ impl<'a> LexTokenIter<'a> {
         // radix 10 numbers).
         const RADIX: u32 = 10;
 
-        let line_nr = self.line_nr;
-        let column_nr = self.column_nr;
+        // Save the current position in the file before starting to lex the token.
+        // At this point, the offset can't be calculated. It will be set if the
+        // token is fully lexed correctly (at the end of this function).
+        self.file_pos =
+            FilePosition::new(self.file_nr, self.offset, 0, self.line_nr, self.column_nr);
 
         let kind = if let Some((c1, c2, c3)) = self.iter.peek_three() {
             if LexTokenIter::valid_linebreak(c1, c2) {
@@ -133,7 +156,9 @@ impl<'a> LexTokenIter<'a> {
             LexTokenKind::EOF
         };
 
-        let lex_token = LexToken::new(kind, line_nr, column_nr);
+        self.file_pos.length = self.offset - self.file_pos.offset;
+
+        let lex_token = LexToken::new(kind, self.file_pos);
         debug!("{:?}", lex_token);
         Ok(lex_token)
     }
@@ -188,6 +213,7 @@ impl<'a> LexTokenIter<'a> {
         }
 
         self.column_nr += result.chars().count() as u64;
+        self.offset += result.chars().count() as u64;
 
         if !result.is_empty() {
             Ok(result)
@@ -215,6 +241,7 @@ impl<'a> LexTokenIter<'a> {
             // Skip and count the prefix for numbers that isn't radix 10.
             self.iter.skip(2);
             self.column_nr += 2;
+            self.offset += 2;
         }
 
         // Parse the number. If the this is a integer, the whole number will
@@ -246,8 +273,10 @@ impl<'a> LexTokenIter<'a> {
         };
 
         self.column_nr += number.chars().count() as u64;
+        self.offset += number.chars().count() as u64;
         if dec_column_nr {
             self.column_nr -= 1;
+            self.offset -= 1;
         }
 
         if is_float {
@@ -362,6 +391,7 @@ impl<'a> LexTokenIter<'a> {
         }
 
         self.column_nr += column_count;
+        self.offset += column_count;
 
         Ok(chars.iter().collect())
     }
@@ -418,8 +448,16 @@ impl<'a> LexTokenIter<'a> {
     /// Returns the line break at the current position of the iterator.
     fn get_linebreak(&mut self) -> CustomResult<LexTokenKind> {
         match self.iter.peek_two() {
-            Some(('\n', _)) => self.iter.skip(1),
-            Some(('\r', Some('\n'))) => self.iter.skip(2),
+            Some(('\n', _)) => {
+                self.iter.skip(1);
+                self.column_nr += 1;
+                self.offset += 1;
+            }
+            Some(('\r', Some('\n'))) => {
+                self.iter.skip(2);
+                self.column_nr += 2;
+                self.offset += 2;
+            }
             fail => {
                 return Err(self.err(format!("Found bad line break in get_linebreak: {:?}", fail)))
             }
@@ -450,6 +488,7 @@ impl<'a> LexTokenIter<'a> {
         }
 
         self.column_nr += count as u64;
+        self.offset += count as u64;
 
         LexTokenKind::Sym(Sym::WhiteSpace(count))
     }
@@ -475,6 +514,7 @@ impl<'a> LexTokenIter<'a> {
 
         let comment_str = comment.iter().collect::<String>();
         self.column_nr += (n + comment_str.chars().count()) as u64;
+        self.offset += (n + comment_str.chars().count()) as u64;
 
         comment_str
     }
@@ -505,6 +545,11 @@ impl<'a> LexTokenIter<'a> {
         // to update the `self.cur_column_nr`. Starts with `n` for the first line
         // which is the length of the "CommentMultiLineBegin".
         let mut line_column_count = n;
+
+        // Keeps track of the amount of charaters that represents the linebreaks.
+        // Need to keep track if the linebreaks are 1 or 2 characters to calculate
+        // the offset in the file correctly.
+        let mut break_byte_count = 0;
 
         // Used to indicate if this comment streched over multiple lines or just
         // a single one. If it is only on one line, the "column count" for this
@@ -549,6 +594,12 @@ impl<'a> LexTokenIter<'a> {
                 }
                 line_column_count = 0;
                 multi_line = true;
+
+                if LexTokenIter::valid_linebreak_n(c1) {
+                    break_byte_count += 1;
+                } else {
+                    break_byte_count += 2;
+                }
             } else {
                 line_column_count += 1;
             }
@@ -560,8 +611,10 @@ impl<'a> LexTokenIter<'a> {
 
         if multi_line {
             self.column_nr = (line_column_count) as u64;
+            self.offset += (n + line_column_count + break_byte_count) as u64;
         } else {
             self.column_nr += (n + line_column_count) as u64;
+            self.offset += (n + line_column_count) as u64;
         }
 
         comment.iter().collect()
@@ -572,8 +625,7 @@ impl<'a> LexTokenIter<'a> {
         LangError::new_backtrace(
             msg,
             LexError {
-                line_nr: self.line_nr,
-                column_nr: self.column_nr,
+                file_pos: self.file_pos,
             },
             true,
         )
@@ -666,7 +718,7 @@ mod tests {
     fn test_get_lit() {
         let mut input = "\"abc 123 åäö\"".to_owned();
         let expected = "abc 123 åäö";
-        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
             .get_lit(Sym::DoubleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
@@ -674,7 +726,7 @@ mod tests {
         // Escape backslash.
         let mut input = "\'\\\\\'".to_owned();
         let expected = "\\";
-        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
@@ -682,7 +734,7 @@ mod tests {
         // Escape "raw byte".
         let mut input = "\'\\x41\'".to_owned();
         let expected = "A";
-        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
@@ -690,7 +742,7 @@ mod tests {
         // Escape newline.
         let mut input = "\'\\n\'".to_owned();
         let expected = "\n";
-        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
@@ -698,7 +750,7 @@ mod tests {
         // Escape carriage return.
         let mut input = "\'\\r\'".to_owned();
         let expected = "\r";
-        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
@@ -706,7 +758,7 @@ mod tests {
         // Escape tab.
         let mut input = "\'\\t\'".to_owned();
         let expected = "\t";
-        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
@@ -714,7 +766,7 @@ mod tests {
         // Escape null.
         let mut input = "\'\\0\'".to_owned();
         let expected = "\0";
-        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
@@ -722,7 +774,7 @@ mod tests {
         // Escape single quote.
         let mut input = "\'\\\'\'".to_owned();
         let expected = "\'";
-        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
@@ -730,7 +782,7 @@ mod tests {
         // Escape double quote.
         let mut input = "\'\\\"\'".to_owned();
         let expected = "\"";
-        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() })
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);

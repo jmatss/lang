@@ -68,7 +68,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
                     // hardcoded path/struct in this case, so can set the type
                     // of the `method_structure` directly.
                     BinOperator::DoubleColon => match bin_op.lhs.as_ref() {
-                        Expr::Type(lhs_ty) => {
+                        Expr::Type(lhs_ty, ..) => {
                             method_call.is_method = true;
                             method_call.method_structure = Some(lhs_ty.clone());
 

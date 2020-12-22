@@ -1,5 +1,5 @@
 use common::{
-    token::{ast::AstToken, ast::Token, block::BlockHeader},
+    token::{ast::AstToken, block::BlockHeader},
     traverser::TraverseContext,
     visitor::Visitor,
 };
@@ -22,7 +22,7 @@ impl Visitor for GenericsAnalyzer {
     /// includes the structure members, impl method parameters and the methods
     /// return types.
     fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Struct(struct_), ..) = &ast_token.token {
+        if let AstToken::Block(BlockHeader::Struct(struct_), ..) = &ast_token {
             let struct_ = struct_.borrow();
 
             if let Some(generics) = &struct_.generic_params {

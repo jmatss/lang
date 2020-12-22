@@ -1,9 +1,14 @@
 mod compiler;
 
+use std::collections::HashMap;
+
 use analyze::analyze;
 use clap::{App, Arg};
 use codegen::generator;
-use common::error::CustomResult;
+use common::{
+    error::{CustomResult, LangError, LangErrorKind},
+    file::{FileId, FileInfo},
+};
 use inkwell::context::Context;
 use lex::lexer;
 use log::Level;
@@ -57,11 +62,46 @@ fn main() -> CustomResult<()> {
 
     env_logger::init();
 
+    // Keep track of the files that are being parsed. This information will be
+    // used when debugging and giving good error messages.
+    let mut file_nr: FileId = 0;
+    let mut files: HashMap<FileId, FileInfo> = HashMap::default();
+
     // Loop through files and lex+parse them until there or no more uses/includes
     // to process. ALl files will be incldued in the same module.
     let mut parser = ParseTokenIter::new();
     let mut ast_root = loop {
-        let mut lex_tokens = match lexer::lex(&input_file) {
+        let path = std::path::Path::new(&input_file);
+        let filename = path
+            .file_name()
+            .map(|os| os.to_str())
+            .flatten()
+            .ok_or_else(|| {
+                LangError::new(
+                    format!("Unable to get filename: {}", input_file),
+                    LangErrorKind::GeneralError,
+                )
+            })?
+            .into();
+        let directory = path
+            .parent()
+            .ok_or_else(|| {
+                LangError::new(
+                    format!("Unable to get directory: {}", input_file),
+                    LangErrorKind::GeneralError,
+                )
+            })?
+            .into();
+
+        file_nr += 1;
+        let file_info = FileInfo {
+            directory,
+            filename,
+        };
+
+        files.insert(file_nr, file_info.clone());
+
+        let mut lex_tokens = match lexer::lex(file_nr, &file_info) {
             Ok(lex_tokens) => lex_tokens,
             Err(errs) => {
                 for e in errs {
@@ -70,7 +110,10 @@ fn main() -> CustomResult<()> {
                 std::process::exit(1);
             }
         };
-        info!("Lexing for file \"{}\" complete.", &input_file);
+        info!(
+            "Lexing for file (ID {}) {:#?} complete.",
+            file_nr, &file_info
+        );
 
         match parser.parse(&mut lex_tokens) {
             Ok(_) => (),

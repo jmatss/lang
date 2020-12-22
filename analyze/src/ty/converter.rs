@@ -7,7 +7,7 @@ use std::{
 use common::{
     error::LangError,
     token::{
-        ast::{AstToken, Token},
+        ast::AstToken,
         block::Function,
         block::{BlockHeader, Struct},
     },
@@ -107,12 +107,7 @@ impl<'a> TypeConverter<'a> {
                         let header = BlockHeader::Struct(Rc::clone(generic_struct));
                         let struct_body = Vec::with_capacity(0);
 
-                        let token = Token::Block(header, old_id, struct_body);
-                        let new_token = AstToken {
-                            token,
-                            line_nr: body_token.line_nr,
-                            column_nr: body_token.column_nr,
-                        };
+                        let new_token = AstToken::Block(header, old_id, struct_body);
 
                         // Slower to shift all the ast tokens to the
                         // right, but ensure that the tokens are
@@ -137,11 +132,7 @@ impl<'a> TypeConverter<'a> {
             let key = (struct_.name.clone(), parent_id);
             self.analyze_context.structs.remove(&key);
 
-            *body.get_mut(i).expect("Known to be in bounds.") = AstToken {
-                token: Token::Empty,
-                line_nr: body_token.line_nr,
-                column_nr: body_token.column_nr,
-            };
+            *body.get_mut(i).expect("Known to be in bounds.") = AstToken::Empty;
         }
     }
 }
@@ -164,8 +155,8 @@ impl<'a> Visitor for TypeConverter<'a> {
     /// Create new structs for generic implementations.
     ///
     /// OBS! This needs to be ran first, before
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Default, parent_id, body) = &mut ast_token.token {
+    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Default, parent_id, body) = &mut ast_token {
             let mut i = 0;
 
             // Iterate through all the structs in the AST.
@@ -174,7 +165,7 @@ impl<'a> Visitor for TypeConverter<'a> {
 
                 // Modify and create the new structs. The old struct will also
                 // be removed.
-                if let Token::Block(BlockHeader::Struct(struct_), old_id, ..) = &body_token.token {
+                if let AstToken::Block(BlockHeader::Struct(struct_), old_id, ..) = &body_token {
                     self.modify_struct(struct_.borrow(), &body_token, body, i, *old_id, *parent_id)
                 }
 
@@ -189,8 +180,7 @@ impl<'a> Visitor for TypeConverter<'a> {
 
                 // Modify and create the new implement blocks and their containing
                 // methods. The old implement blocks and the methods will be removed.
-                if let Token::Block(BlockHeader::Implement(struct_name), old_id, _) =
-                    &body_token.token
+                if let AstToken::Block(BlockHeader::Implement(struct_name), old_id, _) = &body_token
                 {
                     if self.impls_to_be_modified.contains(struct_name) {
                         match self.generic_structs.entry(struct_name.into()) {
@@ -217,11 +207,11 @@ impl<'a> Visitor for TypeConverter<'a> {
                                     // the new methods for the specific struct
                                     // instances from `generic_struct_methods`.
                                     let mut new_impl_token = body_token.clone();
-                                    let new_impl_body = if let Token::Block(
+                                    let new_impl_body = if let AstToken::Block(
                                         BlockHeader::Implement(ident),
                                         _,
                                         new_impl_body,
-                                    ) = &mut new_impl_token.token
+                                    ) = &mut new_impl_token
                                     {
                                         *ident = generic_struct.borrow().name.clone();
                                         new_impl_body
@@ -232,12 +222,12 @@ impl<'a> Visitor for TypeConverter<'a> {
                                     // Replace the "Function" struct in the
                                     // new method block. This new method block
                                     // will be inserted into a new impl block.
-                                    for method in new_impl_body {
-                                        if let Token::Block(
+                                    for mut method in new_impl_body {
+                                        if let AstToken::Block(
                                             BlockHeader::Function(inner_func),
                                             _,
                                             body,
-                                        ) = &mut method.token
+                                        ) = &mut method
                                         {
                                             let new_func = if let Some(new_func) = self
                                                 .generic_struct_methods
@@ -300,11 +290,7 @@ impl<'a> Visitor for TypeConverter<'a> {
                         }
 
                         // Remove/empty the old implement block.
-                        *body.get_mut(i).expect("Known to be in bounds.") = AstToken {
-                            token: Token::Empty,
-                            line_nr: body_token.line_nr,
-                            column_nr: body_token.column_nr,
-                        };
+                        *body.get_mut(i).expect("Known to be in bounds.") = AstToken::Empty;
                     }
                 }
 

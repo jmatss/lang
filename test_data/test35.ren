@@ -11,6 +11,10 @@ function main() -> i32
     var size_i = @size_of<i32>()
     var size_f = @size_of<f64>()
     var size_s = @size_of<TestStruct>()
+    
+    
+    var i: i16 = 123
+    var ty = @type_of(i)
 
     // Size in bytes, so might not be true for all architectures.
 

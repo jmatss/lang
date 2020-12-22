@@ -5,6 +5,7 @@ use crate::{
 };
 use common::{
     error::CustomResult,
+    file::FilePosition,
     token::{
         expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
@@ -20,6 +21,9 @@ use log::debug;
 
 pub struct ExprParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
+
+    /// The FilePosition for the current LexToken being parsed.
+    file_pos: Option<FilePosition>,
 
     /// Keeps a count of the amount of tokens seen. If no tokens have been seen
     /// before a "stop condition" is seen, something has gone wrong. This
@@ -56,6 +60,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     pub fn parse(iter: &'a mut ParseTokenIter<'b>, stop_conds: &'a [Sym]) -> CustomResult<Expr> {
         let mut expr_parser = Self {
             iter,
+            file_pos: None,
             token_count: 0,
             outputs: Vec::new(),
             operators: Vec::new(),
@@ -77,6 +82,11 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
         while let Some(lex_token) = self.iter.next_skip_space() {
             debug!("SHUNTING: {:?}", &lex_token);
+
+            // TODO: The FilePosition used is currently just the first symbol
+            //       found. Need to modifications to the file position so that
+            //       all symbals are included.
+            self.file_pos = Some(lex_token.file_pos.clone());
 
             // Break and stop parsing expression if a Symbol contained in
             // `stop_conds` are found or if EOF is reached.
@@ -113,7 +123,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 }
 
                 LexTokenKind::Lit(lit) => {
-                    let expr = Expr::Lit(lit, None);
+                    let expr = Expr::Lit(lit, None, self.file_pos);
                     self.shunt_operand(expr)?;
                 }
 
@@ -141,11 +151,14 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         None
                     };
 
-                    if let Some(LexTokenKind::Ident(ident)) = next_token.clone().map(|t| t.kind) {
+                    if let Some((LexTokenKind::Ident(ident), file_pos)) =
+                        next_token.clone().map(|t| (t.kind, t.file_pos))
+                    {
                         let start_symbol = Sym::ParenthesisBegin;
                         let end_symbol = Sym::ParenthesisEnd;
                         let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
-                        let built_in_call = BuiltInCall::new(ident, arguments, generics);
+                        let built_in_call =
+                            BuiltInCall::new(ident, arguments, generics, Some(file_pos));
                         self.shunt_operand(Expr::BuiltInCall(built_in_call))?;
                     } else {
                         return Err(self.iter.err(format!(
@@ -178,7 +191,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     let end_symbol = Sym::SquareBracketEnd;
                     let args = self.iter.parse_arg_list(start_symbol, end_symbol)?;
 
-                    let expr = Expr::ArrayInit(ArrayInit::new(args));
+                    let expr = Expr::ArrayInit(ArrayInit::new(args, self.file_pos));
                     self.shunt_operand(expr)?;
                 }
 
@@ -192,7 +205,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 | LexTokenKind::Sym(symbol @ Sym::Of) => {
                     if let Some(op) = get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
-                        let expr = Expr::Type(self.iter.parse_type(None)?);
+                        let expr = Expr::Type(self.iter.parse_type(None)?, self.file_pos);
 
                         self.shunt_operand(expr)?;
                     } else {
@@ -359,7 +372,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
                 Output::Operator(Operator::UnaryOperator(un_op)) => {
                     if let Some(expr) = expr_stack.pop() {
-                        let op = UnOp::new(un_op, Box::new(expr));
+                        let op = UnOp::new(un_op, Box::new(expr), self.file_pos);
                         expr_stack.push(Expr::Op(Op::UnOp(op)));
                     } else {
                         return Err(self
@@ -371,7 +384,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 Output::Operator(Operator::BinaryOperator(bin_op)) => {
                     if let Some(right) = expr_stack.pop() {
                         if let Some(left) = expr_stack.pop() {
-                            let op = BinOp::new(bin_op, Box::new(left), Box::new(right));
+                            let op =
+                                BinOp::new(bin_op, Box::new(left), Box::new(right), self.file_pos);
                             expr_stack.push(Expr::Op(Op::BinOp(op)));
                         } else {
                             return Err(self.iter.err(
@@ -443,7 +457,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     let start_symbol = Sym::ParenthesisBegin;
                     let end_symbol = Sym::ParenthesisEnd;
                     let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
-                    let func_call = FuncCall::new(ident.into(), arguments, generics);
+                    let func_call = FuncCall::new(ident.into(), arguments, generics, self.file_pos);
                     Ok(Expr::FuncCall(func_call))
                 }
 
@@ -452,15 +466,23 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     let start_symbol = Sym::CurlyBracketBegin;
                     let end_symbol = Sym::CurlyBracketEnd;
                     let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
-                    let struct_init = StructInit::new(ident.into(), arguments, generics);
+                    let struct_init = StructInit::new(
+                        ident.into(),
+                        arguments,
+                        generics,
+                        Some(lex_token.file_pos.clone()),
+                    );
                     Ok(Expr::StructInit(struct_init))
                 }
 
                 // Static method call, this is the lhs type.
-                LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(Ty::CompoundType(
-                    InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
-                    generics.unwrap_or_else(Generics::new),
-                ))),
+                LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(
+                    Ty::CompoundType(
+                        InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
+                        generics.unwrap_or_else(Generics::new),
+                    ),
+                    Some(lex_token.file_pos.clone()),
+                )),
 
                 _ => {
                     // See if this is a type. It is a type if the previous
@@ -476,7 +498,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                                 self.iter.rewind_to_mark(mark);
 
                                 let ty = self.iter.parse_type(None)?;
-                                return Ok(Expr::Type(ty));
+                                return Ok(Expr::Type(ty, Some(lex_token.file_pos.clone())));
                             }
 
                             _ => (),

@@ -1,4 +1,4 @@
-use crate::ENV_VAR;
+use crate::{file::FilePosition, ENV_VAR};
 use backtrace::Backtrace;
 use inkwell::support::LLVMString;
 use log::Level;
@@ -21,10 +21,10 @@ pub struct LangError {
 #[derive(Debug, Clone)]
 pub enum LangErrorKind {
     GeneralError,
-    LexError { line_nr: u64, column_nr: u64 },
-    ParseError { line_nr: u64, column_nr: u64 },
-    AnalyzeError { line_nr: u64, column_nr: u64 },
-    CodeGenError { line_nr: u64, column_nr: u64 },
+    LexError { file_pos: FilePosition },
+    ParseError { file_pos: FilePosition },
+    AnalyzeError { file_pos: FilePosition },
+    CodeGenError { file_pos: FilePosition },
     CompileError,
     TraversalError,
 }
@@ -62,8 +62,7 @@ impl From<std::num::ParseIntError> for LangError {
         LangError::new(
             e.to_string(),
             LangErrorKind::CodeGenError {
-                line_nr: 0,
-                column_nr: 0,
+                file_pos: FilePosition::default(),
             },
         )
     }
@@ -74,8 +73,7 @@ impl From<std::num::ParseFloatError> for LangError {
         LangError::new(
             e.to_string(),
             LangErrorKind::CodeGenError {
-                line_nr: 0,
-                column_nr: 0,
+                file_pos: FilePosition::default(),
             },
         )
     }
@@ -86,8 +84,7 @@ impl From<std::io::Error> for LangError {
         LangError::new(
             e.to_string(),
             LangErrorKind::LexError {
-                column_nr: 0,
-                line_nr: 0,
+                file_pos: FilePosition::default(),
             },
         )
     }
@@ -98,8 +95,7 @@ impl From<LLVMString> for LangError {
         LangError::new(
             e.to_string(),
             LangErrorKind::CodeGenError {
-                line_nr: 0,
-                column_nr: 0,
+                file_pos: FilePosition::default(),
             },
         )
     }

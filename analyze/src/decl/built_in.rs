@@ -21,7 +21,14 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
     // TODO: How should this work? How will the type be represented in the
     //       LLVM codegen?
     let name = "type_of";
-    let parameters = vec![Var::new("expr".into(), Some(Ty::Any), None, None, false)];
+    let parameters = vec![Var::new(
+        "expr".into(),
+        Some(Ty::Any),
+        None,
+        None,
+        None,
+        false,
+    )];
     let generics = None;
     let ret_ty = Ty::Any;
     built_ins.insert(

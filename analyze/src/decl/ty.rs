@@ -1,7 +1,6 @@
 use crate::AnalyzeContext;
 use common::{
     error::LangError,
-    token::ast::Token,
     token::{ast::AstToken, block::BlockHeader},
     traverser::TraverseContext,
     visitor::Visitor,
@@ -34,12 +33,12 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
     }
 
     fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.analyze_context.borrow_mut().line_nr = ast_token.line_nr;
-        self.analyze_context.borrow_mut().column_nr = ast_token.column_nr;
+        self.analyze_context.borrow_mut().file_pos =
+            ast_token.file_pos().cloned().unwrap_or_default();
     }
 
-    fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Struct(struct_), struct_id, ..) = &mut ast_token.token {
+    fn visit_struct(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Struct(struct_), struct_id, ..) = &mut ast_token {
             let mut analyze_context = self.analyze_context.borrow_mut();
 
             // The struct will be added in the scope of its parent, so fetch the
@@ -71,8 +70,8 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
         }
     }
 
-    fn visit_enum(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Enum(enum_), enum_id, ..) = &mut ast_token.token {
+    fn visit_enum(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Enum(enum_), enum_id, ..) = &mut ast_token {
             let mut analyze_context = self.analyze_context.borrow_mut();
 
             // The enum will be added in the scope of its parent, so fetch the
@@ -103,9 +102,8 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
         }
     }
 
-    fn visit_interface(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Interface(interface), interface_id, ..) =
-            &mut ast_token.token
+    fn visit_interface(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Interface(interface), interface_id, ..) = &mut ast_token
         {
             let mut analyze_context = self.analyze_context.borrow_mut();
 

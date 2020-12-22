@@ -1,6 +1,6 @@
 use crate::{
     error::{LangError, LangErrorKind::TraversalError},
-    token::ast::Token,
+    file::FilePosition,
     token::{
         ast::AstToken,
         block::BlockHeader,
@@ -24,15 +24,10 @@ pub struct TraverseContext {
     pub block_id: usize,
     pub parent_block_id: usize,
 
-    pub line_nr: u64,
-    pub column_nr: u64,
-}
-
-impl TraverseContext {
-    pub fn set_pos(&mut self, line_nr: u64, column_nr: u64) {
-        self.line_nr = line_nr;
-        self.column_nr = column_nr;
-    }
+    // TODO: Should this contains file information about the parent as well?
+    //       Ex. if this is a type, should the information about what this type
+    //       is assigned to also be here?
+    pub file_pos: FilePosition,
 }
 
 impl<'a> Default for AstTraverser<'a> {
@@ -50,15 +45,9 @@ impl<'a> AstTraverser<'a> {
             traverse_context: TraverseContext {
                 block_id: 0,
                 parent_block_id: usize::MAX,
-                line_nr: 0,
-                column_nr: 0,
+                file_pos: FilePosition::default(),
             },
         }
-    }
-
-    pub fn set_pos(&mut self, line_nr: u64, column_nr: u64) {
-        self.traverse_context.line_nr = line_nr;
-        self.traverse_context.column_nr = column_nr;
     }
 
     pub fn add_visitor(&mut self, visitor: &'a mut dyn Visitor) -> &mut Self {
@@ -84,8 +73,10 @@ impl<'a> AstTraverser<'a> {
         }
     }
 
-    pub fn traverse(&mut self, ast_token: &mut AstToken) -> &mut Self {
-        self.set_pos(ast_token.line_nr, ast_token.column_nr);
+    pub fn traverse(&mut self, mut ast_token: &mut AstToken) -> &mut Self {
+        if let Some(file_pos) = ast_token.file_pos() {
+            self.traverse_context.file_pos = file_pos.clone();
+        }
 
         for v in self.visitors.iter_mut() {
             v.visit_token(ast_token, &self.traverse_context);
@@ -93,7 +84,7 @@ impl<'a> AstTraverser<'a> {
 
         // TODO: Can one move this into the match block below? Currently needed
         //       since can't borrow mut twice.
-        if let Token::Block(_, id, _) = &ast_token.token {
+        if let AstToken::Block(_, id, _) = &ast_token {
             if self.traverse_context.block_id != *id {
                 self.traverse_context.parent_block_id = self.traverse_context.block_id;
                 self.traverse_context.block_id = *id;
@@ -101,8 +92,8 @@ impl<'a> AstTraverser<'a> {
             self.traverse_block(ast_token);
         }
 
-        match &mut ast_token.token {
-            Token::Block(_, id, body) => {
+        match &mut ast_token {
+            AstToken::Block(_, id, body) => {
                 for body_token in body {
                     if self.traverse_context.block_id != *id {
                         self.traverse_context.parent_block_id = self.traverse_context.block_id;
@@ -111,10 +102,10 @@ impl<'a> AstTraverser<'a> {
                     self.traverse(body_token);
                 }
             }
-            Token::Expr(expr) => self.traverse_expr(expr),
-            Token::Stmt(stmt) => self.traverse_stmt(stmt),
-            Token::Empty => debug!("Visiting Empty block"),
-            Token::EOF => {
+            AstToken::Expr(expr) => self.traverse_expr(expr),
+            AstToken::Stmt(stmt) => self.traverse_stmt(stmt),
+            AstToken::Empty => debug!("Visiting Empty block"),
+            AstToken::EOF => {
                 debug!("Visiting EOF");
                 for v in self.visitors.iter_mut() {
                     v.visit_eof(ast_token, &self.traverse_context);
@@ -125,16 +116,18 @@ impl<'a> AstTraverser<'a> {
         self
     }
 
-    pub fn traverse_block(&mut self, ast_token: &mut AstToken) {
-        self.set_pos(ast_token.line_nr, ast_token.column_nr);
+    pub fn traverse_block(&mut self, mut ast_token: &mut AstToken) {
+        if let Some(file_pos) = ast_token.file_pos() {
+            self.traverse_context.file_pos = file_pos.clone();
+        }
 
         debug!("Visiting block -- {:#?}", ast_token);
         for v in self.visitors.iter_mut() {
             v.visit_block(ast_token, &self.traverse_context);
         }
 
-        match &mut ast_token.token {
-            Token::Block(header, ..) => match header {
+        match &mut ast_token {
+            AstToken::Block(header, ..) => match header {
                 BlockHeader::Default => {
                     debug!("Visiting default block");
                     for v in self.visitors.iter_mut() {
@@ -243,6 +236,10 @@ impl<'a> AstTraverser<'a> {
     }
 
     pub fn traverse_expr(&mut self, expr: &mut Expr) {
+        if let Some(file_pos) = expr.file_pos() {
+            self.traverse_context.file_pos = file_pos.clone();
+        }
+
         debug!("Visiting expr -- {:#?}", expr);
         for v in self.visitors.iter_mut() {
             v.visit_expr(expr, &self.traverse_context)
@@ -318,18 +315,22 @@ impl<'a> AstTraverser<'a> {
                 }
             }
 
-            Expr::Type(_) => (),
+            Expr::Type(..) => (),
         }
     }
 
     pub fn traverse_stmt(&mut self, stmt: &mut Stmt) {
+        if let Some(file_pos) = stmt.file_pos() {
+            self.traverse_context.file_pos = file_pos.clone();
+        }
+
         debug!("Visiting stmt -- {:#?}", stmt);
         for v in self.visitors.iter_mut() {
             v.visit_stmt(stmt, &self.traverse_context)
         }
 
         match stmt {
-            Stmt::Return(expr_opt) => {
+            Stmt::Return(expr_opt, _) => {
                 if let Some(expr) = expr_opt {
                     self.traverse_expr(expr);
                 }
@@ -338,52 +339,52 @@ impl<'a> AstTraverser<'a> {
                     v.visit_return(stmt, &self.traverse_context)
                 }
             }
-            Stmt::Yield(expr) => {
+            Stmt::Yield(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting yield");
                 for v in self.visitors.iter_mut() {
                     v.visit_yield(stmt, &self.traverse_context)
                 }
             }
-            Stmt::Break => {
+            Stmt::Break(_) => {
                 debug!("Visiting break");
                 for v in self.visitors.iter_mut() {
                     v.visit_break(stmt, &self.traverse_context)
                 }
             }
-            Stmt::Continue => {
+            Stmt::Continue(_) => {
                 debug!("Visiting continue");
                 for v in self.visitors.iter_mut() {
                     v.visit_continue(stmt, &self.traverse_context)
                 }
             }
-            Stmt::Use(_) => {
+            Stmt::Use(..) => {
                 debug!("Visiting use");
                 for v in self.visitors.iter_mut() {
                     v.visit_use(stmt, &self.traverse_context)
                 }
             }
-            Stmt::Package(_) => {
+            Stmt::Package(..) => {
                 debug!("Visiting package");
                 for v in self.visitors.iter_mut() {
                     v.visit_package(stmt, &self.traverse_context)
                 }
             }
-            Stmt::Increment(expr) => {
+            Stmt::Increment(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting increment");
                 for v in self.visitors.iter_mut() {
                     v.visit_inc(stmt, &self.traverse_context)
                 }
             }
-            Stmt::Decrement(expr) => {
+            Stmt::Decrement(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting decrement");
                 for v in self.visitors.iter_mut() {
                     v.visit_dec(stmt, &self.traverse_context)
                 }
             }
-            Stmt::Defer(expr) => {
+            Stmt::Defer(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting defer");
                 for v in self.visitors.iter_mut() {
@@ -397,7 +398,7 @@ impl<'a> AstTraverser<'a> {
                     v.visit_defer_exec(stmt, &self.traverse_context)
                 }
             }
-            Stmt::Assignment(_, lhs, rhs) => {
+            Stmt::Assignment(_, lhs, rhs, _) => {
                 self.traverse_expr(lhs);
                 self.traverse_expr(rhs);
                 debug!("Visiting assginment");
@@ -405,7 +406,7 @@ impl<'a> AstTraverser<'a> {
                     v.visit_assignment(stmt, &self.traverse_context)
                 }
             }
-            Stmt::VariableDecl(_, expr_opt) => {
+            Stmt::VariableDecl(_, expr_opt, _) => {
                 if let Some(expr) = expr_opt {
                     self.traverse_expr(expr);
                 }
@@ -414,7 +415,7 @@ impl<'a> AstTraverser<'a> {
                     v.visit_var_decl(stmt, &self.traverse_context)
                 }
             }
-            Stmt::ExternalDecl(_) => {
+            Stmt::ExternalDecl(..) => {
                 debug!("Visiting extern decl");
                 for v in self.visitors.iter_mut() {
                     v.visit_extern_decl(stmt, &self.traverse_context)

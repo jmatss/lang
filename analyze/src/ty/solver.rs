@@ -8,7 +8,7 @@ use common::{
     error::LangError,
     token::op::UnOperator,
     token::{
-        ast::{AstToken, Token},
+        ast::AstToken,
         block::{BlockHeader, Function, Struct},
         expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit, Var},
         op::{BinOp, UnOp},
@@ -233,8 +233,8 @@ impl<'a> Visitor for TypeSolver<'a> {
     }
 
     fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.type_context.analyze_context.line_nr = ast_token.line_nr;
-        self.type_context.analyze_context.column_nr = ast_token.column_nr;
+        self.type_context.analyze_context.file_pos =
+            ast_token.file_pos().cloned().unwrap_or_default();
     }
 
     /// Iterate through all expressions and substitute all Unknown types that
@@ -243,13 +243,13 @@ impl<'a> Visitor for TypeSolver<'a> {
     fn visit_expr(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
         // Do the substitute for "Type" here, all other exprs will make the subs
         // in their own visit funcs.
-        if let Expr::Type(ty) = expr {
+        if let Expr::Type(ty, ..) = expr {
             self.subtitute_type(ty, true);
         }
     }
 
     fn visit_lit(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
-        if let Expr::Lit(_, Some(ty)) = expr {
+        if let Expr::Lit(_, Some(ty), ..) = expr {
             self.subtitute_type(ty, true);
         } else {
             let err = self
@@ -272,8 +272,8 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Function(func), ..) = &mut ast_token.token {
+    fn visit_func(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Function(func), ..) = &mut ast_token {
             if let Some(params) = &func.borrow().parameters {
                 for param in params {
                     if let Some(param_ty) = &mut param.borrow_mut().ty {
@@ -491,7 +491,7 @@ impl<'a> Visitor for TypeSolver<'a> {
     }
 
     fn visit_var_decl(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
-        if let Stmt::VariableDecl(var, _) = stmt {
+        if let Stmt::VariableDecl(var, ..) = stmt {
             if let Some(ty) = &mut var.borrow_mut().ty {
                 self.subtitute_type(ty, true);
             } else {

@@ -1,5 +1,6 @@
 use common::{
     error::{CustomResult, LangError, LangErrorKind::ParseError},
+    file::FilePosition,
     token::stmt::Modifier,
     token::{
         expr::Expr,
@@ -260,8 +261,7 @@ impl Operator {
             Err(LangError::new(
                 format!("Invalid operator, unable to get info: {:?}.", self),
                 ParseError {
-                    line_nr: 0,
-                    column_nr: 0,
+                    file_pos: FilePosition::default(),
                 },
             ))
         }

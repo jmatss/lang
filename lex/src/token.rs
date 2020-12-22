@@ -1,19 +1,14 @@
-use common::token::lit::Lit;
+use common::{file::FilePosition, token::lit::Lit};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexToken {
     pub kind: LexTokenKind,
-    pub line_nr: u64,
-    pub column_nr: u64,
+    pub file_pos: FilePosition,
 }
 
 impl LexToken {
-    pub fn new(kind: LexTokenKind, line_nr: u64, column_nr: u64) -> Self {
-        Self {
-            kind,
-            line_nr,
-            column_nr,
-        }
+    pub fn new(kind: LexTokenKind, file_pos: FilePosition) -> Self {
+        Self { kind, file_pos }
     }
 
     #[allow(clippy::match_like_matches_macro)]

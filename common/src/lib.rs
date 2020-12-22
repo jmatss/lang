@@ -12,6 +12,7 @@ pub const ENV_VAR: &str = "LANG_HOME";
 //pub mod cf_visitor;
 pub mod empty_visitor;
 pub mod error;
+pub mod file;
 pub mod iter;
 pub mod token;
 pub mod traverser;

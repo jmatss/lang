@@ -140,7 +140,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                         self.iter.rewind_to_mark(mark);
 
                         let kind = LexTokenKind::Sym(Sym::PointyBracketEnd);
-                        let token = LexToken::new(kind, lex_token.line_nr, lex_token.column_nr);
+                        let token = LexToken::new(kind, lex_token.file_pos.clone());
                         self.iter.replace(token);
 
                         return Ok(generics);

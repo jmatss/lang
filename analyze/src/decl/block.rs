@@ -3,7 +3,6 @@ use std::cell::{RefCell, RefMut};
 use crate::{AnalyzeContext, BlockInfo};
 use common::{
     error::LangError,
-    token::ast::Token,
     token::{ast::AstToken, block::BlockHeader, stmt::Stmt},
     traverser::TraverseContext,
     visitor::Visitor,
@@ -55,19 +54,19 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
     /// Sets the information about if a statement exists in `block_info`.
     fn analyze_stmt(&self, stmt: &Stmt, block_info: &mut BlockInfo) {
         match stmt {
-            Stmt::Return(_) => block_info.contains_return = true,
-            Stmt::Yield(_) => block_info.contains_yield = true,
-            Stmt::Break => block_info.contains_break = true,
-            Stmt::Continue => block_info.contains_continue = true,
-            Stmt::Defer(_) => block_info.contains_defer = true,
+            Stmt::Return(..) => block_info.contains_return = true,
+            Stmt::Yield(..) => block_info.contains_yield = true,
+            Stmt::Break(..) => block_info.contains_break = true,
+            Stmt::Continue(..) => block_info.contains_continue = true,
+            Stmt::Defer(..) => block_info.contains_defer = true,
 
-            Stmt::Use(_)
-            | Stmt::Package(_)
-            | Stmt::Increment(_)
-            | Stmt::Decrement(_)
+            Stmt::Use(..)
+            | Stmt::Package(..)
+            | Stmt::Increment(..)
+            | Stmt::Decrement(..)
             | Stmt::Assignment(..)
             | Stmt::VariableDecl(..)
-            | Stmt::ExternalDecl(_)
+            | Stmt::ExternalDecl(..)
             | Stmt::Modifier(_)
             | Stmt::DeferExec(_) => (),
         }
@@ -80,10 +79,9 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
         analyze_context: &mut RefMut<AnalyzeContext>,
         parent_id: usize,
     ) {
-        analyze_context.line_nr = ast_token.line_nr;
-        analyze_context.column_nr = ast_token.column_nr;
+        analyze_context.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
-        if let Token::Block(ref header, id, body) = &ast_token.token {
+        if let AstToken::Block(ref header, id, body) = &ast_token {
             let is_root_block = self.is_root(header);
             let is_branchable_block = self.is_branchable(header);
             let mut block_info = BlockInfo::new(*id, is_root_block, is_branchable_block);
@@ -99,16 +97,16 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
             let mut all_children_contains_returns = true;
             let mut child_count = 0;
             for child_token in body.iter() {
-                match child_token.token {
-                    Token::Block(BlockHeader::If, child_id, _)
-                    | Token::Block(BlockHeader::IfCase(_), child_id, _)
-                    | Token::Block(BlockHeader::Function(_), child_id, _)
-                    | Token::Block(BlockHeader::Match(_), child_id, _)
-                    | Token::Block(BlockHeader::MatchCase(_), child_id, _)
-                    | Token::Block(BlockHeader::For(..), child_id, _)
-                    | Token::Block(BlockHeader::While(..), child_id, _)
-                    | Token::Block(BlockHeader::Test(_), child_id, _)
-                    | Token::Block(BlockHeader::Anonymous, child_id, _) => {
+                match child_token {
+                    AstToken::Block(BlockHeader::If, child_id, _)
+                    | AstToken::Block(BlockHeader::IfCase(_), child_id, _)
+                    | AstToken::Block(BlockHeader::Function(_), child_id, _)
+                    | AstToken::Block(BlockHeader::Match(_), child_id, _)
+                    | AstToken::Block(BlockHeader::MatchCase(_), child_id, _)
+                    | AstToken::Block(BlockHeader::For(..), child_id, _)
+                    | AstToken::Block(BlockHeader::While(..), child_id, _)
+                    | AstToken::Block(BlockHeader::Test(_), child_id, _)
+                    | AstToken::Block(BlockHeader::Anonymous, child_id, _) => {
                         self.analyze_block(child_token, analyze_context, *id);
 
                         if let Some(child_block_info) = analyze_context.block_info.get(&child_id) {
@@ -126,17 +124,17 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
                         child_count += 1;
                     }
 
-                    Token::Block(BlockHeader::Default, ..)
-                    | Token::Block(BlockHeader::Struct(_), ..)
-                    | Token::Block(BlockHeader::Enum(_), ..)
-                    | Token::Block(BlockHeader::Interface(_), ..)
-                    | Token::Block(BlockHeader::Implement(..), ..) => {
+                    AstToken::Block(BlockHeader::Default, ..)
+                    | AstToken::Block(BlockHeader::Struct(_), ..)
+                    | AstToken::Block(BlockHeader::Enum(_), ..)
+                    | AstToken::Block(BlockHeader::Interface(_), ..)
+                    | AstToken::Block(BlockHeader::Implement(..), ..) => {
                         self.analyze_block(child_token, analyze_context, *id);
                     }
 
-                    Token::Stmt(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
+                    AstToken::Stmt(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
 
-                    Token::Empty | Token::Expr(_) | Token::EOF => (),
+                    AstToken::Empty | AstToken::Expr(_) | AstToken::EOF => (),
                 }
             }
 
@@ -165,8 +163,7 @@ impl<'a> Visitor for BlockAnalyzer<'a> {
 
     fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         let mut analyze_context = self.analyze_context.borrow_mut();
-        analyze_context.line_nr = ast_token.line_nr;
-        analyze_context.column_nr = ast_token.column_nr;
+        analyze_context.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
     }
 
     /// All traversing is done from the default block, no other visit function

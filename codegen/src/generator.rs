@@ -1,7 +1,7 @@
 use analyze::AnalyzeContext;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
-    token::ast::Token,
+    file::FilePosition,
     token::block::BlockHeader,
     token::{
         ast::AstToken,
@@ -39,8 +39,9 @@ pub(super) struct CodeGen<'a, 'ctx> {
 
     /// The ID of the current block that is being compiled.
     pub cur_block_id: BlockId,
-    pub cur_line_nr: u64,
-    pub cur_column_nr: u64,
+
+    /// The file position of the current token.
+    pub cur_file_pos: FilePosition,
 
     /// Contains the current basic block that instructions are inserted into.
     pub cur_basic_block: Option<BasicBlock<'ctx>>,
@@ -114,8 +115,7 @@ pub fn generate<'a, 'ctx>(
                     LangError::new(
                         format!("Unable to find block info for block with id {}", block_id),
                         CodeGenError {
-                            line_nr: 0,
-                            column_nr: 0,
+                            file_pos: FilePosition::default(),
                         },
                     )
                 })?
@@ -153,8 +153,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             analyze_context,
 
-            cur_line_nr: 0,
-            cur_column_nr: 0,
+            cur_file_pos: FilePosition::default(),
 
             cur_block_id: 0,
             cur_basic_block: None,
@@ -176,11 +175,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// of the type.
     /// This function shall be ran before the function/method prototypes
     /// are compiled since they might contains references to types.
-    pub(super) fn compile_type_decl(&mut self, ast_token: &mut AstToken) -> CustomResult<()> {
-        self.cur_line_nr = ast_token.line_nr;
-        self.cur_column_nr = ast_token.column_nr;
+    pub(super) fn compile_type_decl(&mut self, mut ast_token: &mut AstToken) -> CustomResult<()> {
+        self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
-        if let Token::Block(header, id, ref mut body) = &mut ast_token.token {
+        if let AstToken::Block(header, id, ref mut body) = &mut ast_token {
             self.cur_block_id = *id;
 
             match header {
@@ -210,11 +208,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// This will be done at the start of the code generation so that one doesn't
     /// have do declare prototypes manual in the source before the use of the
     /// function/method.
-    pub(super) fn compile_func_decl(&mut self, ast_token: &mut AstToken) -> CustomResult<()> {
-        self.cur_line_nr = ast_token.line_nr;
-        self.cur_column_nr = ast_token.column_nr;
+    pub(super) fn compile_func_decl(&mut self, mut ast_token: &mut AstToken) -> CustomResult<()> {
+        self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
-        if let Token::Block(header, id, ref mut body) = &mut ast_token.token {
+        if let AstToken::Block(header, id, ref mut body) = &mut ast_token {
             self.cur_block_id = *id;
 
             match header {
@@ -223,9 +220,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     self.compile_func_proto(&func.borrow(), Some(linkage))?;
                 }
                 BlockHeader::Implement(_) => {
-                    for ast_token in body.iter_mut() {
-                        if let Token::Block(BlockHeader::Function(func), ..) = &mut ast_token.token
-                        {
+                    for mut ast_token in body.iter_mut() {
+                        if let AstToken::Block(BlockHeader::Function(func), ..) = &mut ast_token {
                             let linkage = Linkage::External;
                             self.compile_func_proto(&func.borrow(), Some(linkage))?;
                         }
@@ -242,21 +238,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn compile(&mut self, ast_token: &mut AstToken) -> CustomResult<()> {
-        self.cur_line_nr = ast_token.line_nr;
-        self.cur_column_nr = ast_token.column_nr;
+    pub(super) fn compile(&mut self, mut ast_token: &mut AstToken) -> CustomResult<()> {
+        self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
-        match &mut ast_token.token {
-            Token::Block(header, id, ref mut body) => {
+        match &mut ast_token {
+            AstToken::Block(header, id, ref mut body) => {
                 self.compile_block(header, *id, body)?;
             }
-            Token::Stmt(ref mut stmt) => {
+            AstToken::Stmt(ref mut stmt) => {
                 self.compile_stmt(stmt)?;
             }
-            Token::Expr(ref mut expr) => {
+            AstToken::Expr(ref mut expr) => {
                 self.compile_expr(expr, ExprTy::RValue)?;
             }
-            Token::Empty | Token::EOF => (),
+            AstToken::Empty | AstToken::EOF => (),
         }
         Ok(())
     }
@@ -417,7 +412,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Ty::Array(inner_ty, dim_opt) => {
                 let lit_dim = if let Some(dim) = dim_opt {
                     match dim.as_ref() {
-                        Expr::Lit(lit, _) => match lit {
+                        Expr::Lit(lit, ..) => match lit {
                             Lit::Integer(num, radix) => u32::from_str_radix(num, *radix)?,
                             _ => {
                                 return Err(self.err(format!(
@@ -528,8 +523,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         LangError::new_backtrace(
             msg,
             CodeGenError {
-                line_nr: self.cur_line_nr,
-                column_nr: self.cur_column_nr,
+                file_pos: self.cur_file_pos,
             },
             true,
         )

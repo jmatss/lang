@@ -1,5 +1,5 @@
 use super::expr::Expr;
-use crate::ty::ty::Ty;
+use crate::{file::FilePosition, ty::ty::Ty};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Op {
@@ -11,16 +11,23 @@ pub enum Op {
 pub struct BinOp {
     pub operator: BinOperator,
     pub ret_type: Option<Ty>,
+    pub file_pos: Option<FilePosition>,
     pub is_const: bool,
     pub lhs: Box<Expr>,
     pub rhs: Box<Expr>,
 }
 
 impl BinOp {
-    pub fn new(operator: BinOperator, lhs: Box<Expr>, rhs: Box<Expr>) -> Self {
+    pub fn new(
+        operator: BinOperator,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+        file_pos: Option<FilePosition>,
+    ) -> Self {
         BinOp {
             operator,
             ret_type: None,
+            file_pos,
             is_const: false,
             lhs,
             rhs,
@@ -32,15 +39,17 @@ impl BinOp {
 pub struct UnOp {
     pub operator: UnOperator,
     pub ret_type: Option<Ty>,
+    pub file_pos: Option<FilePosition>,
     pub is_const: bool,
     pub value: Box<Expr>,
 }
 
 impl UnOp {
-    pub fn new(operator: UnOperator, value: Box<Expr>) -> Self {
+    pub fn new(operator: UnOperator, value: Box<Expr>, file_pos: Option<FilePosition>) -> Self {
         UnOp {
             operator,
             ret_type: None,
+            file_pos,
             is_const: false,
             value,
         }

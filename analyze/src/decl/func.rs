@@ -1,7 +1,6 @@
 use crate::{AnalyzeContext, BlockInfo};
 use common::{
     error::LangError,
-    token::ast::Token,
     token::expr::Var,
     token::{
         ast::AstToken,
@@ -189,6 +188,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
                 Some(ty),
                 None,
                 None,
+                None,
                 false,
             )));
             if let Some(ref mut params) = func.parameters {
@@ -231,17 +231,17 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
     }
 
     fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.analyze_context.borrow_mut().line_nr = ast_token.line_nr;
-        self.analyze_context.borrow_mut().column_nr = ast_token.column_nr;
+        self.analyze_context.borrow_mut().file_pos =
+            ast_token.file_pos().cloned().unwrap_or_default();
     }
 
     /// Marks the functions in this implement block with the name of the implement
     /// block (equivalent to the struct name). This lets one differentiate between
     /// functions and methods by checking the `method_struct` field in "Function"s.
-    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_impl(&mut self, mut ast_token: &mut AstToken, ctx: &TraverseContext) {
         let analyze_context = self.analyze_context.borrow();
 
-        if let Token::Block(BlockHeader::Implement(ident), _, body) = &mut ast_token.token {
+        if let AstToken::Block(BlockHeader::Implement(ident), _, body) = &mut ast_token {
             // Check if this unknown structure can be found and then
             // replaced the inner type with the correct structure.
             let inner_ty = if analyze_context.get_struct(ident, ctx.block_id).is_ok() {
@@ -261,8 +261,8 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
 
             let ty = Ty::CompoundType(inner_ty, Generics::new());
 
-            for body_token in body {
-                if let Token::Block(BlockHeader::Function(func), ..) = &mut body_token.token {
+            for mut body_token in body {
+                if let AstToken::Block(BlockHeader::Function(func), ..) = &mut body_token {
                     func.borrow_mut().method_structure = Some(ty.clone());
                 } else {
                     let err = analyze_context.err(format!(
@@ -275,8 +275,8 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
         }
     }
 
-    fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Token::Block(BlockHeader::Function(func), func_id, ..) = &mut ast_token.token {
+    fn visit_func(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Function(func), func_id, ..) = &mut ast_token {
             let structure_ty = if let Some(structure_ty) = func.borrow().method_structure.clone() {
                 Some(structure_ty)
             } else {
@@ -315,7 +315,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
     fn visit_extern_decl(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
-        if let Stmt::ExternalDecl(func) = stmt {
+        if let Stmt::ExternalDecl(func, ..) = stmt {
             // TODO: Should probably check that if there are multiple extern
             //       declarations of a function that they have the same
             //       parameters & return type.

@@ -2,6 +2,7 @@ use super::generator::CodeGen;
 use analyze::BlockInfo;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
+    file::FilePosition,
     BlockId,
 };
 use inkwell::{
@@ -20,8 +21,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     &any_value
                 ),
                 CodeGenError {
-                    line_nr: 0,
-                    column_nr: 0,
+                    file_pos: FilePosition::default(),
                 },
             )
         })
@@ -35,8 +35,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     &any_type
                 ),
                 CodeGenError {
-                    line_nr: 0,
-                    column_nr: 0,
+                    file_pos: FilePosition::default(),
                 },
             )
         })

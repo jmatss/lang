@@ -7,6 +7,7 @@ mod ty;
 
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
+    file::FilePosition,
     token::{
         ast::AstToken,
         block::{BuiltIn, Enum, Function, Interface, Struct},
@@ -230,10 +231,9 @@ pub struct AnalyzeContext {
     pub block_info: HashMap<BlockId, BlockInfo>,
     pub use_paths: Vec<Path>,
 
-    /// The line/column where the `analyzer` currently is. When the analyzing is
-    /// done, these variable will not be used and will be invalid.
-    pub line_nr: u64,
-    pub column_nr: u64,
+    /// The file position where the `analyzer` currently is. When the analyzing
+    /// is done, this variable will not be used and will be invalid.
+    pub file_pos: FilePosition,
 }
 
 impl Default for AnalyzeContext {
@@ -256,8 +256,7 @@ impl AnalyzeContext {
             block_info: HashMap::default(),
             use_paths: Vec::default(),
 
-            line_nr: 0,
-            column_nr: 0,
+            file_pos: FilePosition::default(),
         }
     }
 
@@ -810,8 +809,7 @@ impl AnalyzeContext {
         LangError::new_backtrace(
             msg,
             AnalyzeError {
-                line_nr: self.line_nr,
-                column_nr: self.column_nr,
+                file_pos: self.file_pos,
             },
             true,
         )
