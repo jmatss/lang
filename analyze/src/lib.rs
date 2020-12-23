@@ -7,7 +7,7 @@ mod ty;
 
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
-    file::FilePosition,
+    file::{FileId, FileInfo, FilePosition},
     token::{
         ast::AstToken,
         block::{BuiltIn, Enum, Function, Interface, Struct},
@@ -63,8 +63,11 @@ use ty::solver::TypeSolver;
 /// need struct/func information to figure out types for method calls.
 /// "decl_func_analyzer"/"decl_type_analyzer"/"type..." needs to be ran before
 /// the "call_args" since it needs to access structs, functions and methods.
-pub fn analyze(ast_root: &mut AstToken) -> Result<AnalyzeContext, Vec<LangError>> {
-    let analyze_context = RefCell::new(AnalyzeContext::new());
+pub fn analyze(
+    ast_root: &mut AstToken,
+    file_info: HashMap<FileId, FileInfo>,
+) -> Result<AnalyzeContext, Vec<LangError>> {
+    let analyze_context = RefCell::new(AnalyzeContext::new(file_info));
 
     debug!("Running IndexingAnalyzer");
     let mut indexing_analyzer = IndexingAnalyzer::new();
@@ -231,6 +234,10 @@ pub struct AnalyzeContext {
     pub block_info: HashMap<BlockId, BlockInfo>,
     pub use_paths: Vec<Path>,
 
+    /// Mapping file IDs to the corresponding file information. This can be used
+    /// to find the filename and directory for file IDs stored in "FilePosition"s.
+    pub file_info: HashMap<FileId, FileInfo>,
+
     /// The file position where the `analyzer` currently is. When the analyzing
     /// is done, this variable will not be used and will be invalid.
     pub file_pos: FilePosition,
@@ -238,12 +245,12 @@ pub struct AnalyzeContext {
 
 impl Default for AnalyzeContext {
     fn default() -> Self {
-        AnalyzeContext::new()
+        AnalyzeContext::new(HashMap::default())
     }
 }
 
 impl AnalyzeContext {
-    pub fn new() -> Self {
+    pub fn new(file_info: HashMap<FileId, FileInfo>) -> Self {
         Self {
             variables: HashMap::default(),
             functions: HashMap::default(),
@@ -256,6 +263,7 @@ impl AnalyzeContext {
             block_info: HashMap::default(),
             use_paths: Vec::default(),
 
+            file_info,
             file_pos: FilePosition::default(),
         }
     }

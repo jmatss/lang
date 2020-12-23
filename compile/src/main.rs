@@ -65,7 +65,7 @@ fn main() -> CustomResult<()> {
     // Keep track of the files that are being parsed. This information will be
     // used when debugging and giving good error messages.
     let mut file_nr: FileId = 0;
-    let mut files: HashMap<FileId, FileInfo> = HashMap::default();
+    let mut file_info: HashMap<FileId, FileInfo> = HashMap::default();
 
     // Loop through files and lex+parse them until there or no more uses/includes
     // to process. ALl files will be incldued in the same module.
@@ -94,14 +94,14 @@ fn main() -> CustomResult<()> {
             .into();
 
         file_nr += 1;
-        let file_info = FileInfo {
+        let file = FileInfo {
             directory,
             filename,
         };
 
-        files.insert(file_nr, file_info.clone());
+        file_info.insert(file_nr, file.clone());
 
-        let mut lex_tokens = match lexer::lex(file_nr, &file_info) {
+        let mut lex_tokens = match lexer::lex(file_nr, &file) {
             Ok(lex_tokens) => lex_tokens,
             Err(errs) => {
                 for e in errs {
@@ -110,10 +110,7 @@ fn main() -> CustomResult<()> {
                 std::process::exit(1);
             }
         };
-        info!(
-            "Lexing for file (ID {}) {:#?} complete.",
-            file_nr, &file_info
-        );
+        info!("Lexing for file (ID {}) {:#?} complete.", file_nr, &file);
 
         match parser.parse(&mut lex_tokens) {
             Ok(_) => (),
@@ -142,7 +139,7 @@ fn main() -> CustomResult<()> {
     println!("Parsing complete.");
     debug!("\nAST after parsing:\n{:#?}", ast_root);
 
-    let analyze_context = match analyze(&mut ast_root) {
+    let analyze_context = match analyze(&mut ast_root, file_info) {
         Ok(analyze_context) => analyze_context,
         Err(errs) => {
             for e in errs {

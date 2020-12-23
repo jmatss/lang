@@ -1,5 +1,7 @@
 use std.assert
 
+external function strcmp(s1: {u8}, s2: {u8}) -> i32
+
 struct TestStruct
 {
     a: i64,
@@ -8,24 +10,36 @@ struct TestStruct
 
 function main() -> i32
 {
-    var size_i = @size_of<i32>()
-    var size_f = @size_of<f64>()
-    var size_s = @size_of<TestStruct>()
-    
-    
-    var i: i16 = 123
-    var ty = @type_of(i)
+    var size_i = @size<i32>()
+    var size_f = @size<f64>()
+    var size_s = @size<TestStruct>()
+
+    //var i: i16 = 123
+    //var ty = @type(i)
 
     // Size in bytes, so might not be true for all architectures.
-
-    assert(size_i == 4)
     printf("i32 size: %d", size_i)
-    
-    assert(size_f == 8)
+    assert(size_i == 4)
+
     printf("\nf64 size: %d", size_f)
-    
-    assert(size_s == 16)
+    assert(size_f == 8)
+
     printf("\nTestStruct{i64,f64} size: %d", size_s)
+    assert(size_s == 16)
+
+    //              21          33
+    var column_nr = @column() + @column()
+    var line_nr = @line()
+    var filename = @file()
+
+    printf("\nline_nr: %d", line_nr)
+    assert(line_nr == 32)
+
+    printf("\ncolumn_nr: %d", column_nr)
+    assert(column_nr == 21 + 33)
+
+    printf("\nfilename: %s", filename)
+    assert(strcmp(filename, "test35.ren") == 0)
 
     return 0
 }

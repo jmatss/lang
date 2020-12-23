@@ -279,10 +279,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         built_in_call: &mut BuiltInCall,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
+        let file_pos = if let Some(file_pos) = &built_in_call.file_pos {
+            file_pos
+        } else {
+            return Err(self.err(format!(
+                "FilePosition not set for built in call: {:#?}",
+                built_in_call
+            )));
+        };
+
         match built_in_call.name.as_ref() {
             // Gets the size of a specified type. The size is returned as a
             // unsigned 32 bit integer.
-            "size_of" => {
+            "size" => {
                 if let Some(ty_arg) = built_in_call
                     .generics
                     .as_ref()
@@ -295,7 +304,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         Ok(size.const_cast(self.context.i32_type(), false).into())
                     } else {
                         Err(self.analyze_context.err(format!(
-                            "Tried to take @size_of non sized type: {:#?}",
+                            "Tried to take @size non sized type: {:#?}",
                             built_in_call
                         )))
                     }
@@ -303,6 +312,30 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     unreachable!("Argument count check in Analyze.");
                 }
             }
+
+            "file" => {
+                if let Some(file_info) = self.analyze_context.file_info.get(&file_pos.file_nr) {
+                    let filename = file_info.filename.clone();
+                    self.compile_lit(&Lit::String(filename), &None)
+                } else {
+                    Err(self.err(format!(
+                        "Unable to find file info for file with nr {}. Built-in call: {:#?}",
+                        file_pos.file_nr, built_in_call
+                    )))
+                }
+            }
+
+            "line" => Ok(self
+                .context
+                .i32_type()
+                .const_int(file_pos.line_nr, false)
+                .into()),
+
+            "column" => Ok(self
+                .context
+                .i32_type()
+                .const_int(file_pos.column_nr, false)
+                .into()),
 
             _ => {
                 unreachable!("Bad built in name: {:#?}", built_in_call);

@@ -86,7 +86,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             // TODO: The FilePosition used is currently just the first symbol
             //       found. Need to modifications to the file position so that
             //       all symbals are included.
-            self.file_pos = Some(lex_token.file_pos.clone());
+            self.file_pos = Some(lex_token.file_pos.to_owned());
 
             // Break and stop parsing expression if a Symbol contained in
             // `stop_conds` are found or if EOF is reached.
@@ -152,7 +152,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     };
 
                     if let Some((LexTokenKind::Ident(ident), file_pos)) =
-                        next_token.clone().map(|t| (t.kind, t.file_pos))
+                        next_token.clone().map(|t| (t.kind, lex_token.file_pos))
                     {
                         let start_symbol = Sym::ParenthesisBegin;
                         let end_symbol = Sym::ParenthesisEnd;
@@ -470,7 +470,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         ident.into(),
                         arguments,
                         generics,
-                        Some(lex_token.file_pos.clone()),
+                        Some(lex_token.file_pos.to_owned()),
                     );
                     Ok(Expr::StructInit(struct_init))
                 }
@@ -481,7 +481,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
                         generics.unwrap_or_else(Generics::new),
                     ),
-                    Some(lex_token.file_pos.clone()),
+                    Some(lex_token.file_pos.to_owned()),
                 )),
 
                 _ => {
@@ -498,7 +498,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                                 self.iter.rewind_to_mark(mark);
 
                                 let ty = self.iter.parse_type(None)?;
-                                return Ok(Expr::Type(ty, Some(lex_token.file_pos.clone())));
+                                return Ok(Expr::Type(ty, Some(lex_token.file_pos.to_owned())));
                             }
 
                             _ => (),

@@ -470,6 +470,19 @@ impl Ty {
             || other.is_any()
         {
             return true;
+        } else if self.is_string() || other.is_string() {
+            // Add support for compatibility with string and {u8}. This is what
+            // the string will be compiled down to for now, but should be changed
+            // to a custom String struct later.
+            // This allows for easy interop with C string during development.
+            match (self, other) {
+                (Ty::Pointer(inner, ..), _) | (_, Ty::Pointer(inner, ..)) => {
+                    if let Ty::CompoundType(InnerTy::U8, ..) = inner.as_ref() {
+                        return true;
+                    }
+                }
+                _ => (),
+            }
         }
 
         // Handles all cases regarding types that isn't "Unknown" or generic.
