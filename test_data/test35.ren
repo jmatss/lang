@@ -32,11 +32,11 @@ function main() -> i32
     var line_nr = @line()
     var filename = @file()
 
-    printf("\nline_nr: %d", line_nr)
-    assert(line_nr == 32)
-
     printf("\ncolumn_nr: %d", column_nr)
     assert(column_nr == 21 + 33)
+
+    printf("\nline_nr: %d", line_nr)
+    assert(line_nr == 32)
 
     printf("\nfilename: %s", filename)
     assert(strcmp(filename, "test35.ren") == 0)

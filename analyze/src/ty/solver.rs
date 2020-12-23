@@ -19,7 +19,6 @@ use common::{
     util,
     visitor::Visitor,
 };
-use log::warn;
 
 use super::context::{SubResult, TypeContext};
 
@@ -60,10 +59,6 @@ impl<'a> TypeSolver<'a> {
                     "Unable to resolve type {:?}. Got back unsolved: {:?}.",
                     ty, un_sub_ty
                 ));
-                warn!(
-                    "ERROR HERE -- Unable to resolve type {:?}. Got back unsolved: {:?}.",
-                    ty, un_sub_ty
-                );
                 self.errors.push(err);
             }
 
@@ -135,17 +130,10 @@ impl<'a> TypeSolver<'a> {
             for member in members {
                 let mut new_member = member.borrow().clone();
 
-                warn!(
-                    "REPLACE MEMBER -- gen_struct.name: {}, member: {:#?}",
-                    gen_struct.name, new_member
-                );
-
                 if let Some(ty) = &mut new_member.ty {
                     ty.replace_generics_impl(&generics);
                     ty.replace_self(&struct_init.name, &gen_struct_ty);
                 }
-
-                warn!("RESULT -- member: {:#?}", new_member);
 
                 *member = Rc::new(RefCell::new(new_member));
             }
@@ -168,17 +156,10 @@ impl<'a> TypeSolver<'a> {
                     for param in parameters {
                         let new_param = Rc::new(RefCell::new(param.borrow().clone()));
 
-                        warn!(
-                            "REPLACE PARAM -- method_name: {}, param: {:#?}",
-                            method_name, new_param
-                        );
-
                         if let Some(ty) = &mut new_param.borrow_mut().ty {
                             ty.replace_generics_impl(&generics);
                             ty.replace_self(&struct_init.name, &gen_struct_ty);
                         }
-
-                        warn!("RESULT -- param: {:#?}", new_param);
 
                         *param = new_param;
                     }

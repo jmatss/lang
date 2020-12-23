@@ -9,7 +9,7 @@ use common::{
     error::{CustomResult, LangErrorKind::LexError},
     token::lit::Lit,
 };
-use log::{debug, warn};
+use log::debug;
 use std::fs::File;
 use std::io::Read;
 

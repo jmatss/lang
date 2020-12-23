@@ -68,9 +68,9 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
     }
 
     /// Creates a new unknown identifier that will be given to a unkown type.
-    /// The new string will containg a unique ID (ID), the line number (L),
-    /// the column number (C) and a free text to give the unkown type some more
-    /// context for readability.
+    /// The new string will containg information about the position of the type
+    /// in a file and a free text to give the unknown type some more context for
+    /// readability.
     fn new_unknown_ident(&mut self, text: &str) -> String {
         let file_nr = self.type_context.analyze_context.file_pos.file_nr;
         let line_nr = self.type_context.analyze_context.file_pos.line_nr;
@@ -190,26 +190,23 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     // TODO: Clean up.
     /// Assign the return type of the function to the function call expr.
     /// Also tie the types of the function parameter to argument types.
+    ///
+    /// If either the return type or the parameters contains references to a
+    /// generic type, creates new "GenericInstance"s of them instead and does NOT
+    /// tie them together with a constraint. This is done since a Generic can
+    /// have multiple differet types depending on the context, which isn't solvable
+    /// through the regular type inference logic.
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
-        let func_ret_ty = if func_call.is_method {
+        let mut func_ret_ty = if func_call.is_method {
             // Get the "owning" structure type of this method. If it isn't set
             // explicitly, it should be set as a expression in the first argument
             // with the name "this".
-            let structure_ty = if let Some(structure_ty) = &func_call.method_structure {
+            let mut structure_ty = if let Some(structure_ty) = &func_call.method_structure {
                 structure_ty.clone()
             } else if let Some(first_arg) = func_call.arguments.first() {
                 if first_arg.name.as_ref().map_or(false, |name| name == "this") {
                     match first_arg.value.get_expr_type() {
-                        Ok(ty) => {
-                            // Set the `method_structure` for the function call
-                            // now that the "this" argument has been set to a
-                            // type (known or unknown type, doesn't matter, just
-                            // need to be set to that it can be tied to a structure).
-                            // At this point the type might be wrapped in a pointer.
-                            func_call.method_structure = Some(ty.clone());
-
-                            ty
-                        }
+                        Ok(ty) => ty,
                         Err(err) => {
                             self.errors.push(err);
                             return;
@@ -229,10 +226,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             };
 
             // If the structure type is know and contains generics, this logic
-            // will fetch thes structure and add the combine the names for the
-            // generics found in the structure declaration with potential
-            if let Some(Ty::CompoundType(inner_ty, generic_types)) = &mut func_call.method_structure
-            {
+            // will fetch the structure and combine the names for the generics
+            // found in the structure declaration with potential generic impls
+            // in the struct init/func call.
+            if let Ty::CompoundType(inner_ty, generic_types) = &mut structure_ty {
                 match inner_ty {
                     InnerTy::Struct(ident)
                     | InnerTy::Enum(ident)
@@ -293,6 +290,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     _ => (),
                 }
             }
+
+            // Set the `method_structure` for the function call now that the
+            // `structure_type` might have been updated. This call might have
+            // no effect if no modifications have been done in the logic above.
+            func_call.method_structure = Some(structure_ty.clone());
 
             // Insert constraints between the function call argument type and
             // the method parameter types that will be figured out later.
@@ -413,6 +415,28 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 Ty::CompoundType(InnerTy::Void, Generics::new())
             }
         };
+
+        // Replace any "Generic"s with "GenericInstances"s instead so that the
+        // "Generic"s doesn't leak out to outside the function. Instead a
+        // unique instance of a generic should be used instead. This will allow
+        // for multiple different types to be mapped to the same single "Generic".
+        if let Some(generics) = func_ret_ty.get_generics() {
+            let mut generics_impl = Generics::new();
+
+            for generic in &generics {
+                if let Ty::Generic(ident, ..) = generic {
+                    let generic_impl =
+                        Ty::GenericInstance(ident.into(), self.type_id.to_string(), None);
+                    self.type_id += 1;
+
+                    generics_impl.insert(ident.into(), generic_impl);
+                } else {
+                    unreachable!("Got non generic from `get_generics()`.");
+                }
+            }
+
+            func_ret_ty.replace_generics_impl(&generics_impl)
+        }
 
         // TODO: Is it correct to directly set the return type for the function
         //       call? Should be inserted as a constraint instead? Will this
@@ -554,7 +578,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     for generic_name in generic_names {
                         let unknown_ident =
                             self.new_unknown_ident(&format!("generic_{}", generic_name));
-                        let gen_ty = Ty::GenericImpl(generic_name.clone(), unknown_ident, None);
+                        let gen_ty = Ty::GenericInstance(generic_name.clone(), unknown_ident, None);
 
                         generics.insert(generic_name.clone(), gen_ty);
                     }

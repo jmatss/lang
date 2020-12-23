@@ -5,7 +5,7 @@ use common::{
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
 };
 use either::Either;
-use log::{debug, warn};
+use log::debug;
 use std::collections::{hash_map, HashMap};
 
 use crate::{AnalyzeContext, BlockInfo};
@@ -71,10 +71,6 @@ impl SubResult {
 
     pub fn is_unsolved(&self) -> bool {
         matches!(self, SubResult::UnSolved(_))
-    }
-
-    pub fn is_err(&self) -> bool {
-        matches!(self, SubResult::Err(_))
     }
 }
 
@@ -463,7 +459,7 @@ impl<'a> TypeContext<'a> {
                     Ty::Any => {
                         return self.solve_any(finalize);
                     }
-                    Ty::Generic(..) | Ty::GenericImpl(..) => {
+                    Ty::Generic(..) | Ty::GenericInstance(..) => {
                         unreachable!("Type was Generic or GenericImpl.");
                     }
                 }
@@ -594,27 +590,10 @@ impl<'a> TypeContext<'a> {
 
     /// Solves generic types.
     fn solve_generic(&mut self, finalize: bool) -> SubResult {
-        let mut cur_ty_backup = self.cur_ty.clone();
+        let cur_ty_backup = self.cur_ty.clone();
 
-        match self.cur_ty {
+        match &self.cur_ty {
             Ty::Generic(..) => {
-                match self.substitutions.get(&self.cur_ty).cloned() {
-                    // Only substitue Generics with GenericImpl, all other type of mapping
-                    // should NOT be used to replace the Generic.
-                    Some(gen_impl @ Ty::GenericImpl(..)) => {
-                        cur_ty_backup = gen_impl;
-                    }
-
-                    Some(sub_ty) => {
-                        if let err @ SubResult::Err(_) = self.solve_substitution(&sub_ty, finalize)
-                        {
-                            return err;
-                        }
-                    }
-
-                    _ => (),
-                }
-
                 // TODO: IS this OK? The "Generic" types should only be a part of structs
                 //       and their impl methods that are to be removed. New structs/impl
                 //       have been created with the generics replaced. Need to make sure
@@ -628,7 +607,7 @@ impl<'a> TypeContext<'a> {
                 }
             }
 
-            Ty::GenericImpl(..) => {
+            Ty::GenericInstance(..) => {
                 if let Some(ty) = self.substitutions.get(&self.cur_ty).cloned() {
                     self.solve_substitution(&ty, finalize)
                 } else {
@@ -1016,8 +995,6 @@ impl<'a> TypeContext<'a> {
             // type of the array if it has been found.
             match self.solve_substitution(&ty, finalize) {
                 SubResult::Solved(sub_ty) => {
-                    warn!("SOLVED -- ty: {:#?}\nsub_ty: {:#?}", ty, sub_ty);
-
                     if let Ty::Array(real_ty, _) = sub_ty {
                         if let Err(err) =
                             self.insert_substitution(cur_ty_backup.clone(), *real_ty.clone())
@@ -1036,8 +1013,6 @@ impl<'a> TypeContext<'a> {
                 }
 
                 SubResult::UnSolved(un_sub_ty) => {
-                    warn!("UNSOLVED -- ty: {:#?}\nun_sub_ty: {:#?}", ty, un_sub_ty);
-
                     *ty = Box::new(un_sub_ty);
 
                     self.cur_ty = cur_ty_backup;

@@ -44,10 +44,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             Kw::Match => self.parse_match(),
 
             // Blocks returns AstTokens instead of Token, so need to do early return.
-            Kw::For => return self.parse_for(),
-            Kw::While => return self.parse_while(),
-            Kw::Implement => return self.parse_impl(),
-            Kw::Function => return self.parse_func(),
+            Kw::For => self.parse_for(),
+            Kw::While => self.parse_while(),
+            Kw::Implement => self.parse_impl(),
+            Kw::Function => self.parse_func(),
 
             Kw::Return => self.parse_return(),
             Kw::Yield => self.parse_yield(),
@@ -242,7 +242,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         Ok(AstToken::Stmt(Stmt::Return(
             expr,
-            Some(self.file_pos.clone()),
+            Some(self.file_pos.to_owned()),
         )))
     }
 
@@ -253,7 +253,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
         Ok(AstToken::Stmt(Stmt::Yield(
             expr,
-            Some(self.file_pos.clone()),
+            Some(self.file_pos.to_owned()),
         )))
     }
 
@@ -261,14 +261,16 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     ///   "break"
     /// The "break" keyword has already been consumed when this function is called.
     fn parse_break(&mut self) -> CustomResult<AstToken> {
-        Ok(AstToken::Stmt(Stmt::Break(Some(self.file_pos.clone()))))
+        Ok(AstToken::Stmt(Stmt::Break(Some(self.file_pos.to_owned()))))
     }
 
     /// Parses a continue statement.
     ///   "continue"
     /// The "continue" keyword has already been consumed when this function is called.
     fn parse_continue(&mut self) -> CustomResult<AstToken> {
-        Ok(AstToken::Stmt(Stmt::Continue(Some(self.file_pos.clone()))))
+        Ok(AstToken::Stmt(Stmt::Continue(Some(
+            self.file_pos.to_owned(),
+        ))))
     }
 
     /// Parses a use statement.
@@ -317,7 +319,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
 
         let path = Path::new(path_parts);
-        Ok(AstToken::Stmt(Stmt::Use(path, Some(self.file_pos.clone()))))
+        Ok(AstToken::Stmt(Stmt::Use(
+            path,
+            Some(self.file_pos.to_owned()),
+        )))
     }
 
     /// Parses a package statement.
@@ -368,7 +373,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let path = Path::new(path_parts);
         Ok(AstToken::Stmt(Stmt::Package(
             path,
-            Some(self.file_pos.clone()),
+            Some(self.file_pos.to_owned()),
         )))
     }
 
@@ -390,7 +395,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
             Ok(AstToken::Stmt(Stmt::ExternalDecl(
                 Rc::new(RefCell::new(func)),
-                Some(self.file_pos.clone()),
+                Some(self.file_pos.to_owned()),
             )))
         } else {
             Err(self
@@ -778,7 +783,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
         Ok(AstToken::Stmt(Stmt::Defer(
             expr,
-            Some(self.file_pos.clone()),
+            Some(self.file_pos.to_owned()),
         )))
     }
 }

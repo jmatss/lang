@@ -11,7 +11,6 @@ use common::{
     util,
     visitor::Visitor,
 };
-use log::warn;
 
 use crate::AnalyzeContext;
 

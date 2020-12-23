@@ -182,7 +182,7 @@ impl<'a> ParseTokenIter<'a> {
             // TODO: Clean up this mess with a mix of ParseToken/ParseTokenKind
             //       (some arms returns ParseTokens, others cascades ParseTokenKinds).
 
-            self.file_pos = lex_token.file_pos.clone();
+            self.file_pos = lex_token.file_pos.to_owned();
 
             // Skip any "break" and white space symbols. Call this function
             // recursively to get an "actual" token.
@@ -220,8 +220,12 @@ impl<'a> ParseTokenIter<'a> {
                         if let Some(assign_op) = get_if_stmt_op(&next) {
                             self.next_skip_space(); // Consume the assign op.
                             let rhs = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                            let stmt =
-                                Stmt::Assignment(assign_op, expr, rhs, Some(self.file_pos.clone()));
+                            let stmt = Stmt::Assignment(
+                                assign_op,
+                                expr,
+                                rhs,
+                                Some(self.file_pos.to_owned()),
+                            );
                             AstToken::Stmt(stmt)
                         } else {
                             AstToken::Expr(expr)
@@ -243,11 +247,11 @@ impl<'a> ParseTokenIter<'a> {
 
                 LexTokenKind::Sym(Sym::Increment) => {
                     let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                    AstToken::Stmt(Stmt::Increment(expr, Some(self.file_pos.clone())))
+                    AstToken::Stmt(Stmt::Increment(expr, Some(self.file_pos.to_owned())))
                 }
                 LexTokenKind::Sym(Sym::Decrement) => {
                     let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                    AstToken::Stmt(Stmt::Decrement(expr, Some(self.file_pos.clone())))
+                    AstToken::Stmt(Stmt::Decrement(expr, Some(self.file_pos.to_owned())))
                 }
 
                 // Error if the iterator finds a lonely symbol of these types:
@@ -790,7 +794,7 @@ impl<'a> ParseTokenIter<'a> {
         LangError::new_backtrace(
             msg,
             ParseError {
-                file_pos: self.file_pos.clone(),
+                file_pos: self.file_pos.to_owned(),
             },
             true,
         )
