@@ -637,7 +637,7 @@ impl<'a> ParseTokenIter<'a> {
 
     /// Replaces the lex token at the current position with the value of `item`.
     /// Returns the old token that was replaced.
-    pub fn replace(&mut self, item: LexToken) -> LexToken {
+    pub fn replace(&mut self, item: LexToken) -> Option<LexToken> {
         self.iter.replace(item)
     }
 

@@ -19,9 +19,12 @@ impl<'a, I: Clone> TokenIter<'a, I> {
     #[inline]
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<I> {
-        let item = self.iter.get(self.pos);
-        self.pos += 1;
-        item.cloned()
+        if let Some(item) = self.iter.get(self.pos) {
+            self.pos += 1;
+            Some(item.clone())
+        } else {
+            None
+        }
     }
 
     /// Returns the current position. This can be used to rewind the iterator
@@ -44,13 +47,18 @@ impl<'a, I: Clone> TokenIter<'a, I> {
         }
     }
 
-    /// Rewinds back the iterator to the latest mark.
+    /// Rewinds back the iterator to the given `mark`.
     #[inline]
-    pub fn rewind_to_mark(&mut self, mark: usize) {
-        self.pos = mark;
+    pub fn rewind_to_mark(&mut self, mark: usize) -> bool {
+        if mark <= self.iter.len() {
+            self.pos = mark;
+            true
+        } else {
+            false
+        }
     }
 
-    /// Puts back a iter into the iterator.
+    /// Rewinds the iterator `n` steps.
     /// If the returned bool is false, this operation tried to rewind to a
     /// position before the actual iterator (pos < 0).
     #[inline]
@@ -66,8 +74,13 @@ impl<'a, I: Clone> TokenIter<'a, I> {
 
     /// Skips the next `n` items in the iterator.
     #[inline]
-    pub fn skip(&mut self, n: usize) {
-        self.pos += n;
+    pub fn skip(&mut self, n: usize) -> bool {
+        if self.pos + n <= self.iter.len() {
+            self.pos += n;
+            true
+        } else {
+            false
+        }
     }
 
     /// Peeks and clones the item at the current position of the iterator.
@@ -96,9 +109,12 @@ impl<'a, I: Clone> TokenIter<'a, I> {
 
     /// Replaces the item at the current position with the value of `item`.
     /// Returns the old token that was replaced.
-    pub fn replace(&mut self, item: I) -> I {
-        let old = self.iter[self.pos].clone();
-        self.iter[self.pos] = item;
-        old
+    pub fn replace(&mut self, item: I) -> Option<I> {
+        if let Some(old) = self.iter.get(self.pos).cloned() {
+            self.iter[self.pos] = item;
+            Some(old)
+        } else {
+            None
+        }
     }
 }
