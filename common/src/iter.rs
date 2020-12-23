@@ -24,16 +24,6 @@ impl<'a, I: Clone> TokenIter<'a, I> {
         item.cloned()
     }
 
-    /// Get the next two items from the iterator.
-    #[inline]
-    pub fn next_two(&mut self) -> Option<(I, Option<I>)> {
-        if let Some(first) = self.next() {
-            Some((first, self.next()))
-        } else {
-            None
-        }
-    }
-
     /// Returns the current position. This can be used to rewind the iterator
     /// to the given position at a later stage.
     #[inline]
@@ -99,32 +89,6 @@ impl<'a, I: Clone> TokenIter<'a, I> {
     pub fn peek_two(&mut self) -> Option<(I, Option<I>)> {
         if let Some(first) = self.peek_at_n(0) {
             Some((first, self.peek_at_n(1)))
-        } else {
-            None
-        }
-    }
-
-    /// Peeks and clones the three upcoming items in the iterator.
-    #[inline]
-    pub fn peek_three(&mut self) -> Option<(I, Option<I>, Option<I>)> {
-        if let Some(first) = self.peek_at_n(0) {
-            Some((first, self.peek_at_n(1), self.peek_at_n(2)))
-        } else {
-            None
-        }
-    }
-
-    /// Peeks and clones the four upcoming items in the iterator.
-    #[inline]
-    #[allow(clippy::type_complexity)]
-    pub fn peek_four(&mut self) -> Option<(I, Option<I>, Option<I>, Option<I>)> {
-        if let Some(first) = self.peek_at_n(0) {
-            Some((
-                first,
-                self.peek_at_n(1),
-                self.peek_at_n(2),
-                self.peek_at_n(3),
-            ))
         } else {
             None
         }
