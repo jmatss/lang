@@ -35,8 +35,7 @@ impl<'ctx> BranchInfo<'ctx> {
         }
     }
 
-    // TODO: Takes linenr/column_nr to be able to add them to error message.
-    //       Find a better way to do this.
+    /// Returns the "if case" basic block at index `index` if one exists.
     pub fn get_if_case(
         &self,
         index: usize,
@@ -48,14 +47,13 @@ impl<'ctx> BranchInfo<'ctx> {
             Err(LangError::new(
                 format!("Unable to get if_case with index: {}", index),
                 CodeGenError {
-                    file_pos: file_pos.clone(),
+                    file_pos: file_pos.to_owned(),
                 },
             ))
         }
     }
 
-    // TODO: Takes linenr/column_nr to be able to add them to error message.
-    //       Find a better way to do this.
+    /// Returns the "if branch" basic block at index `index` if one exists.
     pub fn get_if_branch(
         &self,
         index: usize,
@@ -67,7 +65,7 @@ impl<'ctx> BranchInfo<'ctx> {
             Err(LangError::new(
                 format!("Unable to get if_branch with index: {}", index),
                 CodeGenError {
-                    file_pos: file_pos.clone(),
+                    file_pos: file_pos.to_owned(),
                 },
             ))
         }
@@ -129,7 +127,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    fn create_entry_block_alloca(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
+    fn alloc_param(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
         if let Some(func) = self.cur_func {
             let entry = func
                 .get_first_basic_block()
@@ -139,7 +137,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             //       entry block. Can this be a problem? Will this function ever
             //       be called when other instructions have been added?
             self.builder.position_at_end(entry);
-            self.alloca_var(var)
+            self.alloc_var(var)
         } else {
             Err(self.err(format!(
                 "No active cur func when creating var: {}",
@@ -176,23 +174,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             &empty_vec
         };
 
-        // TODO: How does this work with variadic parameters?
-        // Get names for the parameters and alloc space in the functions stack.
-        for (i, arg) in fn_val.get_param_iter().enumerate() {
-            let param = params
-                .get(i)
-                .ok_or_else(|| {
-                    self.err(format!(
-                        "No param at index {} for function {}",
-                        i, &func.name
-                    ))
-                })?
-                .borrow();
+        if params.len() != fn_val.get_params().len() {
+            return Err(self.err(format!(
+                "Incorrect amount of parameters when generating function \"{:?}\". fn_val len: {}, params len: {}",
+                &func.full_name(),
+                fn_val.get_params().len(),
+                params.len()
+            )));
+        }
 
-            let ptr = self.create_entry_block_alloca(&param)?;
-            self.builder.build_store(ptr, arg);
+        // TODO: How does this work with variadic parameters? Currently varargs
+        //       aren't supported for functions written in the language itself,
+        //       it is only allowed in external functions (for C interop).
+        // Allocated space for the function parameters on the stack.
+        for (param_value, param) in fn_val.get_param_iter().zip(params) {
+            let ptr = self.alloc_param(&param.borrow())?;
+            self.builder.build_store(ptr, param_value);
 
-            let key = (param.name.clone(), func_id);
+            let key = (param.borrow().name.clone(), func_id);
             self.variables.insert(key, ptr);
         }
 

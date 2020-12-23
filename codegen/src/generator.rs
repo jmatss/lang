@@ -256,7 +256,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn alloca_var(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
+    pub(super) fn alloc_var(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
         if let Some(var_type) = &var.ty {
             Ok(match self.compile_type(&var_type)? {
                 AnyTypeEnum::ArrayType(ty) => {
@@ -285,11 +285,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub(super) fn compile_var_decl(&mut self, var: &Var) -> CustomResult<()> {
-        let decl_block_id = self
-            .analyze_context
-            .get_var_decl_scope(&var.name, self.cur_block_id)?;
-        let key = (var.name.clone(), decl_block_id);
-
         match self.analyze_context.get_var(&var.name, self.cur_block_id) {
             Ok(var_decl) => {
                 debug!("Compiling var var_decl: {:#?}", &var_decl);
@@ -297,7 +292,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 // Constants are never "compiled" into instructions, they are handled
                 // "internaly" in this code during compilation.
                 if !var.is_const {
-                    let ptr = self.alloca_var(&var_decl.borrow())?;
+                    let decl_block_id = self
+                        .analyze_context
+                        .get_var_decl_scope(&var.name, self.cur_block_id)?;
+                    let key = (var.name.clone(), decl_block_id);
+
+                    let ptr = self.alloc_var(&var_decl.borrow())?;
                     self.variables.insert(key, ptr);
                 }
 
@@ -412,15 +412,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Ty::Array(inner_ty, dim_opt) => {
                 let lit_dim = if let Some(dim) = dim_opt {
                     match dim.as_ref() {
-                        Expr::Lit(lit, ..) => match lit {
-                            Lit::Integer(num, radix) => u32::from_str_radix(num, *radix)?,
-                            _ => {
-                                return Err(self.err(format!(
-                                    "Invalid literal used as array dimension: {:?}",
-                                    lit
-                                )))
-                            }
-                        },
+                        Expr::Lit(Lit::Integer(num, radix), ..) => {
+                            u32::from_str_radix(num, *radix)?
+                        }
                         _ => {
                             return Err(self.err(format!(
                                 "TODO: Invalid expression used as array dimension: {:?}",
