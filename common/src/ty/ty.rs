@@ -166,7 +166,13 @@ impl Ty {
                 *self = Ty::Generic(ident.clone(), None);
             }
 
-            Ty::Pointer(ty) | Ty::Array(ty, _) => ty.replace_generics(generic_names),
+            Ty::Pointer(ty)
+            | Ty::Array(ty, _)
+            | Ty::GenericInstance(.., Some(ty))
+            | Ty::UnknownStructureMember(ty, ..)
+            | Ty::UnknownStructureMethod(ty, ..)
+            | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownArrayMember(ty) => ty.replace_generics(generic_names),
 
             _ => (),
         }

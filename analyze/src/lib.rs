@@ -106,12 +106,17 @@ pub fn analyze(
         .traverse(ast_root)
         .take_errors()?;
 
-    debug!("Running DeferAnalyzer, running GenericsAnalyzer");
+    debug!("running GenericsAnalyzer");
+    let mut generics_analyzer = GenericsAnalyzer::new(&analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut generics_analyzer)
+        .traverse(ast_root)
+        .take_errors()?;
+
+    debug!("Running DeferAnalyzer");
     let mut defer_analyzer = DeferAnalyzer::new(&analyze_context);
-    let mut generics_analyzer = GenericsAnalyzer::new();
     AstTraverser::new()
         .add_visitor(&mut defer_analyzer)
-        .add_visitor(&mut generics_analyzer)
         .traverse(ast_root)
         .take_errors()?;
 

@@ -2,17 +2,25 @@ use std.assert
 
 external function strcmp(s1: {u8}, s2: {u8}) -> i32
 
-struct TestStruct
+struct TestStruct<T>
 {
     a: i64,
-    b: f64,
+    b: T,
+}
+
+implement TestStruct
+{
+    function this generic_size() -> u32
+    {
+        return @size<T>()
+    }
 }
 
 function main() -> i32
 {
     var size_i = @size<i32>()
     var size_f = @size<f64>()
-    var size_s = @size<TestStruct>()
+    var size_s = @size<TestStruct<f64>>()
 
     //var i: i16 = 123
     //var ty = @type(i)
