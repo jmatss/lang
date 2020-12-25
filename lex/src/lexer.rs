@@ -10,19 +10,13 @@ use common::{
     token::lit::Lit,
 };
 use log::debug;
-use std::fs::File;
-use std::io::Read;
 
 /// Lexes the characters in the source code to LexToken's and returns a vector
 /// containing all lex tokens.
 pub fn lex(file_nr: FileId, file_info: &FileInfo) -> Result<Vec<LexToken>, Vec<LangError>> {
-    let mut contents = String::new();
+    let mut content = std::fs::read(&file_info.full_path()).map_err(|e| vec![e.into()])?;
 
-    File::open(&file_info.full_path())
-        .and_then(|mut f| f.read_to_string(&mut contents))
-        .map_err(|e| vec![e.into()])?;
-
-    let mut iter = LexTokenIter::new(unsafe { contents.as_bytes_mut() }, file_nr);
+    let mut iter = LexTokenIter::new(&mut content, file_nr);
     let mut lex_token_vec = Vec::new();
     let mut errors = Vec::new();
 
