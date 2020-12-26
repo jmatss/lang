@@ -18,9 +18,12 @@ implement TestStruct
 
 function main() -> i32
 {
+    var ts = TestStruct<f64> { 123, 456. }
+    var size_inner = ts.generic_size()
+
     var size_i = @size<i32>()
     var size_f = @size<f64>()
-    var size_s = @size<TestStruct<f64>>()
+    var size_s = @size<TestStruct<f32>>()
 
     //var i: i16 = 123
     //var ty = @type(i)
@@ -32,8 +35,11 @@ function main() -> i32
     printf("\nf64 size: %d", size_f)
     assert(size_f == 8)
 
-    printf("\nTestStruct{i64,f64} size: %d", size_s)
+    printf("\nTestStruct{i64,f32} size: %d", size_s)
     assert(size_s == 16)
+
+    printf("\ninner size (f64): %d", size_inner)
+    assert(size_inner == 8)
 
     //              21          33
     var column_nr = @column() + @column()
@@ -44,7 +50,7 @@ function main() -> i32
     assert(column_nr == 21 + 33)
 
     printf("\nline_nr: %d", line_nr)
-    assert(line_nr == 32)
+    assert(line_nr == 46)
 
     printf("\nfilename: %s", filename)
     assert(strcmp(filename, "test35.ren") == 0)

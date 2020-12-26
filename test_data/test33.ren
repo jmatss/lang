@@ -1,6 +1,6 @@
 //use std.assert
 
-external function printf(format: {u8}, ...) -> i32
+//external function printf(format: {u8}, ...) -> i32
 
 struct TestStruct<T>
 {
@@ -27,17 +27,27 @@ function main() -> i32
 
     var ts1 = TestStruct { i }
     var ts2 = TestStruct { f }
-    var ts3 = TestStruct<i8> { 78 }
+    //var ts3 = TestStruct<i8> { 78 }
 
     ts1.instance_method(456)
-    ts2.instance_method(123.)
-    ts3.instance_method(90)
+    //ts2.instance_method(123.)
+    //ts3.instance_method(90)
 
-    // TODO: Get static methods to work.
-    //var static_res_i = TestStruct<i64>::static_method(i)
-    //var static_res_f: f64 = TestStruct<f64>::static_method(f)
+    // TODO: This causes a infinite loop?
+    //var static_res_i = TestStruct::static_method(i)
 
-    printf("inner: %lld", ts1.inner)
+    var static_res_i = TestStruct<i64>::static_method(i)
+    var static_res_f = TestStruct<f64>::static_method(f)
+    
+    // TODO: Doing this without defining `ts2` (which introduces TestStruct<f64>)
+    //       will crash:
+    //         "Unable to find decl for "TestStruct:f64", ended in up root block."
+    //       This is because the different generic struct variants are only created
+    //       in "visit_struct_init()". They also need to be created for example when
+    //       doing a static struct call.
+    //var static_res_f = TestStruct<f64>::static_method(f)
+
+    //printf("inner: %lld", ts1.inner)
 
     return 0
 }

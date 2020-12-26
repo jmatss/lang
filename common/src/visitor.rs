@@ -7,6 +7,7 @@ use crate::{
         stmt::Stmt,
     },
     traverser::TraverseContext,
+    ty::ty::Ty,
 };
 
 #[allow(unused_variables)]
@@ -66,6 +67,8 @@ pub trait Visitor {
     /* OPERATIONS */
     fn visit_bin_op(&mut self, bin_op: &mut BinOp, ctx: &TraverseContext) {}
     fn visit_un_op(&mut self, un_op: &mut UnOp, ctx: &TraverseContext) {}
+
+    fn visit_type(&mut self, ty: &mut Ty, ctx: &TraverseContext) {}
 
     /* BINARY OPERATIONS */
     /*

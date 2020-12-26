@@ -138,13 +138,8 @@ pub fn analyze(
         .take_errors()?;
 
     debug!("Running TypeConverter");
-    let generic_structs = type_solver.generic_structs;
-    let generic_struct_methods = type_solver.generic_struct_methods;
-    let mut type_converter = TypeConverter::new(
-        &mut analyze_context,
-        generic_structs,
-        generic_struct_methods,
-    );
+    let generic_structures = type_solver.generic_structures;
+    let mut type_converter = TypeConverter::new(&mut analyze_context, generic_structures);
     AstTraverser::new()
         .add_visitor(&mut type_converter)
         .traverse(ast_root)
@@ -341,13 +336,6 @@ impl AnalyzeContext {
 
     /// Given a name of a declaration `ident` and a block scope `id`, returns
     /// the block in which the sought after declaration was declared.
-    ///
-    // TODO: Is `stop_at_root` even needed? In which cases is it needed to stop
-    //       stop at the first root block? Can there be sted functions?
-    /// `stop_at_root` indicates if the search should stop once the first root
-    /// block is found. This should be used for ex. variables so that only the
-    /// variables with the name `ident` in the current scope is considered and
-    /// not any parent scopes.
     fn get_decl_scope<T>(
         &self,
         ident: &str,

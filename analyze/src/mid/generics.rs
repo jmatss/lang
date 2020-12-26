@@ -2,13 +2,9 @@ use std::cell::RefCell;
 
 use common::{
     error::LangError,
-    token::{
-        ast::AstToken,
-        block::BlockHeader,
-        expr::{BuiltInCall, Expr, StructInit},
-        op::{UnOp, UnOperator},
-    },
+    token::{ast::AstToken, block::BlockHeader},
     traverser::{AstTraverser, TraverseContext},
+    ty::ty::Ty,
     visitor::Visitor,
 };
 
@@ -43,47 +39,24 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
     }
 
     // TODO: Implement for interfaces & enums.
-    /// "Rewrites" the types of the generic member types to "Generic"s. This
-    /// includes the structure members, impl method parameters and the methods
-    /// return types.
+    /// "Rewrites" the types of the generic member types to "Generic"s for
+    /// the structure members.
     fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Struct(struct_), ..) = &ast_token {
             let struct_ = struct_.borrow();
-
-            if let Some(generics) = &struct_.generic_params {
-                // Rewrite the generics for the members.
-                if let Some(members) = &struct_.members {
-                    for member in members {
-                        if let Some(ty) = member.borrow_mut().ty.as_mut() {
-                            ty.replace_generics(&generics)
-                        }
-                    }
-                }
-
-                // TODO: Rewrite the generics used inside the method bodies as well.
-
-                // Rewrite the generics for the method parameters and return types.
-                if let Some(methods) = &struct_.methods {
-                    for method in methods.values() {
-                        // Rewrite the generics for the parameters.
-                        if let Some(params) = &method.borrow().parameters {
-                            for param in params {
-                                if let Some(ty) = param.borrow_mut().ty.as_mut() {
-                                    ty.replace_generics(&generics);
-                                }
-                            }
-                        }
-
-                        // Rewrite the generics for the return type.
-                        if let Some(ret_ty) = &mut method.borrow_mut().ret_type {
-                            ret_ty.replace_generics(&generics);
-                        }
+            if let (Some(generics), Some(members)) = (&struct_.generic_params, &struct_.members) {
+                for member in members {
+                    if let Some(ty) = member.borrow_mut().ty.as_mut() {
+                        ty.replace_generics(&generics)
                     }
                 }
             }
         }
     }
 
+    /// "Rewrites" generics parsed as "UnknownIdent"s to "Generic"s by matching
+    /// the identifiers with known names for the generics defined on the structure.
+    /// This will be done for both the method headers and everything in their bodies.
     fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Implement(ident), _, body) = ast_token {
             let analyze_context = self.analyze_context.borrow();
@@ -149,38 +122,7 @@ impl<'a> FuncGenericsReplacer<'a> {
 }
 
 impl<'a> Visitor for FuncGenericsReplacer<'a> {
-    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
-        if let Ok(ty) = expr.get_expr_type_mut() {
-            ty.replace_generics(self.generic_names);
-        }
-    }
-
-    // TODO: Need to replace some types that isn't expression. Should there be
-    //       a `visit_type()` or something similar in the `Visitor` trait that
-    //       lets one handle all cases in a single function?
-    //       Would probably be best to implement, then it could be used for
-    //       multiple Analyze structs.
-
-    fn visit_un_op(&mut self, un_op: &mut UnOp, _ctx: &TraverseContext) {
-        // Edge case for struct access. Need to replace thev operators type as well.
-        if let UnOperator::StructAccess(.., Some(ty)) = &mut un_op.operator {
-            ty.replace_generics(self.generic_names)
-        }
-    }
-
-    fn visit_struct_init(&mut self, struct_init: &mut StructInit, _ctx: &TraverseContext) {
-        if let Some(generics) = &mut struct_init.generics {
-            for ty in generics.iter_types_mut() {
-                ty.replace_generics(self.generic_names)
-            }
-        }
-    }
-
-    fn visit_built_in_call(&mut self, built_in_call: &mut BuiltInCall, _ctx: &TraverseContext) {
-        if let Some(generics) = &mut built_in_call.generics {
-            for ty in generics.iter_types_mut() {
-                ty.replace_generics(self.generic_names)
-            }
-        }
+    fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
+        ty.replace_generics(self.generic_names);
     }
 }

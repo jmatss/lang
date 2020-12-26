@@ -161,11 +161,6 @@ impl<'a> Visitor for BlockAnalyzer<'a> {
         }
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        let mut analyze_context = self.analyze_context.borrow_mut();
-        analyze_context.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
-    }
-
     /// All traversing is done from the default block, no other visit function
     /// will be used. The reason being that this needs to be called recursively
     /// on blocks, which currently isn't possible to do with the regular traverser.

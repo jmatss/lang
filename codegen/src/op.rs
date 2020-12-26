@@ -1139,7 +1139,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         un_op: &mut UnOp,
     ) -> CustomResult<PointerValue<'ctx>> {
-        let idx = if let UnOperator::StructAccess(_, idx_opt, _) = un_op.operator {
+        let idx = if let UnOperator::StructAccess(_, idx_opt) = un_op.operator {
             if let Some(idx) = idx_opt {
                 idx
             } else {

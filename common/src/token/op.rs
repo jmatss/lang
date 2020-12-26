@@ -115,9 +115,8 @@ pub enum UnOperator {
     ArrayAccess(Box<Expr>),
 
     /// The string is the name of the member. The u64 is the index of the struct
-    /// member being accessed and the Type is the type of the member as declared
-    /// in the struct.
-    StructAccess(String, Option<u64>, Option<Ty>),
+    /// member being accessed.
+    StructAccess(String, Option<u64>),
 
     BitComplement,
 

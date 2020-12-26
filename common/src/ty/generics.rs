@@ -49,6 +49,14 @@ impl Generics {
         }
     }
 
+    pub fn len_names(&self) -> usize {
+        self.names.len()
+    }
+
+    pub fn len_types(&self) -> usize {
+        self.types.len()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.names.is_empty() && self.types.is_empty()
     }
