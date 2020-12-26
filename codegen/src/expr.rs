@@ -26,7 +26,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// the value so that the rhs can be assigned to it.
     ///
     /// Example:
-    /// ```
+    /// ```ignore
     /// var x = 3
     /// var y = 5
     /// x.* = y.*

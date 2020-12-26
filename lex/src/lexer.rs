@@ -325,9 +325,15 @@ impl<'a> LexTokenIter<'a> {
                     prev_slash = true;
                 }
 
-                // TODO: Should upper 'X' be allowed?
-                'x' if prev_slash => {
-                    let new_ch = self.escape_raw_byte()?;
+                // Hex escape.
+                'x' | 'X' if prev_slash => {
+                    let new_ch = self.escape_hex()?;
+                    chars.push(new_ch);
+                    prev_slash = false;
+                }
+                // Unicode escape.
+                'u' | 'U' if prev_slash => {
+                    let new_ch = self.escape_unicode()?;
                     chars.push(new_ch);
                     prev_slash = false;
                 }
@@ -379,9 +385,9 @@ impl<'a> LexTokenIter<'a> {
         Ok(chars.iter().collect())
     }
 
-    /// Escapes a character sequence in the format: "0xAA" inside a string or
+    /// Escapes a character sequence in the format: "\xAA" inside a string or
     /// char literal into a single character. The two digits are hex.
-    fn escape_raw_byte(&mut self) -> CustomResult<char> {
+    fn escape_hex(&mut self) -> CustomResult<char> {
         let radix = 16;
         let first = self
             .iter
@@ -400,6 +406,64 @@ impl<'a> LexTokenIter<'a> {
         } else {
             Err(self.err(format!(
                 "Unable to convert escaped \"raw byte\" integer to char: {}",
+                num
+            )))
+        }
+    }
+
+    /// Escapes a character sequence in the format: "\u{XXXXXX}" inside a string or
+    /// char literal into a single character. The amount of numbers (X) should be
+    /// between 1 and 6.
+    fn escape_unicode(&mut self) -> CustomResult<char> {
+        let next_char = self.iter.next();
+        if let Some('{') = next_char {
+        } else {
+            return Err(self.err(format!(
+                "Expected `{{`character after `\\x` in unicode escape, got: {:?}",
+                next_char
+            )));
+        }
+
+        const MAX_SIZE: usize = 6;
+        const RADIX: u32 = 16;
+        let mut chars = Vec::with_capacity(MAX_SIZE);
+
+        let mut i = 0;
+        loop {
+            let next_char = self.iter.next();
+            match next_char {
+                Some('}') => {
+                    break;
+                }
+
+                _ if i > MAX_SIZE => {
+                    return Err(self.err(format!(
+                        "Found to many chars in unicode escape. Current char: {:?}, prev chars: {:#?}",
+                        next_char, chars
+                    )));
+                }
+
+                Some(c) if LexTokenIter::valid_number(c, RADIX) => {
+                    chars.push(c);
+                }
+
+                _ => {
+                    return Err(self.err(format!(
+                        "Got invalid token when parsing unicode escape at index {}: {:#?}",
+                        i, next_char
+                    )));
+                }
+            }
+
+            i += 1;
+        }
+
+        let num = u32::from_str_radix(&chars.iter().collect::<String>(), RADIX)?;
+        if let Some(new_ch) = std::char::from_u32(num) {
+            Ok(new_ch)
+        } else {
+            Err(self.err(format!(
+                "Unable to convert escaped \"unicode\" integer to char: {}",
                 num
             )))
         }
@@ -717,6 +781,14 @@ mod tests {
         // Escape "raw byte".
         let mut input = "\'\\x41\'".to_owned();
         let expected = "A";
+        let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
+            .get_lit(Sym::SingleQuote)
+            .expect("Unable to parse literal.");
+        assert_eq!(expected, actual);
+
+        // Escape unicode.
+        let mut input = "\'\\u{980}\'".to_owned();
+        let expected = "ঀ";
         let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
             .get_lit(Sym::SingleQuote)
             .expect("Unable to parse literal.");
