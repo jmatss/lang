@@ -402,6 +402,15 @@ impl<'a> Visitor for TypeConverter<'a> {
                             // Skip the newly created impl blocks (if any).
                             i += skip;
                         }
+                    } else {
+                        // TODO: Don't hardcode default id.
+                        let id = BlockInfo::DEFAULT_BLOCK_ID;
+
+                        // If this is a impl block for a struct that has been
+                        // removed, remove the impl block as well.
+                        if self.analyze_context.get_struct(&struct_name, id).is_err() {
+                            self.remove_impl_instance(body, i)
+                        }
                     }
                 }
 

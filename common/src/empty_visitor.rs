@@ -2,11 +2,12 @@ use crate::{
     error::LangError,
     token::{
         ast::AstToken,
-        expr::{ArrayInit, Expr, FuncCall, StructInit, Var},
+        expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit, Var},
         op::{BinOp, UnOp},
         stmt::Stmt,
     },
     traverser::TraverseContext,
+    ty::ty::Ty,
     visitor::Visitor,
 };
 
@@ -178,6 +179,14 @@ impl Visitor for DummyVisitor {
     }
 
     fn visit_un_op(&mut self, un_op: &mut UnOp, ctx: &TraverseContext) {
+        unreachable!()
+    }
+
+    fn visit_built_in_call(&mut self, built_in_call: &mut BuiltInCall, ctx: &TraverseContext) {
+        unreachable!()
+    }
+
+    fn visit_type(&mut self, ty: &mut Ty, ctx: &TraverseContext) {
         unreachable!()
     }
 }

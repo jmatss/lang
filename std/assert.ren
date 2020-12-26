@@ -3,6 +3,19 @@ use std.math
 external function printf(format: {u8}, ...) -> i32
 external function exit(exit_code: i32)
 
+struct Assert2<T> {}
+implement Assert2
+{
+    function equals(expected: T, actual: T)
+    {
+        if expected != actual
+        {
+            printf("\nASSERT FAILED:\n")
+            exit(1)
+        }
+    }
+}
+
 struct Assert {}
 implement Assert
 {
@@ -14,19 +27,7 @@ implement Assert
             exit(1)
         }
     }
-    
-    // TODO: Implement for Assert<T>.
-    /*
-    function equals(expected: T, actual: T)
-    {
-        if expected != actual
-        {
-            printf("\nASSERT FAILED:\n")
-            exit(1)
-        }
-    }
-    */
-    
+
     function equals_i32(expected: i32, actual: i32, msg: {u8} = "")
     {
         if expected != actual

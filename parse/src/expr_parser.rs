@@ -17,7 +17,7 @@ use common::{
     },
 };
 use lex::token::{LexTokenKind, Sym};
-use log::debug;
+use log::{debug, warn};
 
 pub struct ExprParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
