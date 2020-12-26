@@ -50,10 +50,10 @@ pub struct LexTokenIter<'a> {
     offset: u64,
 
     /// Current line number (or rather last seen line number).
-    line_nr: u64,
+    line: u64,
 
     /// Current column number (or rather last seen column number).
-    column_nr: u64,
+    column: u64,
 
     /// Keeps track of the previously created file position. This can be handly
     /// ex. when finding errors. Before doing any calculations, the position is
@@ -69,14 +69,14 @@ impl<'a> LexTokenIter<'a> {
             iter: CharIter::new(content),
             file_nr,
             offset: 0,
-            line_nr: 1,
-            column_nr: 1,
+            line: 1,
+            column: 1,
             file_pos: FilePosition::default(),
         }
     }
 
     /// Gets the next LexToken from the iterator.
-    pub fn next_token(&mut self) -> CustomResult<LexToken> {
+    fn next_token(&mut self) -> CustomResult<LexToken> {
         // A radix of 10 will match all type of numbers since non decimal numbers
         // are prefixed with "0x", "0b" or "0o" (which starts with valid
         // radix 10 numbers).
@@ -85,8 +85,7 @@ impl<'a> LexTokenIter<'a> {
         // Save the current position in the file before starting to lex the token.
         // At this point, the offset can't be calculated. It will be set if the
         // token is fully lexed correctly (at the end of this function).
-        self.file_pos =
-            FilePosition::new(self.file_nr, self.offset, 0, self.line_nr, self.column_nr);
+        self.file_pos = FilePosition::new(self.file_nr, self.offset, 0, self.line, self.column);
 
         let kind = if let Some((c1, c2, c3)) = self.iter.peek_three() {
             if LexTokenIter::valid_linebreak(c1, c2) {
@@ -111,29 +110,19 @@ impl<'a> LexTokenIter<'a> {
                 } else {
                     LexTokenKind::Ident(ident)
                 }
-            } else if let Some(symbol_kind_tup) = LexToken::get_if_symbol_three_chars(c1, c2, c3) {
-                let (symbol_kind, n) = symbol_kind_tup;
-
+            } else if let Some((symbol_kind, n)) = LexToken::get_if_symbol_three_chars(c1, c2, c3) {
                 // Add special cases for string- and char literals, they start
-                // and end with " or '
-                // Also filter out comments. If a comment is found, debug print
-                // the comment and parse the next token after the comment.
+                // and end with " or '. Also handle comments here since they
+                // also start with symbols (// and /*).
                 match symbol_kind {
-                    LexTokenKind::Sym(Sym::CommentSingleLine) => {
-                        let comment = self.get_comment_single(n);
-                        debug!("Single-line comment: {:?}", comment);
-                        return self.next_token();
-                    }
-                    LexTokenKind::Sym(Sym::CommentMultiLineBegin) => {
-                        let comment = self.get_comment_multi(n);
-                        debug!("Multi-line comment: {:?}", comment);
-                        return self.next_token();
-                    }
+                    LexTokenKind::Sym(Sym::CommentSingleLine) => self.get_comment_single(n),
+                    LexTokenKind::Sym(Sym::CommentMultiLineBegin) => self.get_comment_multi(n),
                     LexTokenKind::Sym(Sym::DoubleQuote) => self.get_lit_string()?,
                     LexTokenKind::Sym(Sym::SingleQuote) => self.get_lit_char()?,
                     _ => {
                         self.iter.skip(n);
-                        self.column_nr += n as u64;
+                        self.column += n as u64;
+                        self.offset += n as u64;
                         symbol_kind
                     }
                 }
@@ -206,7 +195,7 @@ impl<'a> LexTokenIter<'a> {
             }
         }
 
-        self.column_nr += result.chars().count() as u64;
+        self.column += result.chars().count() as u64;
         self.offset += result.chars().count() as u64;
 
         if !result.is_empty() {
@@ -234,7 +223,7 @@ impl<'a> LexTokenIter<'a> {
         if radix != 10 {
             // Skip and count the prefix for numbers that isn't radix 10.
             self.iter.skip(2);
-            self.column_nr += 2;
+            self.column += 2;
             self.offset += 2;
         }
 
@@ -266,10 +255,10 @@ impl<'a> LexTokenIter<'a> {
             false
         };
 
-        self.column_nr += number.chars().count() as u64;
+        self.column += number.chars().count() as u64;
         self.offset += number.chars().count() as u64;
         if dec_column_nr {
-            self.column_nr -= 1;
+            self.column -= 1;
             self.offset -= 1;
         }
 
@@ -384,7 +373,7 @@ impl<'a> LexTokenIter<'a> {
             }
         }
 
-        self.column_nr += column_count;
+        self.column += column_count;
         self.offset += column_count;
 
         Ok(chars.iter().collect())
@@ -444,12 +433,12 @@ impl<'a> LexTokenIter<'a> {
         match self.iter.peek_two() {
             Some(('\n', _)) => {
                 self.iter.skip(1);
-                self.column_nr += 1;
+                self.column += 1;
                 self.offset += 1;
             }
             Some(('\r', Some('\n'))) => {
                 self.iter.skip(2);
-                self.column_nr += 2;
+                self.column += 2;
                 self.offset += 2;
             }
             fail => {
@@ -457,8 +446,8 @@ impl<'a> LexTokenIter<'a> {
             }
         }
 
-        self.line_nr += 1;
-        self.column_nr = 1;
+        self.line += 1;
+        self.column = 1;
 
         Ok(LexTokenKind::Sym(Sym::LineBreak))
     }
@@ -481,7 +470,7 @@ impl<'a> LexTokenIter<'a> {
             }
         }
 
-        self.column_nr += count as u64;
+        self.column += count as u64;
         self.offset += count as u64;
 
         LexTokenKind::Sym(Sym::WhiteSpace(count))
@@ -490,7 +479,7 @@ impl<'a> LexTokenIter<'a> {
     /// Lexes a single line comment and returns the comment contents.
     /// Does NOT consume the linebreak ending the comment.
     /// The n is the size of the "CommentSingleLine" symbol.
-    fn get_comment_single(&mut self, n: usize) -> String {
+    fn get_comment_single(&mut self, n: usize) -> LexTokenKind {
         let mut comment = Vec::new();
 
         // Consume the "CommentSingleLine" symbol.
@@ -507,16 +496,16 @@ impl<'a> LexTokenIter<'a> {
         }
 
         let comment_str = comment.iter().collect::<String>();
-        self.column_nr += (n + comment_str.chars().count()) as u64;
+        self.column += (n + comment_str.chars().count()) as u64;
         self.offset += (n + comment_str.chars().count()) as u64;
 
-        comment_str
+        LexTokenKind::Comment(comment_str, true)
     }
 
     /// Lexes a multi line comment until the matching "CommentMultiLineEnd" is
     /// found. Comment can be "recursive". This function returns the comment contents.
     /// The n is the size of the "CommentMultiLineBegin" symbol.
-    fn get_comment_multi(&mut self, n: usize) -> String {
+    fn get_comment_multi(&mut self, n: usize) -> LexTokenKind {
         let mut comment = Vec::new();
 
         // Consume the "CommentMultiLineBegin" symbol.
@@ -584,7 +573,7 @@ impl<'a> LexTokenIter<'a> {
             // linebreaks twice.
             if LexTokenIter::valid_linebreak(c1, c2) {
                 if !(prev_was_linebreak_rn && LexTokenIter::valid_linebreak_n(c1)) {
-                    self.line_nr += 1;
+                    self.line += 1;
                 }
                 line_column_count = 0;
                 multi_line = true;
@@ -604,18 +593,18 @@ impl<'a> LexTokenIter<'a> {
         }
 
         if multi_line {
-            self.column_nr = (line_column_count) as u64;
+            self.column = (line_column_count) as u64;
             self.offset += (n + line_column_count + break_byte_count) as u64;
         } else {
-            self.column_nr += (n + line_column_count) as u64;
+            self.column += (n + line_column_count) as u64;
             self.offset += (n + line_column_count) as u64;
         }
 
-        comment.iter().collect()
+        LexTokenKind::Comment(comment.iter().collect(), false)
     }
 
     /// Used when returing errors to include current line/column number.
-    pub fn err(&self, msg: String) -> LangError {
+    fn err(&self, msg: String) -> LangError {
         LangError::new_backtrace(
             msg,
             LexError {

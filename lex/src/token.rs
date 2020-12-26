@@ -27,6 +27,7 @@ pub enum LexTokenKind {
     Lit(Lit),
     Kw(Kw),
     Sym(Sym),
+    Comment(String, bool), // (true => single line), (false => multi line)
     EOF,
 }
 

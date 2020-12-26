@@ -3,32 +3,41 @@ use common::iter::TokenIter;
 /// Wrapper around a `TokenIter<u8>` which allows one to work with chars without
 /// having copy the u8 array into chars before use. This iter lets one work
 /// directly with the u8 array.
-pub struct CharIter<'a> {
+pub(crate) struct CharIter<'a> {
     iter: TokenIter<'a, u8>,
+
+    /// Temporary buffer used when looking at UTF-8 encoded characters. This
+    /// buffer will be used to store possible characters when trying to figure
+    /// out the correct "size" for the characters.
+    buf: [u8; 4],
 }
 
 impl<'a> CharIter<'a> {
-    pub fn new(content: &'a mut [u8]) -> Self {
+    pub(crate) fn new(content: &'a mut [u8]) -> Self {
         Self {
             iter: TokenIter::new(content),
+            buf: [0; 4],
         }
     }
 
     /// Gets the next char from the iterator.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<char> {
-        let mut n = 0;
-        let byte_size = 4;
-
+    pub(crate) fn next(&mut self) -> Option<char> {
         // UTF-8 characters can contain 4 bytes. This loop starts by looking at
         // a single byte and for every iteration increases the amount of bytes
         // that it tries to convert to a character.
-        for i in 0..4 {
+        for i in 0..self.buf.len() {
             if let Some(b) = self.iter.peek_at_n(i) {
-                n <<= byte_size;
-                n |= b as u32;
+                // SAFETY: The loop index `i` is tied to the size of `self.buf`,
+                //         so `i` will never be out of bounds.
+                unsafe { *self.buf.get_unchecked_mut(i) = b };
 
-                if let Some(c) = std::char::from_u32(n) {
+                let slice = &self.buf[0..=i];
+                if let Some(c) = std::str::from_utf8(slice)
+                    .ok()
+                    .map(|s| s.chars().next())
+                    .flatten()
+                {
                     self.iter.skip(i + 1);
                     return Some(c);
                 }
@@ -40,17 +49,8 @@ impl<'a> CharIter<'a> {
         None
     }
 
-    /// Get the next two characters from the iterator.
-    pub fn next_two(&mut self) -> Option<(char, Option<char>)> {
-        if let Some(first) = self.next() {
-            Some((first, self.next()))
-        } else {
-            None
-        }
-    }
-
     /// Peeks and clones the next upcoming items in the iterator.
-    pub fn peek(&mut self) -> Option<char> {
+    pub(crate) fn peek(&mut self) -> Option<char> {
         let mark = self.iter.mark();
         if let Some(res) = self.next() {
             self.iter.rewind_to_mark(mark);
@@ -61,7 +61,7 @@ impl<'a> CharIter<'a> {
     }
 
     /// Peeks and clones the two upcoming items in the iterator.
-    pub fn peek_two(&mut self) -> Option<(char, Option<char>)> {
+    pub(crate) fn peek_two(&mut self) -> Option<(char, Option<char>)> {
         let mark = self.iter.mark();
         if let Some(c1) = self.next() {
             let c2 = self.next();
@@ -73,7 +73,7 @@ impl<'a> CharIter<'a> {
     }
 
     /// Peeks and clones the three upcoming items in the iterator.
-    pub fn peek_three(&mut self) -> Option<(char, Option<char>, Option<char>)> {
+    pub(crate) fn peek_three(&mut self) -> Option<(char, Option<char>, Option<char>)> {
         let mark = self.iter.mark();
         if let Some(c1) = self.next() {
             let c2 = self.next();
@@ -86,7 +86,7 @@ impl<'a> CharIter<'a> {
     }
 
     /// Skips the next `n` characters.
-    pub fn skip(&mut self, n: usize) {
+    pub(crate) fn skip(&mut self, n: usize) {
         for _ in 0..n {
             self.next();
         }
@@ -94,25 +94,13 @@ impl<'a> CharIter<'a> {
 
     /// Rewinds the iterator to the previous character. This function can be used
     /// for an arbitrary amount of rewinds.
-    pub fn rewind(&mut self) -> bool {
+    pub(crate) fn rewind(&mut self) -> bool {
         for i in (1..=4).rev() {
             if self.is_valid_char_of_size(i) {
                 return self.iter.rewind_n(i);
             }
         }
         false
-    }
-
-    /// Puts back a item into the iterator.
-    /// If the returned bool is false, this operation tried to rewind to a
-    /// position before the actual iterator (pos < 0).
-    pub fn rewind_n(&mut self, n: usize) -> bool {
-        for _ in 0..n {
-            if !self.rewind() {
-                return false;
-            }
-        }
-        true
     }
 
     /// Checks if the previos character is a valid char of byte length `n`.
@@ -130,5 +118,184 @@ impl<'a> CharIter<'a> {
 
         self.iter.rewind_to_mark(mark);
         is_valid
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_next_char_for_valid_chars() {
+        // ARRANGE
+        let chars = [('a', 1), ('å', 2), ('ঀ', 3), ('𐊀', 4)];
+        let mut buf = [0; 4];
+
+        for (expected_char, expected_size) in chars.iter() {
+            expected_char.encode_utf8(&mut buf);
+
+            // ACT
+            let actual_char = CharIter::new(&mut buf).next().unwrap();
+
+            // ASSERT
+            assert_eq!(*expected_char, actual_char);
+            assert_eq!(*expected_size, actual_char.len_utf8());
+        }
+    }
+
+    #[test]
+    fn test_next_char_for_invalid_chars() {
+        let mut one_byte = [0x80];
+        let mut two_byte = [0xe0, 0xaa];
+        let mut three_byte = [0xf0, 0xcc, 0xcc];
+        let mut four_byte = [0xf5, 0xff, 0xff, 0xff];
+
+        assert!(CharIter::new(&mut one_byte).next().is_none());
+        assert!(CharIter::new(&mut two_byte).next().is_none());
+        assert!(CharIter::new(&mut three_byte).next().is_none());
+        assert!(CharIter::new(&mut four_byte).next().is_none());
+    }
+
+    #[test]
+    fn test_next_char_for_multiple_chars() {
+        // ARRANGE
+        let expected_first = Some('a');
+        let expected_second = Some('b');
+        let mut chars = "ab".to_string();
+
+        // ACT
+        let mut iter = CharIter::new(unsafe { chars.as_bytes_mut() });
+        let actual_first = iter.next();
+        let actual_second = iter.next();
+
+        // ASSERT
+        assert_eq!(expected_first, actual_first);
+        assert_eq!(expected_second, actual_second);
+    }
+
+    #[test]
+    fn test_peek_does_not_swallow_char() {
+        // ARRANGE
+        let expected = Some('a');
+        let mut chars = "a".to_string();
+
+        // ACT
+        let mut iter = CharIter::new(unsafe { chars.as_bytes_mut() });
+        let actual_peek = iter.peek();
+        let actual_next = iter.next();
+
+        // ASSERT
+        assert_eq!(expected, actual_peek);
+        assert_eq!(expected, actual_next);
+    }
+
+    #[test]
+    fn test_peek_two_for_valid_chars() {
+        // ARRANGE
+        let expected = Some(('a', Some('b')));
+        let mut chars = "ab".to_string();
+
+        // ACT
+        let mut iter = CharIter::new(unsafe { chars.as_bytes_mut() });
+        let actual = iter.peek_two();
+
+        // ASSERT
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_peek_three_for_valid_chars() {
+        // ARRANGE
+        let expected = Some(('a', Some('b'), Some('c')));
+        let mut chars = "abc".to_string();
+
+        // ACT
+        let mut iter = CharIter::new(unsafe { chars.as_bytes_mut() });
+        let actual = iter.peek_three();
+
+        // ASSERT
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_skip_for_valid_chars() {
+        // ARRANGE
+        let values = [(Some('b'), 1), (Some('c'), 2)];
+        let mut chars = "abc".to_string();
+
+        for (expected, skip_n) in values.iter() {
+            let mut iter = CharIter::new(unsafe { chars.as_bytes_mut() });
+
+            // ACT
+            iter.skip(*skip_n);
+            let actual = iter.next();
+
+            // ASSERT
+            assert_eq!(expected, &actual);
+        }
+    }
+
+    #[test]
+    fn test_rewind_for_valid_chars() {
+        // ARRANGE
+        let chars = ['a', 'å', 'ঀ', '𐊀'];
+        let mut buf = [0; 4];
+
+        for expected_char in chars.iter() {
+            expected_char.encode_utf8(&mut buf);
+
+            let mut iter = CharIter::new(&mut buf);
+            iter.next();
+
+            // ACT
+            let rewind_success = iter.rewind();
+            let actual_char = iter.next().unwrap();
+
+            // ASSERT
+            assert!(rewind_success);
+            assert_eq!(*expected_char, actual_char);
+        }
+    }
+
+    #[test]
+    fn test_is_valid_char_of_size_for_valid_chars() {
+        // ARRANGE
+        let chars = [('a', 1), ('å', 2), ('ঀ', 3), ('𐊀', 4)];
+        let mut buf = [0; 4];
+
+        for (expected_char, expected_size) in chars.iter() {
+            expected_char.encode_utf8(&mut buf);
+
+            let mut iter = CharIter::new(&mut buf);
+            iter.next();
+
+            // ACT
+            let is_valid = iter.is_valid_char_of_size(*expected_size);
+
+            // ASSERT
+            assert!(is_valid);
+        }
+    }
+
+    #[test]
+    fn test_is_valid_char_of_size_for_invalid_size() {
+        // ARRANGE
+        let chars = [('a', 1), ('å', 2), ('ঀ', 3), ('𐊀', 4)];
+        let mut buf = [0; 4];
+
+        for (expected_char, expected_size) in chars.iter() {
+            expected_char.encode_utf8(&mut buf);
+
+            let mut iter = CharIter::new(&mut buf);
+            iter.next();
+
+            // ACT
+            // Increment the size sent to `is_valid_char_of_size()` which should
+            // make the function call fail
+            let is_valid = iter.is_valid_char_of_size(*expected_size + 1);
+
+            // ASSERT
+            assert!(!is_valid);
+        }
     }
 }
