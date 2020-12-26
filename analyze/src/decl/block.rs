@@ -134,7 +134,9 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
 
                     AstToken::Stmt(ref stmt) => self.analyze_stmt(stmt, &mut block_info),
 
-                    AstToken::Empty | AstToken::Expr(_) | AstToken::EOF => (),
+                    AstToken::Empty | AstToken::Comment(..) | AstToken::Expr(_) | AstToken::EOF => {
+                        // Do nothing.
+                    }
                 }
             }
 

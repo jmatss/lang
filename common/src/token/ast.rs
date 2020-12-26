@@ -7,7 +7,10 @@ pub enum AstToken {
     Expr(Expr),
     Stmt(Stmt),
     Block(BlockHeader, BlockId, Vec<AstToken>),
-    Empty, // Will be set for removed tokens, should be ignored when visited.
+    /// (true => single line), (false => multi line)
+    Comment(String, bool, FilePosition),
+    /// Will be set for removed tokens, should be ignored when visited.
+    Empty,
     EOF,
 }
 
@@ -19,6 +22,7 @@ impl AstToken {
         match self {
             AstToken::Expr(expr) => expr.file_pos(),
             AstToken::Stmt(stmt) => stmt.file_pos(),
+            AstToken::Comment(.., file_pos) => Some(file_pos),
 
             // TODO: Implement FilePosition for Blocks. The whole file pos logic
             //       will probably be completly reworked later on, so implement

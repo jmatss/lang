@@ -251,7 +251,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             AstToken::Expr(ref mut expr) => {
                 self.compile_expr(expr, ExprTy::RValue)?;
             }
-            AstToken::Empty | AstToken::EOF => (),
+            AstToken::Empty | AstToken::Comment(..) | AstToken::EOF => (),
         }
         Ok(())
     }

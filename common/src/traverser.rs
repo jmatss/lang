@@ -5,7 +5,7 @@ use crate::{
         ast::AstToken,
         block::BlockHeader,
         expr::Expr,
-        op::{AssignOperator, Op, UnOperator},
+        op::{Op, UnOperator},
         stmt::Stmt,
     },
     visitor::Visitor,
@@ -105,6 +105,7 @@ impl<'a> AstTraverser<'a> {
             }
             AstToken::Expr(expr) => self.traverse_expr(expr),
             AstToken::Stmt(stmt) => self.traverse_stmt(stmt),
+            AstToken::Comment(msg, ..) => debug!("Visiting Comment block: {}", msg),
             AstToken::Empty => debug!("Visiting Empty block"),
             AstToken::EOF => {
                 debug!("Visiting EOF");

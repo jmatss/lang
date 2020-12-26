@@ -245,6 +245,10 @@ impl<'a> ParseTokenIter<'a> {
                     self.next_block(BlockHeader::Anonymous)?
                 }
 
+                LexTokenKind::Comment(msg, is_single) => {
+                    AstToken::Comment(msg, is_single, self.file_pos.to_owned())
+                }
+
                 LexTokenKind::Sym(Sym::Increment) => {
                     let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
                     AstToken::Stmt(Stmt::Increment(expr, Some(self.file_pos.to_owned())))
