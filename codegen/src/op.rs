@@ -16,7 +16,7 @@ use inkwell::{
     values::{AnyValueEnum, BasicValueEnum},
     FloatPredicate, IntPredicate,
 };
-use log::{debug, warn};
+use log::debug;
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_op(
@@ -111,7 +111,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | BinOperator::GreaterThan
             | BinOperator::LessThanOrEquals
             | BinOperator::GreaterThanOrEquals => self.compile_bin_op_compare(
-                ret_type,
+                bin_op.ret_type.as_ref().map_or(false, |ty| ty.is_signed()),
                 bin_op.is_const,
                 &bin_op.operator,
                 left,
@@ -127,12 +127,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BinOperator::Multiplication => {
                 self.compile_bin_op_multiplication(ret_type, bin_op.is_const, left, right)?
             }
-            BinOperator::Division => {
-                self.compile_bin_op_division(ret_type, bin_op.is_const, left, right)?
-            }
-            BinOperator::Modulus => {
-                self.compile_bin_op_modulus(ret_type, bin_op.is_const, left, right)?
-            }
+            BinOperator::Division => self.compile_bin_op_division(
+                ret_type,
+                bin_op.ret_type.as_ref().map_or(false, |ty| ty.is_signed()),
+                bin_op.is_const,
+                left,
+                right,
+            )?,
+            BinOperator::Modulus => self.compile_bin_op_modulus(
+                ret_type,
+                bin_op.ret_type.as_ref().map_or(false, |ty| ty.is_signed()),
+                bin_op.is_const,
+                left,
+                right,
+            )?,
             BinOperator::BitAnd => {
                 self.compile_bin_op_bit_and(ret_type, bin_op.is_const, left, right)?
             }
@@ -145,9 +153,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BinOperator::ShiftLeft => {
                 self.compile_bin_op_shift_left(ret_type, bin_op.is_const, left, right)?
             }
-            BinOperator::ShiftRight => {
-                self.compile_bin_op_shift_right(ret_type, bin_op.is_const, left, right)?
-            }
+            BinOperator::ShiftRight => self.compile_bin_op_shift_right(
+                ret_type,
+                bin_op.ret_type.as_ref().map_or(false, |ty| ty.is_signed()),
+                bin_op.is_const,
+                left,
+                right,
+            )?,
             BinOperator::BoolAnd => {
                 panic!("Unexpected BoolAnd to late in func.");
             }
@@ -378,7 +390,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_bin_op_compare(
         &mut self,
-        ret_type: AnyTypeEnum<'ctx>,
+        is_signed: bool,
         is_const: bool,
         op: &BinOperator,
         lhs: BasicValueEnum<'ctx>,
@@ -437,10 +449,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let predicate = match op {
                     BinOperator::Equals => IntPredicate::EQ,
                     BinOperator::NotEquals => IntPredicate::NE,
-                    BinOperator::LessThan => IntPredicate::SLT,
-                    BinOperator::GreaterThan => IntPredicate::SGT,
-                    BinOperator::LessThanOrEquals => IntPredicate::SLE,
-                    BinOperator::GreaterThanOrEquals => IntPredicate::SGE,
+                    BinOperator::LessThan if is_signed => IntPredicate::SLT,
+                    BinOperator::LessThan if !is_signed => IntPredicate::ULT,
+                    BinOperator::GreaterThan if is_signed => IntPredicate::SGT,
+                    BinOperator::GreaterThan if !is_signed => IntPredicate::UGT,
+                    BinOperator::LessThanOrEquals if is_signed => IntPredicate::SLE,
+                    BinOperator::LessThanOrEquals if !is_signed => IntPredicate::ULE,
+                    BinOperator::GreaterThanOrEquals if is_signed => IntPredicate::SGE,
+                    BinOperator::GreaterThanOrEquals if !is_signed => IntPredicate::UGE,
                     _ => return Err(self.err(format!("Invalid operator in int compare: {:?}", op))),
                 };
 
@@ -464,10 +480,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let predicate = match op {
                     BinOperator::Equals => IntPredicate::EQ,
                     BinOperator::NotEquals => IntPredicate::NE,
-                    BinOperator::LessThan => IntPredicate::SLT,
-                    BinOperator::GreaterThan => IntPredicate::SGT,
-                    BinOperator::LessThanOrEquals => IntPredicate::SLE,
-                    BinOperator::GreaterThanOrEquals => IntPredicate::SGE,
+                    BinOperator::LessThan if is_signed => IntPredicate::SLT,
+                    BinOperator::LessThan if !is_signed => IntPredicate::ULT,
+                    BinOperator::GreaterThan if is_signed => IntPredicate::SGT,
+                    BinOperator::GreaterThan if !is_signed => IntPredicate::UGT,
+                    BinOperator::LessThanOrEquals if is_signed => IntPredicate::SLE,
+                    BinOperator::LessThanOrEquals if !is_signed => IntPredicate::ULE,
+                    BinOperator::GreaterThanOrEquals if is_signed => IntPredicate::SGE,
+                    BinOperator::GreaterThanOrEquals if !is_signed => IntPredicate::UGE,
                     _ => return Err(self.err(format!("Invalid operator in ptr compare: {:?}", op))),
                 };
 
@@ -654,6 +674,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_bin_op_division(
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
+        is_signed: bool,
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
@@ -675,13 +696,25 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
             AnyTypeEnum::IntType(_) => {
-                if is_const {
+                if is_const && is_signed {
                     left.into_int_value()
                         .const_signed_div(right.into_int_value())
                         .into()
-                } else {
+                } else if is_const {
+                    left.into_int_value()
+                        .const_unsigned_div(right.into_int_value())
+                        .into()
+                } else if is_signed {
                     self.builder
                         .build_int_signed_div(
+                            left.into_int_value(),
+                            right.into_int_value(),
+                            "div.int",
+                        )
+                        .into()
+                } else {
+                    self.builder
+                        .build_int_unsigned_div(
                             left.into_int_value(),
                             right.into_int_value(),
                             "div.int",
@@ -706,6 +739,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_bin_op_modulus(
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
+        is_signed: bool,
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
@@ -727,13 +761,25 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
             AnyTypeEnum::IntType(_) => {
-                if is_const {
+                if is_const && is_signed {
                     left.into_int_value()
                         .const_signed_remainder(right.into_int_value())
                         .into()
-                } else {
+                } else if is_const {
+                    left.into_int_value()
+                        .const_unsigned_remainder(right.into_int_value())
+                        .into()
+                } else if is_signed {
                     self.builder
                         .build_int_signed_rem(
+                            left.into_int_value(),
+                            right.into_int_value(),
+                            "mod.int",
+                        )
+                        .into()
+                } else {
+                    self.builder
+                        .build_int_unsigned_rem(
                             left.into_int_value(),
                             right.into_int_value(),
                             "mod.int",
@@ -894,6 +940,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_bin_op_shift_right(
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
+        is_signed: bool,
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
@@ -907,12 +954,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         .const_ashr(right.into_int_value())
                         .into()
                 } else {
-                    let sign_extend = true;
                     self.builder
                         .build_right_shift(
                             left.into_int_value(),
                             right.into_int_value(),
-                            sign_extend,
+                            is_signed, // == sign_extend
                             "rshift",
                         )
                         .into()
@@ -1393,6 +1439,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 | AnyValueEnum::FunctionValue(_)
                 | AnyValueEnum::InstructionValue(_) => false,
             };
+
             if !is_const {
                 return false;
             }

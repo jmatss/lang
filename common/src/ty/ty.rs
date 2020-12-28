@@ -415,6 +415,18 @@ impl Ty {
         }
     }
 
+    /// Checks if the given type is signed. This returns true if this is a signed
+    /// integer, returns false for every other type (includingn non-int types).
+    pub fn is_signed(&self) -> bool {
+        match self {
+            Ty::CompoundType(inner_ty, ..) => match inner_ty {
+                InnerTy::I8 | InnerTy::I16 | InnerTy::I32 | InnerTy::I64 | InnerTy::I128 => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     /// Checks if the Type `ty` can be found in self.
     fn contains_ty(&self, ty: &Ty) -> bool {
         match (self, ty) {
