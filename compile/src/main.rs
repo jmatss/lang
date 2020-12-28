@@ -172,14 +172,12 @@ fn main() -> CustomResult<()> {
         }
     }
     println!("Generating complete.");
-    module.verify()?;
-
-    compiler::compile(target_machine, &module, output_file, optimize)?;
-
     if log_enabled!(Level::Debug) {
         module.print_to_stderr();
-        println!("Module after optimization.");
     }
+
+    module.verify()?;
+    compiler::compile(target_machine, &module, output_file, optimize)?;
 
     println!("Compiled to: {}", output_file);
 

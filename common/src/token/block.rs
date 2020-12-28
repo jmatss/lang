@@ -30,59 +30,61 @@ pub enum BlockHeader {
     /// A anonymous block "{ ... }" that can be used to limit the scope.
     Anonymous,
 
-    // Any `IfCase` blocks should be grouped together under one `If`.
-    // A `Ifcase` is a if/elif/else with its corresponding eval expression.
-    //
-    // Example 1:
-    //   if(x) {} else {}
-    // =>
-    //   Block(If, [ Block(IfCase(x), ...), Block(IfCase(_), ...) ])
-    //
-    // Example 2:
-    //   if (x) {
-    //     if (y) {
-    //       ...
-    //     }
-    //   } else (z) {
-    //     ...
-    //   } else {
-    //     ...
-    //   }
-    // =>
-    //   Block(
-    //     header: If,
-    //     body: [
-    //        Block(
-    //          header: IfCase(x),
-    //          body: [
-    //            Block(
-    //              header: If,
-    //              body: [
-    //                Block(
-    //                  header: IfCase(y),
-    //                  body: [ ... ]
-    //                )
-    //              ]
-    //            )
-    //          ]
-    //        ),
-    //        Block(
-    //          header: IfCase(z),
-    //          body: [ ... ]
-    //        ),
-    //        Block(
-    //          header: IfCase(_),
-    //          body: [ ... ]
-    //        )
-    //     ]
-    //   )
+    /// Any `IfCase` blocks should be grouped together under one `If`.
+    /// A `Ifcase` is a if/elif/else with its corresponding eval expression.
+    ///
+    /// Example 1:
+    ///   if(x) {} else {}
+    /// =>
+    ///   Block(If, [ Block(IfCase(x), ...), Block(IfCase(_), ...) ])
+    ///
+    /// Example 2:
+    ///   if (x) {
+    ///     if (y) {
+    ///       ...
+    ///     }
+    ///   } else (z) {
+    ///     ...
+    ///   } else {
+    ///     ...
+    ///   }
+    /// =>
+    ///   Block(
+    ///     header: If,
+    ///     body: [
+    ///        Block(
+    ///          header: IfCase(x),
+    ///          body: [
+    ///            Block(
+    ///              header: If,
+    ///              body: [
+    ///                Block(
+    ///                  header: IfCase(y),
+    ///                  body: [ ... ]
+    ///                )
+    ///              ]
+    ///            )
+    ///          ]
+    ///        ),
+    ///        Block(
+    ///          header: IfCase(z),
+    ///          body: [ ... ]
+    ///        ),
+    ///        Block(
+    ///          header: IfCase(_),
+    ///          body: [ ... ]
+    ///        )
+    ///     ]
+    ///   )
     If,
     IfCase(Option<Expr>),
 
-    // Any `MatchCase` blocks should be grouped together under one `Match`.
-    // See the example above for `If`, should be structured ~similarly.
+    /// Any `MatchCase` blocks should be grouped together under one `Match`.
+    /// See the example above for `If`, should be structured ~similarly.
     Match(Expr),
-    MatchCase(Expr),
+    /// The optional is used to indicate if this is the default block or not.
+    /// If it is set to None, this is the default block.
+    MatchCase(Option<Expr>),
 
     For(Var, Expr),
     // TODO: Maybe merge while and loop (?)

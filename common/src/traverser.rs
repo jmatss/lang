@@ -245,8 +245,10 @@ impl<'a> AstTraverser<'a> {
                         v.visit_match(ast_token, &self.traverse_context);
                     }
                 }
-                BlockHeader::MatchCase(expr) => {
-                    self.traverse_expr(expr);
+                BlockHeader::MatchCase(expr_opt) => {
+                    if let Some(expr) = expr_opt {
+                        self.traverse_expr(expr);
+                    }
                     debug!("Visiting match case");
                     for v in self.visitors.iter_mut() {
                         v.visit_match_case(ast_token, &self.traverse_context);

@@ -1138,16 +1138,18 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     }
                 };
 
-                let case_expr_ty = match match_case_expr.get_expr_type() {
-                    Ok(expr_ty) => expr_ty,
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
-                };
+                if let Some(match_case_expr) = match_case_expr {
+                    let case_expr_ty = match match_case_expr.get_expr_type() {
+                        Ok(expr_ty) => expr_ty,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
 
-                self.type_context
-                    .insert_constraint(match_expr_ty, case_expr_ty);
+                    self.type_context
+                        .insert_constraint(match_expr_ty, case_expr_ty);
+                }
             } else {
                 let err = self
                     .type_context

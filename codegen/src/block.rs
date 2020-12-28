@@ -102,6 +102,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BlockHeader::Anonymous => {
                 self.compile_anon(id, body)?;
             }
+
             BlockHeader::If => {
                 self.compile_if(id, body)?;
             }
@@ -109,11 +110,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err("Unexpected IfCase in compile_block".into()));
             }
 
+            BlockHeader::Match(expr) => self.compile_match(expr, id, body)?,
+            BlockHeader::MatchCase(_) => {
+                return Err(self.err("Unexpected MatchCase in compile_block".into()));
+            }
+
             BlockHeader::Struct(_) | BlockHeader::Enum(_) | BlockHeader::Interface(_) => {
                 // All structs, enums and interfaces already compiled at this stage.
             }
-            //BlockHeader::Match(expr) => self.compile_match(expr),
-            //BlockHeader::MatchCase(expr) => self.compile_match_case(expr),
 
             //BlockHeader::For(var, expr) => self.compile_for(var, expr),
             BlockHeader::While(expr_opt) => self.compile_while(expr_opt, id, body)?,
@@ -385,11 +389,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for (index, mut if_case) in body.iter_mut().enumerate() {
             self.cur_block_id = id;
 
-            if let AstToken::Block(
-                BlockHeader::IfCase(ref mut expr_opt),
-                inner_id,
-                ref mut inner_body,
-            ) = &mut if_case
+            if let AstToken::Block(BlockHeader::IfCase(expr_opt), inner_id, inner_body) =
+                &mut if_case
             {
                 self.compile_if_case(
                     expr_opt,
@@ -470,6 +471,154 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         } else {
             Err(self.err("Current basic block None".into()))
         }
+    }
+
+    /// All the "ParseToken"s in the body should be "MatchCase"s.
+    fn compile_match(
+        &mut self,
+        expr: &mut Expr,
+        id: BlockId,
+        body: &mut [AstToken],
+    ) -> CustomResult<()> {
+        let start_block = self
+            .cur_basic_block
+            .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
+
+        let mut cases = Vec::default();
+        let mut blocks_without_branch = Vec::default();
+
+        // Iterate through all "match cases" in this match-statement and compile them.
+        // This will NOT compile the default block. It is done in iteration after
+        // this to ensure that the default block is generated after all other block
+        // to keep the sequential flow.
+        for mut match_case in body.iter_mut() {
+            self.cur_block_id = id;
+
+            if let AstToken::Block(BlockHeader::MatchCase(Some(case_expr)), _, inner_body) =
+                &mut match_case
+            {
+                let cur_block = self.cur_basic_block.unwrap();
+                let match_case_block = self
+                    .context
+                    .insert_basic_block_after(cur_block, "match.case");
+
+                let value = self.compile_expr(case_expr, ExprTy::RValue)?;
+                if !value.is_int_value() {
+                    return Err(self.err(format!(
+                        "Expression in match case not int value: {:#?}",
+                        match_case
+                    )));
+                }
+                let value = value.into_int_value();
+
+                // Compile all tokens inside this match-case.
+                self.cur_basic_block = Some(match_case_block);
+                self.builder.position_at_end(match_case_block);
+                for token in inner_body {
+                    self.cur_block_id = id;
+                    self.compile(token)?;
+                }
+
+                // If the body of the match case doesn't have a ending branch
+                // instruction, a "ending" branch needs to be added. Store the
+                // current block in `blocks_without_branch`. After this for-loop
+                // is done, all the blocks in that vector will be given a branch
+                // to the merge block. The merge block will be created after this
+                // loop.
+                let cur_block = self.cur_basic_block.unwrap();
+                if cur_block.get_terminator().is_none() {
+                    blocks_without_branch.push(cur_block);
+                }
+
+                cases.push((value, match_case_block));
+            } else if let AstToken::Block(BlockHeader::MatchCase(None), ..) = &match_case {
+                // Default block will be handled in logic below. Ignore for now.
+            } else {
+                return Err(self.err("Token in \"Match\" block wasn't a \"MatchCase\".".into()));
+            }
+        }
+
+        // The default block that control flow will be branched to if no cases matches.
+        let mut default_block_opt = None;
+
+        // TODO: Fix the "unreachable" default block. Is not always unreachable.
+        // Iterate through the match cases one more time to find the default block.
+        // Also ensure that it only exists a single default block. If no default
+        // block exists, create a "unreachable" instruction. This might not be
+        // correct atm since there might be times when all values aren't covered
+        // by the match cases.
+        for mut match_case in body.iter_mut() {
+            self.cur_block_id = id;
+
+            if let AstToken::Block(BlockHeader::MatchCase(None), _, inner_body) = &mut match_case {
+                if default_block_opt.is_some() {
+                    return Err(self.err("More than one default block found in match.".into()));
+                }
+
+                let cur_block = self.cur_basic_block.unwrap();
+                default_block_opt = Some(
+                    self.context
+                        .insert_basic_block_after(cur_block, "match.default"),
+                );
+
+                // Compile all tokens inside this default match-case.
+                self.cur_basic_block = Some(default_block_opt.unwrap());
+                self.builder.position_at_end(default_block_opt.unwrap());
+                for token in inner_body {
+                    self.cur_block_id = id;
+                    self.compile(token)?;
+                }
+
+                let cur_block = self.cur_basic_block.unwrap();
+                if cur_block.get_terminator().is_none() {
+                    blocks_without_branch.push(cur_block);
+                }
+            }
+        }
+
+        // If None: No default block found, create a new default block that
+        // contains a single unreachable instruction.
+        let default_block = if let Some(default_block) = default_block_opt {
+            default_block
+        } else {
+            let default_block = self
+                .context
+                .insert_basic_block_after(self.cur_basic_block.unwrap(), "match.default");
+
+            self.builder.position_at_end(default_block);
+            self.builder.build_unreachable();
+
+            default_block
+        };
+
+        self.cur_basic_block = Some(default_block);
+
+        // The merge block that all cases will branch to after the switch-statement
+        // if they don't branch away themselves.
+        // This will become the "current basic block" when this function returns.
+        let merge_block = self
+            .context
+            .insert_basic_block_after(self.cur_basic_block.unwrap(), "switch.merge");
+
+        for block_without_branch in blocks_without_branch {
+            self.builder.position_at_end(block_without_branch);
+            self.builder.build_unconditional_branch(merge_block);
+        }
+
+        self.builder.position_at_end(start_block);
+
+        let value = self.compile_expr(expr, ExprTy::RValue)?;
+        if !value.is_int_value() {
+            return Err(self.err(format!("Expression in match not int value: {:#?}", expr)));
+        }
+        let value = value.into_int_value();
+
+        self.builder.build_switch(value, default_block, &cases);
+
+        self.cur_basic_block = Some(merge_block);
+        self.builder.position_at_end(merge_block);
+
+        Ok(())
     }
 
     pub(super) fn compile_struct(&mut self, struct_: &Struct) -> CustomResult<()> {

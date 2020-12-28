@@ -78,7 +78,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             Ok(None)
         } else {
             debug!("Outputs: {:#?}", &expr_parser.outputs);
-            expr_parser.rev_polish_to_expr().map(|x| Some(x))
+            expr_parser.rev_polish_to_expr().map(Some)
         }
     }
 

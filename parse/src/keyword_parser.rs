@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    parser::{ParseTokenIter, DEFAULT_STOP_CONDS},
+    parser::{ParseTokenIter, DEFAULT_STOP_CONDS, KEYWORD_STOP_CONDS},
     token::get_modifier_token,
     type_parser::TypeParser,
 };
@@ -100,7 +100,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 if let LexTokenKind::Sym(Sym::CurlyBracketBegin) = lex_token.kind {
                     None
                 } else {
-                    self.iter.parse_expr_allow_empty(&DEFAULT_STOP_CONDS)?
+                    self.iter.parse_expr_allow_empty(&KEYWORD_STOP_CONDS)?
                 }
             } else {
                 return Err(self
@@ -137,31 +137,63 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let mut match_cases = Vec::new();
         let block_id = self.iter.reserve_block_id();
 
-        let match_expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
+        let match_expr = self.iter.parse_expr(&KEYWORD_STOP_CONDS)?;
+
+        // Ensure that the next token is a CurlyBracketBegin.
+        // If it isn't, something has gone wrong, return error.
+        let lex_token = self.iter.next_skip_space_line();
+        if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) = lex_token.as_ref().map(|t| &t.kind)
+        {
+        } else {
+            return Err(self.iter.err(format!(
+                "Expected CurlyBracketBegin after match expr, was: {:#?}",
+                lex_token
+            )));
+        }
 
         loop {
-            let case_expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
-            let header = BlockHeader::MatchCase(case_expr);
-
-            let match_case = self.iter.next_block(header)?;
-            match_cases.push(match_case);
-
             // See if the next token is a "CurlyBracketEnd" one can assume that
             // it is the curly bracket matching the outer "match" statement.
             // Break in that case, otherwise keep parsing cases.
             if let Some(lex_token) = self.iter.peek_skip_space_line() {
-                if let LexTokenKind::Sym(Sym::CurlyBracketEnd) = lex_token.kind {
-                    self.iter.next_skip_space_line(); // Skip the "CurlyBracketEnd".
-                    break;
-                }
+                let case_expr = match lex_token.kind {
+                    LexTokenKind::Sym(Sym::CurlyBracketEnd) => {
+                        self.iter.next_skip_space_line(); // Skip the "CurlyBracketEnd".
+                        break;
+                    }
+
+                    // If this is the default block, return None as the expression.
+                    // That will be the indication that this is the default block.
+                    LexTokenKind::Ident(ref ident) if ident == "default" => {
+                        self.iter.next_skip_space_line(); // Skip the "ident".
+                        None
+                    }
+
+                    // A regular match block.
+                    _ => Some(self.iter.parse_expr(&KEYWORD_STOP_CONDS)?),
+                };
+
+                let header = BlockHeader::MatchCase(case_expr);
+                let match_case = self.iter.next_block(header)?;
+
+                match_cases.push(match_case);
+            } else {
+                return Err(self.iter.err("Got None when parsing match cases.".into()));
             }
         }
 
-        Ok(AstToken::Block(
-            BlockHeader::Match(match_expr),
-            block_id,
-            match_cases,
-        ))
+        if !match_cases.is_empty() {
+            Ok(AstToken::Block(
+                BlockHeader::Match(match_expr),
+                block_id,
+                match_cases,
+            ))
+        } else {
+            Err(self.iter.err(format!(
+                "Parsed match block with no cases. Match expr: {:#?}",
+                match_expr
+            )))
+        }
     }
 
     /// Parses a for loop block.
@@ -203,7 +235,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 .err("Received None when looking after \"for\"s In symbol.".into()));
         }
 
-        let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
+        let expr = self.iter.parse_expr(&KEYWORD_STOP_CONDS)?;
 
         let header = BlockHeader::For(var, expr);
         self.iter.next_block(header)
@@ -221,7 +253,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             if let LexTokenKind::Sym(Sym::CurlyBracketBegin) = lex_token.kind {
                 None
             } else {
-                Some(self.iter.parse_expr(&DEFAULT_STOP_CONDS)?)
+                Some(self.iter.parse_expr(&KEYWORD_STOP_CONDS)?)
             }
         } else {
             return Err(self

@@ -1277,9 +1277,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             })
     }
 
-    /// This function accessed the member at index `idx_opt` for the enum in
-    /// expression `expr`. The returned value will be a pointer to the allocated
-    /// member, so the caller would have to do a load if they want the actual value.
+    /// This function "creates" a instance of a member of a specific enum.
+    /// This instance will be a const value.
     fn compile_un_op_enum_access(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
         let (member_name, block_id) =
             if let UnOperator::EnumAccess(member_name, block_id) = &un_op.operator {
@@ -1331,15 +1330,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             enum_name, member_name, basic_value
         );
 
-        let enum_ptr = self.builder.build_alloca(enum_ty, "enum.access");
-
-        let member_ptr = self
-            .builder
-            .build_struct_gep(enum_ptr, 0, "enum.access.gep")
-            .map_err(|_| self.err(format!("Unable to GEP enum \"{}\".", &enum_name)))?;
-        self.builder.build_store(member_ptr, basic_value);
-
-        Ok(self.builder.build_load(enum_ptr, "enum.access.load").into())
+        Ok(enum_ty.const_named_struct(&[basic_value]).into())
     }
 
     fn compile_un_op_negative(

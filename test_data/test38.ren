@@ -1,0 +1,44 @@
+use std.assert
+
+external function printf(format: {u8}, ...) -> i32
+
+function main() -> i32
+{
+    var correct1
+    var value1 = 1
+
+    match value1
+    {
+        1 {
+            correct1 = true
+            printf("1")
+        }
+
+        default {
+            correct1 = false
+            printf("default 1")
+        }
+    }
+
+    assert(correct1)
+
+    var correct2
+    var value2 = 99
+
+    match value2
+    {
+        2 {
+            correct2 = false
+            printf("\n2")
+        }
+
+        default {
+            correct2 = true
+            printf("\ndefault 2")
+        }
+    }
+
+    assert(correct2)
+
+    return 0
+}

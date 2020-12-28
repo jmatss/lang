@@ -26,6 +26,16 @@ pub const DEFAULT_STOP_CONDS: [Sym; 4] = [
     Sym::CurlyBracketBegin,
 ];
 
+/// Stop conditions used when one knows that the expression will be ended with
+/// a "CurlyBracketBegin". This allows ex. linebreaks in expressions which allows
+/// for some more leeway when writting the expression. These stop conditions
+/// should always be preffered over the other ones.
+///
+/// This is commonly when parsing keywords where the layout is predetermined.
+/// For example a expression after a "if" will ALWAYS be ended with a curly
+/// bracket.
+pub const KEYWORD_STOP_CONDS: [Sym; 1] = [Sym::CurlyBracketBegin];
+
 /// The stop conditions used when one wants to parse either a "regular"
 /// expressions or a expression that is the lhs of a assignment.
 /// Other that the `DEFAULT_STOP_CONDS` this array will contains all assignment
