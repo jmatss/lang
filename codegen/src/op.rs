@@ -16,7 +16,7 @@ use inkwell::{
     values::{AnyValueEnum, BasicValueEnum},
     FloatPredicate, IntPredicate,
 };
-use log::debug;
+use log::{debug, warn};
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_op(
@@ -412,9 +412,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     BinOperator::LessThanOrEquals => FloatPredicate::OLE,
                     BinOperator::GreaterThanOrEquals => FloatPredicate::OGE,
                     _ => {
-                        return Err(
-                            self.err(format!("Invalid operator in bin_op compare: {:?}", op))
-                        )
+                        return Err(self.err(format!("Invalid operator in float compare: {:?}", op)))
                     }
                 };
 
@@ -443,11 +441,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     BinOperator::GreaterThan => IntPredicate::SGT,
                     BinOperator::LessThanOrEquals => IntPredicate::SLE,
                     BinOperator::GreaterThanOrEquals => IntPredicate::SGE,
-                    _ => {
-                        return Err(
-                            self.err(format!("Invalid operator in bin_op compare: {:?}", op))
-                        )
-                    }
+                    _ => return Err(self.err(format!("Invalid operator in int compare: {:?}", op))),
                 };
 
                 if is_const {
@@ -462,6 +456,44 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             rhs.into_int_value(),
                             "compare.int",
                         )
+                        .into()
+                }
+            }
+
+            BasicTypeEnum::PointerType(_) => {
+                let predicate = match op {
+                    BinOperator::Equals => IntPredicate::EQ,
+                    BinOperator::NotEquals => IntPredicate::NE,
+                    BinOperator::LessThan => IntPredicate::SLT,
+                    BinOperator::GreaterThan => IntPredicate::SGT,
+                    BinOperator::LessThanOrEquals => IntPredicate::SLE,
+                    BinOperator::GreaterThanOrEquals => IntPredicate::SGE,
+                    _ => return Err(self.err(format!("Invalid operator in ptr compare: {:?}", op))),
+                };
+
+                let ptr_int_ty = self
+                    .context
+                    .ptr_sized_int_type(&self.target_machine.get_target_data(), None);
+
+                if is_const {
+                    let lhs_ptr = lhs.into_pointer_value().const_to_int(ptr_int_ty);
+                    let rhs_ptr = rhs.into_pointer_value().const_to_int(ptr_int_ty);
+
+                    lhs_ptr.const_int_compare(predicate, rhs_ptr).into()
+                } else {
+                    let lhs_ptr = self.builder.build_ptr_to_int(
+                        lhs.into_pointer_value(),
+                        ptr_int_ty,
+                        "lhs.ptr.to.int",
+                    );
+                    let rhs_ptr = self.builder.build_ptr_to_int(
+                        rhs.into_pointer_value(),
+                        ptr_int_ty,
+                        "rhs.ptr.to.int",
+                    );
+
+                    self.builder
+                        .build_int_compare(predicate, lhs_ptr, rhs_ptr, "compare.ptr")
                         .into()
                 }
             }

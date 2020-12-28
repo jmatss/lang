@@ -1,0 +1,20 @@
+use std.assert
+
+function main() -> i32
+{
+    var int_1 = 123
+    var int_2 = 456
+
+    var ptr_1_1 = int_1.&
+    var ptr_1_2 = int_1.&
+    var ptr_2   = int_2.&
+
+    printf("ptr_1_1: %p", ptr_1_1)
+    printf("\nptr_1_2: %p", ptr_1_2)
+    printf("\nptr_2: %p", ptr_2)
+
+    assert(ptr_1_1 == ptr_1_2)
+    assert(ptr_1_1 != ptr_2)
+
+    return 0
+}
