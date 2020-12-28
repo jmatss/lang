@@ -392,12 +392,12 @@ impl<'a> Visitor for TypeConverter<'a> {
                 // contains generics. These new impl blocks will contain the actual
                 // generic implementations/instances. The old impl blocks containing
                 // the generic placeholders will be removed.
-                if let AstToken::Block(BlockHeader::Implement(struct_name), ..) = &body_token {
-                    let struct_name = struct_name.clone();
+                if let AstToken::Block(BlockHeader::Implement(structure_name), ..) = &body_token {
+                    let structure_name = structure_name.clone();
 
-                    if self.generic_structures.contains_key(&struct_name) {
+                    if self.generic_structures.contains_key(&structure_name) {
                         if let Some(skip) =
-                            self.create_method_instance(body, i, &struct_name, &mut body_token)
+                            self.create_method_instance(body, i, &structure_name, &mut body_token)
                         {
                             // Skip the newly created impl blocks (if any).
                             i += skip;
@@ -406,10 +406,19 @@ impl<'a> Visitor for TypeConverter<'a> {
                         // TODO: Don't hardcode default id.
                         let id = BlockInfo::DEFAULT_BLOCK_ID;
 
-                        // If this is a impl block for a struct that has been
+                        // If this is a impl block for a structure that has been
                         // removed, remove the impl block as well.
-                        if self.analyze_context.get_struct(&struct_name, id).is_err() {
-                            self.remove_impl_instance(body, i)
+                        if self
+                            .analyze_context
+                            .get_struct(&structure_name, id)
+                            .is_err()
+                            && self.analyze_context.get_enum(&structure_name, id).is_err()
+                            && self
+                                .analyze_context
+                                .get_interface(&structure_name, id)
+                                .is_err()
+                        {
+                            self.remove_impl_instance(body, i);
                         }
                     }
                 }

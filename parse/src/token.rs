@@ -211,6 +211,7 @@ impl Operator {
                 UnOperator::Address => (true, 1, Fix::Postfix),
                 UnOperator::ArrayAccess(_) => (true, 1, Fix::Postfix),
                 UnOperator::StructAccess(..) => (true, 1, Fix::Postfix),
+                UnOperator::EnumAccess(..) => (true, 1, Fix::Postfix),
             })
         } else if let Operator::BinaryOperator(binary_op) = self {
             Some(match binary_op {

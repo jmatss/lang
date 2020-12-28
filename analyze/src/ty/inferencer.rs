@@ -245,12 +245,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                 .generic_params
                                 .clone()
                                 .unwrap_or_else(Vec::default)
-                        } else if let Ok(enum_) = self
+                        } else if self
                             .type_context
                             .analyze_context
                             .get_enum(ident, ctx.block_id)
+                            .is_ok()
                         {
-                            enum_.borrow().generics.clone().unwrap_or_else(Vec::default)
+                            Vec::default()
                         } else if let Ok(interface) = self
                             .type_context
                             .analyze_context
@@ -911,7 +912,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 self.type_context
                     .insert_constraint(ret_ty, Ty::UnknownArrayMember(Box::new(val_ty)));
             }
-            UnOperator::StructAccess(member_name, ..) => {
+            UnOperator::StructAccess(member_name, ..) | UnOperator::EnumAccess(member_name, ..) => {
                 self.type_context.insert_constraint(
                     ret_ty,
                     Ty::UnknownStructureMember(Box::new(val_ty), member_name.clone()),

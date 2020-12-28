@@ -4,7 +4,7 @@ use common::{
     file::FilePosition,
     token::{
         ast::AstToken,
-        block::{BlockHeader, Function, Struct},
+        block::{BlockHeader, Enum, Function, Struct},
         expr::{Expr, Var},
     },
     BlockId,
@@ -497,8 +497,48 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let packed = false;
-        let struct_type = self.context.opaque_struct_type(&struct_.name);
-        struct_type.set_body(member_types.as_ref(), packed);
+        let struct_ty = self.context.opaque_struct_type(&struct_.name);
+        struct_ty.set_body(member_types.as_ref(), packed);
+
+        Ok(())
+    }
+
+    pub(super) fn compile_enum(&mut self, enum_: &Enum) -> CustomResult<()> {
+        // Create a new struct type containing a single member that has the type
+        // of the "inner enum type". This will most likely be a integer type.
+        //
+        // The type of the whole `enum_` will be Enum(ident). This type will be
+        // set for the members as well. Only the given literal values of the members
+        // will be the inner type.
+        let ty = if let Some(members) = &enum_.members {
+            if let Some(member) = members.first() {
+                if let Some(ty) = &member.borrow().default_value {
+                    ty.get_expr_type()?
+                } else {
+                    return Err(self.err(format!(
+                        "No default value set for first member in enum \"{}\".",
+                        &enum_.name
+                    )));
+                }
+            } else {
+                return Err(self.err(format!(
+                    "Unable to find first member in enum \"{}\".",
+                    &enum_.name
+                )));
+            }
+        } else {
+            return Err(self.err(format!(
+                "No members set for enum \"{}\". Unable to figure out member type.",
+                &enum_.name
+            )));
+        };
+
+        let any_ty = self.compile_type(&ty)?;
+        let basic_ty = CodeGen::any_into_basic_type(any_ty)?;
+
+        let packed = false;
+        let enum_ty = self.context.opaque_struct_type(&enum_.name);
+        enum_ty.set_body(&[basic_ty], packed);
 
         Ok(())
     }

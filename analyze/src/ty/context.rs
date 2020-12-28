@@ -799,22 +799,11 @@ impl<'a> TypeContext<'a> {
             let id = BlockInfo::DEFAULT_BLOCK_ID;
 
             let method = match inner_ty {
-                InnerTy::Struct(struct_name) => {
-                    match self
-                        .analyze_context
-                        .get_method(struct_name, &method_name, id)
-                    {
+                InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
+                    match self.analyze_context.get_method(ident, &method_name, id) {
                         Ok(method) => method,
                         Err(err) => return SubResult::Err(err),
                     }
-                }
-
-                InnerTy::Enum(_) => {
-                    panic!("TODO: Enum, should it have methods?")
-                }
-
-                InnerTy::Interface(_) => {
-                    panic!("TODO: Interface, should it have methods?");
                 }
 
                 _ => {
@@ -910,16 +899,10 @@ impl<'a> TypeContext<'a> {
                 }
             };
 
-            let struct_name = match inner_ty {
-                InnerTy::Struct(struct_name) => struct_name,
-
-                InnerTy::Enum(_) => {
-                    panic!("TODO: Enum, should it have methods?")
-                }
-
-                InnerTy::Interface(_) => {
-                    panic!("TODO: Interface, should it have methods?");
-                }
+            let structure_name = match inner_ty {
+                InnerTy::Struct(structure_name)
+                | InnerTy::Enum(structure_name)
+                | InnerTy::Interface(structure_name) => structure_name,
 
                 _ => {
                     return if finalize {
@@ -943,7 +926,7 @@ impl<'a> TypeContext<'a> {
             let actual_idx = match name_or_idx {
                 Either::Left(arg_name) => {
                     match self.analyze_context.get_method_param_idx(
-                        struct_name,
+                        structure_name,
                         &method_name,
                         &arg_name,
                         id,
@@ -956,7 +939,7 @@ impl<'a> TypeContext<'a> {
             };
 
             let mut arg_ty = match self.analyze_context.get_method_param_type(
-                struct_name,
+                structure_name,
                 &method_name,
                 actual_idx,
                 BlockInfo::DEFAULT_BLOCK_ID,

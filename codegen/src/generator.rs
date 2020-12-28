@@ -186,8 +186,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     self.compile_struct(&struct_.borrow())?;
                 }
                 BlockHeader::Enum(enum_) => {
-                    panic!("TODO: Enum");
-                    //self.compile_enum(enum_);
+                    self.compile_enum(&enum_.borrow())?;
                 }
                 BlockHeader::Interface(interface) => {
                     panic!("TODO: interface");
@@ -456,13 +455,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             struct_type.clone().into()
                         } else {
                             return Err(self.err(format!(
-                                "Unable to find custom compound type with name: {:#?}",
+                                "Unable to find custom struct type with name: {:#?}",
                                 ident
                             )));
                         }
                     }
-                    InnerTy::Enum(_) => {
-                        panic!("TODO: Enum")
+                    InnerTy::Enum(ident) => {
+                        if let Some(struct_type) = self.module.get_struct_type(&ident) {
+                            struct_type.clone().into()
+                        } else {
+                            return Err(self.err(format!(
+                                "Unable to find custom enum type with name: {:#?}",
+                                ident
+                            )));
+                        }
                     }
                     InnerTy::Interface(_) => {
                         panic!("TODO: interface")

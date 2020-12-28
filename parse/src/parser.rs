@@ -337,36 +337,59 @@ impl<'a> ParseTokenIter<'a> {
 
     pub fn parse_expr(&mut self, stop_conds: &[Sym]) -> CustomResult<Expr> {
         ExprParser::parse(self, stop_conds)
+            .map(|x| x.ok_or_else(|| self.err("Expression was empty.".into())))?
+    }
+
+    /// Parse the next expression. The next expression is allowed to be empty.
+    pub fn parse_expr_allow_empty(&mut self, stop_conds: &[Sym]) -> CustomResult<Option<Expr>> {
+        ExprParser::parse(self, stop_conds)
     }
 
     pub fn parse_type(&mut self, generics: Option<&Generics>) -> CustomResult<Ty> {
         TypeParser::parse(self, generics)
     }
 
-    /// Parses a variable and any type that it might have specified after which
-    /// would indicate a declaration.
-    pub fn parse_var_type(&mut self, ident: &str) -> CustomResult<Var> {
-        // If the next token is a colon, a type is specified after this variable.
-        // Parse it and set the `var_type` inside the variable.
-        let (var_type, file_pos) = if let Some(next_token) = self.peek_skip_space() {
-            if let LexTokenKind::Sym(Sym::Colon) = next_token.kind {
-                self.next_skip_space(); // Skip the colon.
-                (Some(self.parse_type(None)?), Some(next_token.file_pos))
-            } else {
-                (None, None)
+    // TODO: Currently doesn't handle FilePosition. How should this be done?
+    //       The returned value will just contain a None file_pos.
+    /// Parses a variable, including type and default value. If `parse_type` is
+    /// set, a potential type will be parsed following the given variable.
+    /// If `parse_value` is set, a potential value will be parsed following the
+    /// given variable.
+    pub fn parse_var(
+        &mut self,
+        ident: &str,
+        parse_type: bool,
+        parse_value: bool,
+        is_const: bool,
+        generics: Option<&Generics>,
+    ) -> CustomResult<Var> {
+        // TODO: Handle file_pos.
+
+        let ty = if let Some(next_token) = self.peek_skip_space() {
+            match next_token.kind {
+                LexTokenKind::Sym(Sym::Colon) if parse_type => {
+                    self.next_skip_space(); // Skip the colon.
+                    Some(self.parse_type(generics)?)
+                }
+                _ => None,
             }
         } else {
-            (None, None)
+            None
         };
 
-        Ok(Var::new(
-            ident.into(),
-            var_type,
-            None,
-            None,
-            file_pos,
-            false,
-        ))
+        let value = if let Some(next_token) = self.peek_skip_space() {
+            match next_token.kind {
+                LexTokenKind::Sym(Sym::Equals) if parse_value => {
+                    self.next_skip_space(); // Skip the Equals.
+                    Some(Box::new(self.parse_expr(&DEFAULT_STOP_CONDS)?))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        Ok(Var::new(ident.into(), ty, None, value, None, is_const))
     }
 
     /// Parses a list of arguments. This can be used on generic list containing
@@ -541,36 +564,12 @@ impl<'a> ParseTokenIter<'a> {
                 // which is the indicator for a variadic function.
                 match lex_token.kind {
                     LexTokenKind::Ident(ident) => {
-                        let var_type = self.parse_colon_type(generics)?;
-
-                        // Parse any default value for the parameter if it is
-                        // specified which is indicated with a equals sign.
-                        let default_value =
-                            if let Some(peek_lex_token) = self.peek_skip_space_line() {
-                                if let LexTokenKind::Sym(Sym::Equals) = peek_lex_token.kind {
-                                    self.next_skip_space_line();
-
-                                    // TODO: The default stop conditions stops
-                                    //       on a curly bracket begin. This will
-                                    //       prevent a struct init to be used as
-                                    //       a default value. Is this ok?
-                                    Some(Box::new(self.parse_expr(&DEFAULT_STOP_CONDS)?))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
-
+                        let parse_type = true;
+                        let parse_value = true;
                         let is_const = false;
-                        let parameter = Var::new(
-                            ident,
-                            Some(var_type),
-                            None,
-                            default_value,
-                            Some(lex_token.file_pos),
-                            is_const,
-                        );
+                        let parameter =
+                            self.parse_var(&ident, parse_type, parse_value, is_const, None)?;
+
                         parameters.push(parameter);
                     }
 
@@ -620,22 +619,6 @@ impl<'a> ParseTokenIter<'a> {
             } else {
                 return Err(self.err("Received None at end of parameter in list.".into()));
             }
-        }
-    }
-
-    /// Parses a type including the starting colon.
-    fn parse_colon_type(&mut self, generics: Option<&Generics>) -> CustomResult<Ty> {
-        if let Some(lex_token) = self.next_skip_space() {
-            if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
-                self.parse_type(generics)
-            } else {
-                Err(self.err(format!(
-                    "Invalid token when parsing colon before type: {:?}",
-                    lex_token
-                )))
-            }
-        } else {
-            Err(self.err("Received None expecting colon at start of type.".into()))
         }
     }
 

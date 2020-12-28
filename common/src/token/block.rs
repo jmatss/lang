@@ -198,14 +198,6 @@ impl Function {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Enum {
-    pub name: String,
-    pub generics: Option<Vec<String>>,
-    pub members: Option<Vec<Rc<RefCell<Var>>>>,
-    // TODO: extends: Vec<Type>
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuiltIn {
     pub name: &'static str,
     pub parameters: Vec<Var>,
@@ -232,17 +224,37 @@ impl BuiltIn {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Enum {
+    pub name: String,
+    /// The type of the enum values. Will most likely be a integer type.
+    pub ty: Ty,
+    pub members: Option<Vec<Rc<RefCell<Var>>>>,
+
+    /// The key is the name of the method.
+    pub methods: Option<HashMap<String, Rc<RefCell<Function>>>>,
+}
+
 impl Enum {
-    pub fn new(
-        name: String,
-        generics: Option<Vec<String>>,
-        members: Option<Vec<Rc<RefCell<Var>>>>,
-    ) -> Self {
+    pub fn new(name: String, ty: Ty, members: Option<Vec<Rc<RefCell<Var>>>>) -> Self {
         Enum {
             name,
-            generics,
+            ty,
             members,
+            methods: None,
         }
+    }
+
+    /// Returns the index of the member with name `member_name` in this enum.
+    pub fn member_index(&self, member_name: &str) -> Option<usize> {
+        if let Some(members) = &self.members {
+            for (idx, member) in members.iter().enumerate() {
+                if member.borrow().name == member_name {
+                    return Some(idx);
+                }
+            }
+        }
+        None
     }
 }
 

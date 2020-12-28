@@ -8,6 +8,7 @@ use common::{
         expr::Expr,
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
+    ty::ty::Ty,
 };
 use inkwell::{
     types::{AnyTypeEnum, BasicTypeEnum},
@@ -101,8 +102,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // Create some sort of typedef that then can be used to iterate over.
             BinOperator::Range => panic!("TODO: Range"),
             BinOperator::RangeInclusive => panic!("TODO: RangeInclusive"),
-            BinOperator::Dot => self.compile_bin_op_dot(ret_type, left, right)?,
-            BinOperator::DoubleColon => self.compile_bin_op_double_colon(ret_type, left, right)?,
+            BinOperator::Dot => unreachable!("Compile bin op Dot"),
+            BinOperator::DoubleColon => unreachable!("Compile bin op DoubleColon"),
 
             BinOperator::Equals
             | BinOperator::NotEquals
@@ -228,6 +229,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     ExprTy::RValue => Ok(self.builder.build_load(ptr, "struct.gep.rval").into()),
                 }
             }
+            UnOperator::EnumAccess(..) => match expr_ty {
+                ExprTy::LValue => Err(self.err(format!(
+                    "Enum access is not allowed as a LValue: {:?}",
+                    un_op
+                ))),
+                ExprTy::RValue => self.compile_un_op_enum_access(un_op),
+            },
             UnOperator::Positive => {
                 let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
                 un_op.is_const = self.is_const(&[&any_value]);
@@ -1189,6 +1197,71 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     un_op
                 ))
             })
+    }
+
+    /// This function accessed the member at index `idx_opt` for the enum in
+    /// expression `expr`. The returned value will be a pointer to the allocated
+    /// member, so the caller would have to do a load if they want the actual value.
+    fn compile_un_op_enum_access(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
+        let (member_name, block_id) =
+            if let UnOperator::EnumAccess(member_name, block_id) = &un_op.operator {
+                (member_name.clone(), *block_id)
+            } else {
+                return Err(self.err(format!(
+                    "Un op not struct access when compilig enum access: {:?}",
+                    un_op
+                )));
+            };
+
+        // TODO: Does the enum name need to be fetched in some other way in the
+        //       future? Will it be ex. prepended with package/module info?
+        let enum_name = if let Expr::Type(Ty::CompoundType(inner_ty, ..), ..) = un_op.value.as_ref()
+        {
+            inner_ty.to_string()
+        } else {
+            return Err(self.err(format!(
+                "Unop value in enum access not a enum type: {:#?}",
+                un_op,
+            )));
+        };
+
+        let member = self
+            .analyze_context
+            .get_enum_member(&enum_name, &member_name, block_id)?;
+
+        let basic_value = if let Some(mut value) = member.borrow().default_value.clone() {
+            let any_value = self.compile_expr(value.as_mut(), ExprTy::RValue)?;
+            CodeGen::any_into_basic_value(any_value)?
+        } else {
+            return Err(self.err(format!(
+                "Member of enum \"{}\" has no value set, member: {:#?}",
+                enum_name, member
+            )));
+        };
+
+        let enum_ty = if let Some(enum_ty) = self.module.get_struct_type(&enum_name) {
+            enum_ty
+        } else {
+            return Err(self.err(format!(
+                "Unable to find enum with name \"{}\" in codegen module.",
+                enum_name
+            )));
+        };
+
+        debug!(
+            "Compiling enum access -- enum_name: {}, member_name: {}, basic_value: {:#?}",
+            enum_name, member_name, basic_value
+        );
+
+        let enum_ptr = self.builder.build_alloca(enum_ty, "enum.access");
+
+        let member_ptr = self
+            .builder
+            .build_struct_gep(enum_ptr, 0, "enum.access.gep")
+            .map_err(|_| self.err(format!("Unable to GEP enum \"{}\".", &enum_name)))?;
+        self.builder.build_store(member_ptr, basic_value);
+
+        Ok(self.builder.build_load(enum_ptr, "enum.access.load").into())
     }
 
     fn compile_un_op_negative(

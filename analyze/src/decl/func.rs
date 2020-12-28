@@ -140,24 +140,39 @@ impl<'a> DeclFuncAnalyzer<'a> {
 
     fn analyze_method_header(
         &mut self,
-        struct_name: &str,
+        structure_name: &str,
         func: &mut Rc<RefCell<Function>>,
         func_id: BlockId,
     ) {
         // TODO: Make this work for all structures.
 
-        // The method will be added in the scope of its wrapping struct, so
+        // The method will be added in the scope of its wrapping structure, so
         // fetch the block id for the struct.
-        let struct_decl_id = match self
+        let (decl_id, inner_ty) = if let Ok(decl_id) = self
             .analyze_context
             .borrow()
-            .get_struct_decl_scope(struct_name, func_id)
+            .get_struct_decl_scope(structure_name, func_id)
         {
-            Ok(struct_decl_id) => struct_decl_id,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
+            (decl_id, InnerTy::Struct(structure_name.into()))
+        } else if let Ok(decl_id) = self
+            .analyze_context
+            .borrow()
+            .get_enum_decl_scope(structure_name, func_id)
+        {
+            (decl_id, InnerTy::Enum(structure_name.into()))
+        } else if let Ok(decl_id) = self
+            .analyze_context
+            .borrow()
+            .get_interface_decl_scope(structure_name, func_id)
+        {
+            (decl_id, InnerTy::Interface(structure_name.into()))
+        } else {
+            let err = self.analyze_context.borrow().err(format!(
+                "Unable to find structure with name \"{}\" from block ID {}.",
+                structure_name, func_id
+            ));
+            self.errors.push(err);
+            return;
         };
 
         // TODO: Should probably be changed to something better.
@@ -167,7 +182,6 @@ impl<'a> DeclFuncAnalyzer<'a> {
             static THIS_VAR_NAME: &str = "this";
             let mut func = func.borrow_mut();
 
-            let inner_ty = InnerTy::Struct(struct_name.into());
             let generics = Generics::new();
 
             let ty = if func.modifiers.contains(&Modifier::This) {
@@ -176,8 +190,8 @@ impl<'a> DeclFuncAnalyzer<'a> {
                 Ty::Pointer(Box::new(Ty::CompoundType(inner_ty, generics)))
             } else {
                 let err = self.analyze_context.borrow().err(format!(
-                    "Non static function did not contain \"this\" or \"this ptr\" reference. Struct name: {}, func: {:#?}.",
-                    struct_name, func
+                    "Non static function did not contain \"this\" or \"this ptr\" reference. Structure name: {}, func: {:#?}.",
+                    structure_name, func
                 ));
                 self.errors.push(err);
                 return;
@@ -200,9 +214,9 @@ impl<'a> DeclFuncAnalyzer<'a> {
 
         // Insert this method into `methods` in the analyze context.
         if let Err(err) = self.analyze_context.borrow_mut().insert_method(
-            struct_name,
+            structure_name,
             Rc::clone(func),
-            struct_decl_id,
+            decl_id,
         ) {
             self.errors.push(err);
             return;

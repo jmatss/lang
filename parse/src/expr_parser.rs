@@ -57,7 +57,11 @@ pub struct ExprParser<'a, 'b> {
 }
 
 impl<'a, 'b> ExprParser<'a, 'b> {
-    pub fn parse(iter: &'a mut ParseTokenIter<'b>, stop_conds: &'a [Sym]) -> CustomResult<Expr> {
+    /// If the expression was empty (was no expression), returns None.
+    pub fn parse(
+        iter: &'a mut ParseTokenIter<'b>,
+        stop_conds: &'a [Sym],
+    ) -> CustomResult<Option<Expr>> {
         let mut expr_parser = Self {
             iter,
             file_pos: None,
@@ -69,15 +73,19 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             parenthesis_count: 0,
         };
 
-        expr_parser.shunting_yard()?;
-        debug!("Outputs: {:#?}", &expr_parser.outputs);
-
-        expr_parser.rev_polish_to_expr()
+        let was_empty = expr_parser.shunting_yard()?;
+        if was_empty {
+            Ok(None)
+        } else {
+            debug!("Outputs: {:#?}", &expr_parser.outputs);
+            expr_parser.rev_polish_to_expr().map(|x| Some(x))
+        }
     }
 
     /// See https://www.andr.mu/logs/the-shunting-yard-algorithm/ for a good
     /// explanation of the algorithm.
-    fn shunting_yard(&mut self) -> CustomResult<()> {
+    /// Return `true` if the expression was empty.
+    fn shunting_yard(&mut self) -> CustomResult<bool> {
         let mark = self.iter.mark();
 
         while let Some(lex_token) = self.iter.next_skip_space() {
@@ -104,9 +112,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         self.iter.rewind_skip_space()?;
                         break;
                     } else {
-                        return Err(self
-                            .iter
-                            .err(format!("A `stop_cond` found before token: {:?}", symbol)));
+                        let was_empty = true;
+                        return Ok(was_empty);
                     }
                 }
             } else if let LexTokenKind::EOF = lex_token.kind {
@@ -173,7 +180,14 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     // TODO: Will only using the square bracket end as a stop
                     //       symbol break anything? Inifinite loop?
                     let stop_conds = [Sym::SquareBracketEnd];
-                    let expr = ExprParser::parse(self.iter, &stop_conds)?;
+
+                    let expr = if let Some(expr) = ExprParser::parse(self.iter, &stop_conds)? {
+                        expr
+                    } else {
+                        return Err(self
+                            .iter
+                            .err("Found no expression in array indexing.".into()));
+                    };
 
                     // Consume the "SquareBracketEnd".
                     self.iter.next_skip_space();
@@ -196,8 +210,10 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 }
 
                 // Skip any linebreaks if the linbreaks aren't a part of the
-                // stop conditions.
-                LexTokenKind::Sym(Sym::LineBreak) => self.token_count -= 1,
+                // stop conditions. Also skip comments.
+                LexTokenKind::Sym(Sym::LineBreak) | LexTokenKind::Comment(..) => {
+                    self.token_count -= 1
+                }
 
                 // Special case for operators that takes a "type" as rhs.
                 LexTokenKind::Sym(symbol @ Sym::Is)
@@ -241,7 +257,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             self.outputs.push(Output::Operator(op));
         }
 
-        Ok(())
+        let was_empty = false;
+        Ok(was_empty)
     }
 
     /// Adds a operand into the "shunting".
@@ -475,7 +492,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     Ok(Expr::StructInit(struct_init))
                 }
 
-                // Static method call, this is the lhs type.
+                // Static method/variable access, this is the lhs type.
                 LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(
                     Ty::CompoundType(
                         InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
@@ -506,13 +523,23 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     }
 
                     // Otherwise this is just a regular variable name.
-                    let var = self.iter.parse_var_type(ident)?;
+                    let parse_type = true;
+                    let parse_value = false;
+                    let is_const = false;
+                    let var =
+                        self.iter
+                            .parse_var(ident, parse_type, parse_value, is_const, None)?;
                     Ok(Expr::Var(var))
                 }
             }
         } else {
             // TODO: Merge with logic above, same stuff.
-            let var = self.iter.parse_var_type(ident)?;
+            let parse_type = true;
+            let parse_value = false;
+            let is_const = false;
+            let var = self
+                .iter
+                .parse_var(ident, parse_type, parse_value, is_const, None)?;
             Ok(Expr::Var(var))
         }
     }

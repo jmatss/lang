@@ -367,7 +367,7 @@ impl Ty {
         }
     }
 
-    pub fn is_unknown_struct_member(&self) -> bool {
+    pub fn is_unknown_structure_member(&self) -> bool {
         if let Ty::UnknownStructureMember(..) = self {
             true
         } else {
@@ -375,7 +375,7 @@ impl Ty {
         }
     }
 
-    pub fn is_unknown_struct_method(&self) -> bool {
+    pub fn is_unknown_structure_method(&self) -> bool {
         if let Ty::UnknownStructureMethod(..) = self {
             true
         } else {

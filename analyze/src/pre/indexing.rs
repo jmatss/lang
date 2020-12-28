@@ -9,10 +9,9 @@ use common::{
 };
 use log::debug;
 
-/// Gathers information about indexing of variables. This includes array indexing,
-/// struct indexing and method calls etc. This analyzer traverses through all
-/// expressions and tried to deduce the correct indexing. "Markers" will be
-/// inserted into the AST.
+/// Gathers information about indexing on variables. This includes struct member
+/// indexing and enum member indexing. Those kind of expression will be rewritten
+/// in the AST so that it is easier to work with them.
 pub struct IndexingAnalyzer {}
 
 impl IndexingAnalyzer {
@@ -29,21 +28,44 @@ impl Visitor for IndexingAnalyzer {
     /// Wraps struct accesses into a new un op that replaces the old binary
     /// Dot operation. The index and the type of the member will be parsed in
     /// a later stage of the analyzing (after "type analyzing" have been ran).
-    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
+    fn visit_expr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {
         if let Expr::Op(Op::BinOp(bin_op)) = expr {
-            if let BinOperator::Dot = bin_op.operator {
-                if let Some(var) = bin_op.rhs.eval_to_var() {
-                    debug!(
-                        "Rewriting struct access -- lhs var: {:?}, rhs var: {:?}",
-                        bin_op.lhs, &var
-                    );
+            if let Some(var) = bin_op.rhs.eval_to_var() {
+                match bin_op.operator {
+                    // Struct access.
+                    BinOperator::Dot => {
+                        debug!(
+                            "Rewriting struct access -- lhs var: {:?}, rhs var: {:?}",
+                            bin_op.lhs, &var
+                        );
 
-                    let struct_access = UnOperator::StructAccess(var.name.clone(), None);
-                    let un_op =
-                        UnOp::new(struct_access, bin_op.lhs.clone(), expr.file_pos().cloned());
-                    *expr = Expr::Op(Op::UnOp(un_op));
+                        let struct_access = UnOperator::StructAccess(var.name.clone(), None);
+                        let un_op =
+                            UnOp::new(struct_access, bin_op.lhs.clone(), expr.file_pos().cloned());
+                        *expr = Expr::Op(Op::UnOp(un_op));
 
-                    debug!("expr after rewrite: {:?}", expr);
+                        debug!("expr after rewrite: {:?}", expr);
+                    }
+
+                    // TODO: Will this double colon access always be for enums only?
+                    //       Is there a possibility that this might be used for
+                    //       static/const as well access in the future?
+                    // Enum access.
+                    BinOperator::DoubleColon => {
+                        debug!(
+                            "Rewriting enum access -- lhs var: {:?}, rhs var: {:?}",
+                            bin_op.lhs, &var
+                        );
+
+                        let enum_access = UnOperator::EnumAccess(var.name.clone(), ctx.block_id);
+                        let un_op =
+                            UnOp::new(enum_access, bin_op.lhs.clone(), expr.file_pos().cloned());
+                        *expr = Expr::Op(Op::UnOp(un_op));
+
+                        debug!("expr after rewrite: {:?}", expr);
+                    }
+
+                    _ => (),
                 }
             }
         }

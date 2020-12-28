@@ -18,6 +18,7 @@ use common::{
     ty::ty::Ty,
     BlockId,
 };
+use core::panic;
 use decl::block::BlockAnalyzer;
 use decl::func::DeclFuncAnalyzer;
 use decl::ty::DeclTypeAnalyzer;
@@ -519,76 +520,142 @@ impl AnalyzeContext {
         self.get_mut(ident, decl_block_id, &self.interfaces)
     }
 
-    /// Given a name of a struct `struct_name`, a name of a method `func` and a
-    /// block scope `id`, returns a reference to the declaration in the AST.
+    /// Given a name of a structure `structure_name`, a name of a method `func`
+    /// and a block scope `id`, returns a reference to the declaration in the AST.
     pub fn get_method(
         &self,
-        struct_name: &str,
+        structure_name: &str,
         func_name: &str,
         id: BlockId,
     ) -> CustomResult<Rc<RefCell<Function>>> {
-        let decl_block_id = self.get_struct_decl_scope(struct_name, id)?;
-        let struct_ = self.get_struct(struct_name, decl_block_id)?;
-        let struct_ = struct_.borrow();
+        if let Ok(decl_block_id) = self.get_struct_decl_scope(structure_name, id) {
+            let struct_ = self.get_struct(structure_name, decl_block_id)?;
+            let struct_ = struct_.borrow();
 
-        if let Some(method) = struct_
-            .methods
-            .as_ref()
-            .and_then(|ref map| map.get(func_name))
-        {
-            Ok(Rc::clone(method))
+            if let Some(method) = struct_
+                .methods
+                .as_ref()
+                .and_then(|ref map| map.get(func_name))
+            {
+                Ok(Rc::clone(method))
+            } else {
+                Err(self.err(format!(
+                    "Unable to find method named \"{}\" in struct \"{:#?}\".",
+                    &func_name, &struct_,
+                )))
+            }
+        } else if let Ok(decl_block_id) = self.get_enum_decl_scope(structure_name, id) {
+            let enum_ = self.get_enum(structure_name, decl_block_id)?;
+            let enum_ = enum_.borrow();
+
+            if let Some(method) = enum_
+                .methods
+                .as_ref()
+                .and_then(|ref map| map.get(func_name))
+            {
+                Ok(Rc::clone(method))
+            } else {
+                Err(self.err(format!(
+                    "Unable to find method named \"{}\" in struct \"{:#?}\".",
+                    &func_name, &enum_,
+                )))
+            }
+        } else if let Ok(decl_block_id) = self.get_interface_decl_scope(structure_name, id) {
+            panic!("TODO: Get method interface.");
         } else {
             Err(self.err(format!(
-                "Unable to find method named \"{}\" in struct \"{:#?}\".",
-                &func_name, &struct_,
+                "Unable to find structure with name \"{}\" from block ID {}.",
+                structure_name, id
             )))
         }
     }
 
-    /// Given a name of a struct `struct_name` and a block scope `id`, returns
+    /// Given a name of a structure `structure_name` and a block scope `id`, returns
     /// references to all methods declared for the structure in the AST.
     pub fn get_methods(
         &self,
-        struct_name: &str,
+        structure_name: &str,
         id: BlockId,
     ) -> CustomResult<Vec<Rc<RefCell<Function>>>> {
-        let decl_block_id = self.get_struct_decl_scope(struct_name, id)?;
-        let struct_ = self.get_struct(struct_name, decl_block_id)?;
+        if let Ok(decl_block_id) = self.get_struct_decl_scope(structure_name, id) {
+            let struct_ = self.get_struct(structure_name, decl_block_id)?;
+            let mut methods = Vec::default();
 
-        let mut methods = Vec::default();
-
-        if let Some(inner_methods) = struct_.borrow().methods.as_ref() {
-            for method in inner_methods.values() {
-                methods.push(Rc::clone(method));
+            if let Some(inner_methods) = struct_.borrow().methods.as_ref() {
+                for method in inner_methods.values() {
+                    methods.push(Rc::clone(method));
+                }
             }
-        }
 
-        Ok(methods)
+            Ok(methods)
+        } else if let Ok(decl_block_id) = self.get_enum_decl_scope(structure_name, id) {
+            let enum_ = self.get_struct(structure_name, decl_block_id)?;
+            let mut methods = Vec::default();
+
+            if let Some(inner_methods) = enum_.borrow().methods.as_ref() {
+                for method in inner_methods.values() {
+                    methods.push(Rc::clone(method));
+                }
+            }
+
+            Ok(methods)
+        } else if let Ok(decl_block_id) = self.get_interface_decl_scope(structure_name, id) {
+            panic!("TODO: Get methods interface.");
+        } else {
+            Err(self.err(format!(
+                "Unable to find structure with name \"{}\" from block ID {}.",
+                structure_name, id
+            )))
+        }
     }
 
-    /// Inserts the given method `func` into the struct with name `struct_name`
-    /// that can be found from the block id `id`.
+    /// Inserts the given method `func` into the structure with name `structure_name`
+    /// that can be found from the block id `id`. This structure can be a
+    /// struct, enum or interface.
     pub fn insert_method(
         &mut self,
-        struct_name: &str,
+        structure_name: &str,
         func: Rc<RefCell<Function>>,
         id: BlockId,
     ) -> CustomResult<()> {
-        let decl_block_id = self.get_struct_decl_scope(struct_name, id)?;
-        let struct_ = self.get_struct(struct_name, decl_block_id)?;
-        let mut struct_ = struct_.borrow_mut();
+        if let Ok(decl_block_id) = self.get_struct_decl_scope(structure_name, id) {
+            let struct_ = self.get_struct(structure_name, decl_block_id)?;
+            let mut struct_ = struct_.borrow_mut();
 
-        let methods = if let Some(methods) = &mut struct_.methods {
-            methods
+            let methods = if let Some(methods) = &mut struct_.methods {
+                methods
+            } else {
+                struct_.methods = Some(HashMap::default());
+                struct_.methods.as_mut().unwrap()
+            };
+
+            let func_name = func.borrow().name.clone();
+            methods.insert(func_name, Rc::clone(&func));
+
+            Ok(())
+        } else if let Ok(decl_block_id) = self.get_enum_decl_scope(structure_name, id) {
+            let enum_ = self.get_enum(structure_name, decl_block_id)?;
+            let mut enum_ = enum_.borrow_mut();
+
+            let methods = if let Some(methods) = &mut enum_.methods {
+                methods
+            } else {
+                enum_.methods = Some(HashMap::default());
+                enum_.methods.as_mut().unwrap()
+            };
+
+            let func_name = func.borrow().name.clone();
+            methods.insert(func_name, Rc::clone(&func));
+
+            Ok(())
+        } else if let Ok(decl_block_id) = self.get_interface_decl_scope(structure_name, id) {
+            panic!("TODO: Insert method into interface.");
         } else {
-            struct_.methods = Some(HashMap::default());
-            struct_.methods.as_mut().unwrap()
-        };
-
-        let func_name = func.borrow().name.clone();
-        methods.insert(func_name, Rc::clone(&func));
-
-        Ok(())
+            Err(self.err(format!(
+                "Unable to find structure with name \"{}\" from block ID {}.",
+                structure_name, id
+            )))
+        }
     }
 
     /// Finds the struct with the name `struct_name` in a scope containing the block
@@ -678,6 +745,28 @@ impl AnalyzeContext {
         }
     }
 
+    /// Finds the enum with the name `enum_name` in a scope containing the block
+    /// with ID `id` and returns the index of the member with name `member_name`.
+    pub fn get_enum_member_index(
+        &self,
+        enum_name: &str,
+        member_name: &str,
+        id: BlockId,
+    ) -> CustomResult<u64> {
+        if let Some(idx) = self
+            .get_enum(enum_name, id)?
+            .borrow()
+            .member_index(member_name)
+        {
+            Ok(idx as u64)
+        } else {
+            Err(self.err(format!(
+                "Unable to find member with name \"{}\" in enum \"{}\".",
+                &member_name, &enum_name
+            )))
+        }
+    }
+
     /// Given a function or method `func`, finds the parameter with the name
     // `param_name` and also its index.
     fn get_param(
@@ -737,18 +826,18 @@ impl AnalyzeContext {
         Ok(self.get_param(func, param_name)?.0)
     }
 
-    /// Finds the struct with the name `struct_name` in a scope containing the block
-    /// with ID `id` and returns the index of the parameter with name `param_name`
-    /// in the method with name `method_name`.
-    /// The struct can ex. be declared in parent block scope.
+    /// Finds the structure with the name `structure_name` in a scope containing
+    /// the block with ID `id` and returns the index of the parameter with name
+    /// `param_name` in the method with name `method_name`.
+    /// The structure_name can ex. be declared in parent block scope.
     pub fn get_method_param_idx(
         &self,
-        struct_name: &str,
+        structure_name: &str,
         method_name: &str,
         param_name: &str,
         id: BlockId,
     ) -> CustomResult<usize> {
-        let method = self.get_method(struct_name, method_name, id)?;
+        let method = self.get_method(structure_name, method_name, id)?;
         self.get_param_idx(method, param_name)
     }
 
@@ -778,18 +867,18 @@ impl AnalyzeContext {
         }
     }
 
-    /// Finds the struct with the name `struct_name` in a scope containing the block
-    /// with ID `id` and returns the type of the parameter with name `param_name`
-    /// in the method with name `method_name`.
-    /// The struct can ex. be declared in parent block scope.
+    /// Finds the structure with the name `structure_name` in a scope containing
+    /// the block with ID `id` and returns the type of the parameter with name
+    /// `param_name` in the method with name `method_name`.
+    /// The structure_name can ex. be declared in parent block scope.
     pub fn get_method_param_type(
         &self,
-        struct_name: &str,
+        structure_name: &str,
         method_name: &str,
         idx: usize,
         id: BlockId,
     ) -> CustomResult<Ty> {
-        let method = self.get_method(struct_name, method_name, id)?;
+        let method = self.get_method(structure_name, method_name, id)?;
         self.get_param_type(method, idx)
     }
 

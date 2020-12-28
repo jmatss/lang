@@ -10,11 +10,16 @@ use common::{
     file::FilePosition,
     token::{
         ast::AstToken,
-        block::{BlockHeader, Function, Struct},
-        expr::Var,
+        block::{BlockHeader, Enum, Function, Struct},
+        expr::{Expr, Var},
+        lit::Lit,
         stmt::{Modifier, Path, Stmt},
     },
-    ty::generics::GenericsKind,
+    ty::{
+        generics::{Generics, GenericsKind},
+        inner_ty::InnerTy,
+        ty::Ty,
+    },
 };
 use lex::token::{Kw, LexTokenKind, Sym};
 
@@ -68,7 +73,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             Kw::Public => Err(self.iter.err("\"Public\" keyword not implemented.".into())),
 
             Kw::Struct => self.parse_struct(),
-            Kw::Enum => Err(self.iter.err("\"Enum\" keyword not implemented.".into())),
+            Kw::Enum => self.parse_enum(),
             Kw::Interface => Err(self
                 .iter
                 .err("\"Interface\" keyword not implemented.".into())),
@@ -95,7 +100,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 if let LexTokenKind::Sym(Sym::CurlyBracketBegin) = lex_token.kind {
                     None
                 } else {
-                    Some(self.iter.parse_expr(&DEFAULT_STOP_CONDS)?)
+                    self.iter.parse_expr_allow_empty(&DEFAULT_STOP_CONDS)?
                 }
             } else {
                 return Err(self
@@ -175,7 +180,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         } else {
             return Err(self.iter.err("None when parsing \"for\" variable.".into()));
         };
-        let var = self.iter.parse_var_type(&ident)?;
+
+        let parse_type = true;
+        let parse_value = false;
+        let is_const = false;
+        let var = self
+            .iter
+            .parse_var(&ident, parse_type, parse_value, is_const, None)?;
 
         // Ensure that the next token is a "In".
         if let Some(lex_token) = self.iter.next_skip_space() {
@@ -722,6 +733,89 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
         struct_.members = members_opt;
         let header = BlockHeader::Struct(Rc::new(RefCell::new(struct_)));
+
+        let block_id = self.iter.reserve_block_id();
+        let body = Vec::with_capacity(0);
+
+        Ok(AstToken::Block(header, block_id, body))
+    }
+
+    // TODO: Should it possible to set values to the individual enum variants?
+    //       Should there be possible to set the integer type of the enum?
+    /// Parses a enum header.
+    ///   "enum <ident> { <ident> [[,] ...] }"
+    /// The "enum" keyword has already been consumed when this function is called.
+    fn parse_enum(&mut self) -> CustomResult<AstToken> {
+        // Start by parsing the identifier
+        let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
+            if let LexTokenKind::Ident(ident) = lex_token.kind {
+                ident
+            } else {
+                return Err(self.iter.err(format!(
+                    "Expected ident when parsing \"enum\", got: {:?}",
+                    lex_token
+                )));
+            }
+        } else {
+            return Err(self
+                .iter
+                .err("Received None when looking at token after \"enum\".".into()));
+        };
+
+        // Parse the members of the enum.
+        let start_symbol = Sym::CurlyBracketBegin;
+        let end_symbol = Sym::CurlyBracketEnd;
+        let (mut members, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol, None)?;
+
+        // TODO: How should the type of the enum be decided? Should it be possible
+        //       to specify as a generic on the enum declaration? But in that case
+        //       it would take a generic impl instead of a generic decl as structs.
+        //       Is this ok?
+        // The type of the enum values. This will assigned to both the whole enum
+        // structure, but also the enum values to help during type inference.
+        let enum_ty = Ty::CompoundType(InnerTy::Enum(ident.clone()), Generics::new());
+        let i32_ty = Ty::CompoundType(InnerTy::I32, Generics::new());
+
+        const RADIX: u32 = 10;
+
+        // TODO: This should probably be done somewhere else in a better way.
+        //       In the future all enums might not be i32 and might not have the
+        //       value of their index position, that might be configurable.
+        // TODO: The type of the enum (Enum) and the type of the members (i32)
+        //       are different. Can this cause any issues in the future?
+        // Wraps all members of the en um into RCs so that they can be stored
+        // in look-up tables during the analyze stage.
+        // Also assign all members the type `Enum(ident)` and give them their
+        // values according to their index position in the enum.
+        let members = members
+            .iter_mut()
+            .enumerate()
+            .map(|(idx, m)| {
+                m.ty = Some(enum_ty.clone());
+                m.default_value = Some(Box::new(Expr::Lit(
+                    Lit::Integer(idx.to_string(), RADIX),
+                    Some(i32_ty.clone()),
+                    None,
+                )));
+                Rc::new(RefCell::new(m.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        if is_var_arg {
+            return Err(self.iter.err(format!(
+                "Found invalid var_arg symbol in enum with name: {}",
+                &ident
+            )));
+        }
+
+        let members_opt = if !members.is_empty() {
+            Some(members)
+        } else {
+            None
+        };
+
+        let enum_ = Enum::new(ident, enum_ty, members_opt);
+        let header = BlockHeader::Enum(Rc::new(RefCell::new(enum_)));
 
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);

@@ -1,5 +1,5 @@
 use super::expr::Expr;
-use crate::{file::FilePosition, ty::ty::Ty};
+use crate::{file::FilePosition, ty::ty::Ty, BlockId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Op {
@@ -117,6 +117,11 @@ pub enum UnOperator {
     /// The string is the name of the member. The u64 is the index of the struct
     /// member being accessed.
     StructAccess(String, Option<u64>),
+
+    /// The string is the name of the member. The BlockId is the block ID in
+    /// which this enum access was done. This is needed to find the enum structure
+    /// during code generation.
+    EnumAccess(String, BlockId),
 
     BitComplement,
 
