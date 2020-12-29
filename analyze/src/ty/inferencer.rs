@@ -21,7 +21,7 @@ use common::{
     visitor::Visitor,
 };
 use either::Either;
-use log::debug;
+use log::{debug, warn};
 
 use super::context::TypeContext;
 
@@ -529,10 +529,22 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
         }
 
+        // TODO: Temporary ugly hack to make "@type" to work. Should do this in
+        //       a adifferent way and somewhere else.
+        if &built_in_call.name == "type" {
+            built_in_call.ret_type = Some(Ty::Expr(Box::new(
+                built_in_call.arguments.first().unwrap().value.clone(),
+            )));
+        }
+
+        warn!("Built in call: {:#?}", built_in_call);
+
         // TODO: Is it correct to directly set the return type for the function
         //       call? Should be inserted as a constraint instead? Will this
         //       affect generics?
-        built_in_call.ret_type = Some(built_in.ret_type);
+        if built_in_call.ret_type.is_none() {
+            built_in_call.ret_type = Some(built_in.ret_type);
+        }
     }
 
     /// Adds the correct type for the struct init and ties the types of the struct

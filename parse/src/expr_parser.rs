@@ -17,7 +17,7 @@ use common::{
     },
 };
 use lex::token::{LexTokenKind, Sym};
-use log::debug;
+use log::{debug, warn};
 
 pub struct ExprParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
@@ -141,7 +141,10 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
                 // "Built-in" function call.
                 LexTokenKind::Sym(Sym::At) => {
+                    // `next_token` should contain the ident.
                     let next_token = self.iter.next_skip_space();
+
+                    warn!("BEFORE PARSE TYPE GENERICS");
 
                     // TODO: Most of the logic below is taken from `self.parse_expr_ident`.
                     //       Merge the logic.
@@ -163,12 +166,20 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         None
                     };
 
+                    warn!(
+                        "ident_token: {:#?}, peek: {:#?}, generics: {:#?}",
+                        next_token,
+                        self.iter.peek_skip_space(),
+                        generics
+                    );
+
                     if let Some((LexTokenKind::Ident(ident), file_pos)) =
                         next_token.clone().map(|t| (t.kind, lex_token.file_pos))
                     {
                         let start_symbol = Sym::ParenthesisBegin;
                         let end_symbol = Sym::ParenthesisEnd;
                         let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
+                        warn!("done parsing arg list.");
                         let built_in_call =
                             BuiltInCall::new(ident, arguments, generics, Some(file_pos));
                         self.shunt_operand(Expr::BuiltInCall(built_in_call))?;
@@ -540,9 +551,13 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     let parse_type = true;
                     let parse_value = false;
                     let is_const = false;
-                    let var =
-                        self.iter
-                            .parse_var(ident, parse_type, parse_value, is_const, None)?;
+                    let var = self.iter.parse_var(
+                        ident,
+                        parse_type,
+                        parse_value,
+                        is_const,
+                        generics.as_ref(),
+                    )?;
                     Ok(Expr::Var(var))
                 }
             }

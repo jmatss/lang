@@ -573,7 +573,7 @@ impl<'a> ParseTokenIter<'a> {
                         let parse_value = true;
                         let is_const = false;
                         let parameter =
-                            self.parse_var(&ident, parse_type, parse_value, is_const, None)?;
+                            self.parse_var(&ident, parse_type, parse_value, is_const, generics)?;
 
                         parameters.push(parameter);
                     }

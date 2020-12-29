@@ -32,4 +32,10 @@ impl AstToken {
             AstToken::Empty | AstToken::EOF => None,
         }
     }
+
+    /// Returns true if this token is "skippable". This is tokens that aren't
+    /// really used generate code, ex. comments and empty tokens.
+    pub fn is_skippable(&self) -> bool {
+        matches!(self, AstToken::Comment(..) | AstToken::Empty)
+    }
 }

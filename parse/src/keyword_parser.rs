@@ -875,6 +875,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             for ast_token in body {
                 if let AstToken::Block(BlockHeader::Function(_), ..) = ast_token {
                     // Do nothing, the token is of correct type.
+                } else if ast_token.is_skippable() {
                 } else {
                     return Err(self.iter.err(format!(
                         "Non function parsed in \"implement\" block: {:#?}.",

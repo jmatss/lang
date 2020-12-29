@@ -8,6 +8,7 @@ use crate::{
         op::{Op, UnOperator},
         stmt::Stmt,
     },
+    ty::ty::Ty,
     visitor::Visitor,
 };
 
@@ -141,18 +142,16 @@ impl<'a> AstTraverser<'a> {
                 }
                 BlockHeader::Function(func) => {
                     // TODO: Iterate through the `generics`.
-                    for v in self.visitors.iter_mut() {
-                        if let Some(params) = &mut func.borrow_mut().parameters {
-                            for param in params {
-                                if let Some(ty) = &mut param.borrow_mut().ty {
-                                    v.visit_type(ty, &self.traverse_context);
-                                }
+                    if let Some(params) = &mut func.borrow_mut().parameters {
+                        for param in params {
+                            if let Some(ty) = &mut param.borrow_mut().ty {
+                                self.traverse_type(ty);
                             }
                         }
+                    }
 
-                        if let Some(ret_ty) = &mut func.borrow_mut().ret_type {
-                            v.visit_type(ret_ty, &self.traverse_context);
-                        }
+                    if let Some(ret_ty) = &mut func.borrow_mut().ret_type {
+                        self.traverse_type(ret_ty);
                     }
 
                     debug!("Visiting func");
@@ -162,12 +161,10 @@ impl<'a> AstTraverser<'a> {
                 }
                 BlockHeader::Struct(struct_) => {
                     // TODO: Visit `implements` and possible generics?
-                    for v in self.visitors.iter_mut() {
-                        if let Some(members) = &mut struct_.borrow_mut().members {
-                            for member in members {
-                                if let Some(ty) = &mut member.borrow_mut().ty {
-                                    v.visit_type(ty, &self.traverse_context);
-                                }
+                    if let Some(members) = &mut struct_.borrow_mut().members {
+                        for member in members {
+                            if let Some(ty) = &mut member.borrow_mut().ty {
+                                self.traverse_type(ty);
                             }
                         }
                     }
@@ -179,12 +176,10 @@ impl<'a> AstTraverser<'a> {
                 }
                 BlockHeader::Enum(enum_) => {
                     // TODO: Visit possible generics?
-                    for v in self.visitors.iter_mut() {
-                        if let Some(members) = &mut enum_.borrow_mut().members {
-                            for member in members {
-                                if let Some(ty) = &mut member.borrow_mut().ty {
-                                    v.visit_type(ty, &self.traverse_context);
-                                }
+                    if let Some(members) = &mut enum_.borrow_mut().members {
+                        for member in members {
+                            if let Some(ty) = &mut member.borrow_mut().ty {
+                                self.traverse_type(ty);
                             }
                         }
                     }
@@ -196,12 +191,10 @@ impl<'a> AstTraverser<'a> {
                 }
                 BlockHeader::Interface(interface) => {
                     // TODO: Visit possible generics?
-                    for v in self.visitors.iter_mut() {
-                        if let Some(members) = &mut interface.borrow_mut().members {
-                            for member in members {
-                                if let Some(ty) = &mut member.borrow_mut().ty {
-                                    v.visit_type(ty, &self.traverse_context);
-                                }
+                    if let Some(members) = &mut interface.borrow_mut().members {
+                        for member in members {
+                            if let Some(ty) = &mut member.borrow_mut().ty {
+                                self.traverse_type(ty);
                             }
                         }
                     }
@@ -255,10 +248,8 @@ impl<'a> AstTraverser<'a> {
                     }
                 }
                 BlockHeader::For(var, expr) => {
-                    for v in self.visitors.iter_mut() {
-                        if let Some(ty) = &mut var.ty {
-                            v.visit_type(ty, &self.traverse_context);
-                        }
+                    if let Some(ty) = &mut var.ty {
+                        self.traverse_type(ty);
                     }
 
                     self.traverse_expr(expr);
@@ -278,18 +269,16 @@ impl<'a> AstTraverser<'a> {
                 }
                 BlockHeader::Test(func) => {
                     // TODO: Iterate through the `generics`.
-                    for v in self.visitors.iter_mut() {
-                        if let Some(params) = &mut func.parameters {
-                            for param in params {
-                                if let Some(ty) = &mut param.borrow_mut().ty {
-                                    v.visit_type(ty, &self.traverse_context);
-                                }
+                    if let Some(params) = &mut func.parameters {
+                        for param in params {
+                            if let Some(ty) = &mut param.borrow_mut().ty {
+                                self.traverse_type(ty);
                             }
                         }
+                    }
 
-                        if let Some(ret_ty) = &mut func.ret_type {
-                            v.visit_type(ret_ty, &self.traverse_context);
-                        }
+                    if let Some(ret_ty) = &mut func.ret_type {
+                        self.traverse_type(ret_ty);
                     }
 
                     debug!("Visiting test");
@@ -320,9 +309,7 @@ impl<'a> AstTraverser<'a> {
         }
 
         if let Ok(ty) = expr.get_expr_type_mut() {
-            for v in self.visitors.iter_mut() {
-                v.visit_type(ty, &self.traverse_context)
-            }
+            self.traverse_type(ty)
         }
 
         debug!("Visiting expr -- {:#?}", expr);
@@ -344,16 +331,14 @@ impl<'a> AstTraverser<'a> {
                 }
             }
             Expr::FuncCall(func_call) => {
-                for v in self.visitors.iter_mut() {
-                    if let Some(gen_tys) = &mut func_call.generics {
-                        for gen_ty in gen_tys.iter_types_mut() {
-                            v.visit_type(gen_ty, &self.traverse_context)
-                        }
+                if let Some(gen_tys) = &mut func_call.generics {
+                    for gen_ty in gen_tys.iter_types_mut() {
+                        self.traverse_type(gen_ty)
                     }
+                }
 
-                    if let Some(method_structure) = &mut func_call.method_structure {
-                        v.visit_type(method_structure, &self.traverse_context);
-                    }
+                if let Some(ty) = &mut func_call.method_structure {
+                    self.traverse_type(ty);
                 }
 
                 for arg in &mut func_call.arguments {
@@ -366,11 +351,9 @@ impl<'a> AstTraverser<'a> {
                 }
             }
             Expr::BuiltInCall(built_in_call) => {
-                for v in self.visitors.iter_mut() {
-                    if let Some(gen_tys) = &mut built_in_call.generics {
-                        for gen_ty in gen_tys.iter_types_mut() {
-                            v.visit_type(gen_ty, &self.traverse_context)
-                        }
+                if let Some(gen_tys) = &mut built_in_call.generics {
+                    for gen_ty in gen_tys.iter_types_mut() {
+                        self.traverse_type(gen_ty)
                     }
                 }
 
@@ -384,11 +367,9 @@ impl<'a> AstTraverser<'a> {
                 }
             }
             Expr::StructInit(struct_init) => {
-                for v in self.visitors.iter_mut() {
-                    if let Some(gen_tys) = &mut struct_init.generics {
-                        for gen_ty in gen_tys.iter_types_mut() {
-                            v.visit_type(gen_ty, &self.traverse_context)
-                        }
+                if let Some(gen_tys) = &mut struct_init.generics {
+                    for gen_ty in gen_tys.iter_types_mut() {
+                        self.traverse_type(gen_ty)
                     }
                 }
 
@@ -431,11 +412,7 @@ impl<'a> AstTraverser<'a> {
                     v.visit_un_op(un_op, &self.traverse_context)
                 }
             }
-            Expr::Type(ty, ..) => {
-                for v in self.visitors.iter_mut() {
-                    v.visit_type(ty, &self.traverse_context)
-                }
-            }
+            Expr::Type(ty, ..) => self.traverse_type(ty),
         }
 
         self.traverse_context.file_pos = old_pos;
@@ -535,9 +512,7 @@ impl<'a> AstTraverser<'a> {
                 }
 
                 if let Some(ty) = &mut var.borrow_mut().ty {
-                    for v in self.visitors.iter_mut() {
-                        v.visit_type(ty, &self.traverse_context)
-                    }
+                    self.traverse_type(ty)
                 }
 
                 debug!("Visiting var decl");
@@ -560,5 +535,18 @@ impl<'a> AstTraverser<'a> {
         }
 
         self.traverse_context.file_pos = old_pos;
+    }
+
+    pub fn traverse_type(&mut self, ty: &mut Ty) {
+        // TODO: Does the FilePosition need to be updated?
+
+        debug!("Visiting type -- {:#?}", ty);
+        for v in self.visitors.iter_mut() {
+            v.visit_type(ty, &self.traverse_context)
+        }
+
+        if let Some(expr) = ty.get_expr_mut() {
+            self.traverse_expr(expr);
+        }
     }
 }

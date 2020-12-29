@@ -278,6 +278,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
             for mut body_token in body {
                 if let AstToken::Block(BlockHeader::Function(func), ..) = &mut body_token {
                     func.borrow_mut().method_structure = Some(ty.clone());
+                } else if body_token.is_skippable() {
                 } else {
                     let err = analyze_context.err(format!(
                         "AST token in impl block with name \"{}\" not a function: {:?}",

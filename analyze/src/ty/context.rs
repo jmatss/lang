@@ -122,7 +122,9 @@ impl<'a> TypeContext<'a> {
                 _ => (),
             }
 
-            self.constraints.push((lhs, rhs));
+            if !lhs.is_any() && !rhs.is_any() {
+                self.constraints.push((lhs, rhs));
+            }
         } else {
             debug!(
                 "Constraint already exists -- lhs: {:?}, rhs: {:?}",
@@ -363,6 +365,9 @@ impl<'a> TypeContext<'a> {
                 &from, &to
             );
             return Ok(());
+        } else if from.is_any() || to.is_any() {
+            // Do not map "Any" types.
+            return Ok(());
         }
 
         // Insert substitutions for the inner types of outer types that have
@@ -443,6 +448,13 @@ impl<'a> TypeContext<'a> {
                     }
                     Ty::Pointer(..) | Ty::Array(..) => {
                         return self.solve_aggregate(finalize);
+                    }
+                    Ty::Expr(expr) => {
+                        if let Ok(ty) = expr.get_expr_type() {
+                            return self.solve_substitution(&ty, finalize);
+                        } else {
+                            unreachable!("No type for expr: {:#?}", expr);
+                        }
                     }
                     Ty::UnknownStructureMember(..) => {
                         return self.solve_unknown_structure_member(finalize);
@@ -622,11 +634,15 @@ impl<'a> TypeContext<'a> {
     /// Solves "Any" types. If a Any type has a mapping in the substitution map,
     /// this function won't be called.
     fn solve_any(&mut self, finalize: bool) -> SubResult {
+        // TODO: Is this correct? Should "Any" never be solved?
         if finalize {
+            /*
             SubResult::Err(
                 self.analyze_context
                     .err(format!("Unable to solve \"Any\" type: {:#?}", self.cur_ty)),
             )
+            */
+            SubResult::Solved(self.cur_ty.clone())
         } else {
             SubResult::UnSolved(self.cur_ty.clone())
         }

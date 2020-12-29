@@ -1,6 +1,7 @@
-use crate::parser::ParseTokenIter;
+use crate::parser::{ParseTokenIter, DEFAULT_ASSIGN_STOP_CONDS};
 use common::{
     error::CustomResult,
+    token::expr::Expr,
     ty::{
         generics::{Generics, GenericsKind},
         inner_ty::InnerTy,
@@ -8,6 +9,7 @@ use common::{
     },
 };
 use lex::token::{LexToken, LexTokenKind, Sym};
+use log::warn;
 
 pub struct TypeParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
@@ -67,6 +69,28 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                 // Array/slice.
                 LexTokenKind::Sym(Sym::SquareBracketBegin) => self.parse_type_array(),
 
+                // Built in call.
+                LexTokenKind::Sym(Sym::At) => {
+                    self.iter.rewind_skip_space()?;
+
+                    // Need to add stop conditions for if the the start/end of
+                    // a generic list is reached.
+                    let mut stop_conds = DEFAULT_ASSIGN_STOP_CONDS.to_vec();
+                    stop_conds.push(Sym::PointyBracketBegin);
+                    stop_conds.push(Sym::PointyBracketEnd);
+                    stop_conds.push(Sym::ShiftRight);
+
+                    let expr = self.iter.parse_expr(&stop_conds)?;
+                    if let Expr::BuiltInCall(..) = expr {
+                        Ok(Ty::Expr(Box::new(expr)))
+                    } else {
+                        Err(self.iter.err(format!(
+                            "\"At\"(@) in type NOT built-in call, was: {:#?}",
+                            expr
+                        )))
+                    }
+                }
+
                 _ => Err(self
                     .iter
                     .err(format!("Invalid type token: {:?}", lex_token))),
@@ -82,6 +106,8 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     pub(crate) fn parse_type_generics(&mut self, kind: GenericsKind) -> CustomResult<Generics> {
         let mut generics = Generics::new();
 
+        warn!("INSIDE GENERICS!");
+
         let mark = self.iter.mark();
 
         // If the next token isn't a "PointyBracketBegin" there are no generic
@@ -95,6 +121,8 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             }
         }
 
+        warn!("INSIDE GENERICS 2!");
+
         // Sanity check to see if this is a generic list with no items inside.
         if let Some(lex_token) = self.iter.peek_skip_space() {
             match lex_token.kind {
@@ -105,6 +133,8 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             }
         }
 
+        warn!("INSIDE GENERICS 3!");
+
         loop {
             // Parse the next item in the list as either a identifier(name) or
             // a type depending if this is a decl or impl generic list.
@@ -113,6 +143,8 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                 GenericsKind::Impl => generics.insert_type(self.parse_type()?),
                 _ => panic!("Bad GenericsKind: {:#?}", generics),
             }
+
+            warn!("INSIDE GENERICS 4!");
 
             let mark = self.iter.mark();
 

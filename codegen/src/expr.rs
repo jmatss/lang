@@ -337,6 +337,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .const_int(file_pos.column_nr, false)
                 .into()),
 
+            "type" => Err(self.err(format!(
+                "Unexpected @type built in call, should not end up here: {:#?}",
+                built_in_call
+            ))),
+
             _ => {
                 unreachable!("Bad built in name: {:#?}", built_in_call);
             }

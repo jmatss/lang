@@ -42,6 +42,17 @@ pub enum Ty {
     /// the generic impls.
     GenericInstance(String, String, Option<Box<Ty>>),
 
+    /// Represents a expression parsed as a type. The resulting type will be
+    /// the return type of the expression.
+    ///
+    /// Example for a built in call:
+    /// ```ignore
+    /// var i: i64 = 123
+    /// var x = StructWithGeneric<@type(i)> {}
+    /// ```
+    /// where `@type(i)` would return the type of expression `i` which is `i64`.
+    Expr(Box<Expr>),
+
     /// Unknown member of the struct/enum/interface type "Type" with the member
     /// name "String".
     UnknownStructureMember(Box<Ty>, String),
@@ -154,6 +165,17 @@ impl Ty {
         }
     }
 
+    // TODO: This only fetched a expression if it is the outer most type.
+    //       How should expression in ex. generics be handled? Should this
+    //       return a iterator or a list?
+    pub fn get_expr_mut(&mut self) -> Option<&mut Expr> {
+        if let Ty::Expr(expr, ..) = self {
+            Some(expr)
+        } else {
+            None
+        }
+    }
+
     /// Recursively replaces any generic identifiers from "UnknownIdent" wrapped
     /// inside a "CompoundType" into "Generic"s.
     pub fn replace_generics(&mut self, generic_names: &[String]) {
@@ -163,7 +185,9 @@ impl Ty {
                     generic.replace_generics(generic_names);
                 }
 
-                *self = Ty::Generic(ident.clone(), None);
+                if generic_names.contains(ident) {
+                    *self = Ty::Generic(ident.clone(), None);
+                }
             }
 
             Ty::Pointer(ty)
@@ -173,6 +197,12 @@ impl Ty {
             | Ty::UnknownStructureMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
             | Ty::UnknownArrayMember(ty) => ty.replace_generics(generic_names),
+
+            Ty::Expr(expr) => {
+                if let Ok(ty) = expr.get_expr_type_mut() {
+                    ty.replace_generics(generic_names);
+                }
+            }
 
             _ => (),
         }
@@ -219,6 +249,12 @@ impl Ty {
             | Ty::UnknownMethodArgument(ty, ..)
             | Ty::UnknownArrayMember(ty) => ty.replace_generics_impl(generics_impl),
 
+            Ty::Expr(expr) => {
+                if let Ok(ty) = expr.get_expr_type_mut() {
+                    ty.replace_generics_impl(generics_impl);
+                }
+            }
+
             _ => (),
         }
     }
@@ -248,6 +284,14 @@ impl Ty {
             | Ty::UnknownArrayMember(ty) => {
                 if let Some(mut inner_generics) = ty.get_generics() {
                     generics.append(&mut inner_generics);
+                }
+            }
+
+            Ty::Expr(expr) => {
+                if let Ok(ty) = expr.get_expr_type() {
+                    if let Some(mut inner_generics) = ty.get_generics() {
+                        generics.append(&mut inner_generics);
+                    }
                 }
             }
 
@@ -284,6 +328,13 @@ impl Ty {
             | Ty::UnknownStructureMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
             | Ty::UnknownArrayMember(ty) => ty.replace_self(old_name, new_self_ty),
+
+            Ty::Expr(expr) => {
+                if let Ok(ty) = expr.get_expr_type_mut() {
+                    ty.replace_self(old_name, new_self_ty);
+                }
+            }
+
             _ => (),
         }
     }
@@ -346,6 +397,14 @@ impl Ty {
 
     pub fn is_array(&self) -> bool {
         if let Ty::Array(..) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_expr(&self) -> bool {
+        if let Ty::Expr(..) = self {
             true
         } else {
             false
@@ -433,6 +492,7 @@ impl Ty {
             (Ty::CompoundType(_, _), Ty::CompoundType(_, _))
             | (Ty::Pointer(_), Ty::Pointer(_))
             | (Ty::Array(_, _), Ty::Array(_, _))
+            | (Ty::Expr(..), Ty::Expr(..))
             | (Ty::Generic(..), Ty::Generic(..))
             | (Ty::Any, Ty::Any)
             | (Ty::GenericInstance(..), Ty::GenericInstance(..))
@@ -462,6 +522,14 @@ impl Ty {
             | Ty::UnknownMethodArgument(new_ty, _, _)
             | Ty::UnknownArrayMember(new_ty) => new_ty.contains_ty(ty),
 
+            Ty::Expr(expr) => {
+                if let Ok(new_ty) = expr.get_expr_type() {
+                    new_ty.contains_ty(ty)
+                } else {
+                    false
+                }
+            }
+
             _ => false,
         }
     }
@@ -488,6 +556,14 @@ impl Ty {
             | Ty::UnknownStructureMethod(ty, _)
             | Ty::UnknownMethodArgument(ty, _, _)
             | Ty::UnknownArrayMember(ty) => ty.contains_inner_ty(inner_ty),
+
+            Ty::Expr(expr) => {
+                if let Ok(ty) = expr.get_expr_type() {
+                    ty.contains_inner_ty(inner_ty)
+                } else {
+                    false
+                }
+            }
 
             Ty::Generic(..) | Ty::GenericInstance(..) | Ty::Any => false,
         }
@@ -547,37 +623,33 @@ impl Ty {
     //       true. Should this be the case?
     pub fn is_compatible(&self, other: &Ty) -> bool {
         // Handles all cases with "Unknown" types.
-        if self.is_unknown_int() {
+        if self.is_generic() || other.is_generic() || self.is_any() || other.is_any() {
+            return true;
+        } else if self.is_unknown_int() {
             if other.is_unknown_float() || other.is_unknown_ident() {
                 return false;
-            } else if other.is_int() || other.is_unknown_any() || other.is_generic() {
+            } else if other.is_int() || other.is_unknown_any() {
                 return true;
             }
         } else if other.is_unknown_int() {
             if self.is_unknown_float() || self.is_unknown_ident() {
                 return false;
-            } else if self.is_int() || self.is_unknown_any() || self.is_generic() {
+            } else if self.is_int() || self.is_unknown_any() {
                 return true;
             }
         } else if self.is_unknown_float() {
             if other.is_unknown_int() || other.is_unknown_ident() {
                 return false;
-            } else if other.is_float() || other.is_unknown_any() || other.is_generic() {
+            } else if other.is_float() || other.is_unknown_any() {
                 return true;
             }
         } else if other.is_unknown_float() {
             if self.is_unknown_int() || self.is_unknown_ident() {
                 return false;
-            } else if self.is_float() || self.is_unknown_any() || self.is_generic() {
+            } else if self.is_float() || self.is_unknown_any() {
                 return true;
             }
-        } else if self.is_unknown_any()
-            || other.is_unknown_any()
-            || self.is_generic()
-            || other.is_generic()
-            || self.is_any()
-            || other.is_any()
-        {
+        } else if self.is_unknown_any() || other.is_unknown_any() {
             return true;
         } else if self.is_string() || other.is_string() {
             // Add support for compatibility with string and {u8}. This is what
@@ -601,6 +673,14 @@ impl Ty {
 
             (Ty::CompoundType(comp_a, gens_a), Ty::CompoundType(comp_b, gens_b)) => {
                 comp_a == comp_b && gens_a.len() == gens_b.len()
+            }
+
+            (Ty::Expr(expr), other_ty) | (other_ty, Ty::Expr(expr)) => {
+                if let Ok(ty) = expr.get_expr_type() {
+                    ty.is_compatible(other_ty)
+                } else {
+                    false
+                }
             }
 
             _ => false,
@@ -711,6 +791,15 @@ impl Ty {
                 ty.precedence_priv(highest, next_depth, is_generic_param)
             }
 
+            Ty::Expr(expr) => {
+                if let Ok(ty) = expr.get_expr_type() {
+                    // Use the same depth.
+                    ty.precedence_priv(highest, depth, is_generic_param)
+                } else {
+                    highest
+                }
+            }
+
             Ty::GenericInstance(..) => usize::max(highest, 12 + extra),
             Ty::Generic(..) => usize::max(highest, 14 + extra),
             Ty::Any => usize::max(highest, 18 + extra),
@@ -756,6 +845,14 @@ impl Display for Ty {
                 result.push('{');
                 result.push_str(&inner_ty.to_string());
                 result.push('}');
+            }
+
+            Ty::Expr(expr) => {
+                if let Ok(ty) = expr.get_expr_type() {
+                    result.push_str(&ty.to_string());
+                } else {
+                    panic!("Expr type None.");
+                }
             }
 
             Ty::Array(inner_ty, dim_opt) => {

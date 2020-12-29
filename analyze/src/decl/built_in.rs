@@ -7,7 +7,7 @@ use common::{
 
 /// Stores information about all built-in functions into a hashmap.
 pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
-    let mut built_ins = HashMap::with_capacity(1);
+    let mut built_ins = HashMap::with_capacity(5);
 
     let name = "size";
     let parameters = Vec::with_capacity(0);
