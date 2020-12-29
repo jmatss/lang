@@ -19,12 +19,7 @@ use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 use log::debug;
 
 /// The common stop conditions used when parsing expressions.
-pub const DEFAULT_STOP_CONDS: [Sym; 4] = [
-    Sym::LineBreak,
-    Sym::SemiColon,
-    Sym::Comma,
-    Sym::CurlyBracketBegin,
-];
+pub const DEFAULT_STOP_CONDS: [Sym; 3] = [Sym::LineBreak, Sym::SemiColon, Sym::Comma];
 
 /// Stop conditions used when one knows that the expression will be ended with
 /// a "CurlyBracketBegin". This allows ex. linebreaks in expressions which allows

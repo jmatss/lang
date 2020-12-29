@@ -41,6 +41,37 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
+    /// Returns true if all basic values in `values` are const.
+    pub(super) fn is_const(values: &[AnyValueEnum<'ctx>]) -> bool {
+        for value in values.iter() {
+            let is_const = match *value {
+                AnyValueEnum::ArrayValue(val) => val.is_const(),
+                AnyValueEnum::IntValue(val) => val.is_const(),
+                AnyValueEnum::FloatValue(val) => val.is_const(),
+                AnyValueEnum::PointerValue(val) => val.is_const(),
+                AnyValueEnum::StructValue(val) => {
+                    // TODO: Should probably be some way to iterate through all its member
+                    //       recursively and figure out if all fields of the struct is
+                    //       const. If that is the case, one can assume that the struct
+                    //       is also const.
+                    // If the struct has no name, this is a constant struct
+                    // according to inkwell documentation.
+                    val.get_name().to_bytes().is_empty()
+                }
+                AnyValueEnum::VectorValue(val) => val.is_const(),
+
+                AnyValueEnum::PhiValue(_)
+                | AnyValueEnum::FunctionValue(_)
+                | AnyValueEnum::InstructionValue(_) => false,
+            };
+
+            if !is_const {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Returns the BasicBlock representing the "closest" merge block from the
     /// current block. Merge blocks will be created for ex. if-statements
     /// and while-loops.

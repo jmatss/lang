@@ -96,17 +96,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             // If the next lex token is a "CurlyBracketBegin", no expression is
             // given after this "if case". Assume this is the ending "else".
             // Otherwise parse the expression.
-            let expr = if let Some(lex_token) = self.iter.peek_skip_space_line() {
-                if let LexTokenKind::Sym(Sym::CurlyBracketBegin) = lex_token.kind {
-                    None
-                } else {
-                    self.iter.parse_expr_allow_empty(&KEYWORD_STOP_CONDS)?
-                }
-            } else {
-                return Err(self
-                    .iter
-                    .err("Received None when looking at \"if case\" expr.".into()));
-            };
+            let expr = self.iter.parse_expr_allow_empty(&KEYWORD_STOP_CONDS)?;
             let header = BlockHeader::IfCase(expr);
 
             let if_case = self.iter.next_block(header)?;

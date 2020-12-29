@@ -390,39 +390,40 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
 
-        // TODO: How should the init of a struct work? Currently the var decl
-        //       will create a store for the struct. But in this, to access the
-        //       members, one has to get a pointer from somewhere. So for now
-        //       this function will also make a store so that it can get a pointer
-        //       to it so that the values can be inserted.
-        // TODO: If this is a const, create it with "const_named_struct".
-        //       Otherwise, create const empty one, and then insert the values
-        //       one at a time.
-        // if is_const {
-        //     let struct_value = struct_type.const_named_struct(args.as_ref());
-        // } else {
+        let is_const = CodeGen::is_const(
+            &args
+                .clone()
+                .iter()
+                .map(|x| x.clone().into())
+                .collect::<Vec<_>>(),
+        );
 
-        // Create a tmp storage for the struct so that the init values can be set.
-        // Iterate through all members of the struct and initialize them.
-        let struct_ptr = self.builder.build_alloca(struct_type, "struct.init");
-        for (i, arg_value) in args.iter().enumerate() {
-            let member_ptr = self
+        if is_const {
+            Ok(struct_type.const_named_struct(&args).into())
+        } else {
+            // TODO: Can this be done in a better way? The stack storring/loading
+            //       isn't really needed.
+            let struct_ptr = self.builder.build_alloca(struct_type, "struct.init");
+
+            for (i, arg_value) in args.iter().enumerate() {
+                let member_ptr = self
+                    .builder
+                    .build_struct_gep(struct_ptr, i as u32, "struct.init.gep")
+                    .map_err(|_| {
+                        self.err(format!(
+                            "Unable to GEP struct \"{}\" member {}.",
+                            &struct_init.name, i
+                        ))
+                    })?;
+
+                self.builder.build_store(member_ptr, *arg_value);
+            }
+
+            Ok(self
                 .builder
-                .build_struct_gep(struct_ptr, i as u32, "struct.init.gep")
-                .map_err(|_| {
-                    self.err(format!(
-                        "Unable to GEP struct \"{}\" member {}.",
-                        &struct_init.name, i
-                    ))
-                })?;
-
-            self.builder.build_store(member_ptr, *arg_value);
+                .build_load(struct_ptr, "struct.init.load")
+                .into())
         }
-
-        Ok(self
-            .builder
-            .build_load(struct_ptr, "struct.init.load")
-            .into())
     }
 
     /// Generates a array creation/initialization.

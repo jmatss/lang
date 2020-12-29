@@ -12,8 +12,7 @@ use common::{
 };
 use inkwell::{
     types::{AnyTypeEnum, BasicTypeEnum},
-    values::PointerValue,
-    values::{AnyValueEnum, BasicValueEnum},
+    values::{AggregateValue, AnyValueEnum, BasicValueEnum, PointerValue},
     FloatPredicate, IntPredicate,
 };
 use log::debug;
@@ -63,7 +62,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let right_any = self.compile_expr(&mut bin_op.rhs, ExprTy::RValue)?;
         let right = CodeGen::any_into_basic_value(right_any)?;
 
-        bin_op.is_const = self.is_const(&[&left_any, &right_any]);
+        bin_op.is_const = CodeGen::is_const(&[left_any, right_any]);
 
         let left_type = left.get_type();
         let right_type = right.get_type();
@@ -235,10 +234,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
             UnOperator::StructAccess(..) => {
-                let ptr = self.compile_un_op_struct_access(un_op)?;
+                let val = self.compile_un_op_struct_access(un_op, expr_ty)?;
                 match expr_ty {
-                    ExprTy::LValue => Ok(ptr.into()),
-                    ExprTy::RValue => Ok(self.builder.build_load(ptr, "struct.gep.rval").into()),
+                    ExprTy::LValue => Ok(val),
+                    ExprTy::RValue => Ok(self
+                        .builder
+                        .build_load(val.into_pointer_value(), "struct.gep.rval")
+                        .into()),
                 }
             }
             UnOperator::EnumAccess(..) => match expr_ty {
@@ -250,7 +252,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             },
             UnOperator::Positive => {
                 let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
-                un_op.is_const = self.is_const(&[&any_value]);
+                un_op.is_const = CodeGen::is_const(&[any_value]);
 
                 // Do nothing.
                 Ok(any_value)
@@ -352,40 +354,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
         })
-    }
-
-    fn compile_bin_op_dot(
-        &mut self,
-        ret_type: AnyTypeEnum<'ctx>,
-        left: BasicValueEnum<'ctx>,
-        right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
-        let left_type = left.get_type();
-        Ok(match left_type {
-            BasicTypeEnum::StructType(_) => {
-                // TODO: FIXME: The right side will have been a struct gep
-                //              and should contain the content value that we
-                //              want to return. Is this a valid assumption?
-                right.into()
-            }
-
-            BasicTypeEnum::ArrayType(_)
-            | BasicTypeEnum::PointerType(_)
-            | BasicTypeEnum::VectorType(_)
-            | BasicTypeEnum::FloatType(_)
-            | BasicTypeEnum::IntType(_) => {
-                return Err(self.err(format!("Bad left type in Dot bin op: {:?}", left_type)))
-            }
-        })
-    }
-
-    fn compile_bin_op_double_colon(
-        &mut self,
-        ret_type: AnyTypeEnum<'ctx>,
-        left: BasicValueEnum<'ctx>,
-        right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
-        panic!("TODO: Implement static variables.")
     }
 
     fn compile_bin_op_compare(
@@ -1118,7 +1086,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// to the value or the value itself is up to the caller.
     fn compile_un_op_deref(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
-        un_op.is_const = self.is_const(&[&any_value]);
+        un_op.is_const = CodeGen::is_const(&[any_value]);
 
         if any_value.is_pointer_value() {
             // TODO: Find better way to do this.
@@ -1139,7 +1107,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn compile_un_op_address(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
-        un_op.is_const = self.is_const(&[&any_value]);
+        un_op.is_const = CodeGen::is_const(&[any_value]);
 
         if any_value.is_pointer_value() {
             Ok(any_value)
@@ -1176,7 +1144,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
-        un_op.is_const = self.is_const(&[&any_value]);
+        un_op.is_const = CodeGen::is_const(&[any_value]);
 
         let ptr = if any_value.is_pointer_value() {
             any_value.into_pointer_value()
@@ -1224,10 +1192,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_un_op_struct_access(
         &mut self,
         un_op: &mut UnOp,
-    ) -> CustomResult<PointerValue<'ctx>> {
+        expr_ty: ExprTy,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
         let idx = if let UnOperator::StructAccess(_, idx_opt) = un_op.operator {
             if let Some(idx) = idx_opt {
-                idx
+                idx as u32
             } else {
                 return Err(self.err(format!(
                     "No index set when compiling struct access: {:?}",
@@ -1242,39 +1211,40 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
-        un_op.is_const = self.is_const(&[&any_value]);
-
-        let ptr = if any_value.is_pointer_value() {
-            any_value.into_pointer_value()
-        } else if let AnyTypeEnum::StructType(_) = any_value.get_type() {
-            // Need to wrap any struct types with a temporary alloc to
-            // access its members.
-            let ptr = self.builder.build_alloca(
-                any_value.get_type().into_struct_type(),
-                "struct.type.access",
-            );
-            self.builder.build_store(ptr, any_value.into_struct_value());
-            ptr
-        } else {
-            return Err(self.err(format!(
-                "Expr in struct access not a pointer. Un up: {:#?}\ncompiled expr: {:#?}",
-                un_op, any_value
-            )));
-        };
+        un_op.is_const = CodeGen::is_const(&[any_value]);
 
         debug!(
-            "Compilng struct access -- expr: {:#?}\nptr: {:#?}\nidx: {:?}",
-            un_op.value, ptr, idx
+            "Compilng struct access -- un_op: {:#?}\n\nidx: {:?}",
+            un_op, idx
         );
 
-        self.builder
-            .build_struct_gep(ptr, idx as u32, "struct.gep")
-            .map_err(|_| {
-                self.err(format!(
-                    "Unable to gep for struct member index: {:?}.",
-                    un_op
-                ))
-            })
+        if any_value.is_pointer_value() {
+            let ptr = any_value.into_pointer_value();
+            self.builder
+                .build_struct_gep(ptr, idx, "struct.gep")
+                .map(|val| val.into())
+                .map_err(|_| {
+                    self.err(format!(
+                        "Unable to gep for struct member index: {:?}.",
+                        un_op
+                    ))
+                })
+        } else if any_value.is_struct_value() {
+            // Can only be a StructValue if this is a rvalue.
+            if let ExprTy::RValue = expr_ty {
+                Ok(any_value
+                    .into_struct_value()
+                    .const_extract_value(&mut [idx])
+                    .into())
+            } else {
+                Err(self.err(format!("StructValue not allowed in lvalue: {:#?}", un_op)))
+            }
+        } else {
+            Err(self.err(format!(
+                "Expr in struct access not a pointer orr struct. Un up: {:#?}\ncompiled expr: {:#?}",
+                un_op, any_value
+            )))
+        }
     }
 
     /// This function "creates" a instance of a member of a specific enum.
@@ -1339,7 +1309,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         un_op: &mut UnOp,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
-        un_op.is_const = self.is_const(&[&any_value]);
+        un_op.is_const = CodeGen::is_const(&[any_value]);
 
         Ok(match ret_type {
             AnyTypeEnum::FloatType(_) => {
@@ -1380,7 +1350,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         un_op: &mut UnOp,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
-        un_op.is_const = self.is_const(&[&any_value]);
+        un_op.is_const = CodeGen::is_const(&[any_value]);
 
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
@@ -1405,36 +1375,5 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 )))
             }
         })
-    }
-
-    /// Returns true if all basic values in `values` are const.
-    fn is_const(&self, values: &[&AnyValueEnum<'ctx>]) -> bool {
-        for value in values.iter() {
-            let is_const = match *value {
-                AnyValueEnum::ArrayValue(val) => val.is_const(),
-                AnyValueEnum::IntValue(val) => val.is_const(),
-                AnyValueEnum::FloatValue(val) => val.is_const(),
-                AnyValueEnum::PointerValue(val) => val.is_const(),
-                AnyValueEnum::StructValue(val) => {
-                    // TODO: Should probably be some way to iterate through all its member
-                    //       recursively and figure out if all fields of the struct is
-                    //       const. If that is the case, one can assume that the struct
-                    //       is also const.
-                    // If the struct has no name, this is a constant struct
-                    // according to inkwell documentation.
-                    val.get_name().to_bytes().is_empty()
-                }
-                AnyValueEnum::VectorValue(val) => val.is_const(),
-
-                AnyValueEnum::PhiValue(_)
-                | AnyValueEnum::FunctionValue(_)
-                | AnyValueEnum::InstructionValue(_) => false,
-            };
-
-            if !is_const {
-                return false;
-            }
-        }
-        true
     }
 }

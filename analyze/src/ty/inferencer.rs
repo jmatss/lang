@@ -21,7 +21,7 @@ use common::{
     visitor::Visitor,
 };
 use either::Either;
-use log::{debug, warn};
+use log::debug;
 
 use super::context::TypeContext;
 
@@ -297,8 +297,6 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // `structure_type` might have been updated. This call might have
             // no effect if no modifications have been done in the logic above.
             func_call.method_structure = Some(structure_ty.clone());
-
-            warn!("DDD");
 
             // Insert constraints between the function call argument type and
             // the method parameter types that will be figured out later.

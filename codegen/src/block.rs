@@ -1,19 +1,24 @@
 use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
-    error::{CustomResult, LangError, LangErrorKind::CodeGenError},
+    error::{
+        CustomResult, LangError,
+        LangErrorKind::{self, CodeGenError},
+    },
     file::FilePosition,
     token::{
         ast::AstToken,
         block::{BlockHeader, Enum, Function, Struct},
         expr::{Expr, Var},
     },
+    ty::{inner_ty::InnerTy, ty::Ty},
     BlockId,
 };
 use inkwell::{
     basic_block::BasicBlock,
+    builder::Builder,
     module::Linkage,
     types::AnyTypeEnum,
-    values::{FunctionValue, PointerValue},
+    values::{AggregateValue, AnyValueEnum, FunctionValue, IntValue, PointerValue},
 };
 
 /// Contains information related to branches in either a if-statement or a
@@ -66,6 +71,107 @@ impl<'ctx> BranchInfo<'ctx> {
                 format!("Unable to get if_branch with index: {}", index),
                 CodeGenError {
                     file_pos: file_pos.to_owned(),
+                },
+            ))
+        }
+    }
+}
+
+/// The type information for something that is being generated. This can for
+/// example be used to ensure that "enum"s are handled correctly in match cases.
+/// Since match cases needs to be ints, the enums needs to be converted to ints.
+enum CodeGenTy {
+    Int,
+    Enum,
+}
+
+impl CodeGenTy {
+    fn new(ty: &Ty) -> CustomResult<Self> {
+        // TODO: Add more types.
+        match ty {
+            Ty::CompoundType(inner_ty, ..) => match inner_ty {
+                InnerTy::Enum(_) => Ok(CodeGenTy::Enum),
+                _ if inner_ty.is_int() => Ok(CodeGenTy::Int),
+                _ => Err(LangError::new(
+                    format!("Invalid type when creating CodeGenTy: {:#?}", ty),
+                    LangErrorKind::GeneralError,
+                )),
+            },
+
+            _ => Err(LangError::new(
+                format!("Invalid type when creating CodeGenTy: {:#?}", ty),
+                LangErrorKind::GeneralError,
+            )),
+        }
+    }
+
+    /// Helper function to get the given `value` as a integer const.
+    fn as_int_const<'ctx>(&self, value: AnyValueEnum<'ctx>) -> CustomResult<IntValue<'ctx>> {
+        let value = match self {
+            CodeGenTy::Int => value,
+
+            CodeGenTy::Enum => {
+                assert!(value.is_struct_value());
+
+                value
+                    .into_struct_value()
+                    .const_extract_value(&mut [0])
+                    .into()
+            }
+        };
+
+        if value.is_int_value() {
+            Ok(value.into_int_value())
+        } else {
+            Err(LangError::new(
+                format!(
+                    "Given `value` expected to be const int, was not: {:#?}",
+                    value
+                ),
+                LangErrorKind::CodeGenError {
+                    file_pos: FilePosition::default(),
+                },
+            ))
+        }
+    }
+
+    /// Helper function to get the given `value` as a integer.
+    fn as_int<'ctx>(
+        &self,
+        builder: &Builder<'ctx>,
+        value: AnyValueEnum<'ctx>,
+    ) -> CustomResult<IntValue<'ctx>> {
+        let value = match self {
+            CodeGenTy::Int => value,
+
+            CodeGenTy::Enum => {
+                assert!(value.is_struct_value());
+                let basic_value = CodeGen::any_into_basic_value(value)?;
+
+                // TODO: Is there a better way to do this other than storing it
+                //       on the stack temporarily to GEP?
+                let enum_ptr = builder.build_alloca(basic_value.get_type(), "enum.as.int.alloc");
+                builder.build_store(enum_ptr, basic_value);
+
+                let value_ptr = builder
+                    .build_struct_gep(enum_ptr, 0, "enum.as.int.gep")
+                    .map_err(|_| {
+                        LangError::new(
+                            format!("Unable to GEP enum: {:#?}", &value),
+                            LangErrorKind::GeneralError,
+                        )
+                    })?;
+                builder.build_load(value_ptr, "enum.as.int.load").into()
+            }
+        };
+
+        if value.is_int_value() {
+            Ok(value.into_int_value())
+        } else {
+            Err(LangError::new(
+                format!("Given `value` expected to be int, was not: {:#?}", value),
+                LangErrorKind::CodeGenError {
+                    file_pos: FilePosition::default(),
                 },
             ))
         }
@@ -484,6 +590,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .cur_basic_block
             .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
 
+        let codegen_ty = CodeGenTy::new(&expr.get_expr_type()?)?;
+
         let mut cases = Vec::default();
         let mut blocks_without_branch = Vec::default();
 
@@ -502,14 +610,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     .context
                     .insert_basic_block_after(cur_block, "match.case");
 
-                let value = self.compile_expr(case_expr, ExprTy::RValue)?;
-                if !value.is_int_value() {
+                let value_expr = self.compile_expr(case_expr, ExprTy::RValue)?;
+                let value = codegen_ty.as_int_const(value_expr)?;
+
+                // The case expressions in a switch needs to be constant.
+                if !value.is_constant_int() {
                     return Err(self.err(format!(
-                        "Expression in match case not int value: {:#?}",
-                        match_case
+                        "Expression in match case not constant: {:#?}",
+                        case_expr
                     )));
                 }
-                let value = value.into_int_value();
 
                 // Compile all tokens inside this match-case.
                 self.cur_basic_block = Some(match_case_block);
@@ -607,11 +717,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         self.builder.position_at_end(start_block);
 
-        let value = self.compile_expr(expr, ExprTy::RValue)?;
-        if !value.is_int_value() {
-            return Err(self.err(format!("Expression in match not int value: {:#?}", expr)));
-        }
-        let value = value.into_int_value();
+        let value_expr = self.compile_expr(expr, ExprTy::RValue)?;
+        let value = codegen_ty.as_int(self.builder, value_expr)?;
 
         self.builder.build_switch(value, default_block, &cases);
 

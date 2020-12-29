@@ -108,12 +108,17 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 break;
             } else if let LexTokenKind::Sym(ref symbol) = lex_token.kind {
                 if self.stop_conds.contains(symbol) {
-                    if self.token_count != 0 {
-                        self.iter.rewind_skip_space()?;
-                        break;
-                    } else {
-                        let was_empty = true;
+                    // Rewind the iter so that the stop condition symbol is left.
+                    self.iter.rewind_skip_space()?;
+
+                    let was_empty = self.token_count == 0;
+                    if was_empty {
+                        // Edge case if this is an empty expression. Do not break
+                        // and solve the parsed expressions, do a early return
+                        // instead.
                         return Ok(was_empty);
+                    } else {
+                        break;
                     }
                 }
             } else if let LexTokenKind::EOF = lex_token.kind {
@@ -268,9 +273,10 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             self.prev_was_operand = true;
             Ok(())
         } else {
-            Err(self
-                .iter
-                .err("Received two operands in a row (or a postfix operator).".into()))
+            Err(self.iter.err(format!(
+                "Received two operands in a row (or a postfix operator). Cur expr: {:#?}",
+                expr
+            )))
         }
     }
 
@@ -470,7 +476,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         if let Some(lex_token) = self.iter.peek_skip_space() {
             match lex_token.kind {
                 // Function call.
-                LexTokenKind::Sym(Sym::ParenthesisBegin) => {
+                LexTokenKind::Sym(Sym::ParenthesisBegin)
+                    if !self.stop_conds.contains(&Sym::ParenthesisBegin) =>
+                {
                     let start_symbol = Sym::ParenthesisBegin;
                     let end_symbol = Sym::ParenthesisEnd;
                     let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
@@ -479,7 +487,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 }
 
                 // Struct construction.
-                LexTokenKind::Sym(Sym::CurlyBracketBegin) => {
+                LexTokenKind::Sym(Sym::CurlyBracketBegin)
+                    if !self.stop_conds.contains(&Sym::CurlyBracketBegin) =>
+                {
                     let start_symbol = Sym::CurlyBracketBegin;
                     let end_symbol = Sym::CurlyBracketEnd;
                     let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
@@ -493,13 +503,17 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 }
 
                 // Static method/variable access, this is the lhs type.
-                LexTokenKind::Sym(Sym::DoubleColon) => Ok(Expr::Type(
-                    Ty::CompoundType(
-                        InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
-                        generics.unwrap_or_else(Generics::new),
-                    ),
-                    Some(lex_token.file_pos.to_owned()),
-                )),
+                LexTokenKind::Sym(Sym::DoubleColon)
+                    if !self.stop_conds.contains(&Sym::DoubleColon) =>
+                {
+                    Ok(Expr::Type(
+                        Ty::CompoundType(
+                            InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
+                            generics.unwrap_or_else(Generics::new),
+                        ),
+                        Some(lex_token.file_pos.to_owned()),
+                    ))
+                }
 
                 _ => {
                     // See if this is a type. It is a type if the previous
