@@ -3,6 +3,7 @@ use common::{
     file::FilePosition,
     token::expr::Expr,
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
+    BlockId,
 };
 use either::Either;
 use log::debug;
@@ -13,6 +14,11 @@ use crate::{AnalyzeContext, BlockInfo};
 // TODO: Remove `analyze_context` from here, makes no sense to have it nested
 //       in this TypeContext. The TypeCOntexct currently needs to look up
 //       struct declaration when solving substitutions.
+
+// TODO: Add `set_generic_names()` calls when solving stuff. It is currently just
+//       used in `solve_unknown_structure_method()`, but would probably be best
+//       to be put into a more "generic" solve method, ex. when solving all
+//       compound/array/pointer.
 
 /// "Stand-alone" struct that will contain all the important state/context
 /// after the type inference have been ran. This struct will then be used by
@@ -770,13 +776,20 @@ impl<'a> TypeContext<'a> {
             // `local_cur_ty` further down in this block).
             let method_name = method_name.clone();
 
-            let sub_ty = match self.solve_substitution(ty, finalize) {
+            let mut sub_ty = match self.solve_substitution(ty, finalize) {
                 SubResult::Solved(sub_ty) | SubResult::UnSolved(sub_ty) => {
                     *ty = Box::new(sub_ty.clone());
                     sub_ty
                 }
                 err => return err,
             };
+
+            // TODO: Don't hardcode default id.
+            let id = BlockInfo::DEFAULT_BLOCK_ID;
+
+            if let Err(err) = self.set_generic_names(&mut sub_ty, id) {
+                return SubResult::Err(err);
+            }
 
             let (inner_ty, generics) = match &sub_ty {
                 Ty::CompoundType(InnerTy::UnknownIdent(..), ..)
@@ -810,9 +823,6 @@ impl<'a> TypeContext<'a> {
                     )))
                 }
             };
-
-            // TODO: Don't hardcode default id.
-            let id = BlockInfo::DEFAULT_BLOCK_ID;
 
             let method = match inner_ty {
                 InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
@@ -1023,6 +1033,44 @@ impl<'a> TypeContext<'a> {
         } else {
             unreachable!("This function will only be called when it is a UnknownArrayMember type.");
         }
+    }
+
+    /// If the given type `ty` contains generics that don't have their "names"
+    /// set, this function will fetch the structure and set the names if possible.
+    pub fn set_generic_names(&self, ty: &mut Ty, block_id: BlockId) -> CustomResult<()> {
+        let (inner_ty, generics) = match ty {
+            Ty::CompoundType(inner_ty, generics) => (inner_ty, generics),
+
+            Ty::Pointer(ty_box) | Ty::Array(ty_box, ..) => {
+                return self.set_generic_names(ty_box, block_id);
+            }
+
+            _ => return Ok(()),
+        };
+
+        if !generics.is_empty() && generics.len_names() == 0 {
+            match inner_ty {
+                InnerTy::Struct(ident) => match self.analyze_context.get_struct(ident, block_id) {
+                    Ok(struct_) => {
+                        if let Some(generic_names) = &struct_.borrow().generic_params {
+                            for (idx, gen_name) in generic_names.iter().enumerate() {
+                                generics.insert_lookup(gen_name.clone(), idx);
+                                generics.insert_name(gen_name.clone());
+                            }
+                        }
+                    }
+
+                    Err(err) => return Err(err),
+                },
+
+                _ => panic!(
+                    "TODO: Implement for more types. generics: {:#?}, inner_ty: {:#?}",
+                    generics, inner_ty
+                ),
+            }
+        }
+
+        Ok(())
     }
 
     // TODO: Is it possible to move this function to "Expr" in some way?

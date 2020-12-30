@@ -60,13 +60,13 @@ impl<'a> TypeSolver<'a> {
     /// will insert those into `self.generic_structures`. This map will in a later
     /// stage be used to create all the structures containing the different
     /// generic types.
+    /// This function also adds the names for the generics if they aren't already
+    /// set and that information is attainable.
     fn create_generic_struct(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
-        let ty_backup = ty.clone();
-
-        let (ident, inner_ty, generics) = match ty {
+        let ident = match ty {
             Ty::CompoundType(inner_ty, generics) => {
                 if !generics.is_empty() {
-                    (inner_ty.to_string(), inner_ty, generics)
+                    inner_ty.to_string()
                 } else {
                     return;
                 }
@@ -83,31 +83,10 @@ impl<'a> TypeSolver<'a> {
         // TODO: Don't hardcode default id.
         let id = BlockInfo::DEFAULT_BLOCK_ID;
 
-        // At this point it is known that `generics` contains generics, and this
-        // if-statement sees that the names are empty. Get the structure and
-        // insert the names for the generics.
-        if generics.len_names() == 0 {
-            match inner_ty {
-                InnerTy::Struct(ident) => {
-                    match self.type_context.analyze_context.get_struct(ident, id) {
-                        Ok(struct_) => {
-                            if let Some(generic_names) = &struct_.borrow().generic_params {
-                                for (idx, gen_name) in generic_names.iter().enumerate() {
-                                    generics.insert_lookup(gen_name.clone(), idx);
-                                    generics.insert_name(gen_name.clone());
-                                }
-                            }
-                        }
-
-                        Err(err) => {
-                            self.errors.push(err);
-                            return;
-                        }
-                    }
-                }
-
-                _ => panic!("TODO: Implement for more types: {:#?}", ty),
-            }
+        // Set names of generics if they aren't set already.
+        if let Err(err) = self.type_context.set_generic_names(ty, id) {
+            self.errors.push(err);
+            return;
         }
 
         match self.generic_structures.entry(ident) {
