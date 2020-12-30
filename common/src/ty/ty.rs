@@ -1,4 +1,4 @@
-use std::{fmt::Display, hash::Hash};
+use std::{collections::HashSet, fmt::Display, hash::Hash};
 
 use crate::token::expr::Expr;
 
@@ -168,9 +168,44 @@ impl Ty {
     // TODO: This only fetched a expression if it is the outer most type.
     //       How should expression in ex. generics be handled? Should this
     //       return a iterator or a list?
-    pub fn get_expr_mut(&mut self) -> Option<&mut Expr> {
-        if let Ty::Expr(expr, ..) = self {
-            Some(expr)
+    // TODO: Rewrite this is a safe way. Temporary hack to get something to work.
+    pub fn get_exprs_mut(&mut self) -> Option<Vec<&mut Expr>> {
+        let mut exprs = Vec::default();
+
+        match self {
+            Ty::CompoundType(_, generics) => {
+                for ty in generics.iter_types_mut() {
+                    if let Some(inner_exprs) = ty.get_exprs_mut() {
+                        for inner_expr in inner_exprs {
+                            exprs.push(unsafe { (inner_expr as *mut Expr).as_mut().unwrap() });
+                        }
+                    }
+                }
+            }
+
+            Ty::Pointer(ty)
+            | Ty::Array(ty, _)
+            | Ty::GenericInstance(.., Some(ty))
+            | Ty::UnknownStructureMember(ty, ..)
+            | Ty::UnknownStructureMethod(ty, ..)
+            | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownArrayMember(ty) => {
+                if let Some(inner_exprs) = ty.get_exprs_mut() {
+                    for inner_expr in inner_exprs {
+                        exprs.push(unsafe { (inner_expr as *mut Expr).as_mut().unwrap() });
+                    }
+                }
+            }
+
+            Ty::Expr(expr) => {
+                exprs.push(unsafe { (expr.as_mut() as *mut Expr).as_mut().unwrap() });
+            }
+
+            Ty::Any | Ty::Generic(..) | Ty::GenericInstance(..) => (),
+        }
+
+        if !exprs.is_empty() {
+            Some(exprs)
         } else {
             None
         }
@@ -300,6 +335,59 @@ impl Ty {
 
         if !generics.is_empty() {
             Some(generics)
+        } else {
+            None
+        }
+    }
+
+    /// Gets a set of the names of all structures that is contained in the type.
+    pub fn get_structure_names(&self) -> Option<HashSet<String>> {
+        let mut names = HashSet::default();
+
+        match self {
+            Ty::CompoundType(inner_ty, comp_generics) => {
+                for generic in comp_generics.iter_types() {
+                    if let Some(inner_names) = generic.get_structure_names() {
+                        names.extend(inner_names.into_iter());
+                    }
+                }
+
+                match inner_ty {
+                    InnerTy::Struct(ident)
+                    | InnerTy::Enum(ident)
+                    | InnerTy::Interface(ident)
+                    | InnerTy::UnknownIdent(ident, ..) => {
+                        names.insert(ident.clone());
+                    }
+                    _ => (),
+                }
+            }
+
+            Ty::Pointer(ty)
+            | Ty::Array(ty, _)
+            | Ty::GenericInstance(.., Some(ty))
+            | Ty::UnknownStructureMember(ty, ..)
+            | Ty::UnknownStructureMethod(ty, ..)
+            | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownArrayMember(ty) => {
+                if let Some(inner_names) = ty.get_structure_names() {
+                    names.extend(inner_names.into_iter());
+                }
+            }
+
+            Ty::Expr(expr) => {
+                if let Ok(ty) = expr.get_expr_type() {
+                    if let Some(inner_names) = ty.get_structure_names() {
+                        names.extend(inner_names.into_iter());
+                    }
+                }
+            }
+
+            _ => (),
+        }
+
+        if !names.is_empty() {
+            Some(names)
         } else {
             None
         }

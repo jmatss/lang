@@ -545,8 +545,10 @@ impl<'a> AstTraverser<'a> {
             v.visit_type(ty, &self.traverse_context)
         }
 
-        if let Some(expr) = ty.get_expr_mut() {
-            self.traverse_expr(expr);
+        if let Some(exprs) = ty.get_exprs_mut() {
+            for expr in exprs {
+                self.traverse_expr(expr);
+            }
         }
     }
 }

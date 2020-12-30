@@ -2,7 +2,6 @@ use analyze::AnalyzeContext;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
     file::FilePosition,
-    token::block::BlockHeader,
     token::{
         ast::AstToken,
         expr::{Expr, Var},
@@ -15,7 +14,6 @@ use inkwell::{
     basic_block::BasicBlock,
     builder::Builder,
     context::Context,
-    module::Linkage,
     module::Module,
     targets::TargetMachine,
     types::{AnyTypeEnum, BasicTypeEnum},
@@ -167,74 +165,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             variables: HashMap::default(),
             constants: HashMap::default(),
         }
-    }
-
-    /// Compile all declarations of types: structs, enums and interfaces.
-    /// This will be done at the start of the code generation so that one
-    /// doesn't have do declare prototypes manual in the source before the use
-    /// of the type.
-    /// This function shall be ran before the function/method prototypes
-    /// are compiled since they might contains references to types.
-    pub(super) fn compile_type_decl(&mut self, mut ast_token: &mut AstToken) -> CustomResult<()> {
-        self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
-
-        if let AstToken::Block(header, id, ref mut body) = &mut ast_token {
-            self.cur_block_id = *id;
-
-            match header {
-                BlockHeader::Struct(struct_) => {
-                    self.compile_struct(&struct_.borrow())?;
-                }
-                BlockHeader::Enum(enum_) => {
-                    self.compile_enum(&enum_.borrow())?;
-                }
-                BlockHeader::Interface(interface) => {
-                    panic!("TODO: interface");
-                    //self.compile_interface(interface);
-                }
-                _ => (),
-            }
-
-            for token in body {
-                self.compile_type_decl(token)?
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Compile all declarations of functions and methods (implement blocks).
-    /// This will be done at the start of the code generation so that one doesn't
-    /// have do declare prototypes manual in the source before the use of the
-    /// function/method.
-    pub(super) fn compile_func_decl(&mut self, mut ast_token: &mut AstToken) -> CustomResult<()> {
-        self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
-
-        if let AstToken::Block(header, id, ref mut body) = &mut ast_token {
-            self.cur_block_id = *id;
-
-            match header {
-                BlockHeader::Function(func) => {
-                    let linkage = Linkage::External;
-                    self.compile_func_proto(&func.borrow(), Some(linkage))?;
-                }
-                BlockHeader::Implement(_) => {
-                    for mut ast_token in body.iter_mut() {
-                        if let AstToken::Block(BlockHeader::Function(func), ..) = &mut ast_token {
-                            let linkage = Linkage::External;
-                            self.compile_func_proto(&func.borrow(), Some(linkage))?;
-                        }
-                    }
-                }
-                _ => (),
-            }
-
-            for token in body {
-                self.compile_func_decl(token)?
-            }
-        }
-
-        Ok(())
     }
 
     pub(super) fn compile(&mut self, mut ast_token: &mut AstToken) -> CustomResult<()> {

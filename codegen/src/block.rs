@@ -20,6 +20,7 @@ use inkwell::{
     types::AnyTypeEnum,
     values::{AggregateValue, AnyValueEnum, FunctionValue, IntValue, PointerValue},
 };
+use log::{debug, warn};
 
 /// Contains information related to branches in either a if-statement or a
 /// match-statement. This will then be sent around to all if-cases so that
@@ -729,6 +730,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub(super) fn compile_struct(&mut self, struct_: &Struct) -> CustomResult<()> {
+        debug!("Compiling struct -- {:#?}", struct_);
+
         // Go through all members of the struct and create a vector containing
         // all their types.
         let member_types = if let Some(members) = &struct_.members {
@@ -760,6 +763,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub(super) fn compile_enum(&mut self, enum_: &Enum) -> CustomResult<()> {
+        debug!("Compiling enum -- {:#?}", enum_);
+
         // Create a new struct type containing a single member that has the type
         // of the "inner enum type". This will most likely be a integer type.
         //
