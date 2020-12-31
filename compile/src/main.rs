@@ -1,7 +1,5 @@
 mod compiler;
 
-use std::collections::HashMap;
-
 use analyze::analyze;
 use clap::{App, Arg};
 use codegen::generator;
@@ -11,8 +9,9 @@ use common::{
 };
 use inkwell::context::Context;
 use lex::lexer;
-use log::Level;
+use log::{log_enabled, Level};
 use parse::parser::ParseTokenIter;
+use std::{collections::HashMap, time::Instant};
 
 #[macro_use]
 extern crate log;
@@ -67,6 +66,8 @@ fn main() -> CustomResult<()> {
     let mut file_nr: FileId = 0;
     let mut file_info: HashMap<FileId, FileInfo> = HashMap::default();
 
+    let parse_timer = Instant::now();
+
     // Loop through files and lex+parse them until there or no more uses/includes
     // to process. ALl files will be incldued in the same module.
     let mut parser = ParseTokenIter::new();
@@ -101,6 +102,7 @@ fn main() -> CustomResult<()> {
 
         file_info.insert(file_nr, file.clone());
 
+        let lex_timer = Instant::now();
         let mut lex_tokens = match lexer::lex(file_nr, &file) {
             Ok(lex_tokens) => lex_tokens,
             Err(errs) => {
@@ -110,7 +112,11 @@ fn main() -> CustomResult<()> {
                 std::process::exit(1);
             }
         };
-        info!("Lexing for file (ID {}) {:#?} complete.", file_nr, &file);
+        println!(
+            "Lexing {} complete ({:?}).",
+            &file.filename,
+            lex_timer.elapsed()
+        );
 
         match parser.parse(&mut lex_tokens) {
             Ok(_) => (),
@@ -136,9 +142,12 @@ fn main() -> CustomResult<()> {
             break parser.take_root_block();
         }
     };
-    println!("Parsing complete.");
-    debug!("\nAST after parsing:\n{:#?}", ast_root);
+    println!("Parsing+lexing complete ({:?}).", parse_timer.elapsed());
+    if log_enabled!(Level::Debug) {
+        debug!("\nAST after parsing:\n{:#?}", ast_root);
+    }
 
+    let analyze_timer = Instant::now();
     let analyze_context = match analyze(&mut ast_root, file_info) {
         Ok(analyze_context) => analyze_context,
         Err(errs) => {
@@ -148,12 +157,14 @@ fn main() -> CustomResult<()> {
             std::process::exit(1);
         }
     };
-    debug!("\nAST after analyze:\n{:#?}", ast_root);
+    println!("Analyzing complete ({:?}).", analyze_timer.elapsed());
+    if log_enabled!(Level::Debug) {
+        debug!("\nAST after analyze:\n{:#?}", ast_root);
+    }
     analyze_context.debug_print();
-    println!("Analyzing complete.");
 
+    let generate_timer = Instant::now();
     let target_machine = compiler::setup_target()?;
-
     let context = Context::create();
     let builder = context.create_builder();
     let module = context.create_module(module_name);
@@ -172,14 +183,16 @@ fn main() -> CustomResult<()> {
         }
     }
 
-    println!("Generating complete.");
+    println!("Generating complete ({:?}).", generate_timer.elapsed());
     if log_enabled!(Level::Debug) {
         println!("Before optimizing:");
         module.print_to_stderr();
     }
 
+    let compile_timer = Instant::now();
     module.verify()?;
     compiler::compile(target_machine, &module, output_file, optimize)?;
+    println!("Compiling complete ({:?}).", compile_timer.elapsed());
 
     if log_enabled!(Level::Debug) && optimize {
         println!("After optimizing:");
