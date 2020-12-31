@@ -250,69 +250,35 @@ impl<'a> TypeConverter<'a> {
                     }
                 };
 
+                let mut generics_replacer = GenericsReplacer::new(
+                    &mut self.analyze_context,
+                    Rc::clone(&new_struct),
+                    &generics,
+                    old_name,
+                    gen_structure_ty,
+                );
+
+                let mut traverser = AstTraverser::new();
+                traverser
+                    .add_visitor(&mut generics_replacer)
+                    .set_deep_copy(true);
+
                 // For every method of the struct, replace any generic types with
                 // the type of the generics instances. Also replace any reference
                 // to the old name with the new full name (containing generics).
                 //
                 // This will be done for parameters, return types and bodies.
-                for mut method in new_impl_body {
-                    if let AstToken::Block(BlockHeader::Function(inner_func), old_id, method_body) =
-                        &mut method
-                    {
-                        let new_inner_func = inner_func.borrow().clone();
-                        *inner_func = Rc::new(RefCell::new(new_inner_func));
-
-                        // Replace generics in parameters.
-                        if let Some(parameters) = &mut inner_func.borrow_mut().parameters {
-                            for param in parameters {
-                                let new_param = Rc::new(RefCell::new(param.borrow().clone()));
-
-                                if let Some(ty) = &mut new_param.borrow_mut().ty {
-                                    ty.replace_generics_impl(&generics);
-                                    ty.replace_self(&old_name, gen_structure_ty);
-                                }
-
-                                *param = new_param;
-                            }
-                        }
-
-                        // Replace generics in return type.
-                        if let Some(ret_ty) = &mut inner_func.borrow_mut().ret_type {
-                            ret_ty.replace_generics_impl(&generics);
-                            ret_ty.replace_self(&old_name, gen_structure_ty);
-                        }
-
-                        // Replace generics in body.
-                        let mut generics_replacer =
-                            GenericsReplacer::new(&generics, &old_name, gen_structure_ty);
-                        for body_token in method_body {
-                            if let Err(mut err) = AstTraverser::new()
-                                .add_visitor(&mut generics_replacer)
-                                .traverse(body_token)
-                                .take_errors()
-                            {
-                                self.errors.append(&mut err);
-                                return None;
-                            }
-                        }
-
-                        inner_func.borrow_mut().method_structure = Some(gen_structure_ty.clone());
-
-                        // Insert a reference from the new structure type to
-                        // this new method. Also insert the new methods into the
-                        // look-up tables.
-                        if let Some(methods) = new_struct.borrow_mut().methods.as_mut() {
-                            methods
-                                .insert(inner_func.borrow().name.clone(), Rc::clone(&inner_func));
-                        }
-                        if let Err(err) = self.analyze_context.insert_method(
-                            &new_name,
-                            Rc::clone(&inner_func),
-                            *old_id,
-                        ) {
-                            self.errors.push(err);
-                        }
+                // New instances will be created for all shared references (see
+                // `set_deep_copy(true)` in `AstTraverser`).
+                for method in new_impl_body {
+                    if let AstToken::Block(BlockHeader::Function(..), ..) = method {
+                        traverser.set_deep_copy_nr(new_idx).traverse_token(method);
                     }
+                }
+
+                if let Err(mut err) = traverser.take_errors() {
+                    self.errors.append(&mut err);
+                    return None;
                 }
 
                 // Slower to shift all the ast tokens to the right, but ensure

@@ -26,7 +26,7 @@ use decl::var::DeclVarAnalyzer;
 use log::debug;
 use mid::defer::DeferAnalyzer;
 use mid::generics::GenericsAnalyzer;
-use post::call_args::CallArgs;
+use post::{call_args::CallArgs, clean_up::clean_up};
 use pre::indexing::IndexingAnalyzer;
 use pre::method::MethodAnalyzer;
 use std::{cell::RefCell, cell::RefMut, collections::HashMap, fmt::Debug, rc::Rc};
@@ -74,21 +74,21 @@ pub fn analyze(
     let mut indexing_analyzer = IndexingAnalyzer::new();
     AstTraverser::new()
         .add_visitor(&mut indexing_analyzer)
-        .traverse(ast_root)
+        .traverse_token(ast_root)
         .take_errors()?;
 
     debug!("Running BlockAnalyzer");
     let mut block_analyzer = BlockAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut block_analyzer)
-        .traverse(ast_root)
+        .traverse_token(ast_root)
         .take_errors()?;
 
     debug!("Running DeclTypeAnalyzer");
     let mut decl_type_analyzer = DeclTypeAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut decl_type_analyzer)
-        .traverse(ast_root)
+        .traverse_token(ast_root)
         .take_errors()?;
 
     debug!("Running DeclVarAnalyzer, running DeclFuncAnalyzer");
@@ -97,28 +97,28 @@ pub fn analyze(
     AstTraverser::new()
         .add_visitor(&mut decl_func_analyzer)
         .add_visitor(&mut decl_var_analyzer)
-        .traverse(ast_root)
+        .traverse_token(ast_root)
         .take_errors()?;
 
     debug!("Running MethodAnalyzer");
     let mut method_analyzer = MethodAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut method_analyzer)
-        .traverse(ast_root)
+        .traverse_token(ast_root)
         .take_errors()?;
 
     debug!("running GenericsAnalyzer");
     let mut generics_analyzer = GenericsAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut generics_analyzer)
-        .traverse(ast_root)
+        .traverse_token(ast_root)
         .take_errors()?;
 
     debug!("Running DeferAnalyzer");
     let mut defer_analyzer = DeferAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut defer_analyzer)
-        .traverse(ast_root)
+        .traverse_token(ast_root)
         .take_errors()?;
 
     let mut analyze_context = analyze_context.replace(AnalyzeContext::default());
@@ -128,14 +128,14 @@ pub fn analyze(
     let mut type_inferencer = TypeInferencer::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut type_inferencer)
-        .traverse(ast_root)
+        .traverse_token(ast_root)
         .take_errors()?;
 
     debug!("Running TypeSolver");
     let mut type_solver = TypeSolver::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut type_solver)
-        .traverse(ast_root)
+        .traverse_token(ast_root)
         .take_errors()?;
 
     debug!("Running TypeConverter");
@@ -143,15 +143,17 @@ pub fn analyze(
     let mut type_converter = TypeConverter::new(&mut analyze_context, generic_structures);
     AstTraverser::new()
         .add_visitor(&mut type_converter)
-        .traverse(ast_root)
+        .traverse_token(ast_root)
         .take_errors()?;
 
     debug!("Running CallArgs");
     let mut call_args = CallArgs::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut call_args)
-        .traverse(ast_root)
+        .traverse_token(ast_root)
         .take_errors()?;
+
+    clean_up(&mut analyze_context);
 
     Ok(analyze_context)
 }
@@ -270,56 +272,6 @@ impl AnalyzeContext {
     }
 
     pub fn debug_print(&self) {
-        /*
-        debug!(
-            "Variables:\n{:#?}",
-            self.variables
-                .iter()
-                .map(|(k, v)| (k, unsafe { v.as_ref() }.unwrap()))
-                .collect::<HashMap<_, _>>()
-        );
-        debug!(
-            "Functions:\n{:#?}",
-            self.functions
-                .iter()
-                .map(|(k, v)| (k, unsafe { v.as_ref() }.unwrap()))
-                .collect::<HashMap<_, _>>()
-        );
-        debug!(
-            "Structs:\n{:#?}",
-            self.structs
-                .iter()
-                .map(|(k, v)| (k, unsafe { v.as_ref() }.unwrap()))
-                .collect::<HashMap<_, _>>()
-        );
-        debug!(
-            "Enums:\n{:#?}",
-            self.enums
-                .iter()
-                .map(|(k, v)| (k, unsafe { v.as_ref() }.unwrap()))
-                .collect::<HashMap<_, _>>()
-        );
-        debug!(
-            "Interfaces:\n{:#?}",
-            self.interfaces
-                .iter()
-                .map(|(k, v)| (k, unsafe { v.as_ref() }.unwrap()))
-                .collect::<HashMap<_, _>>()
-        );
-        debug!(
-            "Methods:\n{:#?}",
-            self.structs
-                .iter()
-                .map(|(ks, vs)| (
-                    ks,
-                    unsafe { vs.as_ref().unwrap() }.clone().methods.map(|m| m
-                        .iter()
-                        .map(|(n, f)| (n.clone(), unsafe { f.as_ref() }.unwrap()))
-                        .collect::<Vec<_>>())
-                ))
-                .collect::<HashMap<_, _>>()
-        );
-        */
         debug!("Block info:\n{:#?}", self.block_info);
     }
 

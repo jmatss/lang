@@ -1199,12 +1199,15 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// The types of the lhs and rhs of a variable declaration with a init value
     /// should be of the same type, add as constraints.
     fn visit_var_decl(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
-        if let Stmt::VariableDecl(var, expr_opt, ..) = stmt {
+        if let Stmt::VariableDecl(var, ..) = stmt {
             let mut var = var.borrow_mut();
 
             // No way to do type inference of rhs on var decl with no init value.
-            let rhs_ty_opt = if expr_opt.is_some() {
-                match self.type_context.get_expr_type(expr_opt.as_ref()) {
+            let rhs_ty_opt = if var.value.is_some() {
+                match self
+                    .type_context
+                    .get_expr_type(var.value.clone().map(|x| *x).as_ref())
+                {
                     Ok(rhs_ty) => Some(rhs_ty),
                     Err(err) => {
                         self.errors.push(err);

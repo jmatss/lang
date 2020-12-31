@@ -565,8 +565,8 @@ impl<'a> ParseTokenIter<'a> {
 
         loop {
             if let Some(lex_token) = self.next_skip_space_line() {
-                // Parses either a identifier followed by a type or a "TripleDot"
-                // which is the indicator for a variadic function.
+                // Parses either a identifier followed by a type/value or a
+                // "TripleDot" which is the indicator for a variadic function.
                 match lex_token.kind {
                     LexTokenKind::Ident(ident) => {
                         let parse_type = true;

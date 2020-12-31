@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
     error::{LangError, LangErrorKind::TraversalError},
     file::FilePosition,
@@ -22,6 +24,16 @@ pub struct AstTraverser<'a> {
 // TODO: Add more context here.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct TraverseContext {
+    /// Indicates if any found shared references (ex. RefCount) should be "deep"
+    /// copied before the traverser visits it. This comes in handy when working
+    /// with generics for example, where you want to make transformations to
+    /// different instances.
+    pub deep_copy: bool,
+
+    /// A number that is used to mark copies so that they can be uniquely identified.
+    /// This will only be used if `deep_copy` is set to true.
+    pub copy_nr: Option<usize>,
+
     pub block_id: usize,
     pub parent_block_id: usize,
 
@@ -44,6 +56,8 @@ impl<'a> AstTraverser<'a> {
             visitors: Vec::default(),
             errors: Vec::default(),
             traverse_context: TraverseContext {
+                deep_copy: false,
+                copy_nr: None,
                 block_id: 0,
                 parent_block_id: usize::MAX,
                 file_pos: FilePosition::default(),
@@ -60,6 +74,16 @@ impl<'a> AstTraverser<'a> {
         !self.errors.is_empty()
     }
 
+    pub fn set_deep_copy(&mut self, deep_copy: bool) -> &mut Self {
+        self.traverse_context.deep_copy = deep_copy;
+        self
+    }
+
+    pub fn set_deep_copy_nr(&mut self, copy_nr: usize) -> &mut Self {
+        self.traverse_context.copy_nr = Some(copy_nr);
+        self
+    }
+
     pub fn take_errors(&mut self) -> Result<&mut Self, Vec<LangError>> {
         for visitor in self.visitors.iter_mut() {
             if let Some(ref mut visitor_errs) = visitor.take_errors() {
@@ -74,7 +98,7 @@ impl<'a> AstTraverser<'a> {
         }
     }
 
-    pub fn traverse(&mut self, mut ast_token: &mut AstToken) -> &mut Self {
+    pub fn traverse_token(&mut self, mut ast_token: &mut AstToken) -> &mut Self {
         let old_pos = self.traverse_context.file_pos.to_owned();
         if let Some(file_pos) = ast_token.file_pos() {
             self.traverse_context.file_pos = file_pos.to_owned();
@@ -101,7 +125,7 @@ impl<'a> AstTraverser<'a> {
                         self.traverse_context.parent_block_id = self.traverse_context.block_id;
                         self.traverse_context.block_id = *id;
                     }
-                    self.traverse(body_token);
+                    self.traverse_token(body_token);
                 }
             }
             AstToken::Expr(expr) => self.traverse_expr(expr),
@@ -141,11 +165,38 @@ impl<'a> AstTraverser<'a> {
                     }
                 }
                 BlockHeader::Function(func) => {
+                    if self.traverse_context.deep_copy {
+                        let mut new_func = func.borrow().clone();
+
+                        if let Some(params) = &mut new_func.parameters {
+                            for param in params {
+                                let mut new_param = param.borrow().clone();
+                                new_param.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                                *param = Rc::new(RefCell::new(new_param));
+                            }
+                        }
+
+                        *func = Rc::new(RefCell::new(new_func));
+                    }
+
                     // TODO: Iterate through the `generics`.
                     if let Some(params) = &mut func.borrow_mut().parameters {
                         for param in params {
                             if let Some(ty) = &mut param.borrow_mut().ty {
                                 self.traverse_type(ty);
+                            }
+                            if let Some(value) = &mut param.borrow_mut().value {
+                                self.traverse_expr(value);
+                            }
+
+                            // Iterate through the parametersa of functions as
+                            // variable declarations. One have to temporary wrap
+                            // them in a `Stmt::VariableDecl` for it to work
+                            // smootyly.
+                            let file_pos = param.borrow().file_pos.to_owned();
+                            let mut var_decl = Stmt::VariableDecl(Rc::clone(param), file_pos);
+                            for v in self.visitors.iter_mut() {
+                                v.visit_var_decl(&mut var_decl, &self.traverse_context);
                             }
                         }
                     }
@@ -160,11 +211,34 @@ impl<'a> AstTraverser<'a> {
                     }
                 }
                 BlockHeader::Struct(struct_) => {
+                    if self.traverse_context.deep_copy {
+                        let mut new_struct = struct_.borrow().clone();
+
+                        if let Some(members) = &mut new_struct.members {
+                            for member in members {
+                                let mut new_member = member.borrow().clone();
+                                new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                                *member = Rc::new(RefCell::new(new_member));
+                            }
+                        }
+
+                        *struct_ = Rc::new(RefCell::new(new_struct));
+                    }
+
                     // TODO: Visit `implements` and possible generics?
                     if let Some(members) = &mut struct_.borrow_mut().members {
                         for member in members {
+                            if self.traverse_context.deep_copy {
+                                let mut new_member = member.borrow().clone();
+                                new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                                *member = Rc::new(RefCell::new(new_member));
+                            }
+
                             if let Some(ty) = &mut member.borrow_mut().ty {
                                 self.traverse_type(ty);
+                            }
+                            if let Some(value) = &mut member.borrow_mut().value {
+                                self.traverse_expr(value);
                             }
                         }
                     }
@@ -175,6 +249,20 @@ impl<'a> AstTraverser<'a> {
                     }
                 }
                 BlockHeader::Enum(enum_) => {
+                    if self.traverse_context.deep_copy {
+                        let mut new_enum = enum_.borrow().clone();
+
+                        if let Some(members) = &mut new_enum.members {
+                            for member in members {
+                                let mut new_member = member.borrow().clone();
+                                new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                                *member = Rc::new(RefCell::new(new_member));
+                            }
+                        }
+
+                        *enum_ = Rc::new(RefCell::new(new_enum));
+                    }
+
                     // TODO: Visit possible generics?
                     if let Some(members) = &mut enum_.borrow_mut().members {
                         for member in members {
@@ -190,6 +278,20 @@ impl<'a> AstTraverser<'a> {
                     }
                 }
                 BlockHeader::Interface(interface) => {
+                    if self.traverse_context.deep_copy {
+                        let mut new_interface = interface.borrow().clone();
+
+                        if let Some(members) = &mut new_interface.members {
+                            for member in members {
+                                let mut new_member = member.borrow().clone();
+                                new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                                *member = Rc::new(RefCell::new(new_member));
+                            }
+                        }
+
+                        *interface = Rc::new(RefCell::new(new_interface));
+                    }
+
                     // TODO: Visit possible generics?
                     if let Some(members) = &mut interface.borrow_mut().members {
                         for member in members {
@@ -268,6 +370,16 @@ impl<'a> AstTraverser<'a> {
                     }
                 }
                 BlockHeader::Test(func) => {
+                    if self.traverse_context.deep_copy {
+                        if let Some(params) = &mut func.parameters {
+                            for param in params {
+                                let mut new_param = param.borrow().clone();
+                                new_param.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                                *param = Rc::new(RefCell::new(new_param));
+                            }
+                        }
+                    }
+
                     // TODO: Iterate through the `generics`.
                     if let Some(params) = &mut func.parameters {
                         for param in params {
@@ -325,6 +437,10 @@ impl<'a> AstTraverser<'a> {
                 }
             }
             Expr::Var(var) => {
+                if let Some(value) = &mut var.value {
+                    self.traverse_expr(value);
+                }
+
                 debug!("Visiting var");
                 for v in self.visitors.iter_mut() {
                     v.visit_var(var, &self.traverse_context)
@@ -501,14 +617,20 @@ impl<'a> AstTraverser<'a> {
             Stmt::Assignment(_, lhs, rhs, _) => {
                 self.traverse_expr(lhs);
                 self.traverse_expr(rhs);
-                debug!("Visiting assginment");
+                debug!("Visiting assignment");
                 for v in self.visitors.iter_mut() {
                     v.visit_assignment(stmt, &self.traverse_context)
                 }
             }
-            Stmt::VariableDecl(var, expr_opt, _) => {
-                if let Some(expr) = expr_opt {
-                    self.traverse_expr(expr);
+            Stmt::VariableDecl(var, _) => {
+                if self.traverse_context.deep_copy {
+                    let mut new_var = var.borrow().clone();
+                    new_var.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                    *var = Rc::new(RefCell::new(new_var));
+                }
+
+                if let Some(value) = &mut var.borrow_mut().value {
+                    self.traverse_expr(value);
                 }
 
                 if let Some(ty) = &mut var.borrow_mut().ty {

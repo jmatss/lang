@@ -333,9 +333,13 @@ pub struct Var {
     pub name: String,
     pub ty: Option<Ty>,
     pub modifiers: Option<Vec<Modifier>>,
-    pub default_value: Option<Box<Expr>>,
+    pub value: Option<Box<Expr>>,
     pub file_pos: Option<FilePosition>,
     pub is_const: bool,
+
+    /// If this is a exact copy of another variable, this index will be set to
+    /// help tell the variables aparat.
+    pub copy_nr: Option<usize>,
 }
 
 impl Var {
@@ -351,9 +355,30 @@ impl Var {
             name,
             ty,
             modifiers,
-            default_value,
+            value: default_value,
             file_pos,
             is_const,
+            copy_nr: None,
+        }
+    }
+
+    pub fn set_copy_nr(&mut self, copy_nr: usize) {
+        self.copy_nr = Some(copy_nr);
+    }
+
+    /// Since variables might be duplicated when structs/functions have generics,
+    /// a "full_name" is required to uniquely identfy the "clones".The combination
+    /// of name+blockID is NOT enough, in those cases a `copy_nr` is appended
+    /// to the name.
+    ///
+    /// This is only a problem during code generation, so this will be used
+    /// to store the `name` of the variable uniquely in a `variables` look-up
+    /// hash table.
+    pub fn full_name(&self) -> String {
+        if let Some(copy_nr) = &self.copy_nr {
+            format!("{}:{}", &self.name, copy_nr)
+        } else {
+            self.name.clone()
         }
     }
 }

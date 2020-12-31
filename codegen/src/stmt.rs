@@ -33,11 +33,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 Ok(())
             }
 
-            Stmt::VariableDecl(var, expr_opt, ..) => {
-                let var = var.borrow();
+            Stmt::VariableDecl(var, ..) => {
+                let mut var = var.borrow_mut();
 
                 self.compile_var_decl(&var)?;
-                if let Some(expr) = expr_opt {
+                if let Some(expr) = &mut var.value {
                     let any_value = self.compile_expr(expr, ExprTy::RValue)?;
                     let basic_value = CodeGen::any_into_basic_value(any_value)?;
                     self.compile_var_store(&var, basic_value)?;

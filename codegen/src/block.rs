@@ -302,7 +302,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let ptr = self.alloc_param(&param.borrow())?;
             self.builder.build_store(ptr, param_value);
 
-            let key = (param.borrow().name.clone(), func_id);
+            let key = (param.borrow().full_name(), func_id);
             self.variables.insert(key, ptr);
         }
 
@@ -773,7 +773,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // will be the inner type.
         let ty = if let Some(members) = &enum_.members {
             if let Some(member) = members.first() {
-                if let Some(ty) = &member.borrow().default_value {
+                if let Some(ty) = &member.borrow().value {
                     ty.get_expr_type()?
                 } else {
                     return Err(self.err(format!(

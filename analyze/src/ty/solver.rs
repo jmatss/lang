@@ -62,7 +62,7 @@ impl<'a> TypeSolver<'a> {
     /// generic types.
     /// This function also adds the names for the generics if they aren't already
     /// set and that information is attainable.
-    fn create_generic_struct(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
+    fn create_generic_struct(&mut self, ty: &mut Ty) {
         let ident = match ty {
             Ty::CompoundType(inner_ty, generics) => {
                 if !generics.is_empty() {
@@ -73,7 +73,7 @@ impl<'a> TypeSolver<'a> {
             }
 
             Ty::Pointer(ty_box) | Ty::Array(ty_box, ..) => {
-                self.create_generic_struct(ty_box, _ctx);
+                self.create_generic_struct(ty_box);
                 return;
             }
 
@@ -113,7 +113,7 @@ impl<'a> Visitor for TypeSolver<'a> {
 
     fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
         self.subtitute_type(ty, true);
-        self.create_generic_struct(ty, _ctx);
+        self.create_generic_struct(ty);
     }
 
     fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {

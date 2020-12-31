@@ -1,5 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
-
+use crate::AnalyzeContext;
 use common::{
     error::CustomResult,
     error::LangError,
@@ -11,8 +10,7 @@ use common::{
     util,
     visitor::Visitor,
 };
-
-use crate::AnalyzeContext;
+use std::{cell::RefCell, rc::Rc};
 
 /// Iterates through all function and method calls and re-orders all named
 /// arguments so that they are put in the correct index position so that
@@ -141,7 +139,7 @@ impl<'a> CallArgs<'a> {
             for param in params[start_idx..].iter() {
                 let param = param.borrow();
 
-                if let Some(default_value) = &param.default_value {
+                if let Some(default_value) = &param.value {
                     let default_arg =
                         Argument::new(Some(param.name.clone()), *default_value.clone());
                     func_call.arguments.push(default_arg);

@@ -214,26 +214,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub(super) fn compile_var_decl(&mut self, var: &Var) -> CustomResult<()> {
-        match self.analyze_context.get_var(&var.name, self.cur_block_id) {
-            Ok(var_decl) => {
-                debug!("Compiling var var_decl: {:#?}", &var_decl);
+        debug!("Compiling var var_decl: {:#?}", &var);
 
-                // Constants are never "compiled" into instructions, they are handled
-                // "internaly" in this code during compilation.
-                if !var.is_const {
-                    let decl_block_id = self
-                        .analyze_context
-                        .get_var_decl_scope(&var.name, self.cur_block_id)?;
-                    let key = (var.name.clone(), decl_block_id);
+        // Constants are never "compiled" into instructions, they are handled
+        // "internaly" in this code during compilation.
+        if !var.is_const {
+            let decl_block_id = self
+                .analyze_context
+                .get_var_decl_scope(&var.full_name(), self.cur_block_id)?;
+            let key = (var.full_name(), decl_block_id);
 
-                    let ptr = self.alloc_var(&var_decl.borrow())?;
-                    self.variables.insert(key, ptr);
-                }
-
-                Ok(())
-            }
-            Err(err) => Err(err),
+            let ptr = self.alloc_var(var)?;
+            self.variables.insert(key, ptr);
         }
+
+        Ok(())
     }
 
     pub(super) fn compile_var_store(
@@ -251,8 +246,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let block_id = self.cur_block_id;
             let decl_block_id = self
                 .analyze_context
-                .get_var_decl_scope(&var.name, block_id)?;
-            let key = (var.name.clone(), decl_block_id);
+                .get_var_decl_scope(&var.full_name(), block_id)?;
+            let key = (var.full_name(), decl_block_id);
 
             self.constants.insert(key, basic_value);
         }
@@ -278,8 +273,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
-            .get_var_decl_scope(&var.name, block_id)?;
-        let key = (var.name.clone(), decl_block_id);
+            .get_var_decl_scope(&var.full_name(), block_id)?;
+        let key = (var.full_name(), decl_block_id);
         debug!("Loading constant pointer. Key: {:?}", &key);
 
         if let Some(const_value) = self.constants.get(&key) {
@@ -287,7 +282,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         } else {
             Err(self.err(format!(
                 "Unable to find value for constant \"{}\" in decl block ID {}.",
-                &var.name, decl_block_id
+                &var.full_name(),
+                decl_block_id
             )))
         }
     }
@@ -296,8 +292,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
-            .get_var_decl_scope(&var.name, block_id)?;
-        let key = (var.name.clone(), decl_block_id);
+            .get_var_decl_scope(&var.full_name(), block_id)?;
+        let key = (var.full_name(), decl_block_id);
         debug!(
             "Loading variable pointer. Key: {:?}, cur_block_id: {}",
             &key, block_id
@@ -308,7 +304,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         } else {
             Err(self.err(format!(
                 "Unable to find ptr for variable \"{}\" in decl block ID {}.",
-                &var.name, decl_block_id
+                &var.full_name(),
+                decl_block_id
             )))
         }
     }

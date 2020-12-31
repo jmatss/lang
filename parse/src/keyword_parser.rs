@@ -11,7 +11,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{BlockHeader, Enum, Function, Struct},
-        expr::{Expr, Var},
+        expr::Expr,
         lit::Lit,
         stmt::{Modifier, Path, Stmt},
     },
@@ -457,45 +457,18 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 .err("Received None when looking at token after \"var\".".into()));
         };
 
-        // If the next token is a "Colon", parse the type.
-        let var_type = if let Some(lex_token) = self.iter.peek_skip_space() {
-            if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
-                self.iter.next_skip_space(); // Consume "Colon".
-                Some(self.iter.parse_type(None)?)
-            } else {
-                None
-            }
-        } else {
-            return Err(self
-                .iter
-                .err("Received None when looking at token after \"var <ident>\".".into()));
-        };
-
-        // If the next token is a "Equals" this is an initializer, parse the
-        // next expression which will be the assigned value.
-        let expr_opt = if let Some(lex_token) = self.iter.peek_skip_space() {
-            if let LexTokenKind::Sym(Sym::Equals) = lex_token.kind {
-                self.iter.next_skip_space(); // Consume "Equals".
-                Some(self.iter.parse_expr(&DEFAULT_STOP_CONDS)?)
-            } else {
-                None
-            }
-        } else {
-            return Err(self.iter.err(
-                "Received None when looking at token after \"var <ident> [: <type>]\".".into(),
-            ));
-        };
-
+        let parse_type = true;
+        let parse_value = true;
         let is_const = false;
-        let var = Rc::new(RefCell::new(Var::new(
-            ident,
-            var_type,
-            None,
-            None,
-            Some(file_pos),
+        let var = Rc::new(RefCell::new(self.iter.parse_var(
+            &ident,
+            parse_type,
+            parse_value,
             is_const,
-        )));
-        let var_decl = Stmt::VariableDecl(var, expr_opt, Some(file_pos));
+            None,
+        )?));
+
+        let var_decl = Stmt::VariableDecl(var, Some(file_pos));
         Ok(AstToken::Stmt(var_decl))
     }
 
@@ -707,7 +680,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     }
 
     /// Parses a struct header.
-    ///   "struct <ident> [ < <generic>, ... > ] { [<ident>: <type>] [[,] ...] }"
+    ///   "struct <ident> [ < <generic>, ... > ] [{ [<ident>: <type>] [[,] ...] }]"
     /// The "struct" keyword has already been consumed when this function is called.
     fn parse_struct(&mut self) -> CustomResult<AstToken> {
         // Start by parsing the identifier
@@ -735,12 +708,18 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             None
         };
 
-        // Parse the members of the struct.
-        let start_symbol = Sym::CurlyBracketBegin;
-        let end_symbol = Sym::CurlyBracketEnd;
-        let (members, is_var_arg) = self
-            .iter
-            .parse_par_list(start_symbol, end_symbol, generics)?;
+        // Parse the members of the struct. If the next token isn't a
+        // "CurlyBracketBegin" symbol, assume this is a struct with no members.
+        let (members, is_var_arg) = if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
+            self.iter.peek_skip_space_line().map(|t| t.kind)
+        {
+            let start_symbol = Sym::CurlyBracketBegin;
+            let end_symbol = Sym::CurlyBracketEnd;
+            self.iter
+                .parse_par_list(start_symbol, end_symbol, generics)?
+        } else {
+            (Vec::default(), false)
+        };
 
         let members = members
             .iter()
@@ -823,7 +802,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             .enumerate()
             .map(|(idx, m)| {
                 m.ty = Some(enum_ty.clone());
-                m.default_value = Some(Box::new(Expr::Lit(
+                m.value = Some(Box::new(Expr::Lit(
                     Lit::Integer(idx.to_string(), RADIX),
                     Some(i32_ty.clone()),
                     None,

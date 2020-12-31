@@ -1,4 +1,4 @@
-use crate::ty::generics::Generics;
+use crate::ty::{generics::Generics, ty::Ty};
 
 /// Concatenates a structure name and a method name to create the name that will
 /// be used to refer to this function. The name is concatenated with a dash.
@@ -15,6 +15,13 @@ pub fn to_method_name(
         to_generic_struct_name(structure_name, structure_generics),
         method_name
     )
+}
+
+/// Adds the `ty` type information to the end of a variable name. This will come
+/// in handy for variables that have generic types; they will be duplicated which
+/// means that a name+blockID is not enough not uniqely identify it.
+pub fn to_var_name(name: &str, ty: &Ty) -> String {
+    format!("{}:{}", name, ty.to_string())
 }
 
 /// Formats the name of a struct with generics. The names of the generic struct

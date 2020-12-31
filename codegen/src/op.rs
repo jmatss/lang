@@ -1276,7 +1276,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .analyze_context
             .get_enum_member(&enum_name, &member_name, block_id)?;
 
-        let basic_value = if let Some(mut value) = member.borrow().default_value.clone() {
+        let basic_value = if let Some(mut value) = member.borrow().value.clone() {
             let any_value = self.compile_expr(value.as_mut(), ExprTy::RValue)?;
             CodeGen::any_into_basic_value(any_value)?
         } else {

@@ -97,7 +97,7 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
                 let mut func_replacer = FuncGenericsReplacer::new(&generic_names);
                 if let Err(mut err) = AstTraverser::new()
                     .add_visitor(&mut func_replacer)
-                    .traverse(method)
+                    .traverse_token(method)
                     .take_errors()
                 {
                     self.errors.append(&mut err);

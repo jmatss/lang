@@ -1,0 +1,21 @@
+use std.mem
+
+struct TestStruct
+{
+    inner_a: i8,
+    inner_b: u8,
+}
+
+function main() -> i32
+{
+    var a = Allocator<u64>::init(123)
+    defer Allocator<u64>::deinit(a)
+
+    var b = Allocator<TestStruct>::init()
+    var c = Allocator<u64>::init(456)
+
+    Allocator<u64>::deinit(c)
+    Allocator<TestStruct>::deinit(b)
+
+    return 0
+}

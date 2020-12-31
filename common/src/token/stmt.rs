@@ -47,9 +47,8 @@ pub enum Stmt {
     /// The "middle expr" is the lhs and the "right expr" is the rhs of the assignment.
     Assignment(AssignOperator, Expr, Expr, Option<FilePosition>),
 
-    /// Used both for "var" and "const" variables. The expr options will be Some
-    /// if this var decl also has han initializer.
-    VariableDecl(Rc<RefCell<Var>>, Option<Expr>, Option<FilePosition>),
+    /// Used both for "var" and "const" variables.
+    VariableDecl(Rc<RefCell<Var>>, Option<FilePosition>),
 
     // TODO: Implement extern for variables as well.
     /// Declaration of extern functions.
@@ -71,8 +70,8 @@ impl Stmt {
             | Stmt::Increment(_, file_pos)
             | Stmt::Decrement(_, file_pos)
             | Stmt::Defer(_, file_pos)
-            | Stmt::Assignment(_, _, _, file_pos)
-            | Stmt::VariableDecl(_, _, file_pos)
+            | Stmt::Assignment(.., file_pos)
+            | Stmt::VariableDecl(.., file_pos)
             | Stmt::ExternalDecl(_, file_pos) => file_pos.as_ref(),
             Stmt::DeferExec(_) | Stmt::Modifier(_) => None,
         }

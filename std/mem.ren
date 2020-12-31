@@ -1,2 +1,22 @@
-external function malloc(size: i32) -> {i8}
-external function free(ptr: {i8})
+external function malloc(size: u32) -> {u8}
+external function free(ptr: {u8})
+external function printf(format: {u8}, ...) -> i32
+
+struct Allocator<T>;
+
+implement Allocator
+{
+    function init(value: T = @null<T>()) -> {T}
+    {
+        var ptr = malloc(@size<T>()) as {T}
+        ptr.* = value
+        printf("Allocation (size: %d, ptr: 0x%p)\n", @size<T>(), ptr)
+        return ptr
+    }
+
+    function deinit(ptr: {T})
+    {
+        printf("Deallocation (ptr: 0x%p)\n", ptr)
+        free(ptr as {u8})
+    }
+}
