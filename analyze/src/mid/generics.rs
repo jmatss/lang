@@ -44,7 +44,7 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
     fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Struct(struct_), ..) = &ast_token {
             let struct_ = struct_.borrow();
-            if let (Some(generics), Some(members)) = (&struct_.generic_params, &struct_.members) {
+            if let (Some(generics), Some(members)) = (&struct_.generics, &struct_.members) {
                 for member in members {
                     if let Some(ty) = member.borrow_mut().ty.as_mut() {
                         ty.replace_generics(&generics)
@@ -69,7 +69,7 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
             let generic_names = if let Ok(struct_) = analyze_context.get_struct(ident, block_id) {
                 struct_
                     .borrow()
-                    .generic_params
+                    .generics
                     .clone()
                     .unwrap_or_else(Vec::default)
             } else if let Ok(enum_) = analyze_context.get_enum(ident, block_id) {

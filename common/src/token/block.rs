@@ -97,7 +97,7 @@ pub enum BlockHeader {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Struct {
     pub name: String,
-    pub generic_params: Option<Vec<String>>,
+    pub generics: Option<Vec<String>>,
     pub implements: Option<Vec<Ty>>,
     pub members: Option<Vec<Rc<RefCell<Var>>>>, // TODO: extends: Vec<Type>
 
@@ -109,7 +109,7 @@ impl Struct {
     pub fn new(name: String) -> Self {
         Self {
             name,
-            generic_params: None,
+            generics: None,
             implements: None,
             members: None,
             methods: None,
@@ -132,7 +132,7 @@ impl Struct {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
-    pub generics: Option<Vec<Ty>>,
+    pub generics: Option<Vec<String>>,
     pub parameters: Option<Vec<Rc<RefCell<Var>>>>,
     pub ret_type: Option<Ty>,
     pub modifiers: Vec<Modifier>,
@@ -147,7 +147,7 @@ pub struct Function {
 impl Function {
     pub fn new(
         name: String,
-        generics: Option<Vec<Ty>>,
+        generics: Option<Vec<String>>,
         parameters: Option<Vec<Rc<RefCell<Var>>>>,
         ret_type: Option<Ty>,
         modifiers: Vec<Modifier>,

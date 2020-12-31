@@ -379,7 +379,7 @@ impl<'a> Visitor for TypeConverter<'a> {
                         }
                     } else if struct_
                         .borrow()
-                        .generic_params
+                        .generics
                         .as_ref()
                         .map(|gens| !gens.is_empty())
                         .unwrap_or(false)

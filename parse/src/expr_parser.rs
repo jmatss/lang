@@ -551,13 +551,15 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     let parse_type = true;
                     let parse_value = false;
                     let is_const = false;
-                    let var = self.iter.parse_var(
+                    let mut var = self.iter.parse_var(
                         ident,
                         parse_type,
                         parse_value,
                         is_const,
                         generics.as_ref(),
                     )?;
+                    var.file_pos = self.file_pos;
+
                     Ok(Expr::Var(var))
                 }
             }

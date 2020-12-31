@@ -652,6 +652,18 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             }
         };
 
+        let mut type_parse = TypeParser::new(self.iter, None);
+        let generics = type_parse
+            .parse_type_generics(GenericsKind::Decl)?
+            .iter_names()
+            .cloned()
+            .collect::<Vec<_>>();
+        let generics_opt = if !generics.is_empty() {
+            Some(generics)
+        } else {
+            None
+        };
+
         let start_symbol = Sym::ParenthesisBegin;
         let end_symbol = Sym::ParenthesisEnd;
         let (params, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol, None)?;
@@ -661,6 +673,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             .iter()
             .map(|var| Rc::new(RefCell::new(var.clone())))
             .collect::<Vec<_>>();
+        let params_opt = if !params.is_empty() {
+            Some(params)
+        } else {
+            None
+        };
 
         // If the next token is a "Arrow" ("->"), assume that the return type
         // of the function is specified afterwards. If there are no arrow,
@@ -679,16 +696,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 .err("Received None when looking at token after \"function <ident>\".".into()));
         };
 
-        let params_opt = if !params.is_empty() {
-            Some(params)
-        } else {
-            None
-        };
-        // TODO: Generics.
-        let generics = None;
         Ok(Function::new(
             ident,
-            generics,
+            generics_opt,
             params_opt,
             return_type,
             modifiers,
@@ -751,8 +761,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         };
 
         let mut struct_ = Struct::new(ident);
-        struct_.generic_params =
-            generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
+        struct_.generics = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
         struct_.members = members_opt;
         let header = BlockHeader::Struct(Rc::new(RefCell::new(struct_)));
 

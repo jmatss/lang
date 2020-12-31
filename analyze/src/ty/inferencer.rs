@@ -242,7 +242,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         {
                             struct_
                                 .borrow()
-                                .generic_params
+                                .generics
                                 .clone()
                                 .unwrap_or_else(Vec::default)
                         } else if self
@@ -569,7 +569,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // to ensure that two members of a struct with the same ident uses
             // the same unknown generic type. It is also needed to ensure that
             // different struct uses different types for the generics.
-            let generics = if let Some(generic_names) = &struct_.generic_params {
+            let generics = if let Some(generic_names) = &struct_.generics {
                 let mut generics = Generics::new();
 
                 // If the struct init call has specified explicitly the implementation

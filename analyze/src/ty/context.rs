@@ -1056,7 +1056,7 @@ impl<'a> TypeContext<'a> {
             match inner_ty {
                 InnerTy::Struct(ident) => match self.analyze_context.get_struct(ident, block_id) {
                     Ok(struct_) => {
-                        if let Some(generic_names) = &struct_.borrow().generic_params {
+                        if let Some(generic_names) = &struct_.borrow().generics {
                             for (idx, gen_name) in generic_names.iter().enumerate() {
                                 generics.insert_lookup(gen_name.clone(), idx);
                                 generics.insert_name(gen_name.clone());
