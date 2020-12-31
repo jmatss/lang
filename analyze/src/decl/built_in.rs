@@ -36,6 +36,15 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
         BuiltIn::new(name, parameters, generics, ret_ty, false),
     );
 
+    let name = "null";
+    let parameters = Vec::with_capacity(0);
+    let generics = Some(vec![Ty::Any]);
+    let ret_ty = Ty::Any;
+    built_ins.insert(
+        name,
+        BuiltIn::new(name, parameters, generics, ret_ty, false),
+    );
+
     let name = "file";
     let parameters = Vec::with_capacity(0);
     let generics = None;

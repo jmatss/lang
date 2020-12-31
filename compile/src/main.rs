@@ -171,13 +171,20 @@ fn main() -> CustomResult<()> {
             std::process::exit(1);
         }
     }
+
     println!("Generating complete.");
     if log_enabled!(Level::Debug) {
+        println!("Before optimizing:");
         module.print_to_stderr();
     }
 
     module.verify()?;
     compiler::compile(target_machine, &module, output_file, optimize)?;
+
+    if log_enabled!(Level::Debug) && optimize {
+        println!("After optimizing:");
+        module.print_to_stderr();
+    }
 
     println!("Compiled to: {}", output_file);
 

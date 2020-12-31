@@ -15,10 +15,10 @@ use crate::{AnalyzeContext, BlockInfo};
 //       in this TypeContext. The TypeCOntexct currently needs to look up
 //       struct declaration when solving substitutions.
 
-// TODO: Add `set_generic_names()` calls when solving stuff. It is currently just
-//       used in `solve_unknown_structure_method()`, but would probably be best
-//       to be put into a more "generic" solve method, ex. when solving all
-//       compound/array/pointer.
+// TODO: Add `set_generic_names()` calls when solving stuff. It is currently
+//       used in `solve_unknown_structure_method()` & `solve_unknown_structure_method()`,
+//       but would probably be best to be put into a more "generic" solve method,
+//       ex. when solving all compound/array/pointer.
 
 /// "Stand-alone" struct that will contain all the important state/context
 /// after the type inference have been ran. This struct will then be used by
@@ -667,13 +667,20 @@ impl<'a> TypeContext<'a> {
             let member_name = member_name.clone();
 
             // Get any possible substitution.
-            let sub_ty = match self.solve_substitution(ty, finalize) {
+            let mut sub_ty = match self.solve_substitution(ty, finalize) {
                 SubResult::Solved(sub_ty) | SubResult::UnSolved(sub_ty) => {
                     *ty = Box::new(sub_ty.clone());
                     sub_ty
                 }
                 err => return err,
             };
+
+            // TODO: Don't hardcode default id.
+            let id = BlockInfo::DEFAULT_BLOCK_ID;
+
+            if let Err(err) = self.set_generic_names(&mut sub_ty, id) {
+                return SubResult::Err(err);
+            }
 
             let (inner_ty, generics) = match &sub_ty {
                 Ty::CompoundType(InnerTy::UnknownIdent(..), ..)
@@ -693,9 +700,6 @@ impl<'a> TypeContext<'a> {
                     )))
                 }
             };
-
-            // TODO: Don't hardcode default id.
-            let id = BlockInfo::DEFAULT_BLOCK_ID;
 
             let var = match inner_ty {
                 InnerTy::Struct(ident) => {

@@ -313,6 +313,29 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
 
+            // Gets the type of a expression. This built-in call will be "replaced"
+            // in the AST before this point is reached, so should never end up here.
+            "type" => Err(self.err(format!(
+                "Unexpected @type built in call, should not end up here: {:#?}",
+                built_in_call
+            ))),
+
+            // Creates a null/empty value of the specified type.
+            "null" => {
+                if let Some(ty_arg) = built_in_call
+                    .generics
+                    .as_ref()
+                    .map(|gs| gs.iter_types().next())
+                    .flatten()
+                {
+                    let ty = self.compile_type(ty_arg)?;
+                    self.compile_null(ty)
+                } else {
+                    unreachable!("Argument count check in Analyze.");
+                }
+            }
+
+            // Gets the filename of the file that this built-in call is in.
             "file" => {
                 if let Some(file_info) = self.analyze_context.file_info.get(&file_pos.file_nr) {
                     let filename = file_info.filename.clone();
@@ -325,22 +348,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
 
+            // Gets the line number at which this built-in is called.
             "line" => Ok(self
                 .context
                 .i32_type()
                 .const_int(file_pos.line_nr, false)
                 .into()),
 
+            // Gets the column number at which this built-in is called.
             "column" => Ok(self
                 .context
                 .i32_type()
                 .const_int(file_pos.column_nr, false)
                 .into()),
-
-            "type" => Err(self.err(format!(
-                "Unexpected @type built in call, should not end up here: {:#?}",
-                built_in_call
-            ))),
 
             _ => {
                 unreachable!("Bad built in name: {:#?}", built_in_call);
@@ -496,6 +516,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         Ok(self.builder.build_load(array_ptr, "array.init.load").into())
+    }
+
+    fn compile_null(&mut self, ty: AnyTypeEnum<'ctx>) -> CustomResult<AnyValueEnum<'ctx>> {
+        Ok(match ty {
+            AnyTypeEnum::ArrayType(ty) => ty.const_zero().into(),
+            AnyTypeEnum::FloatType(ty) => ty.const_zero().into(),
+            AnyTypeEnum::IntType(ty) => ty.const_zero().into(),
+            AnyTypeEnum::PointerType(ty) => ty.const_zero().into(),
+            AnyTypeEnum::StructType(ty) => ty.const_zero().into(),
+            AnyTypeEnum::VectorType(ty) => ty.const_zero().into(),
+
+            AnyTypeEnum::FunctionType(_) | AnyTypeEnum::VoidType(_) => {
+                return Err(self.err(format!(
+                    "Tried to create null for unsupported type: {:#?}",
+                    ty
+                )))
+            }
+        })
     }
 
     fn infer_arg_type(
