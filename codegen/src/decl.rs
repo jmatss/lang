@@ -198,6 +198,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ref_ident: &str,
         references: &HashMap<String, HashSet<String>>,
     ) -> bool {
+        // HashSet used to detect cyclic dependencies.
+        let mut seen_idents = HashSet::default();
+        CodeGen::contains_rec(cur_ident, ref_ident, references, &mut seen_idents)
+    }
+
+    fn contains_rec(
+        cur_ident: &str,
+        ref_ident: &str,
+        references: &HashMap<String, HashSet<String>>,
+        seen_idents: &mut HashSet<String>,
+    ) -> bool {
         let ref_references = if let Some(ref_references) = references.get(ref_ident) {
             ref_references
         } else {
@@ -208,7 +219,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return true;
         } else {
             for nested_ident in ref_references {
-                if CodeGen::contains(cur_ident, nested_ident, references) {
+                let is_cyclic_dependency = seen_idents.contains(nested_ident);
+                seen_idents.insert(nested_ident.into());
+
+                if is_cyclic_dependency
+                    || CodeGen::contains_rec(cur_ident, nested_ident, references, seen_idents)
+                {
                     return true;
                 }
             }
