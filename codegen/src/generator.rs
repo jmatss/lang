@@ -1,4 +1,4 @@
-use analyze::AnalyzeContext;
+use analyze::context::AnalyzeContext;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
     file::FilePosition,
