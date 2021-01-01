@@ -252,7 +252,7 @@ impl Ty {
     /// highest precedence will be used.
     pub fn replace_generics_impl(&mut self, generics_impl: &Generics) {
         match self {
-            Ty::Generic(ident, inferred_ty) => {
+            Ty::Generic(ident, inferred_ty) | Ty::GenericInstance(ident, _, inferred_ty) => {
                 // TODO: Will this specific generic always be found in the
                 //       `generics_impl` map?
                 if let Some(impl_ty) = generics_impl.get(ident) {
@@ -278,7 +278,6 @@ impl Ty {
 
             Ty::Pointer(ty)
             | Ty::Array(ty, _)
-            | Ty::GenericInstance(.., Some(ty))
             | Ty::UnknownStructureMember(ty, ..)
             | Ty::UnknownStructureMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)

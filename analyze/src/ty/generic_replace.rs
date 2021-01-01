@@ -11,11 +11,7 @@ use common::{
     visitor::Visitor,
     BlockId,
 };
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashSet, rc::Rc};
 
 use crate::AnalyzeContext;
 

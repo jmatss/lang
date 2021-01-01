@@ -1,17 +1,41 @@
 external function malloc(size: u32) -> {u8}
 external function free(ptr: {u8})
+external function realloc(ptr: {u8}, size: u32) -> {u8}
 external function printf(format: {u8}, ...) -> i32
 
 struct Allocator<T>;
-
 implement Allocator
 {
     function init(value: T = @null<T>()) -> {T}
     {
-        var ptr = malloc(@size<T>()) as {T}
+        // TODO: Why doesn't this work? Is it possible to make it work the same way?
+        //       It seems like it isn't able to solve `T` since T is "nested" twice.
+        //var ptr = Allocator<     T      >::init_size(@size<     T      >())
+          var ptr = Allocator<@type(value)>::init_size(@size<@type(value)>())
         ptr.* = value
-        printf("Allocation (size: %d, ptr: 0x%p)\n", @size<T>(), ptr)
         return ptr
+    }
+
+    function init_size(size: u32) -> {T}
+    {
+        var ptr = malloc(size) as {T}
+        printf("Allocation (size: %d, ptr: 0x%p)\n", size, ptr)
+        return ptr
+    }
+
+    function reinit(ptr: {T}, size: u32) -> {T}
+    {
+        var new_ptr = realloc(ptr as {u8}, size) as {T}
+        if new_ptr == @null<{T}>()
+        {
+            printf("Reallocation failed (size: %d, ptr: 0x%p)\n", size, new_ptr)
+            return ptr
+        }
+        else
+        {
+            printf("Reallocation success (size: %d, old_ptr: 0x%p, new_ptr: 0x%p)\n", size, ptr, new_ptr)
+            return new_ptr
+        }
     }
 
     function deinit(ptr: {T})

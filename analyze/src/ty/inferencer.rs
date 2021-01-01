@@ -240,6 +240,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             .analyze_context
                             .get_struct(ident, ctx.block_id)
                         {
+                            *inner_ty = InnerTy::Struct(ident.clone());
                             struct_
                                 .borrow()
                                 .generics
@@ -251,12 +252,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             .get_enum(ident, ctx.block_id)
                             .is_ok()
                         {
+                            *inner_ty = InnerTy::Enum(ident.clone());
                             Vec::default()
                         } else if let Ok(interface) = self
                             .type_context
                             .analyze_context
                             .get_interface(ident, ctx.block_id)
                         {
+                            *inner_ty = InnerTy::Interface(ident.clone());
                             interface
                                 .borrow()
                                 .generics
@@ -267,24 +270,35 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         };
 
                         let mut generics = Generics::new();
-                        let mut idx = 0;
 
-                        for (gen_name, gen_ty) in generic_names
-                            .iter()
-                            .cloned()
-                            .zip(generic_types.iter_types().cloned())
-                        {
-                            generics.insert(gen_name, gen_ty);
-                            idx += 1;
-                        }
+                        // If the generics impls have been specified, use those
+                        // to populate the Generics.
+                        // Else fifno generic implements have been specified,
+                        // create new "GenericInstance"s.
+                        if generic_types.len_types() > 0 {
+                            if generic_names.len() != generic_types.len_types() {
+                                let err = self.type_context.analyze_context.err(format!(
+                                    "Wrong amount of generics for static call. Func call: {:#?}, generic_names: {:#?}",
+                                    func_call, generic_names
+                                ));
+                                self.errors.push(err);
+                                return;
+                            }
 
-                        // If not all of the generics have implements, just insert
-                        // the remanining generics as names without impls.
-                        while idx < generic_names.len() {
-                            let gen_name = generic_names.get(idx).expect("Known to be inbounds.");
-                            generics.insert_lookup(gen_name.clone(), idx);
-                            generics.insert_name(gen_name.clone());
-                            idx += 1;
+                            generic_names
+                                .iter()
+                                .cloned()
+                                .zip(generic_types.iter_types().cloned())
+                                .for_each(|(gen_name, gen_ty)| generics.insert(gen_name, gen_ty));
+                        } else {
+                            for gen_name in generic_names {
+                                let unknown_ident =
+                                    self.new_unknown_ident(&format!("generic_{}", gen_name));
+                                let gen_ty =
+                                    Ty::GenericInstance(gen_name.clone(), unknown_ident, None);
+
+                                generics.insert(gen_name.clone(), gen_ty);
+                            }
                         }
 
                         *generic_types = generics;
