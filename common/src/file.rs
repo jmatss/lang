@@ -1,3 +1,8 @@
+use std::{
+    fmt::{write, Debug},
+    write,
+};
+
 pub type FileId = u64;
 
 /// Contains information about a specific file. This file will be represented
@@ -21,7 +26,7 @@ impl FileInfo {
 /// Contains information about where a token has been parsed from. This includes
 /// the file, the byte offset in the file, the length (in bytes) of the token,
 /// line nr and column nr.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct FilePosition {
     pub file_nr: u64,
     pub offset: u64,
@@ -50,6 +55,22 @@ impl Default for FilePosition {
             length: 0,
             line_nr: 0,
             column_nr: 0,
+        }
+    }
+}
+
+impl Debug for FilePosition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.file_nr > 0 {
+            f.debug_struct("FilePosition")
+                .field("file_nr", &self.file_nr)
+                .field("offset", &self.offset)
+                .field("length", &self.length)
+                .field("line_nr", &self.line_nr)
+                .field("column_nr", &self.column_nr)
+                .finish()
+        } else {
+            write!(f, "\"unspecified file position\"")
         }
     }
 }

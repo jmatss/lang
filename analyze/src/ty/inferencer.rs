@@ -102,7 +102,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     }
 
     /// Solve the constraints at the EOF. Also debug log the results.
-    fn visit_eof(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {
         self.type_context.analyze_context.file_pos = FilePosition::default();
 
         let mut result = self.type_context.solve_constraints(true);

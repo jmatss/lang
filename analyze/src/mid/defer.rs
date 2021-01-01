@@ -91,12 +91,6 @@ impl<'a> DeferAnalyzer<'a> {
         }
     }
 
-    /// Given a block ID `id`, returns every deferred expression for this
-    /// single block.
-    fn get_cur_block_defers(&mut self, id: BlockId) -> Option<Vec<Expr>> {
-        self.get_defers(id, |_| true)
-    }
-
     /// Given a block ID `id`, returns every deferred expression for this block
     /// AND all its parent blocks.
     fn get_defers_all_parents(&mut self, id: BlockId) -> Option<Vec<Expr>> {

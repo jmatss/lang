@@ -19,21 +19,22 @@ use common::{
     BlockId,
 };
 use core::panic;
-use decl::block::BlockAnalyzer;
-use decl::func::DeclFuncAnalyzer;
-use decl::ty::DeclTypeAnalyzer;
-use decl::var::DeclVarAnalyzer;
+use decl::{
+    block::BlockAnalyzer, func::DeclFuncAnalyzer, ty::DeclTypeAnalyzer, var::DeclVarAnalyzer,
+};
 use log::debug;
-use mid::defer::DeferAnalyzer;
-use mid::generics::GenericsAnalyzer;
-use post::{call_args::CallArgs, clean_up::clean_up};
-use pre::indexing::IndexingAnalyzer;
-use pre::method::MethodAnalyzer;
-use std::{cell::RefCell, cell::RefMut, collections::HashMap, fmt::Debug, rc::Rc};
-use ty::context::TypeContext;
-use ty::converter::TypeConverter;
-use ty::inferencer::TypeInferencer;
-use ty::solver::TypeSolver;
+use mid::{defer::DeferAnalyzer, generics::GenericsAnalyzer};
+use post::{call_args::CallArgs, clean_up::clean_up, exhaust::ExhaustAnalyzer};
+use pre::{indexing::IndexingAnalyzer, method::MethodAnalyzer};
+use std::{
+    cell::{RefCell, RefMut},
+    collections::HashMap,
+    fmt::Debug,
+    rc::Rc,
+};
+use ty::{
+    context::TypeContext, converter::TypeConverter, inferencer::TypeInferencer, solver::TypeSolver,
+};
 
 // TODO: Error if a function that doesn't have a return type has a return in it.
 // TODO: Make it so that one doesn't have to recreate a new AstVisitor for every
@@ -143,6 +144,13 @@ pub fn analyze(
     let mut type_converter = TypeConverter::new(&mut analyze_context, generic_structures);
     AstTraverser::new()
         .add_visitor(&mut type_converter)
+        .traverse_token(ast_root)
+        .take_errors()?;
+
+    debug!("Running ExhaustAnalyzer");
+    let mut exhaust_analyze = ExhaustAnalyzer::new(&analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut exhaust_analyze)
         .traverse_token(ast_root)
         .take_errors()?;
 

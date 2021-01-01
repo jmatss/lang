@@ -14,13 +14,12 @@ function main() -> i32
 
 
     var b = Allocator<f32>::init_size(4)
-    defer Allocator::deinit(b)
     b.* = 678.0
+    Allocator::deinit(b)
 
 
     var c = Allocator<TestStruct>::init()
     var d = Allocator<u64>::init(456)
-
     Allocator::deinit(d)
     Allocator::deinit(c)
 
@@ -28,6 +27,7 @@ function main() -> i32
     var e = Allocator::init(123 as u64)
     var f = Allocator::reinit(e, 128)
     Allocator::deinit(f)
+
 
     return 0
 }

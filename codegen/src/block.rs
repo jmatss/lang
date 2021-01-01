@@ -20,7 +20,7 @@ use inkwell::{
     types::AnyTypeEnum,
     values::{AggregateValue, AnyValueEnum, FunctionValue, IntValue, PointerValue},
 };
-use log::{debug, warn};
+use log::debug;
 
 /// Contains information related to branches in either a if-statement or a
 /// match-statement. This will then be sent around to all if-cases so that

@@ -92,6 +92,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
 
+        // TODO: Implement is_signed for the function `compile_bin_op_as()`.
+
         Ok(match bin_op.operator {
             BinOperator::In => panic!("TODO: In"),
             BinOperator::Is => panic!("TODO: Is"),
