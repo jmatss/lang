@@ -85,7 +85,7 @@ impl<'a> LexTokenIter<'a> {
         // Save the current position in the file before starting to lex the token.
         // At this point, the offset can't be calculated. It will be set if the
         // token is fully lexed correctly (at the end of this function).
-        self.file_pos = FilePosition::new(self.file_nr, self.offset, 0, self.line, self.column);
+        self.file_pos = FilePosition::new(self.file_nr, self.offset, self.line, self.column);
 
         let kind = if let Some((c1, c2, c3)) = self.iter.peek_three() {
             if LexTokenIter::valid_linebreak(c1, c2) {
@@ -121,8 +121,7 @@ impl<'a> LexTokenIter<'a> {
                     LexTokenKind::Sym(Sym::SingleQuote) => self.get_lit_char()?,
                     _ => {
                         self.iter.skip(n);
-                        self.column += n as u64;
-                        self.offset += n as u64;
+                        self.inc_column_and_offset(n as u64);
                         symbol_kind
                     }
                 }
@@ -139,11 +138,27 @@ impl<'a> LexTokenIter<'a> {
             LexTokenKind::EOF
         };
 
-        self.file_pos.length = self.offset - self.file_pos.offset;
+        // Set the ending file positions when the whole token has been parsed.
+        self.file_pos
+            .set_end_offset(self.offset)?
+            .set_end_pos(self.line, self.column);
 
         let lex_token = LexToken::new(kind, self.file_pos);
         debug!("{:?}", lex_token);
         Ok(lex_token)
+    }
+
+    /// Helper function to increase both `self.column` and `self.offset` at the
+    /// same time. This can be done ex. when parsing symbols since it is known
+    /// that every symbol character is one byte (UTF-8 len).
+    ///
+    /// This function can NOT be used when parsing characters that might be UTF-8
+    /// characters which are greater than one byte. This is because `self.column`
+    /// counts in UTF-8 characters while `self.offset` counts bytes.
+    #[inline]
+    fn inc_column_and_offset(&mut self, n: u64) {
+        self.column += n;
+        self.offset += n;
     }
 
     #[inline]
@@ -196,7 +211,7 @@ impl<'a> LexTokenIter<'a> {
         }
 
         self.column += result.chars().count() as u64;
-        self.offset += result.chars().count() as u64;
+        self.offset += result.len() as u64;
 
         if !result.is_empty() {
             Ok(result)
@@ -223,8 +238,7 @@ impl<'a> LexTokenIter<'a> {
         if radix != 10 {
             // Skip and count the prefix for numbers that isn't radix 10.
             self.iter.skip(2);
-            self.column += 2;
-            self.offset += 2;
+            self.inc_column_and_offset(2);
         }
 
         // Parse the number. If the this is a integer, the whole number will
@@ -234,7 +248,7 @@ impl<'a> LexTokenIter<'a> {
 
         // Will be set to true if the column number should be decrement with one.
         // This is true for floats that doesn't have a number after the "dot".
-        let mut dec_column_nr = false;
+        let mut zero_char_appended = false;
 
         // If this number contains a dot, assume it is a float number.
         // Currently a float number doesn't need to have a number after the dot,
@@ -244,10 +258,10 @@ impl<'a> LexTokenIter<'a> {
 
             if LexTokenIter::valid_number(next, radix) {
                 number = [number, self.get_integer(radix)].join(".");
-                dec_column_nr = false;
+                zero_char_appended = false;
             } else {
                 number.push_str(".0");
-                dec_column_nr = true;
+                zero_char_appended = true;
             }
 
             true
@@ -255,11 +269,12 @@ impl<'a> LexTokenIter<'a> {
             false
         };
 
-        self.column += number.chars().count() as u64;
-        self.offset += number.chars().count() as u64;
-        if dec_column_nr {
-            self.column -= 1;
-            self.offset -= 1;
+        // Characters for numbers and dots('.') are always 1 byte in UTF-8 so
+        // can use the `inc_column_and_offset` safely.
+        if zero_char_appended {
+            self.inc_column_and_offset(number.len() as u64 - 1);
+        } else {
+            self.inc_column_and_offset(number.len() as u64);
         }
 
         if is_float {
@@ -288,16 +303,16 @@ impl<'a> LexTokenIter<'a> {
 
     // https://doc.rust-lang.org/reference/tokens.html
     // Valid escape chars:
-    //   \x41   ("raw byte" escape (hex))
-    //   \n     (newline)
-    //   \r     (carriage return)
-    //   \t     (tab)
-    //   \\     (backslash)
-    //   \0     (null)
-    //   \'     (single quote)
-    //   \"     (double quote)
+    //   \u{7FFF}  (unicode escape, up to 6 digits (24 bit))
+    //   \x41      ("raw byte" escape (hex))
+    //   \n        (newline)
+    //   \r        (carriage return)
+    //   \t        (tab)
+    //   \\        (backslash)
+    //   \0        (null)
+    //   \'        (single quote)
+    //   \"        (double quote)
     //
-    // TODO: Unicode escape. Example: \u{7FFF}  (24-bit, up to 6 digits)
     // TODO: Formatting string. Example "num x: {x}"  (== format!("num x: {}", x))
     /// Returns the string or char literal at the current position of the iterator.
     /// Will also escape any escape characters in the process.
@@ -305,9 +320,10 @@ impl<'a> LexTokenIter<'a> {
         let mut chars = Vec::new();
 
         // Remove the start "symbol" (single or double-quote).
-        // `column_count` starts at 1 since it includes the start symbol.
+        // Starts at 1 since they includes the start symbol.
         self.iter.skip(1);
         let mut column_count = 1;
+        let mut column_count_bytes = 1;
 
         // Iterate through all char tokens in the string literal and add them to
         // the `chars` vector until the end of the literal.
@@ -316,6 +332,8 @@ impl<'a> LexTokenIter<'a> {
         let mut prev_slash = false;
         while let Some(ch) = self.iter.next() {
             column_count += 1;
+            column_count_bytes += ch.len_utf8() as u64;
+
             match ch {
                 '\\' if prev_slash => {
                     chars.push('\\');
@@ -327,14 +345,20 @@ impl<'a> LexTokenIter<'a> {
 
                 // Hex escape.
                 'x' | 'X' if prev_slash => {
-                    let new_ch = self.escape_hex()?;
+                    let (new_ch, count) = self.escape_hex()?;
                     chars.push(new_ch);
+
+                    column_count += count as u64;
+                    column_count_bytes += count as u64;
                     prev_slash = false;
                 }
                 // Unicode escape.
                 'u' | 'U' if prev_slash => {
-                    let new_ch = self.escape_unicode()?;
+                    let (new_ch, count) = self.escape_unicode()?;
                     chars.push(new_ch);
+
+                    column_count += count as u64;
+                    column_count_bytes += count as u64;
                     prev_slash = false;
                 }
 
@@ -380,14 +404,15 @@ impl<'a> LexTokenIter<'a> {
         }
 
         self.column += column_count;
-        self.offset += column_count;
+        self.offset += column_count_bytes;
 
         Ok(chars.iter().collect())
     }
 
     /// Escapes a character sequence in the format: "\xAA" inside a string or
     /// char literal into a single character. The two digits are hex.
-    fn escape_hex(&mut self) -> CustomResult<char> {
+    /// Returns the amount of characters that have been parsed (2).
+    fn escape_hex(&mut self) -> CustomResult<(char, usize)> {
         let radix = 16;
         let first = self
             .iter
@@ -402,7 +427,7 @@ impl<'a> LexTokenIter<'a> {
 
         let num = (first << 4) | second;
         if let Some(new_ch) = std::char::from_u32(num) {
-            Ok(new_ch)
+            Ok((new_ch, 2))
         } else {
             Err(self.err(format!(
                 "Unable to convert escaped \"raw byte\" integer to char: {}",
@@ -414,7 +439,10 @@ impl<'a> LexTokenIter<'a> {
     /// Escapes a character sequence in the format: "\u{XXXXXX}" inside a string or
     /// char literal into a single character. The amount of numbers (X) should be
     /// between 1 and 6.
-    fn escape_unicode(&mut self) -> CustomResult<char> {
+    ///
+    /// The amount of lexed characters will be returned in the tuple as `usize`.
+    /// This count includes the braces as well.
+    fn escape_unicode(&mut self) -> CustomResult<(char, usize)> {
         let next_char = self.iter.next();
         if let Some('{') = next_char {
         } else {
@@ -458,9 +486,13 @@ impl<'a> LexTokenIter<'a> {
             i += 1;
         }
 
+        // The lexed characters are numbers + two braces which all have 1 byte
+        // lengths in UTF-8.
+        let char_count = chars.len() + 2;
+
         let num = u32::from_str_radix(&chars.iter().collect::<String>(), RADIX)?;
         if let Some(new_ch) = std::char::from_u32(num) {
-            Ok(new_ch)
+            Ok((new_ch, char_count))
         } else {
             Err(self.err(format!(
                 "Unable to convert escaped \"unicode\" integer to char: {}",
@@ -485,7 +517,7 @@ impl<'a> LexTokenIter<'a> {
             Ok(LexTokenKind::Lit(Lit::Char(char_lit)))
         } else {
             Err(self.err(format!(
-                "Char literal length not 1, len is {}. The literal: {}",
+                "Char literal count not 1, len is {}. The literal: {}",
                 char_lit.chars().count(),
                 char_lit
             )))
@@ -497,13 +529,11 @@ impl<'a> LexTokenIter<'a> {
         match self.iter.peek_two() {
             Some(('\n', _)) => {
                 self.iter.skip(1);
-                self.column += 1;
-                self.offset += 1;
+                self.inc_column_and_offset(1);
             }
             Some(('\r', Some('\n'))) => {
                 self.iter.skip(2);
-                self.column += 2;
-                self.offset += 2;
+                self.inc_column_and_offset(2);
             }
             fail => {
                 return Err(self.err(format!("Found bad line break in get_linebreak: {:?}", fail)))
@@ -534,8 +564,7 @@ impl<'a> LexTokenIter<'a> {
             }
         }
 
-        self.column += count as u64;
-        self.offset += count as u64;
+        self.inc_column_and_offset(count as u64);
 
         LexTokenKind::Sym(Sym::WhiteSpace(count))
     }
@@ -561,7 +590,7 @@ impl<'a> LexTokenIter<'a> {
 
         let comment_str = comment.iter().collect::<String>();
         self.column += (n + comment_str.chars().count()) as u64;
-        self.offset += (n + comment_str.chars().count()) as u64;
+        self.offset += (n + comment_str.len()) as u64;
 
         LexTokenKind::Comment(comment_str, true)
     }
@@ -591,20 +620,16 @@ impl<'a> LexTokenIter<'a> {
         // of the comment. When parsing the last line, this column will be used
         // to update the `self.cur_column_nr`. Starts with `n` for the first line
         // which is the length of the "CommentMultiLineBegin".
-        let mut line_column_count = n;
+        let mut column_count_line = n;
 
-        // Keeps track of the amount of charaters that represents the linebreaks.
-        // Need to keep track if the linebreaks are 1 or 2 characters to calculate
-        // the offset in the file correctly.
-        let mut break_byte_count = 0;
-
-        // Used to indicate if this comment streched over multiple lines or just
-        // a single one. If it is only on one line, the "column count" for this
-        // comment will be added to the current `self.cur_column_nr`. Otherwise
-        // it will just overwrite it with the current col count in this function.
-        let mut multi_line = false;
+        // Keeps track of all bytes parsed. Start with `n` since that is the
+        // length of the "CommentMultiLineBegin".
+        let mut byte_count = n;
 
         while let Some(c1) = self.iter.next() {
+            column_count_line += 1;
+            byte_count += c1.len_utf8();
+
             let (c2, c3) = if let Some(chars) = self.iter.peek_two() {
                 let (c2, c3) = chars;
                 (Some(c2), c3)
@@ -612,22 +637,32 @@ impl<'a> LexTokenIter<'a> {
                 panic!("None when peeking in multi line comment.")
             };
 
-            if let Some((lex_token_kind, sym_len)) = LexToken::get_if_symbol_three_chars(c1, c2, c3)
-            {
-                match lex_token_kind {
-                    LexTokenKind::Sym(Sym::CommentMultiLineBegin) => {
-                        multi_line_comment_begin_count += 1;
+            if let Some((kind, sym_len)) = LexToken::get_if_symbol_three_chars(c1, c2, c3) {
+                match kind {
+                    LexTokenKind::Sym(sym @ Sym::CommentMultiLineBegin)
+                    | LexTokenKind::Sym(sym @ Sym::CommentMultiLineEnd) => {
+                        if let Sym::CommentMultiLineBegin = sym {
+                            multi_line_comment_begin_count += 1;
+                        } else if let Sym::CommentMultiLineEnd = sym {
+                            multi_line_comment_begin_count -= 1;
+                        }
+
+                        // `c1` has already has been consumed from the iterator,
+                        // so consume (`sym_len` - 1) to account for `c1`s length,
+                        // which is 1 because all symbol chars have 1 byte UTF-8 len.
+                        let skip_count = sym_len - 1;
+                        self.iter.skip(skip_count);
+
+                        column_count_line += skip_count;
+                        byte_count += skip_count;
                     }
-                    LexTokenKind::Sym(Sym::CommentMultiLineEnd) => {
-                        multi_line_comment_begin_count -= 1;
-                    }
+
                     _ => (),
                 }
 
+                // If true: All nested comments have been lexed, time to clean-up
+                // and return from this function.
                 if multi_line_comment_begin_count == 0 {
-                    // -1 because the first char has already been "consumed".
-                    self.iter.skip(sym_len - 1);
-                    line_column_count += sym_len - 1;
                     break;
                 }
             }
@@ -635,20 +670,11 @@ impl<'a> LexTokenIter<'a> {
             // Increment line number if a linebreak is found. Make sure to not
             // count any "\n" after a "\r\n" was seen to prevent counting those
             // linebreaks twice.
-            if LexTokenIter::valid_linebreak(c1, c2) {
-                if !(prev_was_linebreak_rn && LexTokenIter::valid_linebreak_n(c1)) {
-                    self.line += 1;
-                }
-                line_column_count = 0;
-                multi_line = true;
-
-                if LexTokenIter::valid_linebreak_n(c1) {
-                    break_byte_count += 1;
-                } else {
-                    break_byte_count += 2;
-                }
-            } else {
-                line_column_count += 1;
+            if LexTokenIter::valid_linebreak_rn(c1, c2)
+                || (!prev_was_linebreak_rn && LexTokenIter::valid_linebreak_n(c1))
+            {
+                self.line += 1;
+                column_count_line = 0;
             }
 
             prev_was_linebreak_rn = LexTokenIter::valid_linebreak_rn(c1, c2);
@@ -656,26 +682,15 @@ impl<'a> LexTokenIter<'a> {
             comment.push(c1);
         }
 
-        if multi_line {
-            self.column = (line_column_count) as u64;
-            self.offset += (n + line_column_count + break_byte_count) as u64;
-        } else {
-            self.column += (n + line_column_count) as u64;
-            self.offset += (n + line_column_count) as u64;
-        }
+        self.column = column_count_line as u64;
+        self.offset += byte_count as u64;
 
         LexTokenKind::Comment(comment.iter().collect(), false)
     }
 
     /// Used when returing errors to include current line/column number.
     fn err(&self, msg: String) -> LangError {
-        LangError::new_backtrace(
-            msg,
-            LexError {
-                file_pos: self.file_pos,
-            },
-            true,
-        )
+        LangError::new(msg, LexError, Some(self.file_pos.to_owned()))
     }
 }
 

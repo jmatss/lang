@@ -2,9 +2,7 @@ use common::iter::TokenIter;
 
 use crate::validations::utf8_char_width;
 
-/// Wrapper around a `TokenIter<u8>` which allows one to work with chars without
-/// having copy the u8 array into chars before use. This iter lets one work
-/// directly with the u8 array.
+/// Wrapper around a `TokenIter<u8>` which allows one to iterate over UTF-8 chars.
 pub(crate) struct CharIter<'a> {
     iter: TokenIter<'a, u8>,
 
