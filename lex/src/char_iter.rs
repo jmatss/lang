@@ -1,5 +1,7 @@
 use common::iter::TokenIter;
 
+use crate::validations::utf8_char_width;
+
 /// Wrapper around a `TokenIter<u8>` which allows one to work with chars without
 /// having copy the u8 array into chars before use. This iter lets one work
 /// directly with the u8 array.
@@ -23,30 +25,24 @@ impl<'a> CharIter<'a> {
     /// Gets the next char from the iterator.
     #[allow(clippy::should_implement_trait)]
     pub(crate) fn next(&mut self) -> Option<char> {
-        // UTF-8 characters can contain 4 bytes. This loop starts by looking at
-        // a single byte and for every iteration increases the amount of bytes
-        // that it tries to convert to a character.
-        for i in 0..self.buf.len() {
-            if let Some(b) = self.iter.peek_at_n(i) {
-                // SAFETY: The loop index `i` is tied to the size of `self.buf`,
-                //         so `i` will never be out of bounds.
-                unsafe { *self.buf.get_unchecked_mut(i) = b };
-
-                let slice = &self.buf[0..=i];
-                if let Some(c) = std::str::from_utf8(slice)
-                    .ok()
-                    .map(|s| s.chars().next())
-                    .flatten()
-                {
-                    self.iter.skip(i + 1);
-                    return Some(c);
-                }
-            } else {
-                break;
-            }
+        let width = utf8_char_width(self.iter.peek()?);
+        if width == 0 {
+            return None;
+        } else if width > 4 {
+            unreachable!("`width` can't be greater than 4 (max size of UTF-8 char)");
         }
 
-        None
+        // Populate `self.buf` with the next `width` bytes from the iterator.
+        // This will be the bytes representing the next UTF-8 character.
+        for i in 0..width {
+            self.buf[i] = self.iter.next()?;
+        }
+
+        let utf_8_slice = &self.buf[0..width];
+        std::str::from_utf8(utf_8_slice)
+            .ok()
+            .map(|s| s.chars().next())
+            .flatten()
     }
 
     /// Peeks and clones the next upcoming items in the iterator.
@@ -109,10 +105,8 @@ impl<'a> CharIter<'a> {
         let mark = self.iter.mark();
 
         if self.iter.rewind_n(n) {
-            if let Some(c) = self.next() {
-                if c.len_utf8() == n {
-                    is_valid = true;
-                }
+            if let Some(first_b) = self.iter.peek() {
+                is_valid = utf8_char_width(first_b) == n;
             }
         }
 
