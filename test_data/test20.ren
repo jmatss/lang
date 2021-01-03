@@ -24,8 +24,8 @@ function main() -> i32
     assert(e == 5)
     assert(g == 3)
 
-    var h = malloc(1) as {i8}
-    defer free(h as {i8})
+    var h = malloc(1) as {u8}
+    defer free(h as {u8})
     h.* = 3
     assert(h.* == 3)
 
