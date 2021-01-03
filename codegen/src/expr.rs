@@ -389,6 +389,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .const_int(file_pos.column_start, false)
                 .into()),
 
+            // Creates a unreachable instruction.
+            "unreachable" => Ok(self.builder.build_unreachable().into()),
+
             _ => {
                 unreachable!("Bad built in name: {:#?}", built_in_call);
             }

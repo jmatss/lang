@@ -74,5 +74,11 @@ function main() -> i32
     printf("\nnull_s.b: %f", null_s.b)
     assert_equals_f64(0.0, null_s.b, 0.01)
 
+
+    if false
+    {
+        @unreachable()
+    }
+
     return 0
 }

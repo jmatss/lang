@@ -73,5 +73,14 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
         BuiltIn::new(name, parameters, generics, ret_ty, false),
     );
 
+    let name = "unreachable";
+    let parameters = Vec::with_capacity(0);
+    let generics = None;
+    let ret_ty = Ty::CompoundType(InnerTy::Void, Generics::new());
+    built_ins.insert(
+        name,
+        BuiltIn::new(name, parameters, generics, ret_ty, false),
+    );
+
     built_ins
 }
