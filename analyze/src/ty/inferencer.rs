@@ -73,8 +73,8 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
     /// readability.
     fn new_unknown_ident(&mut self, text: &str) -> String {
         let file_nr = self.type_context.analyze_context.file_pos.file_nr;
-        let line_nr = self.type_context.analyze_context.file_pos.line_nr;
-        let column_nr = self.type_context.analyze_context.file_pos.column_nr;
+        let line_nr = self.type_context.analyze_context.file_pos.line_start;
+        let column_nr = self.type_context.analyze_context.file_pos.column_start;
         let offset = self.type_context.analyze_context.file_pos.offset;
         let length = self.type_context.analyze_context.file_pos.length;
 

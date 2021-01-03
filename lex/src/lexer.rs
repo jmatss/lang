@@ -139,9 +139,20 @@ impl<'a> LexTokenIter<'a> {
         };
 
         // Set the ending file positions when the whole token has been parsed.
-        self.file_pos
-            .set_end_offset(self.offset)?
-            .set_end_pos(self.line, self.column);
+        // Since the `self` fields now points to the start of the next token,
+        // need to decrement some fields to point to the end of the "previous"
+        // token (the one that was just parsed),
+        if let LexTokenKind::Sym(Sym::LineBreak) = kind {
+            let column_diff = self.offset - self.file_pos.offset;
+            let column = self.file_pos.column_start + column_diff - 1;
+            self.file_pos
+                .set_end_offset(self.offset)?
+                .set_end_pos(self.line - 1, column);
+        } else {
+            self.file_pos
+                .set_end_offset(self.offset)?
+                .set_end_pos(self.line, self.column - 1);
+        }
 
         let lex_token = LexToken::new(kind, self.file_pos);
         debug!("{:?}", lex_token);
@@ -536,7 +547,7 @@ impl<'a> LexTokenIter<'a> {
                 self.inc_column_and_offset(2);
             }
             fail => {
-                return Err(self.err(format!("Found bad line break in get_linebreak: {:?}", fail)))
+                return Err(self.err(format!("Found bad line break in get_linebreak: {:?}", fail)));
             }
         }
 

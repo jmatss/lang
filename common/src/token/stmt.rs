@@ -18,8 +18,8 @@ pub enum Stmt {
     Break(Option<FilePosition>),
     Continue(Option<FilePosition>),
 
-    Use(Path, Option<FilePosition>),
-    Package(Path, Option<FilePosition>),
+    Use(Path),
+    Package(Path),
 
     /// Inc/dec are statements so that they can't be used in other expressions.
     Increment(Expr, Option<FilePosition>),
@@ -65,14 +65,15 @@ impl Stmt {
             | Stmt::Yield(_, file_pos)
             | Stmt::Break(file_pos)
             | Stmt::Continue(file_pos)
-            | Stmt::Use(_, file_pos)
-            | Stmt::Package(_, file_pos)
             | Stmt::Increment(_, file_pos)
             | Stmt::Decrement(_, file_pos)
             | Stmt::Defer(_, file_pos)
             | Stmt::Assignment(.., file_pos)
             | Stmt::VariableDecl(.., file_pos)
             | Stmt::ExternalDecl(_, file_pos) => file_pos.as_ref(),
+
+            Stmt::Use(path) | Stmt::Package(path) => Some(&path.file_pos),
+
             Stmt::DeferExec(_) | Stmt::Modifier(_) => None,
         }
     }
@@ -92,13 +93,14 @@ pub enum Modifier {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Path {
     pub idents: Vec<String>,
+    pub file_pos: FilePosition,
 }
 
 impl Path {
     const EXTENSION: &'static str = ".ren";
 
-    pub fn new(idents: Vec<String>) -> Self {
-        Path { idents }
+    pub fn new(idents: Vec<String>, file_pos: FilePosition) -> Self {
+        Path { idents, file_pos }
     }
 
     /// Returns the path to a file. First looks for the file in the env var
@@ -123,6 +125,7 @@ impl Path {
                     LangError::new(
                         format!("Unable to convert path \"{:?}\" to str.", lang_file_path),
                         GeneralError,
+                        Some(self.file_pos.to_owned()),
                     )
                 })?
                 .into())
@@ -136,6 +139,7 @@ impl Path {
                             relative_file_path
                         ),
                         GeneralError,
+                        Some(self.file_pos.to_owned()),
                     )
                 })?
                 .into())
@@ -143,6 +147,7 @@ impl Path {
             Err(LangError::new(
                 format!("Unable to find file: {}{}", relative_path, Path::EXTENSION),
                 GeneralError,
+                Some(self.file_pos.to_owned()),
             ))
         }
     }

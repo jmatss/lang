@@ -15,26 +15,31 @@ pub type CustomResult<T> = Result<T, LangError>;
 pub struct LangError {
     pub msg: String,
     pub kind: LangErrorKind,
+    pub file_pos: Option<FilePosition>,
     pub backtrace: Option<Backtrace>,
 }
 
 #[derive(Debug, Clone)]
 pub enum LangErrorKind {
     GeneralError,
-    LexError { file_pos: FilePosition },
-    ParseError { file_pos: FilePosition },
-    AnalyzeError { file_pos: FilePosition },
-    CodeGenError { file_pos: FilePosition },
+    LexError,
+    ParseError,
+    AnalyzeError,
+    CodeGenError,
     CompileError,
-    TraversalError,
 }
 
 impl LangError {
-    pub fn new(msg: String, kind: LangErrorKind) -> Self {
-        LangError::new_backtrace(msg, kind, true)
+    pub fn new(msg: String, kind: LangErrorKind, file_pos: Option<FilePosition>) -> Self {
+        LangError::new_backtrace(msg, kind, file_pos, true)
     }
 
-    pub fn new_backtrace(msg: String, kind: LangErrorKind, contain_backtrace: bool) -> Self {
+    pub fn new_backtrace(
+        msg: String,
+        kind: LangErrorKind,
+        file_pos: Option<FilePosition>,
+        contain_backtrace: bool,
+    ) -> Self {
         let backtrace = if log_enabled!(Level::Debug) && contain_backtrace {
             Some(Backtrace::new())
         } else {
@@ -44,6 +49,7 @@ impl LangError {
         Self {
             msg,
             kind,
+            file_pos,
             backtrace,
         }
     }
@@ -53,56 +59,54 @@ impl Error for LangError {}
 
 impl Display for LangError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "[{:?}] {}\n{:#?}", self.kind, self.msg, self.backtrace)
+        if let Some(file_pos) = self.file_pos {
+            write!(f, "[{:?} - {:?}]", self.kind, file_pos)?;
+        } else {
+            write!(f, "[{:?}]", self.kind)?;
+        }
+
+        write!(f, " {}", self.msg)?;
+
+        if log_enabled!(Level::Debug) {
+            if let Some(backtrace) = &self.backtrace {
+                write!(f, "\n{:#?}", backtrace)?;
+            }
+        }
+
+        Ok(())
     }
 }
 
 impl From<std::num::ParseIntError> for LangError {
     fn from(e: std::num::ParseIntError) -> Self {
-        LangError::new(
-            e.to_string(),
-            LangErrorKind::CodeGenError {
-                file_pos: FilePosition::default(),
-            },
-        )
+        LangError::new(e.to_string(), LangErrorKind::CodeGenError, None)
     }
 }
 
 impl From<std::num::ParseFloatError> for LangError {
     fn from(e: std::num::ParseFloatError) -> Self {
-        LangError::new(
-            e.to_string(),
-            LangErrorKind::CodeGenError {
-                file_pos: FilePosition::default(),
-            },
-        )
+        LangError::new(e.to_string(), LangErrorKind::CodeGenError, None)
     }
 }
 
 impl From<std::io::Error> for LangError {
     fn from(e: std::io::Error) -> Self {
-        LangError::new(
-            e.to_string(),
-            LangErrorKind::LexError {
-                file_pos: FilePosition::default(),
-            },
-        )
+        LangError::new(e.to_string(), LangErrorKind::LexError, None)
     }
 }
 
 impl From<LLVMString> for LangError {
     fn from(e: LLVMString) -> Self {
-        LangError::new(
-            e.to_string(),
-            LangErrorKind::CodeGenError {
-                file_pos: FilePosition::default(),
-            },
-        )
+        LangError::new(e.to_string(), LangErrorKind::CodeGenError, None)
     }
 }
 
 impl From<VarError> for LangError {
     fn from(e: VarError) -> Self {
-        LangError::new(format!("{}: {}", e, ENV_VAR), LangErrorKind::GeneralError)
+        LangError::new(
+            format!("{}: {}", e, ENV_VAR),
+            LangErrorKind::GeneralError,
+            None,
+        )
     }
 }

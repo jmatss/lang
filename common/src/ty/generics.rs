@@ -188,6 +188,6 @@ impl Display for Generics {
             .collect::<Vec<_>>()
             .join(",");
 
-        write!(f, "{}", result)
+        write!(f, "<{}>", result)
     }
 }

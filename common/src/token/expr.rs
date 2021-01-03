@@ -6,10 +6,7 @@ use super::{
     stmt::Modifier,
 };
 use crate::{
-    error::{
-        CustomResult, LangError,
-        LangErrorKind::{self, AnalyzeError},
-    },
+    error::{CustomResult, LangError, LangErrorKind},
     file::FilePosition,
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     util, BlockId,
@@ -45,9 +42,8 @@ impl Expr {
                 } else {
                     return Err(LangError::new(
                         format!("Type of var was None: {:?}", var),
-                        AnalyzeError {
-                            file_pos: FilePosition::default(),
-                        },
+                        LangErrorKind::GeneralError,
+                        self.file_pos().cloned(),
                     ));
                 }
             }
@@ -96,15 +92,16 @@ impl Expr {
             _ => {
                 return Err(LangError::new(
                     "Unable to get type of expr.".into(),
-                    AnalyzeError {
-                        file_pos: FilePosition::default(),
-                    },
+                    LangErrorKind::GeneralError,
+                    self.file_pos().cloned(),
                 ))
             }
         })
     }
 
     pub fn get_expr_type_mut(&mut self) -> CustomResult<&mut Ty> {
+        let file_pos = self.file_pos().cloned();
+
         Ok(match self {
             Expr::Lit(_, Some(ty), _) | Expr::Type(ty, _) => ty,
             Expr::Var(var) => {
@@ -113,9 +110,8 @@ impl Expr {
                 } else {
                     return Err(LangError::new(
                         "Type of var was None.".into(),
-                        AnalyzeError {
-                            file_pos: FilePosition::default(),
-                        },
+                        LangErrorKind::GeneralError,
+                        file_pos,
                     ));
                 }
             }
@@ -164,9 +160,8 @@ impl Expr {
             _ => {
                 return Err(LangError::new(
                     "Unable to get type of expr.".into(),
-                    AnalyzeError {
-                        file_pos: FilePosition::default(),
-                    },
+                    LangErrorKind::GeneralError,
+                    file_pos,
                 ))
             }
         })
@@ -177,9 +172,9 @@ impl Expr {
             Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) => file_pos.as_ref(),
             Expr::Var(var) => var.file_pos.as_ref(),
             Expr::FuncCall(func_call) => func_call.file_pos.as_ref(),
-            Expr::BuiltInCall(built_in_call) => built_in_call.file_pos.as_ref(),
+            Expr::BuiltInCall(built_in_call) => Some(&built_in_call.file_pos),
             Expr::StructInit(struct_init) => struct_init.file_pos.as_ref(),
-            Expr::ArrayInit(array_init) => array_init.file_pos.as_ref(),
+            Expr::ArrayInit(array_init) => Some(&array_init.file_pos),
             Expr::Op(op) => match op {
                 Op::BinOp(bin_op) => bin_op.file_pos.as_ref(),
                 Op::UnOp(un_op) => un_op.file_pos.as_ref(),
@@ -334,8 +329,13 @@ pub struct Var {
     pub ty: Option<Ty>,
     pub modifiers: Option<Vec<Modifier>>,
     pub value: Option<Box<Expr>>,
-    pub file_pos: Option<FilePosition>,
     pub is_const: bool,
+
+    /// The file position spanning the whole variable.
+    pub file_pos: Option<FilePosition>,
+
+    /// The file position spanning only the type of the variable.
+    pub ty_file_pos: Option<FilePosition>,
 
     /// If this is a exact copy of another variable, this index will be set to
     /// help tell the variables aparat.
@@ -349,6 +349,7 @@ impl Var {
         modifiers: Option<Vec<Modifier>>,
         default_value: Option<Box<Expr>>,
         file_pos: Option<FilePosition>,
+        ty_file_pos: Option<FilePosition>,
         is_const: bool,
     ) -> Self {
         Var {
@@ -357,6 +358,7 @@ impl Var {
             modifiers,
             value: default_value,
             file_pos,
+            ty_file_pos,
             is_const,
             copy_nr: None,
         }
@@ -375,8 +377,8 @@ impl Var {
     /// to store the `name` of the variable uniquely in a `variables` look-up
     /// hash table.
     pub fn full_name(&self) -> String {
-        if let Some(copy_nr) = &self.copy_nr {
-            format!("{}:{}", &self.name, copy_nr)
+        if let Some(copy_nr) = self.copy_nr {
+            util::to_var_name(&self.name, copy_nr)
         } else {
             self.name.clone()
         }
@@ -455,6 +457,7 @@ impl FuncCall {
                     return Err(LangError::new(
                         format!("Unable to get full name for method call: {:#?}", self),
                         LangErrorKind::GeneralError,
+                        self.file_pos.to_owned(),
                     ));
                 };
 
@@ -484,7 +487,7 @@ pub struct BuiltInCall {
     pub arguments: Vec<Argument>,
     pub ret_type: Option<Ty>,
     pub generics: Option<Generics>,
-    pub file_pos: Option<FilePosition>,
+    pub file_pos: FilePosition,
 }
 
 impl BuiltInCall {
@@ -492,7 +495,7 @@ impl BuiltInCall {
         name: String,
         arguments: Vec<Argument>,
         generics: Option<Generics>,
-        file_pos: Option<FilePosition>,
+        file_pos: FilePosition,
     ) -> Self {
         Self {
             name,
@@ -573,6 +576,7 @@ impl StructInit {
                 Err(LangError::new(
                     format!("Unable to get full name for struct init: {:#?}", self),
                     LangErrorKind::GeneralError,
+                    self.file_pos.to_owned(),
                 ))
             }
         } else {
@@ -585,11 +589,11 @@ impl StructInit {
 pub struct ArrayInit {
     pub arguments: Vec<Argument>,
     pub ret_type: Option<Ty>,
-    pub file_pos: Option<FilePosition>,
+    pub file_pos: FilePosition,
 }
 
 impl ArrayInit {
-    pub fn new(arguments: Vec<Argument>, file_pos: Option<FilePosition>) -> Self {
+    pub fn new(arguments: Vec<Argument>, file_pos: FilePosition) -> Self {
         Self {
             arguments,
             ret_type: None,

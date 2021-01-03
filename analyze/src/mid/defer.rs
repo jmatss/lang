@@ -111,7 +111,7 @@ impl<'a> Visitor for DeferAnalyzer<'a> {
     }
 
     fn visit_block(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(_, id, body) = &mut ast_token {
+        if let AstToken::Block(_, _, id, body) = &mut ast_token {
             let mut i = 0;
             while i < body.len() {
                 match &body[i] {

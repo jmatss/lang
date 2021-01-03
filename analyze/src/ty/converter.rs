@@ -1,5 +1,6 @@
 use common::{
     error::LangError,
+    file::FilePosition,
     token::{ast::AstToken, block::BlockHeader},
     traverser::AstTraverser,
     traverser::TraverseContext,
@@ -78,6 +79,7 @@ impl<'a> TypeConverter<'a> {
         &mut self,
         old_name: &str,
         body: &mut Vec<AstToken>,
+        file_pos: &FilePosition,
         old_idx: usize,
         old_id: BlockId,
         parent_id: BlockId,
@@ -172,7 +174,10 @@ impl<'a> TypeConverter<'a> {
                 // right, but ensure that the tokens are
                 // inserted next to the old struct and
                 // doesn't ex. get added after the EOF token.
-                body.insert(old_idx + 1, AstToken::Block(header, old_id, struct_body));
+                body.insert(
+                    old_idx + 1,
+                    AstToken::Block(header, file_pos.to_owned(), old_id, struct_body),
+                );
             }
 
             // Remove the old, now unused, structure.
@@ -228,7 +233,7 @@ impl<'a> TypeConverter<'a> {
                 // this new impl block to contain the generics.
                 let mut new_impl_token = old_impl_token.clone();
                 let (new_impl_body, new_name) =
-                    if let AstToken::Block(BlockHeader::Implement(ident), _, new_impl_body) =
+                    if let AstToken::Block(BlockHeader::Implement(ident), .., new_impl_body) =
                         &mut new_impl_token
                     {
                         *ident = util::to_generic_struct_name(&old_name, &generics);
@@ -320,7 +325,7 @@ impl<'a> Visitor for TypeConverter<'a> {
     ///
     /// OBS! This needs to be ran first, before
     fn visit_default_block(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Default, parent_id, body) = &mut ast_token {
+        if let AstToken::Block(BlockHeader::Default, _, parent_id, body) = &mut ast_token {
             let mut i = 0;
 
             // Iterate through all the structures in the AST.
@@ -331,11 +336,14 @@ impl<'a> Visitor for TypeConverter<'a> {
 
                 // Modify and create the new structs. The old struct will also
                 // be removed.
-                if let AstToken::Block(BlockHeader::Struct(struct_), old_id, ..) = &body_token {
+                if let AstToken::Block(BlockHeader::Struct(struct_), file_pos, old_id, ..) =
+                    &body_token
+                {
                     if self.generic_structures.contains_key(&struct_.borrow().name) {
                         if let Some(skip) = self.create_structure_instance(
                             &struct_.borrow().name.clone(),
                             body,
+                            file_pos,
                             i,
                             *old_id,
                             *parent_id,

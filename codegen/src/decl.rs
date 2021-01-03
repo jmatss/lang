@@ -50,10 +50,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             } else if let Some(enum_) = enums.get(&ident) {
                 self.compile_enum(&enum_.borrow())?;
             } else {
-                return Err(self.err(format!(
-                    "Unable to find structure with name \"{}\" when compiling type decl.",
-                    &ident
-                )));
+                return Err(self.err(
+                    format!(
+                        "Unable to find structure with name \"{}\" when compiling type decl.",
+                        &ident
+                    ),
+                    None,
+                ));
             }
         }
 
@@ -75,7 +78,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         enums: &mut HashMap<String, Rc<RefCell<Enum>>>,
         references: &mut HashMap<String, HashSet<String>>,
     ) -> CustomResult<()> {
-        if let AstToken::Block(header, id, body) = ast_token {
+        if let AstToken::Block(header, _, id, body) = ast_token {
             self.cur_block_id = *id;
 
             match header {
@@ -153,10 +156,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let cur_references_prev = CodeGen::contains(prev_ident, cur_ident, &references);
 
                 if prev_references_cur && cur_references_prev {
-                    return Err(self.err(format!(
-                        "Cyclic dependency between structures \"{}\" and \"{}\".",
-                        cur_ident, prev_ident
-                    )));
+                    return Err(self.err(
+                        format!(
+                            "Cyclic dependency between structures \"{}\" and \"{}\".",
+                            cur_ident, prev_ident
+                        ),
+                        None,
+                    ));
                 } else if prev_references_cur {
                     // Can't insert the "current" structure before the "previous"
                     // since it is being referenced from it. Insert into `order`
@@ -240,19 +246,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_func_decl(&mut self, mut ast_token: &mut AstToken) -> CustomResult<()> {
         self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
-        if let AstToken::Block(header, id, ref mut body) = &mut ast_token {
+        if let AstToken::Block(header, file_pos, id, ref mut body) = &mut ast_token {
             self.cur_block_id = *id;
 
             match header {
                 BlockHeader::Function(func) => {
                     let linkage = Linkage::External;
-                    self.compile_func_proto(&func.borrow(), Some(linkage))?;
+                    self.compile_func_proto(
+                        &func.borrow(),
+                        Some(file_pos.to_owned()),
+                        Some(linkage),
+                    )?;
                 }
                 BlockHeader::Implement(_) => {
                     for mut ast_token in body.iter_mut() {
                         if let AstToken::Block(BlockHeader::Function(func), ..) = &mut ast_token {
                             let linkage = Linkage::External;
-                            self.compile_func_proto(&func.borrow(), Some(linkage))?;
+                            self.compile_func_proto(
+                                &func.borrow(),
+                                Some(file_pos.to_owned()),
+                                Some(linkage),
+                            )?;
                         }
                     }
                 }

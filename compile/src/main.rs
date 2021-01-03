@@ -66,8 +66,6 @@ fn main() -> CustomResult<()> {
     let mut file_nr: FileId = 0;
     let mut file_info: HashMap<FileId, FileInfo> = HashMap::default();
 
-    let parse_timer = Instant::now();
-
     // Loop through files and lex+parse them until there or no more uses/includes
     // to process. ALl files will be incldued in the same module.
     let mut parser = ParseTokenIter::new();
@@ -81,6 +79,7 @@ fn main() -> CustomResult<()> {
                 LangError::new(
                     format!("Unable to get filename: {}", input_file),
                     LangErrorKind::GeneralError,
+                    None,
                 )
             })?
             .into();
@@ -90,6 +89,7 @@ fn main() -> CustomResult<()> {
                 LangError::new(
                     format!("Unable to get directory: {}", input_file),
                     LangErrorKind::GeneralError,
+                    None,
                 )
             })?
             .into();
@@ -107,7 +107,7 @@ fn main() -> CustomResult<()> {
             Ok(lex_tokens) => lex_tokens,
             Err(errs) => {
                 for e in errs {
-                    error!("{}", e);
+                    eprintln!("[ERROR] {}", e);
                 }
                 std::process::exit(1);
             }
@@ -118,21 +118,27 @@ fn main() -> CustomResult<()> {
             lex_timer.elapsed()
         );
 
+        let parse_timer = Instant::now();
         match parser.parse(&mut lex_tokens) {
             Ok(_) => (),
             Err(errs) => {
                 for e in errs {
-                    error!("{}", e);
+                    eprintln!("[ERROR] {}", e);
                 }
                 std::process::exit(1);
             }
         }
+        println!(
+            "Parsing {} complete ({:?}).",
+            &file.filename,
+            parse_timer.elapsed()
+        );
 
         if let Some(use_path) = parser.uses.pop() {
             input_file = match use_path.to_file_path() {
                 Ok(input_file) => input_file,
                 Err(e) => {
-                    error!("{}", e);
+                    eprintln!("[ERROR] {}", e);
                     std::process::exit(1);
                 }
             };
@@ -142,7 +148,7 @@ fn main() -> CustomResult<()> {
             break parser.take_root_block();
         }
     };
-    println!("Parsing+lexing complete ({:?}).", parse_timer.elapsed());
+
     if log_enabled!(Level::Debug) {
         debug!("\nAST after parsing:\n{:#?}", ast_root);
     }
@@ -152,7 +158,7 @@ fn main() -> CustomResult<()> {
         Ok(analyze_context) => analyze_context,
         Err(errs) => {
             for e in errs {
-                error!("{}", e);
+                eprintln!("[ERROR] {}", e);
             }
             std::process::exit(1);
         }
@@ -178,7 +184,7 @@ fn main() -> CustomResult<()> {
     ) {
         Ok(_) => (),
         Err(e) => {
-            error!("{}", e);
+            eprintln!("[ERROR] {}", e);
             std::process::exit(1);
         }
     }

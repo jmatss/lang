@@ -646,12 +646,6 @@ impl AnalyzeContext {
 
     /// Used when returing errors to include current line/column number.
     pub fn err(&self, msg: String) -> LangError {
-        LangError::new_backtrace(
-            msg,
-            AnalyzeError {
-                file_pos: self.file_pos,
-            },
-            true,
-        )
+        LangError::new(msg, AnalyzeError, Some(self.file_pos))
     }
 }

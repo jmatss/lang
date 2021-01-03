@@ -122,7 +122,7 @@ impl<'a> Visitor for ExhaustAnalyzer<'a> {
     ///   ints
     ///   enums
     fn visit_match(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Match(match_expr), _, match_cases) = ast_token {
+        if let AstToken::Block(BlockHeader::Match(match_expr), _, _, match_cases) = ast_token {
             let match_case_ty = match match_expr.get_expr_type() {
                 Ok(ty) => ty,
                 Err(err) => {

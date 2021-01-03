@@ -17,13 +17,10 @@ use common::{
     },
 };
 use lex::token::{LexTokenKind, Sym};
-use log::{debug, warn};
+use log::debug;
 
 pub struct ExprParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
-
-    /// The FilePosition for the current LexToken being parsed.
-    file_pos: Option<FilePosition>,
 
     /// Keeps a count of the amount of tokens seen. If no tokens have been seen
     /// before a "stop condition" is seen, something has gone wrong. This
@@ -62,9 +59,12 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         iter: &'a mut ParseTokenIter<'b>,
         stop_conds: &'a [Sym],
     ) -> CustomResult<Option<Expr>> {
+        // Take the file pos of the first symbol of the expression if possible.
+        // This will be used if a more accurate/precise file_pos can't be used.
+        let file_pos = iter.peek_file_pos()?;
+
         let mut expr_parser = Self {
             iter,
-            file_pos: None,
             token_count: 0,
             outputs: Vec::new(),
             operators: Vec::new(),
@@ -73,28 +73,32 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             parenthesis_count: 0,
         };
 
-        let was_empty = expr_parser.shunting_yard()?;
-        if was_empty {
-            Ok(None)
-        } else {
-            debug!("Outputs: {:#?}", &expr_parser.outputs);
-            expr_parser.rev_polish_to_expr().map(Some)
+        match expr_parser.shunting_yard()? {
+            // (was_empty, expr_file_pos_opt)
+            (false, Some(file_pos)) => {
+                debug!("Outputs: {:#?}", &expr_parser.outputs);
+                expr_parser.rev_polish_to_expr(&file_pos).map(Some)
+            }
+
+            (true, _) => Ok(None),
+
+            (false, None) => Err(expr_parser.iter.err(
+                "Expr wasn't empty, but got back None expr_file_pos.".into(),
+                Some(file_pos),
+            )),
         }
     }
 
     /// See https://www.andr.mu/logs/the-shunting-yard-algorithm/ for a good
     /// explanation of the algorithm.
     /// Return `true` if the expression was empty.
-    fn shunting_yard(&mut self) -> CustomResult<bool> {
+    fn shunting_yard(&mut self) -> CustomResult<(bool, Option<FilePosition>)> {
         let mark = self.iter.mark();
+
+        let mut file_pos = self.iter.peek_file_pos()?;
 
         while let Some(lex_token) = self.iter.next_skip_space() {
             debug!("SHUNTING: {:?}", &lex_token);
-
-            // TODO: The FilePosition used is currently just the first symbol
-            //       found. Need to modifications to the file position so that
-            //       all symbals are included.
-            self.file_pos = Some(lex_token.file_pos.to_owned());
 
             // Break and stop parsing expression if a Symbol contained in
             // `stop_conds` are found or if EOF is reached.
@@ -105,6 +109,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 // put back the previous "ParenthesisEnd" that was removed.
                 self.iter.rewind_skip_space()?;
                 self.iter.rewind_skip_space()?;
+
+                file_pos.set_end(&self.iter.peek_file_pos()?)?;
                 break;
             } else if let LexTokenKind::Sym(ref symbol) = lex_token.kind {
                 if self.stop_conds.contains(symbol) {
@@ -116,13 +122,16 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         // Edge case if this is an empty expression. Do not break
                         // and solve the parsed expressions, do a early return
                         // instead.
-                        return Ok(was_empty);
+                        return Ok((was_empty, None));
                     } else {
+                        file_pos.set_end(&self.iter.peek_file_pos()?)?;
                         break;
                     }
                 }
             } else if let LexTokenKind::EOF = lex_token.kind {
                 self.iter.rewind_skip_space()?;
+
+                file_pos.set_end(&self.iter.peek_file_pos()?)?;
                 break;
             }
 
@@ -130,12 +139,26 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
             match lex_token.clone().kind {
                 LexTokenKind::Ident(ident) => {
-                    let expr = self.parse_expr_ident(&ident)?;
+                    let expr = self.parse_expr_ident(&ident, lex_token.file_pos)?;
+
+                    if let Some(expr_file_pos) = expr.file_pos() {
+                        file_pos.set_end(expr_file_pos)?;
+                    } else {
+                        unreachable!();
+                    }
+
                     self.shunt_operand(expr)?;
                 }
 
                 LexTokenKind::Lit(lit) => {
-                    let expr = Expr::Lit(lit, None, self.file_pos);
+                    let expr = Expr::Lit(lit, None, Some(lex_token.file_pos));
+
+                    if let Some(expr_file_pos) = expr.file_pos() {
+                        file_pos.set_end(expr_file_pos)?;
+                    } else {
+                        unreachable!();
+                    }
+
                     self.shunt_operand(expr)?;
                 }
 
@@ -144,8 +167,6 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     // `next_token` should contain the ident.
                     let next_token = self.iter.next_skip_space();
 
-                    warn!("BEFORE PARSE TYPE GENERICS");
-
                     // TODO: Most of the logic below is taken from `self.parse_expr_ident`.
                     //       Merge the logic.
                     let generics = if let Some(lex_token) = self.iter.peek_skip_space() {
@@ -153,7 +174,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             match TypeParser::new(self.iter, None)
                                 .parse_type_generics(GenericsKind::Impl)
                             {
-                                Ok(generics) => Some(generics),
+                                Ok((generics, _)) => Some(generics),
                                 Err(_) => {
                                     self.iter.rewind_to_mark(mark);
                                     None
@@ -166,28 +187,27 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         None
                     };
 
-                    warn!(
-                        "ident_token: {:#?}, peek: {:#?}, generics: {:#?}",
-                        next_token,
-                        self.iter.peek_skip_space(),
-                        generics
-                    );
-
-                    if let Some((LexTokenKind::Ident(ident), file_pos)) =
-                        next_token.clone().map(|t| (t.kind, lex_token.file_pos))
-                    {
+                    if let Some(LexTokenKind::Ident(ident)) = next_token.clone().map(|t| t.kind) {
                         let start_symbol = Sym::ParenthesisBegin;
                         let end_symbol = Sym::ParenthesisEnd;
-                        let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
-                        warn!("done parsing arg list.");
+                        let (arguments, args_file_pos) =
+                            self.iter.parse_arg_list(start_symbol, end_symbol)?;
+
+                        let mut built_in_file_pos = lex_token.file_pos;
+                        built_in_file_pos.set_end(&args_file_pos)?;
+                        file_pos.set_end(&args_file_pos)?;
+
                         let built_in_call =
-                            BuiltInCall::new(ident, arguments, generics, Some(file_pos));
+                            BuiltInCall::new(ident, arguments, generics, lex_token.file_pos);
                         self.shunt_operand(Expr::BuiltInCall(built_in_call))?;
                     } else {
-                        return Err(self.iter.err(format!(
-                            "Expected ident after '@' (built-in call), got: {:?}",
-                            next_token
-                        )));
+                        return Err(self.iter.err(
+                            format!(
+                                "Expected ident after '@' (built-in call), got: {:?}",
+                                next_token
+                            ),
+                            Some(lex_token.file_pos),
+                        ));
                     }
                 }
 
@@ -200,15 +220,21 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     let expr = if let Some(expr) = ExprParser::parse(self.iter, &stop_conds)? {
                         expr
                     } else {
-                        return Err(self
-                            .iter
-                            .err("Found no expression in array indexing.".into()));
+                        return Err(self.iter.err(
+                            "Found no expression in array indexing.".into(),
+                            Some(lex_token.file_pos),
+                        ));
                     };
 
                     // Consume the "SquareBracketEnd".
-                    self.iter.next_skip_space();
+                    if let Some(end_token) = self.iter.next_skip_space() {
+                        file_pos.set_end(&end_token.file_pos)?;
+                    } else {
+                        unreachable!();
+                    }
 
                     let op = Operator::UnaryOperator(UnOperator::ArrayAccess(Box::new(expr)));
+
                     self.shunt_operator(op)?;
                 }
 
@@ -219,15 +245,27 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
                     let start_symbol = Sym::SquareBracketBegin;
                     let end_symbol = Sym::SquareBracketEnd;
-                    let args = self.iter.parse_arg_list(start_symbol, end_symbol)?;
+                    let (args, args_file_pos) =
+                        self.iter.parse_arg_list(start_symbol, end_symbol)?;
 
-                    let expr = Expr::ArrayInit(ArrayInit::new(args, self.file_pos));
+                    let mut array_init_file_pos = lex_token.file_pos;
+                    array_init_file_pos.set_end(&args_file_pos)?;
+
+                    let expr = Expr::ArrayInit(ArrayInit::new(args, array_init_file_pos));
+
+                    if let Some(expr_file_pos) = expr.file_pos() {
+                        file_pos.set_end(expr_file_pos)?;
+                    } else {
+                        unreachable!("Expr doesn't have a file_pos: {:#?}", expr);
+                    }
+
                     self.shunt_operand(expr)?;
                 }
 
                 // Skip any linebreaks if the linbreaks aren't a part of the
                 // stop conditions. Also skip comments.
                 LexTokenKind::Sym(Sym::LineBreak) | LexTokenKind::Comment(..) => {
+                    file_pos.set_end(&lex_token.file_pos)?;
                     self.token_count -= 1
                 }
 
@@ -237,33 +275,47 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 | LexTokenKind::Sym(symbol @ Sym::Of) => {
                     if let Some(op) = get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
-                        let expr = Expr::Type(self.iter.parse_type(None)?, self.file_pos);
+                        let (ty_expr, ty_file_pos) = self.iter.parse_type(None)?;
+                        let expr = Expr::Type(ty_expr, Some(ty_file_pos));
+
+                        if let Some(expr_file_pos) = expr.file_pos() {
+                            file_pos.set_end(expr_file_pos)?;
+                        } else {
+                            unreachable!("Expr doesn't have a file_pos: {:#?}", expr);
+                        }
 
                         self.shunt_operand(expr)?;
                     } else {
-                        return Err(self.iter.err(format!(
-                            "Parsed None operator during expression for symbol: {:?}",
-                            symbol
-                        )));
+                        return Err(self.iter.err(
+                            format!(
+                                "Parsed None operator during expression for symbol: {:?}",
+                                symbol
+                            ),
+                            Some(lex_token.file_pos),
+                        ));
                     }
                 }
 
                 LexTokenKind::Sym(symbol) => {
                     if let Some(op) = get_if_expr_op(&symbol) {
+                        file_pos.set_end(&lex_token.file_pos)?;
                         self.shunt_operator(op)?;
                     } else {
-                        return Err(self.iter.err(format!(
-                            "Parsed None operator during expression for symbol: {:?}",
-                            symbol
-                        )));
+                        return Err(self.iter.err(
+                            format!(
+                                "Parsed None operator during expression for symbol: {:?}",
+                                symbol
+                            ),
+                            Some(lex_token.file_pos),
+                        ));
                     }
                 }
 
                 _ => {
-                    return Err(self.iter.err(format!(
-                        "Parsed invalid token during expression: {:?}",
-                        lex_token
-                    )));
+                    return Err(self.iter.err(
+                        format!("Parsed invalid token during expression: {:?}", lex_token),
+                        Some(lex_token.file_pos),
+                    ));
                 }
             }
         }
@@ -274,7 +326,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         }
 
         let was_empty = false;
-        Ok(was_empty)
+        Ok((was_empty, Some(file_pos)))
     }
 
     /// Adds a operand into the "shunting".
@@ -284,10 +336,13 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             self.prev_was_operand = true;
             Ok(())
         } else {
-            Err(self.iter.err(format!(
-                "Received two operands in a row (or a postfix operator). Cur expr: {:#?}",
-                expr
-            )))
+            Err(self.iter.err(
+                format!(
+                    "Received two operands in a row (or a postfix operator). Cur expr: {:#?}",
+                    expr
+                ),
+                expr.file_pos().cloned(),
+            ))
         }
     }
 
@@ -394,50 +449,83 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
     // TODO: Should empty expression be allowed?
     /// Converts the given "outputs" in reverse polsih notation to an expression.
-    fn rev_polish_to_expr(&mut self) -> CustomResult<Expr> {
+    fn rev_polish_to_expr(&mut self, full_expr_file_pos: &FilePosition) -> CustomResult<Expr> {
         let mut expr_stack = Vec::new();
         let outputs = std::mem::take(&mut self.outputs);
+
+        let mut prev_file_pos = Some(full_expr_file_pos.to_owned());
 
         for output in &outputs {
             match output.clone() {
                 Output::Operand(expr) => {
+                    prev_file_pos = expr.file_pos().cloned();
                     expr_stack.push(expr);
                 }
 
                 Output::Operator(Operator::UnaryOperator(un_op)) => {
                     if let Some(expr) = expr_stack.pop() {
-                        let op = UnOp::new(un_op, Box::new(expr), self.file_pos);
+                        let expr_file_pos = expr.file_pos().cloned();
+                        prev_file_pos = expr_file_pos.to_owned();
+
+                        let op = UnOp::new(un_op, Box::new(expr), expr_file_pos);
                         expr_stack.push(Expr::Op(Op::UnOp(op)));
                     } else {
-                        return Err(self
-                            .iter
-                            .err("Empty expr in expr_stack when popping (unary).".into()));
+                        return Err(self.iter.err(
+                            "Empty expr in expr_stack when popping (unary).".into(),
+                            prev_file_pos,
+                        ));
                     }
                 }
 
                 Output::Operator(Operator::BinaryOperator(bin_op)) => {
                     if let Some(right) = expr_stack.pop() {
+                        let right_file_pos = if let Some(right_file_pos) = right.file_pos() {
+                            right_file_pos.to_owned()
+                        } else {
+                            unreachable!()
+                        };
+
                         if let Some(left) = expr_stack.pop() {
-                            let op =
-                                BinOp::new(bin_op, Box::new(left), Box::new(right), self.file_pos);
+                            let left_file_pos = if let Some(left_file_pos) = left.file_pos() {
+                                left_file_pos.to_owned()
+                            } else {
+                                unreachable!()
+                            };
+
+                            let mut bin_op_file_pos = left_file_pos.to_owned();
+                            bin_op_file_pos.set_end(&right_file_pos)?;
+
+                            prev_file_pos = Some(bin_op_file_pos.to_owned());
+
+                            let op = BinOp::new(
+                                bin_op,
+                                Box::new(left),
+                                Box::new(right),
+                                Some(bin_op_file_pos),
+                            );
                             expr_stack.push(Expr::Op(Op::BinOp(op)));
                         } else {
                             return Err(self.iter.err(
                                 "Empty expr in expr_stack when popping (binary left).".into(),
+                                right.file_pos().cloned(),
                             ));
                         }
                     } else {
-                        return Err(self
-                            .iter
-                            .err("Empty expr in expr_stack when popping (binary right).".into()));
+                        return Err(self.iter.err(
+                            "Empty expr in expr_stack when popping (binary right).".into(),
+                            prev_file_pos,
+                        ));
                     }
                 }
 
                 _ => {
-                    return Err(self.iter.err(format!(
-                        "Bad match during rev_polish_to_expr with Output: {:?}. Outputs: {:#?}",
-                        output, outputs
-                    )));
+                    return Err(self.iter.err(
+                        format!(
+                            "Bad match during rev_polish_to_expr with Output: {:?}. Outputs: {:#?}",
+                            output, outputs
+                        ),
+                        prev_file_pos,
+                    ));
                 }
             }
         }
@@ -445,17 +533,19 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         // When the loop above have finished, the remaining expression in the
         // `expr_stack` should be the final expression to be returned.
         if expr_stack.len() != 1 {
-            return Err(self.iter.err(format!(
-                "Not one expression left at end of rev_polish_to_expr, amount: {}",
-                expr_stack.len()
-            )));
+            return Err(self.iter.err(
+                format!(
+                    "Not one expression left at end of rev_polish_to_expr, amount: {}",
+                    expr_stack.len()
+                ),
+                Some(full_expr_file_pos.to_owned()),
+            ));
         }
 
         Ok(expr_stack.remove(0))
     }
 
-    // TODO: Seems like this gives incorrect column when parsed in some way.
-    fn parse_expr_ident(&mut self, ident: &str) -> CustomResult<Expr> {
+    fn parse_expr_ident(&mut self, ident: &str, mut file_pos: FilePosition) -> CustomResult<Expr> {
         // If the identifier is followed by a "PointyBracketBegin" it can either
         // be a start of a generic list for structures/function, or it can also
         // be a "LessThan" compare operation. Try to parse it as a generic list,
@@ -465,7 +555,11 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         let generics = if let Some(lex_token) = self.iter.peek_skip_space() {
             if let LexTokenKind::Sym(Sym::PointyBracketBegin) = lex_token.kind {
                 match TypeParser::new(self.iter, None).parse_type_generics(GenericsKind::Impl) {
-                    Ok(generics) => Some(generics),
+                    Ok((generics, Some(tmp_file_pos))) => {
+                        file_pos.set_end(&tmp_file_pos)?;
+                        Some(generics)
+                    }
+                    Ok((generics, None)) => Some(generics),
                     Err(_) => {
                         self.iter.rewind_to_mark(mark);
                         None
@@ -492,9 +586,17 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 {
                     let start_symbol = Sym::ParenthesisBegin;
                     let end_symbol = Sym::ParenthesisEnd;
-                    let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
-                    let func_call = FuncCall::new(ident.into(), arguments, generics, self.file_pos);
-                    Ok(Expr::FuncCall(func_call))
+                    let (arguments, args_file_pos) =
+                        self.iter.parse_arg_list(start_symbol, end_symbol)?;
+
+                    file_pos.set_end(&args_file_pos)?;
+
+                    Ok(Expr::FuncCall(FuncCall::new(
+                        ident.into(),
+                        arguments,
+                        generics,
+                        Some(file_pos),
+                    )))
                 }
 
                 // Struct construction.
@@ -503,14 +605,17 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 {
                     let start_symbol = Sym::CurlyBracketBegin;
                     let end_symbol = Sym::CurlyBracketEnd;
-                    let arguments = self.iter.parse_arg_list(start_symbol, end_symbol)?;
-                    let struct_init = StructInit::new(
+                    let (arguments, args_file_pos) =
+                        self.iter.parse_arg_list(start_symbol, end_symbol)?;
+
+                    file_pos.set_end(&args_file_pos)?;
+
+                    Ok(Expr::StructInit(StructInit::new(
                         ident.into(),
                         arguments,
                         generics,
-                        Some(lex_token.file_pos.to_owned()),
-                    );
-                    Ok(Expr::StructInit(struct_init))
+                        Some(file_pos),
+                    )))
                 }
 
                 // Static method/variable access, this is the lhs type.
@@ -522,7 +627,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
                             generics.unwrap_or_else(Generics::new),
                         ),
-                        Some(lex_token.file_pos.to_owned()),
+                        Some(file_pos.to_owned()),
                     ))
                 }
 
@@ -539,8 +644,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                                 // identifier and parse as type.
                                 self.iter.rewind_to_mark(mark);
 
-                                let ty = self.iter.parse_type(None)?;
-                                return Ok(Expr::Type(ty, Some(lex_token.file_pos.to_owned())));
+                                let (ty, ty_file_pos) = self.iter.parse_type(None)?;
+                                return Ok(Expr::Type(ty, Some(ty_file_pos)));
                             }
 
                             _ => (),
@@ -551,27 +656,22 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     let parse_type = true;
                     let parse_value = false;
                     let is_const = false;
-                    let mut var = self.iter.parse_var(
+                    let var = self.iter.parse_var(
                         ident,
                         parse_type,
                         parse_value,
                         is_const,
                         generics.as_ref(),
+                        file_pos,
                     )?;
-                    var.file_pos = self.file_pos;
 
                     Ok(Expr::Var(var))
                 }
             }
         } else {
-            // TODO: Merge with logic above, same stuff.
-            let parse_type = true;
-            let parse_value = false;
-            let is_const = false;
-            let var = self
-                .iter
-                .parse_var(ident, parse_type, parse_value, is_const, None)?;
-            Ok(Expr::Var(var))
+            // The ident was the last token if the current file, something must
+            // have gone wrong.
+            unreachable!("Got back None from iter when looking at ident: {}", ident);
         }
     }
 }

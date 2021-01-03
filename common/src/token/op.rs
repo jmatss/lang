@@ -7,6 +7,15 @@ pub enum Op {
     UnOp(UnOp),
 }
 
+impl Op {
+    pub fn file_pos(&self) -> Option<FilePosition> {
+        match self {
+            Op::BinOp(bin_op) => bin_op.file_pos.to_owned(),
+            Op::UnOp(un_op) => un_op.file_pos.to_owned(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BinOp {
     pub operator: BinOperator,

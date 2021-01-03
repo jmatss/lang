@@ -1,5 +1,3 @@
-use std::{cell::RefCell, rc::Rc};
-
 use crate::{
     parser::{ParseTokenIter, DEFAULT_STOP_CONDS, KEYWORD_STOP_CONDS},
     token::get_modifier_token,
@@ -22,65 +20,81 @@ use common::{
     },
 };
 use lex::token::{Kw, LexTokenKind, Sym};
-
-// TODO: Better logic for handling file position. Currently it only looks at the
-//       the first token. Need to consider the whole block parsed.
+use std::{cell::RefCell, rc::Rc};
 
 pub struct KeyworkParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
-    file_pos: &'a FilePosition,
 }
 
 impl<'a, 'b> KeyworkParser<'a, 'b> {
+    // TODO: FilePosition for keywords.
+
     pub fn parse(
         iter: &'a mut ParseTokenIter<'b>,
         keyword: Kw,
-        file_pos: &'a FilePosition,
+        kw_file_pos: FilePosition,
     ) -> CustomResult<AstToken> {
-        let mut keyword_parser = Self { iter, file_pos };
-        keyword_parser.parse_keyword(keyword)
+        let mut keyword_parser = Self { iter };
+        keyword_parser.parse_keyword(keyword, kw_file_pos)
     }
 
-    fn parse_keyword(&mut self, keyword: Kw) -> CustomResult<AstToken> {
+    fn parse_keyword(&mut self, keyword: Kw, kw_file_pos: FilePosition) -> CustomResult<AstToken> {
+        let file_pos = kw_file_pos;
+
         match keyword {
             // Parses all the else(x)/else blocks after aswell.
             Kw::If => self.parse_if(),
-            Kw::Else => Err(self.iter.err("Else keyword in keyword parser.".into())),
-            Kw::Match => self.parse_match(),
+            Kw::Else => Err(self
+                .iter
+                .err("Else keyword in keyword parser.".into(), Some(kw_file_pos))),
+            Kw::Match => self.parse_match(kw_file_pos),
 
             // Blocks returns AstTokens instead of Token, so need to do early return.
-            Kw::For => self.parse_for(),
-            Kw::While => self.parse_while(),
-            Kw::Implement => self.parse_impl(),
-            Kw::Function => self.parse_func(),
+            Kw::For => self.parse_for(kw_file_pos),
+            Kw::While => self.parse_while(kw_file_pos),
+            Kw::Implement => self.parse_impl(kw_file_pos),
+            Kw::Function => self.parse_func(kw_file_pos),
 
-            Kw::Return => self.parse_return(),
-            Kw::Yield => self.parse_yield(),
-            Kw::Break => self.parse_break(),
-            Kw::Continue => self.parse_continue(),
+            Kw::Return => self.parse_return(kw_file_pos),
+            Kw::Yield => self.parse_yield(kw_file_pos),
+            Kw::Break => self.parse_break(kw_file_pos),
+            Kw::Continue => self.parse_continue(kw_file_pos),
 
-            Kw::Use => self.parse_use(),
-            Kw::Package => self.parse_package(),
-            Kw::External => self.parse_external(),
+            Kw::Use => self.parse_use(kw_file_pos),
+            Kw::Package => self.parse_package(kw_file_pos),
+            Kw::External => self.parse_external(kw_file_pos),
 
-            Kw::Var => self.parse_var_decl(),
+            Kw::Var => self.parse_var_decl(kw_file_pos),
             Kw::Const => {
                 // TODO: self.parse_const_decl()
-                self.parse_var_decl()
+                self.parse_var_decl(kw_file_pos)
             }
-            Kw::Static => Err(self.iter.err("\"Static\" keyword not implemented.".into())),
-            Kw::Private => Err(self.iter.err("\"Private\" keyword not implemented.".into())),
-            Kw::Public => Err(self.iter.err("\"Public\" keyword not implemented.".into())),
+            Kw::Static => Err(self.iter.err(
+                "\"Static\" keyword not implemented.".into(),
+                Some(kw_file_pos),
+            )),
+            Kw::Private => Err(self.iter.err(
+                "\"Private\" keyword not implemented.".into(),
+                Some(kw_file_pos),
+            )),
+            Kw::Public => Err(self.iter.err(
+                "\"Public\" keyword not implemented.".into(),
+                Some(kw_file_pos),
+            )),
 
-            Kw::Struct => self.parse_struct(),
-            Kw::Enum => self.parse_enum(),
-            Kw::Interface => Err(self
-                .iter
-                .err("\"Interface\" keyword not implemented.".into())),
+            Kw::Struct => self.parse_struct(kw_file_pos),
+            Kw::Enum => self.parse_enum(kw_file_pos),
+            Kw::Interface => Err(self.iter.err(
+                "\"Interface\" keyword not implemented.".into(),
+                Some(kw_file_pos),
+            )),
 
-            Kw::Defer => self.parse_defer(),
+            Kw::Defer => self.parse_defer(kw_file_pos),
 
-            Kw::Test => Err(self.iter.err("\"Test\" keyword not implemented.".into())),
+            Kw::Test => Err(self.iter.err(
+                "\"Test\" keyword not implemented.".into(),
+                Some(kw_file_pos),
+            )),
         }
     }
 
@@ -92,14 +106,22 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let mut if_cases = Vec::new();
         let block_id = self.iter.reserve_block_id();
 
+        let mut file_pos = self.iter.peek_file_pos()?;
+
         loop {
             // If the next lex token is a "CurlyBracketBegin", no expression is
             // given after this "if case". Assume this is the ending "else".
             // Otherwise parse the expression.
             let expr = self.iter.parse_expr_allow_empty(&KEYWORD_STOP_CONDS)?;
+            if let Some(new_file_pos) = expr.as_ref().map(|e| e.file_pos().to_owned()).flatten() {
+                file_pos = new_file_pos.to_owned();
+            }
             let header = BlockHeader::IfCase(expr);
 
             let if_case = self.iter.next_block(header)?;
+            if let Some(block_file_pos) = if_case.file_pos() {
+                file_pos.set_end(block_file_pos)?;
+            }
             if_cases.push(if_case);
 
             // See if the next token is the "else" keyword indicating that this
@@ -108,6 +130,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             if let Some(lex_token) = self.iter.peek_skip_space_line() {
                 if let LexTokenKind::Kw(Kw::Else) = lex_token.kind {
                     self.iter.next_skip_space_line(); // Skip the "else" keyword.
+
+                    file_pos.set_end(&lex_token.file_pos)?;
                     continue;
                 } else {
                     break;
@@ -117,28 +141,45 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             }
         }
 
-        Ok(AstToken::Block(BlockHeader::If, block_id, if_cases))
+        // TODO: Uses the file_pos for the previos token, need to fix so that it
+        //       takes a range from the first to the last token.
+        Ok(AstToken::Block(
+            BlockHeader::If,
+            file_pos,
+            block_id,
+            if_cases,
+        ))
     }
 
     /// Parses a `Match` block and all its cases.
     ///   "match <expr> { <expr> { ... } [...] }"
     /// The "match" keyword has already been consumed when this function is called.
-    fn parse_match(&mut self) -> CustomResult<AstToken> {
+    fn parse_match(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
         let mut match_cases = Vec::new();
         let block_id = self.iter.reserve_block_id();
 
         let match_expr = self.iter.parse_expr(&KEYWORD_STOP_CONDS)?;
 
+        if let Some(expr_file_pos) = match_expr.file_pos() {
+            file_pos.set_end(expr_file_pos)?;
+        } else {
+            unreachable!();
+        }
+
         // Ensure that the next token is a CurlyBracketBegin.
         // If it isn't, something has gone wrong, return error.
-        let lex_token = self.iter.next_skip_space_line();
-        if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) = lex_token.as_ref().map(|t| &t.kind)
+        let peek_token = self.iter.next_skip_space_line();
+        if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
+            peek_token.as_ref().map(|t| &t.kind)
         {
         } else {
-            return Err(self.iter.err(format!(
-                "Expected CurlyBracketBegin after match expr, was: {:#?}",
-                lex_token
-            )));
+            return Err(self.iter.err(
+                format!(
+                    "Expected CurlyBracketBegin after match expr, was: {:#?}",
+                    peek_token
+                ),
+                peek_token.map(|token| token.file_pos),
+            ));
         }
 
         loop {
@@ -149,6 +190,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 let case_expr = match lex_token.kind {
                     LexTokenKind::Sym(Sym::CurlyBracketEnd) => {
                         self.iter.next_skip_space_line(); // Skip the "CurlyBracketEnd".
+
+                        // This is the only happy path break from the loop.
+                        file_pos.set_end(&lex_token.file_pos)?;
                         break;
                     }
 
@@ -168,39 +212,51 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
                 match_cases.push(match_case);
             } else {
-                return Err(self.iter.err("Got None when parsing match cases.".into()));
+                return Err(self.iter.err(
+                    "Got None when parsing match cases.".into(),
+                    peek_token.map(|token| token.file_pos),
+                ));
             }
         }
 
+        // TODO: Uses the file_pos for the prvious token, need to fix so that it
+        //       takes a range from the first to the last token.
         if !match_cases.is_empty() {
             Ok(AstToken::Block(
                 BlockHeader::Match(match_expr),
+                file_pos,
                 block_id,
                 match_cases,
             ))
         } else {
-            Err(self.iter.err(format!(
-                "Parsed match block with no cases. Match expr: {:#?}",
-                match_expr
-            )))
+            Err(self.iter.err(
+                format!(
+                    "Parsed match block with no cases. Match expr: {:#?}",
+                    match_expr
+                ),
+                Some(file_pos),
+            ))
         }
     }
 
     /// Parses a for loop block.
     ///   "for <var> in <expr> { ... }"
     /// The "for" keyword has already been consumed when this function is called.
-    fn parse_for(&mut self) -> CustomResult<AstToken> {
+    fn parse_for(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
         let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
             if let LexTokenKind::Ident(ident) = lex_token.kind {
+                file_pos.set_end(&lex_token.file_pos)?;
                 ident
             } else {
-                return Err(self.iter.err(format!(
-                    "Not ident when parsing \"for\" variable: {:?}",
-                    lex_token
-                )));
+                return Err(self.iter.err(
+                    format!("Not ident when parsing \"for\" variable: {:?}", lex_token),
+                    Some(lex_token.file_pos),
+                ));
             }
         } else {
-            return Err(self.iter.err("None when parsing \"for\" variable.".into()));
+            return Err(self
+                .iter
+                .err("None when parsing \"for\" variable.".into(), Some(file_pos)));
         };
 
         let parse_type = true;
@@ -208,24 +264,36 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let is_const = false;
         let var = self
             .iter
-            .parse_var(&ident, parse_type, parse_value, is_const, None)?;
+            .parse_var(&ident, parse_type, parse_value, is_const, None, file_pos)?;
+
+        if let Some(var_file_pos) = &var.file_pos {
+            file_pos.set_end(var_file_pos)?;
+        }
 
         // Ensure that the next token is a "In".
         if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Sym(Sym::In) = lex_token.kind {
                 // Do nothing, everything OK.
             } else {
-                return Err(self
-                    .iter
-                    .err(format!("Expected \"In\" after for, got: {:?}.", lex_token)));
+                return Err(self.iter.err(
+                    format!("Expected \"In\" after for, got: {:?}.", lex_token),
+                    Some(lex_token.file_pos),
+                ));
             }
         } else {
-            return Err(self
-                .iter
-                .err("Received None when looking after \"for\"s In symbol.".into()));
+            return Err(self.iter.err(
+                "Received None when looking after \"for\"s In symbol.".into(),
+                Some(file_pos),
+            ));
         }
 
         let expr = self.iter.parse_expr(&KEYWORD_STOP_CONDS)?;
+
+        if let Some(expr_file_pos) = expr.file_pos() {
+            file_pos.set_end(expr_file_pos)?;
+        } else {
+            unreachable!();
+        }
 
         let header = BlockHeader::For(var, expr);
         self.iter.next_block(header)
@@ -235,7 +303,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     ///   "while <expr> { ... }"
     ///   "while { ... }"
     /// The "while" keyword has already been consumed when this function is called.
-    fn parse_while(&mut self) -> CustomResult<AstToken> {
+    fn parse_while(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
+        // TODO: Should the `file_pos` be used it here or can the param be removed?
+
         // If the next lex token is a "CurlyBracketBegin", no expression is
         // given after this "while" keyword. Assume that it means a infinite
         // loop (equivalent to "while(true)").
@@ -246,9 +316,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 Some(self.iter.parse_expr(&KEYWORD_STOP_CONDS)?)
             }
         } else {
-            return Err(self
-                .iter
-                .err("Received None when looking at \"while\" expr.".into()));
+            return Err(self.iter.err(
+                "Received None when looking at \"while\" expr.".into(),
+                Some(file_pos),
+            ));
         };
 
         let header = BlockHeader::While(expr);
@@ -259,7 +330,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     ///   "return <expr>"
     ///   "return"
     /// The "return" keyword has already been consumed when this function is called.
-    fn parse_return(&mut self) -> CustomResult<AstToken> {
+    fn parse_return(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
         // If the next lex token is a "LineBreak", no expression is given after
         // this "return" keyword. Assume it is a return for a function with no
         // return value.
@@ -273,43 +344,46 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             None
         };
 
-        Ok(AstToken::Stmt(Stmt::Return(
-            expr,
-            Some(self.file_pos.to_owned()),
-        )))
+        if let Some(expr_file_pos) = expr.as_ref().map(|e| e.file_pos()).flatten() {
+            file_pos.set_end(expr_file_pos)?;
+        }
+
+        Ok(AstToken::Stmt(Stmt::Return(expr, Some(file_pos))))
     }
 
     /// Parses a yield statement.
     ///   "yield <expr>"
     /// The "yield" keyword has already been consumed when this function is called.
-    fn parse_yield(&mut self) -> CustomResult<AstToken> {
+    fn parse_yield(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
-        Ok(AstToken::Stmt(Stmt::Yield(
-            expr,
-            Some(self.file_pos.to_owned()),
-        )))
+
+        if let Some(expr_file_pos) = expr.file_pos() {
+            file_pos.set_end(expr_file_pos)?;
+        } else {
+            unreachable!();
+        }
+
+        Ok(AstToken::Stmt(Stmt::Yield(expr, Some(file_pos))))
     }
 
     /// Parses a break statement.
     ///   "break"
     /// The "break" keyword has already been consumed when this function is called.
-    fn parse_break(&mut self) -> CustomResult<AstToken> {
-        Ok(AstToken::Stmt(Stmt::Break(Some(self.file_pos.to_owned()))))
+    fn parse_break(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
+        Ok(AstToken::Stmt(Stmt::Break(Some(file_pos))))
     }
 
     /// Parses a continue statement.
     ///   "continue"
     /// The "continue" keyword has already been consumed when this function is called.
-    fn parse_continue(&mut self) -> CustomResult<AstToken> {
-        Ok(AstToken::Stmt(Stmt::Continue(Some(
-            self.file_pos.to_owned(),
-        ))))
+    fn parse_continue(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
+        Ok(AstToken::Stmt(Stmt::Continue(Some(file_pos))))
     }
 
     /// Parses a use statement.
     ///   "use <path>"  (where path is a dot separated list of idents)
     /// The "use" keyword has already been consumed when this function is called.
-    fn parse_use(&mut self) -> CustomResult<AstToken> {
+    fn parse_use(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
         let mut path_parts = Vec::new();
 
         loop {
@@ -318,15 +392,19 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 if let LexTokenKind::Ident(ident) = lex_token.kind {
                     path_parts.push(ident);
                 } else {
-                    return Err(self.iter.err(format!(
-                        "Expected ident when parsing \"use\" path, got: {:?}",
-                        lex_token
-                    )));
+                    return Err(self.iter.err(
+                        format!(
+                            "Expected ident when parsing \"use\" path, got: {:?}",
+                            lex_token
+                        ),
+                        Some(lex_token.file_pos),
+                    ));
                 }
             } else {
-                return Err(self
-                    .iter
-                    .err("Received None when looking at \"use\" path.".into()));
+                return Err(self.iter.err(
+                    "Received None when looking at \"use\" path.".into(),
+                    Some(file_pos),
+                ));
             }
 
             // The next symbol should either be a dot which indicates that the
@@ -338,30 +416,33 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                     continue;
                 } else if let LexTokenKind::Sym(Sym::LineBreak) = lex_token.kind {
                     self.iter.next_skip_space(); // Consume "LineBreak".
+
+                    // The only happy path that exists the loop.
+                    file_pos.set_end(&lex_token.file_pos)?;
                     break;
                 } else {
-                    return Err(self
-                        .iter
-                        .err("Received None when looking at \"use\" path.".into()));
+                    return Err(self.iter.err(
+                        "Received None when looking at \"use\" path.".into(),
+                        Some(lex_token.file_pos),
+                    ));
                 }
             } else {
-                return Err(self
-                    .iter
-                    .err("Received None when looking at separator in \"use\" path.".into()));
+                return Err(self.iter.err(
+                    "Received None when looking at separator in \"use\" path.".into(),
+                    Some(file_pos),
+                ));
             }
         }
 
-        let path = Path::new(path_parts);
-        Ok(AstToken::Stmt(Stmt::Use(
-            path,
-            Some(self.file_pos.to_owned()),
-        )))
+        // TODO: Uses the file_pos for the first token, need to fix so that it
+        //       takes a range from the first to the last token.
+        Ok(AstToken::Stmt(Stmt::Use(Path::new(path_parts, file_pos))))
     }
 
     /// Parses a package statement.
     ///   "package <path>"  (where path is a dot separated list of idents)
     /// The "package" keyword has already been consumed when this function is called.
-    fn parse_package(&mut self) -> CustomResult<AstToken> {
+    fn parse_package(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
         let mut path_parts = Vec::new();
 
         loop {
@@ -370,15 +451,19 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 if let LexTokenKind::Ident(ident) = lex_token.kind {
                     path_parts.push(ident);
                 } else {
-                    return Err(self.iter.err(format!(
-                        "Expected ident when parsing \"package\" path, got: {:?}",
-                        lex_token
-                    )));
+                    return Err(self.iter.err(
+                        format!(
+                            "Expected ident when parsing \"package\" path, got: {:?}",
+                            lex_token
+                        ),
+                        Some(lex_token.file_pos),
+                    ));
                 }
             } else {
-                return Err(self
-                    .iter
-                    .err("Received None when looking at \"package\" path.".into()));
+                return Err(self.iter.err(
+                    "Received None when looking at \"package\" path.".into(),
+                    Some(file_pos),
+                ));
             }
 
             // The next symbol should either be a dot which indicates that the
@@ -390,72 +475,86 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                     continue;
                 } else if let LexTokenKind::Sym(Sym::LineBreak) = lex_token.kind {
                     self.iter.next_skip_space(); // Consume "LineBreak".
+
+                    // The only happy path that exists the loop.
+                    file_pos.set_end(&lex_token.file_pos)?;
                     break;
                 } else {
-                    return Err(self
-                        .iter
-                        .err("Received None when looking at \"package\" path.".into()));
+                    return Err(self.iter.err(
+                        "Received None when looking at \"package\" path.".into(),
+                        Some(lex_token.file_pos),
+                    ));
                 }
             } else {
-                return Err(self
-                    .iter
-                    .err("Received None when looking at separator in \"package\" path.".into()));
+                return Err(self.iter.err(
+                    "Received None when looking at separator in \"package\" path.".into(),
+                    Some(file_pos),
+                ));
             }
         }
 
-        let path = Path::new(path_parts);
-        Ok(AstToken::Stmt(Stmt::Package(
-            path,
-            Some(self.file_pos.to_owned()),
-        )))
+        // TODO: Uses the file_pos for the first token, need to fix so that it
+        //       takes a range from the first to the last token.
+        Ok(AstToken::Stmt(Stmt::Package(Path::new(
+            path_parts, file_pos,
+        ))))
     }
 
     // TODO: External only valid for functions atm, add for variables.
     /// Parses a external statement.
     ///   "external <function_prototype>"
     /// The "external" keyword has already been consumed when this function is called.
-    fn parse_external(&mut self) -> CustomResult<AstToken> {
+    fn parse_external(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
         if let Some(lex_token) = self.iter.next_skip_space_line() {
             let func = match lex_token.kind {
-                LexTokenKind::Kw(Kw::Function) => self.parse_func_proto()?,
+                LexTokenKind::Kw(Kw::Function) => self.parse_func_proto(lex_token.file_pos)?,
                 _ => {
-                    return Err(self.iter.err(format!(
-                        "Invalid keyword after external keyword: {:?}",
-                        lex_token
-                    )));
+                    return Err(self.iter.err(
+                        format!("Invalid keyword after external keyword: {:?}", lex_token),
+                        Some(lex_token.file_pos),
+                    ));
                 }
             };
 
+            // TODO: This doesn't include the function prototype into the file_pos,
+            //       only the extern keyword. The function prototype currently
+            //       doesn't store/keep any information about its file_pos.
+            //       How should this work?
+
             Ok(AstToken::Stmt(Stmt::ExternalDecl(
                 Rc::new(RefCell::new(func)),
-                Some(self.file_pos.to_owned()),
+                Some(file_pos),
             )))
         } else {
-            Err(self
-                .iter
-                .err("Received None lex token after external keyword.".into()))
+            Err(self.iter.err(
+                "Received None lex token after external keyword.".into(),
+                Some(file_pos),
+            ))
         }
     }
 
     /// Parses a var statement.
     ///   "var <ident> [: <type>] [= <expr>]"
     /// The "var" keyword has already been consumed when this function is called.
-    fn parse_var_decl(&mut self) -> CustomResult<AstToken> {
+    fn parse_var_decl(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
         // Start by parsing the identifier
-        let (ident, file_pos) = if let Some(lex_token) = self.iter.next_skip_space() {
+        let (ident, var_file_pos) = if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Ident(ident) = lex_token.kind {
                 (ident, lex_token.file_pos)
             } else {
-                return Err(self.iter.err(format!(
-                    "Expected ident when parsing \"var\", got: {:?}",
-                    lex_token
-                )));
+                return Err(self.iter.err(
+                    format!("Expected ident when parsing \"var\", got: {:?}", lex_token),
+                    Some(lex_token.file_pos),
+                ));
             }
         } else {
-            return Err(self
-                .iter
-                .err("Received None when looking at token after \"var\".".into()));
+            return Err(self.iter.err(
+                "Received None when looking at token after \"var\".".into(),
+                Some(file_pos.to_owned()),
+            ));
         };
+
+        file_pos.set_end(&var_file_pos)?;
 
         let parse_type = true;
         let parse_value = true;
@@ -466,7 +565,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             parse_value,
             is_const,
             None,
+            var_file_pos,
         )?));
+
+        if let Some(var_file_pos) = var.borrow().file_pos {
+            file_pos.set_end(&var_file_pos)?;
+        } else {
+            unreachable!();
+        }
 
         let var_decl = Stmt::VariableDecl(var, Some(file_pos));
         Ok(AstToken::Stmt(var_decl))
@@ -537,19 +643,19 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a function and its body. See `parse_func_proto` for the structure
     /// of a function header/prototype.
     /// The "function" keyword has already been consumed when this function is called.
-    fn parse_func(&mut self) -> CustomResult<AstToken> {
-        let func = self.parse_func_proto()?;
+    fn parse_func(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
+        let func = self.parse_func_proto(file_pos)?;
         let func_header = BlockHeader::Function(Rc::new(RefCell::new(func)));
         self.iter.next_block(func_header)
     }
 
-    // TODO: Parsing of generics.
     /// Parses a function prototype/header.
-    ///   "function [ <modifier>... ] <ident> ( [<ident>: <type>] [= <default value>], ... ) [ "->" <type> ]"
-    ///   TODO: "function [ <modifier>... ] <ident> [ < <generic>, ... > ] ( [<ident>: <type>] [= <default value>], ... ) [ "->" <type> ]"
+    ///   "function [ <modifier>... ] <ident> [ < <generic>, ... > ] ( [<ident>: <type>] [= <default value>], ... ) [ "->" <type> ]"
     /// The "function" keyword has already been consumed when this function is called.
-    fn parse_func_proto(&mut self) -> CustomResult<Function> {
+    fn parse_func_proto(&mut self, file_pos: FilePosition) -> CustomResult<Function> {
         let mut modifiers = Vec::new();
+
+        // TODO: Handle FilePosition.
 
         static THIS: &str = "this";
 
@@ -570,16 +676,22 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                             lex_token.as_ref().map(|l| &l.kind)
                         {
                             if ident != THIS {
-                                return Err(self.iter.err(format!(
-                                    "Expected \"this\" after CurlyBracketBegin in \"function\" header, got: {:?}",
-                                    lex_token
-                                )));
+                                return Err(self.iter.err(
+                                    format!(
+                                        "Expected \"this\" after CurlyBracketBegin in \"function\" header, got: {:?}",
+                                        lex_token
+                                    ),
+                                    Some(lex_token.map(|token|token.file_pos)).flatten()
+                                ));
                             }
                         } else {
-                            return Err(self.iter.err(format!(
-                                "Expected \"this\" after CurlyBracketBegin in \"function\" header, got: {:?}",
-                                lex_token
-                            )));
+                            return Err(self.iter.err(
+                                format!(
+                                    "Expected \"this\" after CurlyBracketBegin in \"function\" header, got: {:?}",
+                                    lex_token
+                                ),
+                                Some(lex_token.map(|token|token.file_pos)).flatten()
+                            ));
                         }
 
                         let lex_token = self.iter.next_skip_space_line();
@@ -587,10 +699,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                             lex_token.as_ref().map(|l| &l.kind)
                         {
                         } else {
-                            return Err(self.iter.err(format!(
-                                "Expected CurlyBracketEnd after \"this\" in \"function\" header, got: {:?}",
-                                lex_token
-                            )));
+                            return Err(self.iter.err(
+                                format!(
+                                    "Expected CurlyBracketEnd after \"this\" in \"function\" header, got: {:?}",
+                                    lex_token
+                                ),
+                                Some(lex_token.map(|token|token.file_pos)).flatten()
+                            ));
                         }
 
                         modifiers.push(Modifier::ThisPointer);
@@ -604,33 +719,37 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                         if let Some(modifier) = get_modifier_token(&lex_kw) {
                             modifiers.push(modifier);
                         } else {
-                            return Err(self.iter.err(format!(
-                                "Invalid keyword when parsing \"function\" header, got: {:?}",
-                                lex_token
-                            )));
+                            return Err(self.iter.err(
+                                format!(
+                                    "Invalid keyword when parsing \"function\" header, got: {:?}",
+                                    lex_token
+                                ),
+                                Some(lex_token.file_pos),
+                            ));
                         }
                     }
 
                     _ => {
-                        return Err(self.iter.err(format!(
+                        return Err(self.iter.err(
+                            format!(
                             "Expected ident or keyword when parsing \"function\" header, got: {:?}",
                             lex_token
-                        )))
+                        ),
+                            Some(lex_token.file_pos),
+                        ))
                     }
                 }
             } else {
-                return Err(self
-                    .iter
-                    .err("Received None when looking at tokens after \"function\".".into()));
+                return Err(self.iter.err(
+                    "Received None when looking at tokens after \"function\".".into(),
+                    Some(file_pos),
+                ));
             }
         };
 
-        let mut type_parse = TypeParser::new(self.iter, None);
-        let generics = type_parse
-            .parse_type_generics(GenericsKind::Decl)?
-            .iter_names()
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut type_parser = TypeParser::new(self.iter, None);
+        let (generics, ty_file_pos) = type_parser.parse_type_generics(GenericsKind::Decl)?;
+        let generics = generics.iter_names().cloned().collect::<Vec<_>>();
         let generics_opt = if !generics.is_empty() {
             Some(generics)
         } else {
@@ -639,7 +758,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let start_symbol = Sym::ParenthesisBegin;
         let end_symbol = Sym::ParenthesisEnd;
-        let (params, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol, None)?;
+        let (params, is_var_arg, par_file_pos) =
+            self.iter.parse_par_list(start_symbol, end_symbol, None)?;
 
         // Wrap the params into RC & RefCell.
         let params = params
@@ -655,25 +775,27 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // If the next token is a "Arrow" ("->"), assume that the return type
         // of the function is specified afterwards. If there are no arrow,
         // assume that the function returns void.
-        let return_type = if let Some(lex_token) = self.iter.peek_skip_space_line() {
+        let (return_ty, ty_file_pos) = if let Some(lex_token) = self.iter.peek_skip_space_line() {
             if let LexTokenKind::Sym(Sym::Arrow) = lex_token.kind {
                 // Consume the arrow.
                 self.iter.next_skip_space_line();
-                Some(self.iter.parse_type(None)?)
+                let (return_ty, ty_file_pos) = self.iter.parse_type(None)?;
+                (Some(return_ty), Some(ty_file_pos))
             } else {
-                None
+                (None, None)
             }
         } else {
-            return Err(self
-                .iter
-                .err("Received None when looking at token after \"function <ident>\".".into()));
+            return Err(self.iter.err(
+                "Received None when looking at token after \"function <ident>\".".into(),
+                Some(file_pos),
+            ));
         };
 
         Ok(Function::new(
             ident,
             generics_opt,
             params_opt,
-            return_type,
+            return_ty,
             modifiers,
             is_var_arg,
         ))
@@ -682,25 +804,33 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a struct header.
     ///   "struct <ident> [ < <generic>, ... > ] [{ [<ident>: <type>] [[,] ...] }]"
     /// The "struct" keyword has already been consumed when this function is called.
-    fn parse_struct(&mut self) -> CustomResult<AstToken> {
+    fn parse_struct(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
         // Start by parsing the identifier
         let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
             if let LexTokenKind::Ident(ident) = lex_token.kind {
                 ident
             } else {
-                return Err(self.iter.err(format!(
-                    "Expected ident when parsing \"struct\", got: {:?}",
-                    lex_token
-                )));
+                return Err(self.iter.err(
+                    format!(
+                        "Expected ident when parsing \"struct\", got: {:?}",
+                        lex_token
+                    ),
+                    Some(lex_token.file_pos),
+                ));
             }
         } else {
-            return Err(self
-                .iter
-                .err("Received None when looking at token after \"struct\".".into()));
+            return Err(self.iter.err(
+                "Received None when looking at token after \"struct\".".into(),
+                Some(file_pos),
+            ));
         };
 
         let mut type_parse = TypeParser::new(self.iter, None);
-        let generics = type_parse.parse_type_generics(GenericsKind::Decl)?;
+        let (generics, gens_file_pos) = type_parse.parse_type_generics(GenericsKind::Decl)?;
+
+        if let Some(gens_file_pos) = gens_file_pos {
+            file_pos.set_end(&gens_file_pos)?;
+        }
 
         let generics = if !generics.is_empty() {
             Some(&generics)
@@ -715,8 +845,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         {
             let start_symbol = Sym::CurlyBracketBegin;
             let end_symbol = Sym::CurlyBracketEnd;
-            self.iter
-                .parse_par_list(start_symbol, end_symbol, generics)?
+            let (members, is_var_arg, par_file_pos) =
+                self.iter
+                    .parse_par_list(start_symbol, end_symbol, generics)?;
+
+            file_pos.set_end(&par_file_pos)?;
+
+            (members, is_var_arg)
         } else {
             (Vec::default(), false)
         };
@@ -727,10 +862,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             .collect::<Vec<_>>();
 
         if is_var_arg {
-            return Err(self.iter.err(format!(
-                "Found invalid var_arg symbol in struct with name: {}",
-                &ident
-            )));
+            return Err(self.iter.err(
+                format!(
+                    "Found invalid var_arg symbol in struct with name: {}",
+                    &ident
+                ),
+                Some(file_pos),
+            ));
         }
 
         let members_opt = if !members.is_empty() {
@@ -739,15 +877,17 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             None
         };
 
-        let mut struct_ = Struct::new(ident);
-        struct_.generics = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
-        struct_.members = members_opt;
+        let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
+        let implements = None;
+        let struct_ = Struct::new(ident, generic_names, implements, members_opt);
         let header = BlockHeader::Struct(Rc::new(RefCell::new(struct_)));
 
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);
 
-        Ok(AstToken::Block(header, block_id, body))
+        // TODO: Uses the file_pos for the first token, need to fix so that it
+        //       takes a range from the first to the last token.
+        Ok(AstToken::Block(header, file_pos, block_id, body))
     }
 
     // TODO: Should it possible to set values to the individual enum variants?
@@ -755,27 +895,31 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a enum header.
     ///   "enum <ident> { <ident> [[,] ...] }"
     /// The "enum" keyword has already been consumed when this function is called.
-    fn parse_enum(&mut self) -> CustomResult<AstToken> {
+    fn parse_enum(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
         // Start by parsing the identifier
         let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
             if let LexTokenKind::Ident(ident) = lex_token.kind {
                 ident
             } else {
-                return Err(self.iter.err(format!(
-                    "Expected ident when parsing \"enum\", got: {:?}",
-                    lex_token
-                )));
+                return Err(self.iter.err(
+                    format!("Expected ident when parsing \"enum\", got: {:?}", lex_token),
+                    Some(lex_token.file_pos),
+                ));
             }
         } else {
-            return Err(self
-                .iter
-                .err("Received None when looking at token after \"enum\".".into()));
+            return Err(self.iter.err(
+                "Received None when looking at token after \"enum\".".into(),
+                Some(file_pos),
+            ));
         };
 
         // Parse the members of the enum.
         let start_symbol = Sym::CurlyBracketBegin;
         let end_symbol = Sym::CurlyBracketEnd;
-        let (mut members, is_var_arg) = self.iter.parse_par_list(start_symbol, end_symbol, None)?;
+        let (mut members, is_var_arg, par_file_pos) =
+            self.iter.parse_par_list(start_symbol, end_symbol, None)?;
+
+        file_pos.set_end(&par_file_pos)?;
 
         // TODO: How should the type of the enum be decided? Should it be possible
         //       to specify as a generic on the enum declaration? But in that case
@@ -812,10 +956,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             .collect::<Vec<_>>();
 
         if is_var_arg {
-            return Err(self.iter.err(format!(
-                "Found invalid var_arg symbol in enum with name: {}",
-                &ident
-            )));
+            return Err(self.iter.err(
+                format!("Found invalid var_arg symbol in enum with name: {}", &ident),
+                Some(file_pos),
+            ));
         }
 
         let members_opt = if !members.is_empty() {
@@ -830,28 +974,34 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);
 
-        Ok(AstToken::Block(header, block_id, body))
+        // TODO: Uses the file_pos for the first token, need to fix so that it
+        //       takes a range from the first to the last token.
+        Ok(AstToken::Block(header, file_pos, block_id, body))
     }
 
     // TODO: Generics
     /// Parses a implement header.
     ///   "implement <ident> { [<func> ...] }"
     /// The "implement" keyword has already been consumed when this function is called.
-    fn parse_impl(&mut self) -> CustomResult<AstToken> {
+    fn parse_impl(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
         // Start by parsing the identifier
         let ident = if let Some(lex_token) = self.iter.next_skip_space_line() {
             if let LexTokenKind::Ident(ident) = lex_token.kind {
                 ident
             } else {
-                return Err(self.iter.err(format!(
-                    "Expected ident when parsing \"implement\", got: {:?}",
-                    lex_token
-                )));
+                return Err(self.iter.err(
+                    format!(
+                        "Expected ident when parsing \"implement\", got: {:?}",
+                        lex_token
+                    ),
+                    Some(lex_token.file_pos),
+                ));
             }
         } else {
-            return Err(self
-                .iter
-                .err("Received None when looking at token after \"implement\".".into()));
+            return Err(self.iter.err(
+                "Received None when looking at token after \"implement\".".into(),
+                Some(file_pos),
+            ));
         };
 
         let header = BlockHeader::Implement(ident);
@@ -859,23 +1009,29 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         // Iterate through the tokens in the body and make sure that all tokens
         // are functions.
-        if let AstToken::Block(BlockHeader::Implement(_), _, body) = &impl_token {
+        if let AstToken::Block(BlockHeader::Implement(_), file_pos, _, body) = &impl_token {
             for ast_token in body {
                 if let AstToken::Block(BlockHeader::Function(_), ..) = ast_token {
                     // Do nothing, the token is of correct type.
                 } else if ast_token.is_skippable() {
                 } else {
-                    return Err(self.iter.err(format!(
-                        "Non function parsed in \"implement\" block: {:#?}.",
-                        ast_token
-                    )));
+                    return Err(self.iter.err(
+                        format!(
+                            "Non function parsed in \"implement\" block: {:#?}.",
+                            ast_token
+                        ),
+                        Some(file_pos.to_owned()),
+                    ));
                 }
             }
         } else {
-            return Err(self.iter.err(format!(
-                "Parsed \"implement\" block not a impl block: {:#?}.",
-                impl_token
-            )));
+            return Err(self.iter.err(
+                format!(
+                    "Parsed \"implement\" block not a impl block: {:#?}.",
+                    impl_token
+                ),
+                Some(file_pos),
+            ));
         }
 
         Ok(impl_token)
@@ -884,11 +1040,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a defer statement.
     ///   "defer <expr>"
     /// The "defer" keyword has already been consumed when this function is called.
-    fn parse_defer(&mut self) -> CustomResult<AstToken> {
+    fn parse_defer(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
-        Ok(AstToken::Stmt(Stmt::Defer(
-            expr,
-            Some(self.file_pos.to_owned()),
-        )))
+        Ok(AstToken::Stmt(Stmt::Defer(expr, Some(file_pos))))
     }
 }

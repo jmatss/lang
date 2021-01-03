@@ -1,98 +1,94 @@
 use common::{
     error::{CustomResult, LangError, LangErrorKind::ParseError},
-    file::FilePosition,
     token::stmt::Modifier,
     token::{
         expr::Expr,
         op::{AssignOperator, BinOperator, UnOperator},
     },
 };
+use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 
-pub fn get_modifier_token(keyword: &lex::token::Kw) -> Option<Modifier> {
+pub fn get_modifier_token(keyword: &Kw) -> Option<Modifier> {
     Some(match keyword {
-        lex::token::Kw::Const => Modifier::Const,
-        lex::token::Kw::External => Modifier::External,
-        lex::token::Kw::Static => Modifier::Static,
-        lex::token::Kw::Private => Modifier::Private,
-        lex::token::Kw::Public => Modifier::Public,
+        Kw::Const => Modifier::Const,
+        Kw::External => Modifier::External,
+        Kw::Static => Modifier::Static,
+        Kw::Private => Modifier::Private,
+        Kw::Public => Modifier::Public,
         _ => return None,
     })
 }
 
 /// Returns some Operator if the given symbol is a valid operator inside a
 /// expression, returns None otherwise.
-pub fn get_if_expr_op(symbol: &lex::token::Sym) -> Option<Operator> {
+pub fn get_if_expr_op(symbol: &Sym) -> Option<Operator> {
     Some(match symbol {
-        lex::token::Sym::ParenthesisBegin => Operator::ParenthesisBegin,
-        lex::token::Sym::ParenthesisEnd => Operator::ParenthesisEnd,
-        lex::token::Sym::Plus => Operator::Plus,
-        lex::token::Sym::Minus => Operator::Minus,
+        Sym::ParenthesisBegin => Operator::ParenthesisBegin,
+        Sym::ParenthesisEnd => Operator::ParenthesisEnd,
+        Sym::Plus => Operator::Plus,
+        Sym::Minus => Operator::Minus,
         /*
-        lex::token::Symbol::SquareBracketBegin,
-        lex::token::Symbol::SquareBracketEnd,
-        lex::token::Symbol::CurlyBracketBegin,
-        lex::token::Symbol::CurlyBracketEnd,
+        Symbol::SquareBracketBegin,
+        Symbol::SquareBracketEnd,
+        Symbol::CurlyBracketBegin,
+        Symbol::CurlyBracketEnd,
         */
-        lex::token::Sym::PointyBracketBegin => Operator::BinaryOperator(BinOperator::LessThan),
-        lex::token::Sym::PointyBracketEnd => Operator::BinaryOperator(BinOperator::GreaterThan),
+        Sym::PointyBracketBegin => Operator::BinaryOperator(BinOperator::LessThan),
+        Sym::PointyBracketEnd => Operator::BinaryOperator(BinOperator::GreaterThan),
 
-        lex::token::Sym::Dot => Operator::BinaryOperator(BinOperator::Dot),
-        lex::token::Sym::DoubleColon => Operator::BinaryOperator(BinOperator::DoubleColon),
-        //lex::token::Symbol::Comma,
-        //lex::token::Symbol::QuestionMark,
-        //lex::token::Symbol::ExclamationMark,
-        //lex::token::Symbol::DoubleQuote,
-        //lex::token::Symbol::SingleQuote,
-        //lex::token::Symbol::Colon,
-        //lex::token::Symbol::SemiColon,
-        //lex::token::Symbol::Pound,
-        //lex::token::Symbol::At,
-        //lex::token::Symbol::Dollar,
-        //lex::token::Symbol::LineBreak,
-        //lex::token::Symbol::WhiteSpace(usize),
+        Sym::Dot => Operator::BinaryOperator(BinOperator::Dot),
+        Sym::DoubleColon => Operator::BinaryOperator(BinOperator::DoubleColon),
+        //Symbol::Comma,
+        //Symbol::QuestionMark,
+        //Symbol::ExclamationMark,
+        //Symbol::DoubleQuote,
+        //Symbol::SingleQuote,
+        //Symbol::Colon,
+        //Symbol::SemiColon,
+        //Symbol::Pound,
+        //Symbol::At,
+        //Symbol::Dollar,
+        //Symbol::LineBreak,
+        //Symbol::WhiteSpace(usize),
 
-        //lex::token::Symbol::Pipe,
-        lex::token::Sym::Range => Operator::BinaryOperator(BinOperator::Range),
-        lex::token::Sym::RangeInclusive => Operator::BinaryOperator(BinOperator::RangeInclusive),
-        //lex::token::Symbol::Arrow,
-        lex::token::Sym::Deref => Operator::UnaryOperator(UnOperator::Deref),
-        lex::token::Sym::Address => Operator::UnaryOperator(UnOperator::Address),
+        //Symbol::Pipe,
+        Sym::Range => Operator::BinaryOperator(BinOperator::Range),
+        Sym::RangeInclusive => Operator::BinaryOperator(BinOperator::RangeInclusive),
+        //Symbol::Arrow,
+        Sym::Deref => Operator::UnaryOperator(UnOperator::Deref),
+        Sym::Address => Operator::UnaryOperator(UnOperator::Address),
 
-        lex::token::Sym::EqualsOperator => Operator::BinaryOperator(BinOperator::Equals),
-        lex::token::Sym::NotEquals => Operator::BinaryOperator(BinOperator::NotEquals),
-        lex::token::Sym::SquareBracketBegin => Operator::BinaryOperator(BinOperator::LessThan),
-        lex::token::Sym::SquareBracketEnd => Operator::BinaryOperator(BinOperator::GreaterThan),
-        lex::token::Sym::LessThanOrEquals => {
-            Operator::BinaryOperator(BinOperator::LessThanOrEquals)
-        }
-        lex::token::Sym::GreaterThanOrEquals => {
-            Operator::BinaryOperator(BinOperator::GreaterThanOrEquals)
-        }
+        Sym::EqualsOperator => Operator::BinaryOperator(BinOperator::Equals),
+        Sym::NotEquals => Operator::BinaryOperator(BinOperator::NotEquals),
+        Sym::SquareBracketBegin => Operator::BinaryOperator(BinOperator::LessThan),
+        Sym::SquareBracketEnd => Operator::BinaryOperator(BinOperator::GreaterThan),
+        Sym::LessThanOrEquals => Operator::BinaryOperator(BinOperator::LessThanOrEquals),
+        Sym::GreaterThanOrEquals => Operator::BinaryOperator(BinOperator::GreaterThanOrEquals),
 
-        lex::token::Sym::Multiplication => Operator::BinaryOperator(BinOperator::Multiplication),
-        lex::token::Sym::Division => Operator::BinaryOperator(BinOperator::Division),
-        lex::token::Sym::Modulus => Operator::BinaryOperator(BinOperator::Modulus),
+        Sym::Multiplication => Operator::BinaryOperator(BinOperator::Multiplication),
+        Sym::Division => Operator::BinaryOperator(BinOperator::Division),
+        Sym::Modulus => Operator::BinaryOperator(BinOperator::Modulus),
 
-        lex::token::Sym::BitAnd => Operator::BinaryOperator(BinOperator::BitAnd),
-        lex::token::Sym::BitOr => Operator::BinaryOperator(BinOperator::BitOr),
-        lex::token::Sym::BitXor => Operator::BinaryOperator(BinOperator::BitXor),
-        lex::token::Sym::ShiftLeft => Operator::BinaryOperator(BinOperator::ShiftLeft),
-        lex::token::Sym::ShiftRight => Operator::BinaryOperator(BinOperator::ShiftRight),
-        lex::token::Sym::BitCompliment => Operator::UnaryOperator(UnOperator::BitComplement),
+        Sym::BitAnd => Operator::BinaryOperator(BinOperator::BitAnd),
+        Sym::BitOr => Operator::BinaryOperator(BinOperator::BitOr),
+        Sym::BitXor => Operator::BinaryOperator(BinOperator::BitXor),
+        Sym::ShiftLeft => Operator::BinaryOperator(BinOperator::ShiftLeft),
+        Sym::ShiftRight => Operator::BinaryOperator(BinOperator::ShiftRight),
+        Sym::BitCompliment => Operator::UnaryOperator(UnOperator::BitComplement),
 
         /*
-        lex::token::Symbol::CommentSingleLine,
-        lex::token::Symbol::CommentMultiLineBegin,
-        lex::token::Symbol::CommentMultiLineEnd,
+        Symbol::CommentSingleLine,
+        Symbol::CommentMultiLineBegin,
+        Symbol::CommentMultiLineEnd,
         */
-        lex::token::Sym::BoolNot => Operator::UnaryOperator(UnOperator::BoolNot),
-        lex::token::Sym::BoolAnd => Operator::BinaryOperator(BinOperator::BoolAnd),
-        lex::token::Sym::BoolOr => Operator::BinaryOperator(BinOperator::BoolOr),
+        Sym::BoolNot => Operator::UnaryOperator(UnOperator::BoolNot),
+        Sym::BoolAnd => Operator::BinaryOperator(BinOperator::BoolAnd),
+        Sym::BoolOr => Operator::BinaryOperator(BinOperator::BoolOr),
 
-        lex::token::Sym::In => Operator::BinaryOperator(BinOperator::In),
-        lex::token::Sym::Is => Operator::BinaryOperator(BinOperator::Is),
-        lex::token::Sym::As => Operator::BinaryOperator(BinOperator::As),
-        lex::token::Sym::Of => Operator::BinaryOperator(BinOperator::Of),
+        Sym::In => Operator::BinaryOperator(BinOperator::In),
+        Sym::Is => Operator::BinaryOperator(BinOperator::Is),
+        Sym::As => Operator::BinaryOperator(BinOperator::As),
+        Sym::Of => Operator::BinaryOperator(BinOperator::Of),
 
         _ => return None,
     })
@@ -100,20 +96,20 @@ pub fn get_if_expr_op(symbol: &lex::token::Sym) -> Option<Operator> {
 
 /// Returns some Operator if the given symbol is a valid operator inside a
 /// expression, returns None otherwise.
-pub fn get_if_stmt_op(lex_token: &lex::token::LexToken) -> Option<AssignOperator> {
-    if let lex::token::LexTokenKind::Sym(ref symbol) = lex_token.kind {
+pub fn get_if_stmt_op(lex_token: &LexToken) -> Option<AssignOperator> {
+    if let LexTokenKind::Sym(ref symbol) = lex_token.kind {
         Some(match symbol {
-            lex::token::Sym::Equals => AssignOperator::Assignment,
-            lex::token::Sym::AssignAddition => AssignOperator::AssignAdd,
-            lex::token::Sym::AssignSubtraction => AssignOperator::AssignSub,
-            lex::token::Sym::AssignMultiplication => AssignOperator::AssignMul,
-            lex::token::Sym::AssignDivision => AssignOperator::AssignDiv,
-            lex::token::Sym::AssignModulus => AssignOperator::AssignMod,
-            lex::token::Sym::AssignBitAnd => AssignOperator::AssignBitAnd,
-            lex::token::Sym::AssignBitOr => AssignOperator::AssignBitOr,
-            lex::token::Sym::AssignBitXor => AssignOperator::AssignBitXor,
-            lex::token::Sym::AssignShiftLeft => AssignOperator::AssignShl,
-            lex::token::Sym::AssignShiftRight => AssignOperator::AssignShr,
+            Sym::Equals => AssignOperator::Assignment,
+            Sym::AssignAddition => AssignOperator::AssignAdd,
+            Sym::AssignSubtraction => AssignOperator::AssignSub,
+            Sym::AssignMultiplication => AssignOperator::AssignMul,
+            Sym::AssignDivision => AssignOperator::AssignDiv,
+            Sym::AssignModulus => AssignOperator::AssignMod,
+            Sym::AssignBitAnd => AssignOperator::AssignBitAnd,
+            Sym::AssignBitOr => AssignOperator::AssignBitOr,
+            Sym::AssignBitXor => AssignOperator::AssignBitXor,
+            Sym::AssignShiftLeft => AssignOperator::AssignShl,
+            Sym::AssignShiftRight => AssignOperator::AssignShr,
 
             _ => return None,
         })
@@ -251,6 +247,7 @@ impl Operator {
         }
     }
 
+    // TODO: FilePosition.
     pub fn info(&self) -> CustomResult<OperatorInfo> {
         if let Some(info) = self.lookup() {
             Ok(OperatorInfo {
@@ -261,9 +258,8 @@ impl Operator {
         } else {
             Err(LangError::new(
                 format!("Invalid operator, unable to get info: {:?}.", self),
-                ParseError {
-                    file_pos: FilePosition::default(),
-                },
+                ParseError,
+                None,
             ))
         }
     }

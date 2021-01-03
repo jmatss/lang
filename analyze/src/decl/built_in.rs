@@ -27,6 +27,7 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
         None,
         None,
         None,
+        None,
         false,
     )];
     let generics = None;

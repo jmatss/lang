@@ -20,9 +20,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     "Unable to convert AnyValueEnum: {:#?} into BasicValueEnum.",
                     &any_value
                 ),
-                CodeGenError {
-                    file_pos: FilePosition::default(),
-                },
+                CodeGenError,
+                None,
             )
         })
     }
@@ -34,9 +33,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     "Unable to convert AnyTypeEnum: {:#?} into BasicTypeEnum.",
                     &any_type
                 ),
-                CodeGenError {
-                    file_pos: FilePosition::default(),
-                },
+                CodeGenError,
+                None,
             )
         })
     }
@@ -107,10 +105,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     fn get_block_info(&self, id: BlockId) -> CustomResult<&BlockInfo> {
         self.analyze_context.block_info.get(&id).ok_or_else(|| {
-            self.err(format!(
-                "Unable to find block info for block with id {}",
-                id
-            ))
+            self.err(
+                format!("Unable to find block info for block with id {}", id),
+                None,
+            )
         })
     }
 }

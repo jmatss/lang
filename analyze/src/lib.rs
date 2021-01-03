@@ -8,7 +8,7 @@ mod ty;
 
 use common::{
     error::LangError,
-    file::{FileId, FileInfo},
+    file::{FileId, FileInfo, FilePosition},
     token::ast::AstToken,
     traverser::AstTraverser,
     BlockId,
@@ -161,6 +161,10 @@ pub struct BlockInfo {
     pub block_id: BlockId,
     pub parent_id: BlockId,
 
+    /// Currently the position of the token at the start of the block. This
+    /// should in the future be the full range of the whole block.
+    pub file_pos: FilePosition,
+
     /// Contains information about which control flow statements this block contains.
     /// This will be used during code generation to figure out which
     /// instructions needs to be generated and where branches should jump etc.
@@ -201,10 +205,16 @@ impl BlockInfo {
     /// The block id given to the default block.
     const DEFAULT_BLOCK_ID: BlockId = 0;
 
-    pub fn new(block_id: BlockId, is_root_block: bool, is_branchable_block: bool) -> Self {
+    pub fn new(
+        block_id: BlockId,
+        file_pos: FilePosition,
+        is_root_block: bool,
+        is_branchable_block: bool,
+    ) -> Self {
         Self {
             block_id,
             parent_id: usize::MAX,
+            file_pos,
             contains_return: false,
             contains_yield: false,
             contains_break: false,

@@ -81,10 +81,11 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
     ) {
         analyze_context.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
-        if let AstToken::Block(ref header, id, body) = &ast_token {
+        if let AstToken::Block(ref header, file_pos, id, body) = &ast_token {
             let is_root_block = self.is_root(header);
             let is_branchable_block = self.is_branchable(header);
-            let mut block_info = BlockInfo::new(*id, is_root_block, is_branchable_block);
+            let mut block_info =
+                BlockInfo::new(*id, file_pos.to_owned(), is_root_block, is_branchable_block);
 
             // Update the mapping from this block to its parent.
             // Do not set a parent for the default block.
@@ -98,15 +99,15 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
             let mut child_count = 0;
             for child_token in body.iter() {
                 match child_token {
-                    AstToken::Block(BlockHeader::If, child_id, _)
-                    | AstToken::Block(BlockHeader::IfCase(_), child_id, _)
-                    | AstToken::Block(BlockHeader::Function(_), child_id, _)
-                    | AstToken::Block(BlockHeader::Match(_), child_id, _)
-                    | AstToken::Block(BlockHeader::MatchCase(_), child_id, _)
-                    | AstToken::Block(BlockHeader::For(..), child_id, _)
-                    | AstToken::Block(BlockHeader::While(..), child_id, _)
-                    | AstToken::Block(BlockHeader::Test(_), child_id, _)
-                    | AstToken::Block(BlockHeader::Anonymous, child_id, _) => {
+                    AstToken::Block(BlockHeader::If, _, child_id, _)
+                    | AstToken::Block(BlockHeader::IfCase(_), _, child_id, _)
+                    | AstToken::Block(BlockHeader::Function(_), _, child_id, _)
+                    | AstToken::Block(BlockHeader::Match(_), _, child_id, _)
+                    | AstToken::Block(BlockHeader::MatchCase(_), _, child_id, _)
+                    | AstToken::Block(BlockHeader::For(..), _, child_id, _)
+                    | AstToken::Block(BlockHeader::While(..), _, child_id, _)
+                    | AstToken::Block(BlockHeader::Test(_), _, child_id, _)
+                    | AstToken::Block(BlockHeader::Anonymous, _, child_id, _) => {
                         self.analyze_block(child_token, analyze_context, *id);
 
                         if let Some(child_block_info) = analyze_context.block_info.get(&child_id) {

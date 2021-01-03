@@ -1,6 +1,7 @@
 use crate::generator::CodeGen;
 use common::{
     error::CustomResult,
+    file::FilePosition,
     token::{
         expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit},
         lit::Lit,
@@ -40,11 +41,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         expr: &mut Expr,
         expr_ty: ExprTy,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
+        let file_pos = expr.file_pos().cloned();
+
         let any_value = match expr {
-            Expr::Lit(lit, ty_opt, ..) => self.compile_lit(lit, ty_opt),
+            Expr::Lit(lit, ty_opt, ..) => self.compile_lit(lit, ty_opt, file_pos),
             Expr::FuncCall(func_call) => self.compile_func_call(func_call),
             Expr::BuiltInCall(built_in_call) => self.compile_built_in_call(built_in_call),
-            Expr::Op(op) => self.compile_op(op, expr_ty),
+            Expr::Op(op) => self.compile_op(op, expr_ty, file_pos),
             Expr::StructInit(struct_init) => self.compile_struct_init(struct_init),
             Expr::ArrayInit(array_init) => self.compile_array_init(array_init),
             Expr::Type(ty, ..) => {
@@ -54,7 +57,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 // one "store types" in variables in a hacky way. In the future
                 // it should be possible to store types in variables without
                 // having to init them with a value.
-                Ok(match self.compile_type(&ty)? {
+                Ok(match self.compile_type(&ty, file_pos)? {
                     AnyTypeEnum::ArrayType(ty) => ty.const_zero().into(),
                     AnyTypeEnum::FloatType(ty) => ty.const_zero().into(),
                     AnyTypeEnum::IntType(ty) => ty.const_zero().into(),
@@ -79,6 +82,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         lit: &Lit,
         ty_opt: &Option<Ty>,
+        file_pos: Option<FilePosition>,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         match lit {
             Lit::String(str_lit) => {
@@ -106,10 +110,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             self.context.i32_type().const_int(ch as u64, false),
                         ))
                     } else {
-                        Err(self.err("Unable to get char literal.".into()))
+                        Err(self.err("Unable to get char literal.".into(), file_pos))
                     }
                 } else {
-                    Err(self.err("Char literal isn't a single character.".into()))
+                    Err(self.err("Char literal isn't a single character.".into(), file_pos))
                 }
             }
 
@@ -121,11 +125,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             )),
 
             Lit::Integer(int_lit, radix) => Ok(AnyValueEnum::IntValue(
-                self.compile_lit_int(int_lit, ty_opt, *radix)?,
+                self.compile_lit_int(int_lit, ty_opt, *radix, file_pos)?,
             )),
 
             Lit::Float(float_lit) => Ok(AnyValueEnum::FloatValue(
-                self.compile_lit_float(float_lit, ty_opt)?,
+                self.compile_lit_float(float_lit, ty_opt, file_pos)?,
             )),
         }
     }
@@ -137,6 +141,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         lit: &str,
         gen_ty_opt: &Option<Ty>,
         radix: u32,
+        file_pos: Option<FilePosition>,
     ) -> CustomResult<IntValue<'ctx>> {
         // TODO: Where should the integer literal conversion be made?
 
@@ -144,7 +149,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Some(Ty::CompoundType(inner_ty, _)) => inner_ty.clone(),
             None => InnerTy::default_int(),
             _ => {
-                return Err(self.err(format!("Literal integer type invalid: {:#?}", gen_ty_opt)));
+                return Err(self.err(
+                    format!("Literal integer type invalid: {:#?}", gen_ty_opt),
+                    file_pos,
+                ));
             }
         };
 
@@ -189,7 +197,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let val = u128::from_str_radix(lit, radix)? as u64;
                 self.context.i128_type().const_int(val, false)
             }
-            _ => return Err(self.err(format!("Invalid literal integer type: {:?}", gen_ty_opt))),
+            _ => {
+                return Err(self.err(
+                    format!("Invalid literal integer type: {:?}", gen_ty_opt),
+                    file_pos,
+                ))
+            }
         })
     }
 
@@ -198,19 +211,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         lit: &str,
         gen_ty_opt: &Option<Ty>,
+        file_pos: Option<FilePosition>,
     ) -> CustomResult<FloatValue<'ctx>> {
         let inner_ty = match gen_ty_opt {
             Some(Ty::CompoundType(inner_ty, _)) => inner_ty.clone(),
             None => InnerTy::default_float(),
             _ => {
-                return Err(self.err(format!("Literal float type invalid: {:#?}", gen_ty_opt)));
+                return Err(self.err(
+                    format!("Literal float type invalid: {:#?}", gen_ty_opt),
+                    file_pos,
+                ));
             }
         };
 
         Ok(match inner_ty {
             InnerTy::F32 => self.context.f32_type().const_float(lit.parse()?),
             InnerTy::F64 => self.context.f64_type().const_float(lit.parse()?),
-            _ => return Err(self.err(format!("Invalid literal float type: {:?}", gen_ty_opt))),
+            _ => {
+                return Err(self.err(
+                    format!("Invalid literal float type: {:?}", gen_ty_opt),
+                    file_pos,
+                ))
+            }
         })
     }
 
@@ -227,12 +249,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // arguments are allowed to be greater than parameters since variadic
             // functions are supported to be compatible with C code.
             if func_call.arguments.len() < func_ptr.count_params() as usize {
-                return Err(self.err(format!(
-                    "Wrong amount of args given when calling func \"{}\". Expected: {}, got: {}",
-                    &func_call.name,
-                    func_ptr.count_params(),
-                    func_call.arguments.len()
-                )));
+                return Err(self.err(
+                    format!(
+                        "Wrong amount of args given when calling func \"{}\". Expected: {}, got: {}",
+                        &func_call.name,
+                        func_ptr.count_params(),
+                        func_call.arguments.len()
+                    ),
+                    func_call.file_pos,
+                ));
             }
 
             let mut args = Vec::with_capacity(func_call.arguments.len());
@@ -263,11 +288,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.context.i32_type().const_zero().into()
             })
         } else {
-            Err(self.err(format!(
-                "Unable to find function with name {} to call (full name: {:#?}).",
-                &func_call.name,
-                &func_call.full_name()
-            )))
+            Err(self.err(
+                format!(
+                    "Unable to find function with name {} to call (full name: {:#?}).",
+                    &func_call.name,
+                    &func_call.full_name()
+                ),
+                func_call.file_pos,
+            ))
         }
     }
 
@@ -279,14 +307,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         built_in_call: &mut BuiltInCall,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        let file_pos = if let Some(file_pos) = &built_in_call.file_pos {
-            file_pos
-        } else {
-            return Err(self.err(format!(
-                "FilePosition not set for built in call: {:#?}",
-                built_in_call
-            )));
-        };
+        let file_pos = built_in_call.file_pos.to_owned();
 
         match built_in_call.name.as_ref() {
             // Gets the size of a specified type. The size is returned as a
@@ -298,7 +319,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     .map(|gs| gs.iter_types().next())
                     .flatten()
                 {
-                    let ty = self.compile_type(ty_arg)?;
+                    let ty = self.compile_type(ty_arg, Some(file_pos))?;
 
                     if let Some(size) = ty.size_of() {
                         Ok(size.const_cast(self.context.i32_type(), false).into())
@@ -315,10 +336,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             // Gets the type of a expression. This built-in call will be "replaced"
             // in the AST before this point is reached, so should never end up here.
-            "type" => Err(self.err(format!(
-                "Unexpected @type built in call, should not end up here: {:#?}",
-                built_in_call
-            ))),
+            "type" => Err(self.err(
+                format!(
+                    "Unexpected @type built in call, should not end up here: {:#?}",
+                    built_in_call
+                ),
+                Some(file_pos),
+            )),
 
             // Creates a null/empty value of the specified type.
             "null" => {
@@ -328,8 +352,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     .map(|gs| gs.iter_types().next())
                     .flatten()
                 {
-                    let ty = self.compile_type(ty_arg)?;
-                    self.compile_null(ty)
+                    let ty = self.compile_type(ty_arg, Some(file_pos))?;
+                    self.compile_null(ty, Some(file_pos))
                 } else {
                     unreachable!("Argument count check in Analyze.");
                 }
@@ -339,12 +363,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             "file" => {
                 if let Some(file_info) = self.analyze_context.file_info.get(&file_pos.file_nr) {
                     let filename = file_info.filename.clone();
-                    self.compile_lit(&Lit::String(filename), &None)
+                    self.compile_lit(&Lit::String(filename), &None, Some(file_pos))
                 } else {
-                    Err(self.err(format!(
-                        "Unable to find file info for file with nr {}. Built-in call: {:#?}",
-                        file_pos.file_nr, built_in_call
-                    )))
+                    Err(self.err(
+                        format!(
+                            "Unable to find file info for file with nr {}. Built-in call: {:#?}",
+                            file_pos.file_nr, built_in_call
+                        ),
+                        Some(file_pos),
+                    ))
                 }
             }
 
@@ -352,14 +379,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             "line" => Ok(self
                 .context
                 .i32_type()
-                .const_int(file_pos.line_nr, false)
+                .const_int(file_pos.line_start, false)
                 .into()),
 
             // Gets the column number at which this built-in is called.
             "column" => Ok(self
                 .context
                 .i32_type()
-                .const_int(file_pos.column_nr, false)
+                .const_int(file_pos.column_start, false)
                 .into()),
 
             _ => {
@@ -378,21 +405,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let struct_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
             inner
         } else {
-            return Err(self.err(format!(
-                "Unable to get struct with name \"{}\". Struct init: {:#?}",
-                full_name, struct_init
-            )));
+            return Err(self.err(
+                format!(
+                    "Unable to get struct with name \"{}\". Struct init: {:#?}",
+                    full_name, struct_init
+                ),
+                struct_init.file_pos,
+            ));
         };
 
         // Checks to see if the amount of arguments are different from the
         // amount of members.
         if struct_init.arguments.len() != struct_type.count_fields() as usize {
-            return Err(self.err(format!(
-                "Wrong amount of args given when init struct: {}. Expected: {}, got: {}",
-                &struct_init.name,
-                struct_type.count_fields(),
-                struct_init.arguments.len()
-            )));
+            return Err(self.err(
+                format!(
+                    "Wrong amount of args given when init struct: {}. Expected: {}, got: {}",
+                    &struct_init.name,
+                    struct_type.count_fields(),
+                    struct_init.arguments.len()
+                ),
+                struct_init.file_pos,
+            ));
         }
 
         // Compile all arguments(all values that will be set to initialize the
@@ -435,10 +468,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     .builder
                     .build_struct_gep(struct_ptr, i as u32, "struct.init.gep")
                     .map_err(|_| {
-                        self.err(format!(
-                            "Unable to GEP struct \"{}\" member {}.",
-                            &struct_init.name, i
-                        ))
+                        self.err(
+                            format!(
+                                "Unable to GEP struct \"{}\" member {}.",
+                                &struct_init.name, i
+                            ),
+                            struct_init.file_pos,
+                        )
                     })?;
 
                 self.builder.build_store(member_ptr, *arg_value);
@@ -459,7 +495,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let args = &mut array_init.arguments;
 
         if args.is_empty() {
-            return Err(self.err("Array init with zero arguments.".into()));
+            return Err(self.err(
+                "Array init with zero arguments.".into(),
+                Some(array_init.file_pos),
+            ));
         }
 
         // Compile all arguments(all values that will be set to initialize the
@@ -518,7 +557,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(self.builder.build_load(array_ptr, "array.init.load").into())
     }
 
-    fn compile_null(&mut self, ty: AnyTypeEnum<'ctx>) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_null(
+        &mut self,
+        ty: AnyTypeEnum<'ctx>,
+        file_pos: Option<FilePosition>,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
         Ok(match ty {
             AnyTypeEnum::ArrayType(ty) => ty.const_zero().into(),
             AnyTypeEnum::FloatType(ty) => ty.const_zero().into(),
@@ -528,10 +571,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             AnyTypeEnum::VectorType(ty) => ty.const_zero().into(),
 
             AnyTypeEnum::FunctionType(_) | AnyTypeEnum::VoidType(_) => {
-                return Err(self.err(format!(
-                    "Tried to create null for unsupported type: {:#?}",
-                    ty
-                )))
+                return Err(self.err(
+                    format!("Tried to create null for unsupported type: {:#?}", ty),
+                    file_pos,
+                ))
             }
         })
     }
@@ -550,10 +593,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             //       at through the inkwell API?
             // TODO: Add logic/edge cases where the type of the argument can
             //       be converted to the type of the parameter with no issues.
-            Err(self.err(format!(
+            Err(self.err(
+                format!(
                 "Arg type at index {} wrong type when calling func: {}. Expected: {:?}, got: {:?}",
                 i, func_name, param_type, arg_type,
-            )))
+            ),
+                None,
+            ))
         } else {
             Ok(())
         }

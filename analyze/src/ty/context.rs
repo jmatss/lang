@@ -1,6 +1,5 @@
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
-    file::FilePosition,
     token::expr::Expr,
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     BlockId,
@@ -1084,9 +1083,8 @@ impl<'a> TypeContext<'a> {
         } else {
             Err(LangError::new(
                 "expr opt set to None.".into(),
-                AnalyzeError {
-                    file_pos: FilePosition::default(),
-                },
+                AnalyzeError,
+                None,
             ))
         }
     }

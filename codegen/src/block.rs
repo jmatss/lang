@@ -52,9 +52,8 @@ impl<'ctx> BranchInfo<'ctx> {
         } else {
             Err(LangError::new(
                 format!("Unable to get if_case with index: {}", index),
-                CodeGenError {
-                    file_pos: file_pos.to_owned(),
-                },
+                CodeGenError,
+                Some(file_pos.to_owned()),
             ))
         }
     }
@@ -70,9 +69,8 @@ impl<'ctx> BranchInfo<'ctx> {
         } else {
             Err(LangError::new(
                 format!("Unable to get if_branch with index: {}", index),
-                CodeGenError {
-                    file_pos: file_pos.to_owned(),
-                },
+                CodeGenError,
+                Some(file_pos.to_owned()),
             ))
         }
     }
@@ -82,36 +80,44 @@ impl<'ctx> BranchInfo<'ctx> {
 /// example be used to ensure that "enum"s are handled correctly in match cases.
 /// Since match cases needs to be ints, the enums needs to be converted to ints.
 enum CodeGenTy {
-    Int,
-    Enum,
+    Int(Option<FilePosition>),
+    Enum(Option<FilePosition>),
 }
 
 impl CodeGenTy {
-    fn new(ty: &Ty) -> CustomResult<Self> {
+    fn new(ty: &Ty, file_pos: Option<FilePosition>) -> CustomResult<Self> {
         // TODO: Add more types.
         match ty {
             Ty::CompoundType(inner_ty, ..) => match inner_ty {
-                InnerTy::Enum(_) => Ok(CodeGenTy::Enum),
-                _ if inner_ty.is_int() => Ok(CodeGenTy::Int),
+                InnerTy::Enum(_) => Ok(CodeGenTy::Enum(file_pos)),
+                _ if inner_ty.is_int() => Ok(CodeGenTy::Int(file_pos)),
                 _ => Err(LangError::new(
                     format!("Invalid type when creating CodeGenTy: {:#?}", ty),
                     LangErrorKind::GeneralError,
+                    file_pos,
                 )),
             },
 
             _ => Err(LangError::new(
                 format!("Invalid type when creating CodeGenTy: {:#?}", ty),
                 LangErrorKind::GeneralError,
+                file_pos,
             )),
+        }
+    }
+
+    pub fn file_pos(&self) -> Option<FilePosition> {
+        match self {
+            CodeGenTy::Int(file_pos) | CodeGenTy::Enum(file_pos) => file_pos.to_owned(),
         }
     }
 
     /// Helper function to get the given `value` as a integer const.
     fn as_int_const<'ctx>(&self, value: AnyValueEnum<'ctx>) -> CustomResult<IntValue<'ctx>> {
         let value = match self {
-            CodeGenTy::Int => value,
+            CodeGenTy::Int(_) => value,
 
-            CodeGenTy::Enum => {
+            CodeGenTy::Enum(_) => {
                 assert!(value.is_struct_value());
 
                 value
@@ -129,9 +135,8 @@ impl CodeGenTy {
                     "Given `value` expected to be const int, was not: {:#?}",
                     value
                 ),
-                LangErrorKind::CodeGenError {
-                    file_pos: FilePosition::default(),
-                },
+                LangErrorKind::CodeGenError,
+                self.file_pos(),
             ))
         }
     }
@@ -143,9 +148,9 @@ impl CodeGenTy {
         value: AnyValueEnum<'ctx>,
     ) -> CustomResult<IntValue<'ctx>> {
         let value = match self {
-            CodeGenTy::Int => value,
+            CodeGenTy::Int(_) => value,
 
-            CodeGenTy::Enum => {
+            CodeGenTy::Enum(_) => {
                 assert!(value.is_struct_value());
                 let basic_value = CodeGen::any_into_basic_value(value)?;
 
@@ -160,6 +165,7 @@ impl CodeGenTy {
                         LangError::new(
                             format!("Unable to GEP enum: {:#?}", &value),
                             LangErrorKind::GeneralError,
+                            self.file_pos(),
                         )
                     })?;
                 builder.build_load(value_ptr, "enum.as.int.load").into()
@@ -171,9 +177,8 @@ impl CodeGenTy {
         } else {
             Err(LangError::new(
                 format!("Given `value` expected to be int, was not: {:#?}", value),
-                LangErrorKind::CodeGenError {
-                    file_pos: FilePosition::default(),
-                },
+                LangErrorKind::CodeGenError,
+                self.file_pos(),
             ))
         }
     }
@@ -183,6 +188,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_block(
         &mut self,
         header: &mut BlockHeader,
+        file_pos: &FilePosition,
         id: BlockId,
         body: &mut [AstToken],
     ) -> CustomResult<()> {
@@ -195,31 +201,41 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
             BlockHeader::Function(func) => {
-                self.compile_func(&func.borrow(), id, body)?;
+                self.compile_func(&func.borrow(), file_pos, id, body)?;
             }
             BlockHeader::Implement(_) => {
                 for mut ast_token in body {
-                    if let AstToken::Block(BlockHeader::Function(func), func_id, func_body) =
-                        &mut ast_token
+                    if let AstToken::Block(
+                        BlockHeader::Function(func),
+                        func_file_pos,
+                        func_id,
+                        func_body,
+                    ) = &mut ast_token
                     {
-                        self.compile_func(&func.borrow(), *func_id, func_body)?;
+                        self.compile_func(&func.borrow(), func_file_pos, *func_id, func_body)?;
                     }
                 }
             }
             BlockHeader::Anonymous => {
-                self.compile_anon(id, body)?;
+                self.compile_anon(file_pos, id, body)?;
             }
 
             BlockHeader::If => {
-                self.compile_if(id, body)?;
+                self.compile_if(file_pos, id, body)?;
             }
             BlockHeader::IfCase(_) => {
-                return Err(self.err("Unexpected IfCase in compile_block".into()));
+                return Err(self.err(
+                    "Unexpected IfCase in compile_block".into(),
+                    Some(file_pos.to_owned()),
+                ));
             }
 
             BlockHeader::Match(expr) => self.compile_match(expr, id, body)?,
             BlockHeader::MatchCase(_) => {
-                return Err(self.err("Unexpected MatchCase in compile_block".into()));
+                return Err(self.err(
+                    "Unexpected MatchCase in compile_block".into(),
+                    Some(file_pos.to_owned()),
+                ));
             }
 
             BlockHeader::Struct(_) | BlockHeader::Enum(_) | BlockHeader::Interface(_) => {
@@ -227,7 +243,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
 
             //BlockHeader::For(var, expr) => self.compile_for(var, expr),
-            BlockHeader::While(expr_opt) => self.compile_while(expr_opt, id, body)?,
+            BlockHeader::While(expr_opt) => self.compile_while(expr_opt, file_pos, id, body)?,
 
             //BlockHeader::With(expr) => self.compile_with(expr),
             //BlockHeader::Defer(expr) => self.compile_defer(expr),
@@ -250,26 +266,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.builder.position_at_end(entry);
             self.alloc_var(var)
         } else {
-            Err(self.err(format!(
-                "No active cur func when creating var: {}",
-                &var.name
-            )))
+            Err(self.err(
+                format!("No active cur func when creating var: {}", &var.name),
+                var.file_pos.to_owned(),
+            ))
         }
     }
 
     fn compile_func(
         &mut self,
         func: &Function,
+        file_pos: &FilePosition,
         func_id: BlockId,
         body: &mut [AstToken],
     ) -> CustomResult<()> {
         let fn_val = if let Some(fn_val) = self.module.get_function(&func.full_name()?) {
             fn_val
         } else {
-            return Err(self.err(format!(
-                "Unable to find function with name \"{}\".",
-                func.name
-            )));
+            return Err(self.err(
+                format!("Unable to find function with name \"{}\".", func.name),
+                Some(file_pos.to_owned()),
+            ));
         };
 
         let entry = self.context.append_basic_block(fn_val, "entry");
@@ -286,11 +303,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         if params.len() != fn_val.get_params().len() {
-            return Err(self.err(format!(
-                "Incorrect amount of parameters when generating function \"{:?}\". fn_val len: {}, params len: {}",
-                &func.full_name(),
-                fn_val.get_params().len(),
-                params.len()
+            return Err(self.err(
+                format!(
+                    "Incorrect amount of parameters when generating function \"{:?}\". fn_val len: {}, params len: {}",
+                    &func.full_name(),
+                    fn_val.get_params().len(),
+                    params.len()
+                ),
+                Some(file_pos.to_owned()
             )));
         }
 
@@ -322,13 +342,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     self.builder.build_return(None);
                     Ok(())
                 } else {
-                    Err(self.err(format!(
-                        "Found return stmt in func \"{}\", but it has no return type.",
-                        &func.name
-                    )))
+                    Err(self.err(
+                        format!(
+                            "Found return stmt in func \"{}\", but it has no return type.",
+                            &func.name
+                        ),
+                        Some(file_pos.to_owned()),
+                    ))
                 }
             } else {
-                Err(self.err(format!("No basic block in func: {}", &func.name)))
+                Err(self.err(
+                    format!("No basic block in func: {}", &func.name),
+                    Some(file_pos.to_owned()),
+                ))
             }
         } else {
             Ok(())
@@ -339,6 +365,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_func_proto(
         &self,
         func: &Function,
+        file_pos: Option<FilePosition>,
         linkage_opt: Option<Linkage>,
     ) -> CustomResult<FunctionValue<'ctx>> {
         let param_types = if let Some(params) = &func.parameters {
@@ -347,15 +374,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let param = param.borrow();
 
                 if let Some(param_type_struct) = &param.ty {
-                    let any_type = self.compile_type(&param_type_struct)?;
+                    let any_type =
+                        self.compile_type(&param_type_struct, param.file_pos.to_owned())?;
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
                     inner_types.push(basic_type);
                 } else {
-                    return Err(self.err(format!(
-                        "Bad type for parameter with name\"{}\" in function \"{}\".",
-                        &param.name,
-                        &func.full_name()?
-                    )));
+                    return Err(self.err(
+                        format!(
+                            "Bad type for parameter with name\"{}\" in function \"{}\".",
+                            &param.name,
+                            &func.full_name()?
+                        ),
+                        param.file_pos.to_owned(),
+                    ));
                 }
             }
             inner_types
@@ -367,7 +398,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // with a return type of this type. If no `ret_type` is set, this is
         // a function that returns void, create a void function.
         let fn_type = if let Some(ret_type) = &func.ret_type {
-            match self.compile_type(&ret_type)? {
+            match self.compile_type(&ret_type, file_pos)? {
                 AnyTypeEnum::ArrayType(ty) => ty.fn_type(param_types.as_slice(), func.is_var_arg),
                 AnyTypeEnum::FloatType(ty) => ty.fn_type(param_types.as_slice(), func.is_var_arg),
                 AnyTypeEnum::FunctionType(ty) => ty,
@@ -388,20 +419,34 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .add_function(&func.full_name()?, fn_type, linkage_opt))
     }
 
-    fn compile_anon(&mut self, id: BlockId, body: &mut [AstToken]) -> CustomResult<()> {
-        let cur_func = self
-            .cur_func
-            .ok_or_else(|| self.err("cur_func is None for \"If\".".into()))?;
+    fn compile_anon(
+        &mut self,
+        file_pos: &FilePosition,
+        id: BlockId,
+        body: &mut [AstToken],
+    ) -> CustomResult<()> {
+        let cur_func = self.cur_func.ok_or_else(|| {
+            self.err(
+                "cur_func is None for \"Anon\".".into(),
+                Some(file_pos.to_owned()),
+            )
+        })?;
 
-        let mut cur_block = self
-            .cur_basic_block
-            .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
+        let mut cur_block = self.cur_basic_block.ok_or_else(|| {
+            self.err(
+                "cur_block is None for \"If\".".into(),
+                Some(file_pos.to_owned()),
+            )
+        })?;
 
         for token in body.iter_mut() {
             self.cur_block_id = id;
-            cur_block = self
-                .cur_basic_block
-                .ok_or_else(|| self.err("cur_block is None for \"While\" body.".into()))?;
+            cur_block = self.cur_basic_block.ok_or_else(|| {
+                self.err(
+                    "cur_block is None for \"While\" body.".into(),
+                    Some(file_pos.to_owned()),
+                )
+            })?;
 
             self.builder.position_at_end(cur_block);
             self.compile(token)?;
@@ -427,18 +472,26 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             Ok(())
         } else {
-            Err(self.err(format!(
-                "Unable to find block info for block with ID: {}",
-                id
-            )))
+            Err(self.err(
+                format!("Unable to find block info for block with ID: {}", id),
+                Some(file_pos.to_owned()),
+            ))
         }
     }
 
     /// All the "ParseToken" in the body should be "IfCase"s.
-    fn compile_if(&mut self, id: BlockId, body: &mut [AstToken]) -> CustomResult<()> {
-        let cur_block = self
-            .cur_basic_block
-            .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
+    fn compile_if(
+        &mut self,
+        file_pos: &FilePosition,
+        id: BlockId,
+        body: &mut [AstToken],
+    ) -> CustomResult<()> {
+        let cur_block = self.cur_basic_block.ok_or_else(|| {
+            self.err(
+                "cur_block is None for \"If\".".into(),
+                Some(file_pos.to_owned()),
+            )
+        })?;
 
         // Create and store the "body" blocks of this if-statement.
         // For every if-case that has a expression (if/elif) a extra block
@@ -448,7 +501,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let mut branch_info = BranchInfo::new();
         branch_info.if_branches.push(cur_block);
         for (i, if_case) in body.iter().enumerate() {
-            if let AstToken::Block(BlockHeader::IfCase(expr_opt), _, _) = &if_case {
+            if let AstToken::Block(BlockHeader::IfCase(expr_opt), ..) = &if_case {
                 // Skip adding a branch block if this is the first case (since it
                 // has the branch block `cur_block`). Also only add a branch block
                 // if this `if_case` contains a expression that can be "branched on".
@@ -464,10 +517,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 prev_block = if_block;
                 branch_info.if_cases.push(if_block);
             } else {
-                return Err(self.err(format!(
-                    "Token in \"If\" block wasn't a \"IfCase\": {:?}",
-                    &if_case
-                )));
+                return Err(self.err(
+                    format!("Token in \"If\" block wasn't a \"IfCase\": {:?}", &if_case),
+                    Some(file_pos.to_owned()),
+                ));
             }
         }
 
@@ -486,28 +539,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 None
             }
         } else {
-            return Err(self.err(format!(
-                "Unable to find block info for block with ID: {}",
-                id
-            )));
+            return Err(self.err(
+                format!("Unable to find block info for block with ID: {}", id),
+                Some(file_pos.to_owned()),
+            ));
         };
 
         // Iterate through all "if cases" in this if-statement and compile them.
         for (index, mut if_case) in body.iter_mut().enumerate() {
             self.cur_block_id = id;
 
-            if let AstToken::Block(BlockHeader::IfCase(expr_opt), inner_id, inner_body) =
+            if let AstToken::Block(BlockHeader::IfCase(expr_opt), file_pos, inner_id, inner_body) =
                 &mut if_case
             {
                 self.compile_if_case(
                     expr_opt,
+                    file_pos,
                     *inner_id,
                     index,
                     inner_body.as_mut_slice(),
                     &branch_info,
                 )?;
             } else {
-                return Err(self.err("Token in \"If\" block wasn't a \"IfCase\".".into()));
+                return Err(self.err(
+                    "Token in \"If\" block wasn't a \"IfCase\".".into(),
+                    Some(file_pos.to_owned()),
+                ));
             }
         }
 
@@ -524,17 +581,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_if_case(
         &mut self,
         br_expr_opt: &mut Option<Expr>,
+        file_pos: &FilePosition,
         id: BlockId,
         index: usize,
         body: &mut [AstToken],
         branch_info: &BranchInfo<'ctx>,
     ) -> CustomResult<()> {
-        let if_case_block = branch_info.get_if_case(index, &self.cur_file_pos)?;
+        let if_case_block = branch_info.get_if_case(index, file_pos)?;
 
         // If this is a if case with a expression, the branch condition should
         // be evaluated and branched from the branch block.
         if let Some(br_expr) = br_expr_opt {
-            let branch_block = branch_info.get_if_branch(index, &self.cur_file_pos)?;
+            let branch_block = branch_info.get_if_branch(index, file_pos)?;
 
             // If there are no more branch blocks, set the next branch block to
             // the merge block if there are no more if_cases or set it to the
@@ -543,10 +601,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 if index + 1 >= branch_info.if_cases.len() {
                     self.get_merge_block(id)?
                 } else {
-                    branch_info.get_if_case(index + 1, &self.cur_file_pos)?
+                    branch_info.get_if_case(index + 1, file_pos)?
                 }
             } else {
-                branch_info.get_if_branch(index + 1, &self.cur_file_pos)?
+                branch_info.get_if_branch(index + 1, file_pos)?
             };
 
             // TODO: Return error instead of panicing inside the
@@ -576,7 +634,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
             Ok(())
         } else {
-            Err(self.err("Current basic block None".into()))
+            Err(self.err("Current basic block None".into(), Some(file_pos.to_owned())))
         }
     }
 
@@ -587,11 +645,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         id: BlockId,
         body: &mut [AstToken],
     ) -> CustomResult<()> {
+        let file_pos = expr.file_pos().cloned();
         let start_block = self
             .cur_basic_block
-            .ok_or_else(|| self.err("cur_block is None for \"If\".".into()))?;
+            .ok_or_else(|| self.err("cur_block is None for \"Match\".".into(), file_pos.clone()))?;
 
-        let codegen_ty = CodeGenTy::new(&expr.get_expr_type()?)?;
+        let codegen_ty = CodeGenTy::new(&expr.get_expr_type()?, file_pos)?;
 
         let mut cases = Vec::default();
         let mut blocks_without_branch = Vec::default();
@@ -603,7 +662,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for mut match_case in body.iter_mut() {
             self.cur_block_id = id;
 
-            if let AstToken::Block(BlockHeader::MatchCase(Some(case_expr)), _, inner_body) =
+            if let AstToken::Block(BlockHeader::MatchCase(Some(case_expr)), .., inner_body) =
                 &mut match_case
             {
                 let cur_block = self.cur_basic_block.unwrap();
@@ -616,10 +675,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                 // The case expressions in a switch needs to be constant.
                 if !value.is_constant_int() {
-                    return Err(self.err(format!(
-                        "Expression in match case not constant: {:#?}",
-                        case_expr
-                    )));
+                    return Err(self.err(
+                        format!("Expression in match case not constant: {:#?}", case_expr),
+                        case_expr.file_pos().cloned(),
+                    ));
                 }
 
                 // Compile all tokens inside this match-case.
@@ -645,7 +704,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             } else if let AstToken::Block(BlockHeader::MatchCase(None), ..) = &match_case {
                 // Default block will be handled in logic below. Ignore for now.
             } else {
-                return Err(self.err("Token in \"Match\" block wasn't a \"MatchCase\".".into()));
+                return Err(self.err(
+                    "Token in \"Match\" block wasn't a \"MatchCase\".".into(),
+                    match_case.file_pos().cloned(),
+                ));
             }
         }
 
@@ -661,9 +723,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for mut match_case in body.iter_mut() {
             self.cur_block_id = id;
 
-            if let AstToken::Block(BlockHeader::MatchCase(None), _, inner_body) = &mut match_case {
+            if let AstToken::Block(BlockHeader::MatchCase(None), file_pos, _, inner_body) =
+                &mut match_case
+            {
                 if default_block_opt.is_some() {
-                    return Err(self.err("More than one default block found in match.".into()));
+                    return Err(self.err(
+                        "More than one default block found in match.".into(),
+                        Some(file_pos.to_owned()),
+                    ));
                 }
 
                 let cur_block = self.cur_basic_block.unwrap();
@@ -738,16 +805,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let mut v = Vec::with_capacity(members.len());
             for member in members {
                 let member = member.borrow();
+                let member_file_pos = member.file_pos.to_owned();
 
                 if let Some(member_type_struct) = &member.ty {
-                    let any_type = self.compile_type(&member_type_struct)?;
+                    let any_type = self.compile_type(&member_type_struct, member_file_pos)?;
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
                     v.push(basic_type);
                 } else {
-                    return Err(self.err(format!(
-                        "Bad type for struct \"{}\" member \"{}\".",
-                        &struct_.name, &member.name
-                    )));
+                    return Err(self.err(
+                        format!(
+                            "Bad type for struct \"{}\" member \"{}\".",
+                            &struct_.name, &member.name
+                        ),
+                        member_file_pos,
+                    ));
                 }
             }
             v
@@ -771,30 +842,39 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // The type of the whole `enum_` will be Enum(ident). This type will be
         // set for the members as well. Only the given literal values of the members
         // will be the inner type.
-        let ty = if let Some(members) = &enum_.members {
+        let (ty, file_pos) = if let Some(members) = &enum_.members {
             if let Some(member) = members.first() {
-                if let Some(ty) = &member.borrow().value {
-                    ty.get_expr_type()?
+                let member = member.borrow();
+                let member_file_pos = member.file_pos.to_owned();
+
+                if let Some(ty) = &member.value {
+                    (ty.get_expr_type()?, member_file_pos)
                 } else {
-                    return Err(self.err(format!(
-                        "No default value set for first member in enum \"{}\".",
-                        &enum_.name
-                    )));
+                    return Err(self.err(
+                        format!(
+                            "No default value set for first member in enum \"{}\".",
+                            &enum_.name
+                        ),
+                        member_file_pos,
+                    ));
                 }
             } else {
-                return Err(self.err(format!(
-                    "Unable to find first member in enum \"{}\".",
-                    &enum_.name
-                )));
+                return Err(self.err(
+                    format!("Unable to find first member in enum \"{}\".", &enum_.name),
+                    None,
+                ));
             }
         } else {
-            return Err(self.err(format!(
-                "No members set for enum \"{}\". Unable to figure out member type.",
-                &enum_.name
-            )));
+            return Err(self.err(
+                format!(
+                    "No members set for enum \"{}\". Unable to figure out member type.",
+                    &enum_.name
+                ),
+                None,
+            ));
         };
 
-        let any_ty = self.compile_type(&ty)?;
+        let any_ty = self.compile_type(&ty, file_pos)?;
         let basic_ty = CodeGen::any_into_basic_type(any_ty)?;
 
         let packed = false;
@@ -808,12 +888,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_while(
         &mut self,
         expr_opt: &mut Option<Expr>,
+        file_pos: &FilePosition,
         id: BlockId,
         body: &mut [AstToken],
     ) -> CustomResult<()> {
-        let mut cur_block = self
-            .cur_basic_block
-            .ok_or_else(|| self.err("cur_block is None for \"While\".".into()))?;
+        let mut cur_block = self.cur_basic_block.ok_or_else(|| {
+            self.err(
+                "cur_block is None for \"While\".".into(),
+                Some(file_pos.to_owned()),
+            )
+        })?;
 
         let while_branch_block = self
             .context
@@ -840,10 +924,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     merge_block,
                 );
             } else {
-                return Err(self.err(format!(
-                    "Expression in while loop didn't evaluate to int: {:?}",
-                    value
-                )));
+                return Err(self.err(
+                    format!(
+                        "Expression in while loop didn't evaluate to int: {:?}",
+                        value
+                    ),
+                    expr.file_pos().cloned(),
+                ));
             }
         } else {
             self.builder.build_unconditional_branch(while_body_block);
@@ -854,9 +941,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         for token in body.iter_mut() {
             self.cur_block_id = id;
             self.cur_branch_block = Some(while_branch_block);
-            cur_block = self
-                .cur_basic_block
-                .ok_or_else(|| self.err("cur_block is None for \"While\" body.".into()))?;
+            cur_block = self.cur_basic_block.ok_or_else(|| {
+                self.err(
+                    "cur_block is None for \"While\" body.".into(),
+                    token.file_pos().cloned(),
+                )
+            })?;
 
             self.builder.position_at_end(cur_block);
             self.compile(token)?;
@@ -865,9 +955,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // If the block does NOT contain a terminator instruction inside it
         // (return, yield etc.), add a unconditional branch back up to the
         // "while.branch" block.
-        cur_block = self
-            .cur_basic_block
-            .ok_or_else(|| self.err("cur_block is None for \"While\" body.".into()))?;
+        cur_block = self.cur_basic_block.ok_or_else(|| {
+            self.err(
+                "cur_block is None for \"While\" body.".into(),
+                Some(file_pos.to_owned()),
+            )
+        })?;
         if cur_block.get_terminator().is_none() {
             self.builder.position_at_end(cur_block);
             self.builder.build_unconditional_branch(while_branch_block);

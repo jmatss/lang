@@ -1,4 +1,4 @@
-use crate::ty::{generics::Generics, ty::Ty};
+use crate::ty::generics::Generics;
 
 /// Concatenates a structure name and a method name to create the name that will
 /// be used to refer to this function. The name is concatenated with a dash.
@@ -17,42 +17,24 @@ pub fn to_method_name(
     )
 }
 
-/// Adds the `ty` type information to the end of a variable name. This will come
+/// Adds the `copy_nr` information to the end of a variable name. This will come
 /// in handy for variables that have generic types; they will be duplicated which
 /// means that a name+blockID is not enough not uniqely identify it.
-pub fn to_var_name(name: &str, ty: &Ty) -> String {
-    format!("{}:{}", name, ty.to_string())
+pub fn to_var_name(name: &str, copy_nr: usize) -> String {
+    format!("{}:{}", name, copy_nr)
 }
 
-/// Formats the name of a struct with generics. The names of the generic struct
-/// implementations will need to be changed so that they are unique.
-/// The struct names will be prepended with a colon followed by a comma seperated
+/// Formats the name of a struct with generics.
+/// The struct names will be prepended with its generics as a comma seperated
 /// list of the new real types that have replaced the generics.
 ///
-/// Example:
-///    TestStruct<K, V>
-///  (K == u64) and (V == String) =>
-///    TestStruct:u64,String
+/// Example A struct with two generics K and V:
+///    TestStruct<K,V>
+/// This would be the exact format, case sensitive, no spaces etc.
 pub fn to_generic_struct_name(old_struct_name: &str, generics: &Generics) -> String {
     if generics.is_empty() {
         old_struct_name.to_owned()
     } else {
-        [old_struct_name.into(), generics.to_string()].join(":")
-    }
-}
-
-/// Given a formatted new struct name (see `to_generic_struct_name()`), returns
-/// the actual struct name of the struct with the parts about generic types
-/// removed.
-///
-/// Example input:
-///   TestStruct:u64,String
-/// would return:
-///   TestStruct
-pub fn from_generic_struct_name(new_struct_name: &str) -> String {
-    if let Some(old_struct_name) = new_struct_name.split(':').next() {
-        old_struct_name.into()
-    } else {
-        unreachable!("from_generic_struct_name None: {}", new_struct_name);
+        format!("{}{}", old_struct_name, generics.to_string())
     }
 }

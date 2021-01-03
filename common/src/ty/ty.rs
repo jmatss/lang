@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fmt::Display, hash::Hash};
 
-use crate::token::expr::Expr;
+use crate::{token::expr::Expr, util};
 
 use either::Either;
 
@@ -344,8 +344,8 @@ impl Ty {
         let mut names = HashSet::default();
 
         match self {
-            Ty::CompoundType(inner_ty, comp_generics) => {
-                for generic in comp_generics.iter_types() {
+            Ty::CompoundType(inner_ty, generics) => {
+                for generic in generics.iter_types() {
                     if let Some(inner_names) = generic.get_structure_names() {
                         names.extend(inner_names.into_iter());
                     }
@@ -356,7 +356,7 @@ impl Ty {
                     | InnerTy::Enum(ident)
                     | InnerTy::Interface(ident)
                     | InnerTy::UnknownIdent(ident, ..) => {
-                        names.insert(ident.clone());
+                        names.insert(util::to_generic_struct_name(ident, generics));
                     }
                     _ => (),
                 }
@@ -915,16 +915,7 @@ impl Display for Ty {
                 result.push_str(&inner_ty.to_string());
 
                 if !generics.is_empty() {
-                    result.push('<');
-
-                    let generic_string = generics
-                        .iter_types()
-                        .map(|ty| ty.to_string())
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    result.push_str(&generic_string);
-
-                    result.push('>');
+                    result.push_str(&generics.to_string());
                 }
             }
 

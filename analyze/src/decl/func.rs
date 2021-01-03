@@ -203,6 +203,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
                 None,
                 None,
                 None,
+                None,
                 false,
             )));
             if let Some(ref mut params) = func.parameters {
@@ -255,7 +256,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
     fn visit_impl(&mut self, mut ast_token: &mut AstToken, ctx: &TraverseContext) {
         let analyze_context = self.analyze_context.borrow();
 
-        if let AstToken::Block(BlockHeader::Implement(ident), _, body) = &mut ast_token {
+        if let AstToken::Block(BlockHeader::Implement(ident), _, _, body) = &mut ast_token {
             // Check if this unknown structure can be found and then
             // replaced the inner type with the correct structure.
             let inner_ty = if analyze_context.get_struct(ident, ctx.block_id).is_ok() {
@@ -291,7 +292,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
     }
 
     fn visit_func(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Function(func), func_id, ..) = &mut ast_token {
+        if let AstToken::Block(BlockHeader::Function(func), _, func_id, ..) = &mut ast_token {
             let structure_ty = if let Some(structure_ty) = func.borrow().method_structure.clone() {
                 Some(structure_ty)
             } else {

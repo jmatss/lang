@@ -112,9 +112,8 @@ pub fn generate<'a, 'ctx>(
                 .ok_or_else(|| {
                     LangError::new(
                         format!("Unable to find block info for block with id {}", block_id),
-                        CodeGenError {
-                            file_pos: FilePosition::default(),
-                        },
+                        CodeGenError,
+                        None,
                     )
                 })?
                 .parent_id;
@@ -125,10 +124,13 @@ pub fn generate<'a, 'ctx>(
                     .builder
                     .build_unconditional_branch(wrapping_merge_block);
             } else {
-                return Err(code_gen.err(format!(
-                    "MergeBlock for block with ID {} has no terminator and no wrapping block.",
-                    block_id
-                )));
+                return Err(code_gen.err(
+                    format!(
+                        "MergeBlock for block with ID {} has no terminator and no wrapping block.",
+                        block_id
+                    ),
+                    None,
+                ));
             }
         }
     }
@@ -171,8 +173,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
         match &mut ast_token {
-            AstToken::Block(header, id, ref mut body) => {
-                self.compile_block(header, *id, body)?;
+            AstToken::Block(header, file_pos, id, ref mut body) => {
+                self.compile_block(header, file_pos, *id, body)?;
             }
             AstToken::Stmt(ref mut stmt) => {
                 self.compile_stmt(stmt)?;
@@ -187,29 +189,38 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub(super) fn alloc_var(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
         if let Some(var_type) = &var.ty {
-            Ok(match self.compile_type(&var_type)? {
-                AnyTypeEnum::ArrayType(ty) => {
-                    let sign_extend = false;
-                    let dim = self
-                        .context
-                        .i64_type()
-                        .const_int(ty.len() as u64, sign_extend);
-                    self.builder.build_array_alloca(ty, dim, &var.name)
-                }
-                AnyTypeEnum::FloatType(ty) => self.builder.build_alloca(ty, &var.name),
-                AnyTypeEnum::IntType(ty) => self.builder.build_alloca(ty, &var.name),
-                AnyTypeEnum::PointerType(ty) => self.builder.build_alloca(ty, &var.name),
-                AnyTypeEnum::StructType(ty) => self.builder.build_alloca(ty, &var.name),
-                AnyTypeEnum::VectorType(ty) => self.builder.build_alloca(ty, &var.name),
-                AnyTypeEnum::FunctionType(_) => {
-                    return Err(self.err("Tried to alloca function.".into()));
-                }
-                AnyTypeEnum::VoidType(_) => {
-                    return Err(self.err("Tried to alloca void type.".into()));
-                }
-            })
+            Ok(
+                match self.compile_type(&var_type, var.file_pos.to_owned())? {
+                    AnyTypeEnum::ArrayType(ty) => {
+                        let sign_extend = false;
+                        let dim = self
+                            .context
+                            .i64_type()
+                            .const_int(ty.len() as u64, sign_extend);
+                        self.builder.build_array_alloca(ty, dim, &var.name)
+                    }
+                    AnyTypeEnum::FloatType(ty) => self.builder.build_alloca(ty, &var.name),
+                    AnyTypeEnum::IntType(ty) => self.builder.build_alloca(ty, &var.name),
+                    AnyTypeEnum::PointerType(ty) => self.builder.build_alloca(ty, &var.name),
+                    AnyTypeEnum::StructType(ty) => self.builder.build_alloca(ty, &var.name),
+                    AnyTypeEnum::VectorType(ty) => self.builder.build_alloca(ty, &var.name),
+                    AnyTypeEnum::FunctionType(_) => {
+                        return Err(
+                            self.err("Tried to alloca function.".into(), var.file_pos.to_owned())
+                        );
+                    }
+                    AnyTypeEnum::VoidType(_) => {
+                        return Err(
+                            self.err("Tried to alloca void type.".into(), var.file_pos.to_owned())
+                        );
+                    }
+                },
+            )
         } else {
-            Err(self.err(format!("type None when allocating var: {:?}", &var.name)))
+            Err(self.err(
+                format!("type None when allocating var: {:?}", &var.name),
+                var.file_pos.to_owned(),
+            ))
         }
     }
 
@@ -280,11 +291,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if let Some(const_value) = self.constants.get(&key) {
             Ok(*const_value)
         } else {
-            Err(self.err(format!(
-                "Unable to find value for constant \"{}\" in decl block ID {}.",
-                &var.full_name(),
-                decl_block_id
-            )))
+            Err(self.err(
+                format!(
+                    "Unable to find value for constant \"{}\" in decl block ID {}.",
+                    &var.full_name(),
+                    decl_block_id
+                ),
+                var.file_pos.to_owned(),
+            ))
         }
     }
 
@@ -302,22 +316,29 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if let Some(var_ptr) = self.variables.get(&key) {
             Ok(*var_ptr)
         } else {
-            Err(self.err(format!(
-                "Unable to find ptr for variable \"{}\" in decl block ID {}.",
-                &var.full_name(),
-                decl_block_id
-            )))
+            Err(self.err(
+                format!(
+                    "Unable to find ptr for variable \"{}\" in decl block ID {}.",
+                    &var.full_name(),
+                    decl_block_id
+                ),
+                var.file_pos.to_owned(),
+            ))
         }
     }
 
-    pub(super) fn compile_type(&self, ty: &Ty) -> CustomResult<AnyTypeEnum<'ctx>> {
+    pub(super) fn compile_type(
+        &self,
+        ty: &Ty,
+        file_pos: Option<FilePosition>,
+    ) -> CustomResult<AnyTypeEnum<'ctx>> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Generic;
 
         Ok(match ty {
             Ty::Pointer(ref ptr) => {
                 // Get the type of the inner type and wrap into a "PointerType".
-                match self.compile_type(ptr)? {
+                match self.compile_type(ptr, file_pos)? {
                     AnyTypeEnum::ArrayType(ty) => ty.ptr_type(address_space).into(),
                     AnyTypeEnum::FloatType(ty) => ty.ptr_type(address_space).into(),
                     AnyTypeEnum::FunctionType(ty) => ty.ptr_type(address_space).into(),
@@ -342,17 +363,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             u32::from_str_radix(num, *radix)?
                         }
                         _ => {
-                            return Err(self.err(format!(
-                                "TODO: Invalid expression used as array dimension: {:?}",
-                                dim
-                            )))
+                            return Err(self.err(
+                                format!(
+                                    "TODO: Invalid expression used as array dimension: {:?}",
+                                    dim
+                                ),
+                                file_pos,
+                            ))
                         }
                     }
                 } else {
-                    return Err(self.err("No dimension set for array.".into()));
+                    // TODO: FilePosition.
+                    return Err(self.err("No dimension set for array.".into(), file_pos));
                 };
 
-                match self.compile_type(inner_ty)? {
+                match self.compile_type(inner_ty, file_pos)? {
                     AnyTypeEnum::ArrayType(ty) => ty.array_type(lit_dim).into(),
                     AnyTypeEnum::FloatType(ty) => ty.array_type(lit_dim).into(),
                     AnyTypeEnum::IntType(ty) => ty.array_type(lit_dim).into(),
@@ -360,10 +385,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     AnyTypeEnum::StructType(ty) => ty.array_type(lit_dim).into(),
                     AnyTypeEnum::VectorType(ty) => ty.array_type(lit_dim).into(),
                     AnyTypeEnum::FunctionType(_) => {
-                        return Err(self.err("Tried to array index into function type.".into()))
+                        return Err(
+                            self.err("Tried to array index into function type.".into(), file_pos)
+                        );
                     }
                     AnyTypeEnum::VoidType(_) => {
-                        return Err(self.err("Tried to array index into void type.".into()))
+                        return Err(
+                            self.err("Tried to array index into void type.".into(), file_pos)
+                        );
                     }
                 }
             }
@@ -381,20 +410,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         if let Some(struct_type) = self.module.get_struct_type(&ident) {
                             struct_type.clone().into()
                         } else {
-                            return Err(self.err(format!(
-                                "Unable to find custom struct type with name: {:#?}",
-                                ident
-                            )));
+                            return Err(self.err(
+                                format!(
+                                    "Unable to find custom struct type with name: {:#?}",
+                                    ident
+                                ),
+                                file_pos,
+                            ));
                         }
                     }
                     InnerTy::Enum(ident) => {
                         if let Some(struct_type) = self.module.get_struct_type(&ident) {
                             struct_type.clone().into()
                         } else {
-                            return Err(self.err(format!(
-                                "Unable to find custom enum type with name: {:#?}",
-                                ident
-                            )));
+                            return Err(self.err(
+                                format!("Unable to find custom enum type with name: {:#?}", ident),
+                                file_pos,
+                            ));
                         }
                     }
                     InnerTy::Interface(_) => {
@@ -421,12 +453,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     InnerTy::U128 => AnyTypeEnum::IntType(self.context.i128_type()),
 
                     _ => {
-                        return Err(self.err(format!("Invalid type during type codegen: {:?}", ty)))
+                        return Err(self.err(
+                            format!("Invalid type during type codegen: {:?}", ty),
+                            file_pos,
+                        ))
                     }
                 }
             }
 
-            _ => return Err(self.err(format!("Invalid type during type codegen: {:?}", ty))),
+            _ => {
+                return Err(self.err(
+                    format!("Invalid type during type codegen: {:?}", ty),
+                    file_pos,
+                ))
+            }
         })
     }
 
@@ -446,13 +486,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     /// Used when returing errors to include current line/column number.
-    pub fn err(&self, msg: String) -> LangError {
-        LangError::new_backtrace(
-            msg,
-            CodeGenError {
-                file_pos: self.cur_file_pos,
-            },
-            true,
-        )
+    pub fn err(&self, msg: String, file_pos: Option<FilePosition>) -> LangError {
+        LangError::new(msg, CodeGenError, file_pos)
     }
 }

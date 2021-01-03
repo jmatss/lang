@@ -1,7 +1,5 @@
-use std::{cell::RefCell, rc::Rc};
-
 use crate::{
-    error::{LangError, LangErrorKind::TraversalError},
+    error::{LangError, LangErrorKind},
     file::FilePosition,
     token::{
         ast::AstToken,
@@ -13,6 +11,7 @@ use crate::{
     ty::ty::Ty,
     visitor::Visitor,
 };
+use std::{cell::RefCell, rc::Rc};
 
 pub struct AstTraverser<'a> {
     visitors: Vec<&'a mut dyn Visitor>,
@@ -110,7 +109,7 @@ impl<'a> AstTraverser<'a> {
 
         // TODO: Can one move this into the match block below? Currently needed
         //       since can't borrow mut twice.
-        if let AstToken::Block(_, id, _) = &ast_token {
+        if let AstToken::Block(_, _, id, _) = &ast_token {
             if self.traverse_context.block_id != *id {
                 self.traverse_context.parent_block_id = self.traverse_context.block_id;
                 self.traverse_context.block_id = *id;
@@ -119,7 +118,7 @@ impl<'a> AstTraverser<'a> {
         }
 
         match &mut ast_token {
-            AstToken::Block(_, id, body) => {
+            AstToken::Block(_, _, id, body) => {
                 for body_token in body {
                     if self.traverse_context.block_id != *id {
                         self.traverse_context.parent_block_id = self.traverse_context.block_id;
@@ -400,12 +399,15 @@ impl<'a> AstTraverser<'a> {
                 }
             },
             _ => {
+                // TODO: Is it possible that `self.traverse_context.file_pos`
+                //       contains a old FilePosition at this point.
                 let err = LangError::new(
                     format!(
                         "Expected block token when traversing block, got: {:?}",
                         ast_token
                     ),
-                    TraversalError,
+                    LangErrorKind::GeneralError,
+                    Some(self.traverse_context.file_pos),
                 );
                 self.errors.push(err);
             }

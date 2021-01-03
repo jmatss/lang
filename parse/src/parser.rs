@@ -101,6 +101,7 @@ impl<'a> ParseTokenIter<'a> {
     pub fn take_root_block(&mut self) -> AstToken {
         AstToken::Block(
             BlockHeader::Default,
+            FilePosition::default(),
             self.root_block_id,
             std::mem::take(&mut self.root_block_body),
         )
@@ -143,7 +144,7 @@ impl<'a> ParseTokenIter<'a> {
                             cur_block_body.push(parse_token);
                             break;
                         }
-                        AstToken::Stmt(Stmt::Use(path, _)) => {
+                        AstToken::Stmt(Stmt::Use(path)) => {
                             self.uses.push(path.clone());
                         }
                         _ => (),
@@ -187,7 +188,7 @@ impl<'a> ParseTokenIter<'a> {
             // TODO: Clean up this mess with a mix of ParseToken/ParseTokenKind
             //       (some arms returns ParseTokens, others cascades ParseTokenKinds).
 
-            self.file_pos = lex_token.file_pos.to_owned();
+            let mut file_pos = lex_token.file_pos.to_owned();
 
             // Skip any "break" and white space symbols. Call this function
             // recursively to get an "actual" token.
@@ -198,7 +199,7 @@ impl<'a> ParseTokenIter<'a> {
             }
 
             Ok(match lex_token.kind {
-                LexTokenKind::Kw(keyword) => self.parse_keyword(keyword, &lex_token.file_pos)?,
+                LexTokenKind::Kw(keyword) => self.parse_keyword(keyword, lex_token.file_pos)?,
 
                 // Skip line breaks, white spaces and semi colons. Just return
                 // the symbol and let the caller decide what to do with it.
@@ -225,13 +226,19 @@ impl<'a> ParseTokenIter<'a> {
                         if let Some(assign_op) = get_if_stmt_op(&next) {
                             self.next_skip_space(); // Consume the assign op.
                             let rhs = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                            let stmt = Stmt::Assignment(
-                                assign_op,
-                                expr,
-                                rhs,
-                                Some(self.file_pos.to_owned()),
-                            );
-                            AstToken::Stmt(stmt)
+
+                            if let Some(file_pos_last) = rhs.file_pos() {
+                                // The start of this `file_pos_last` will be the same
+                                // as the `file_pos` inside `expr`.
+                                file_pos.set_end(file_pos_last)?;
+                            } else {
+                                unreachable!(
+                                    "No file_pos set for expr in rhs of assignment: {:#?}",
+                                    rhs
+                                );
+                            }
+
+                            AstToken::Stmt(Stmt::Assignment(assign_op, expr, rhs, Some(file_pos)))
                         } else {
                             AstToken::Expr(expr)
                         }
@@ -272,7 +279,7 @@ impl<'a> ParseTokenIter<'a> {
                         "Found end symbol with no corresponding start: {:?}",
                         lex_token
                     );
-                    return Err(self.err(msg));
+                    return Err(self.err(msg, Some(lex_token.file_pos)));
                 }
 
                 // If a literal or symbol is found, one can assume that they
@@ -294,25 +301,24 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     /// Returns the next block containing all its ParseTokens. A block is always
-    /// started withh "CurlyBracketBegin" and ended with "CurlyBracketEnd".
+    /// started with "CurlyBracketBegin" and ended with "CurlyBracketEnd".
     pub fn next_block(&mut self, header: BlockHeader) -> CustomResult<AstToken> {
         let mut block_tokens = Vec::new();
         let block_id = self.reserve_block_id();
 
-        // TODO: Add logic to calculate FilePosition for blocks.
+        let mut file_pos = self.peek_file_pos()?;
 
         // Ensure that the block starts with a "CurlyBracketBegin".
         if let Some(lex_token) = self.next_skip_space_line() {
             if let LexTokenKind::Sym(Sym::CurlyBracketBegin) = lex_token.kind {
-                //lex_token.file_pos.clone()
             } else {
-                return Err(self.err(format!(
-                    "Received invalid token at start of block: {:?}",
-                    lex_token
-                )));
+                return Err(self.err(
+                    format!("Received invalid token at start of block: {:?}", lex_token),
+                    Some(lex_token.file_pos),
+                ));
             }
         } else {
-            return Err(self.err("Received None at start of block.".into()));
+            return Err(self.err("Received None at start of block.".into(), Some(file_pos)));
         }
 
         loop {
@@ -321,6 +327,8 @@ impl<'a> ParseTokenIter<'a> {
             if let Some(lex_token) = self.peek_skip_space_line() {
                 if let LexTokenKind::Sym(Sym::CurlyBracketEnd) = lex_token.kind {
                     self.next_skip_space_line(); // Consume "CurlyBracketEnd".
+
+                    file_pos.set_end(&lex_token.file_pos)?;
                     break;
                 }
             }
@@ -329,20 +337,33 @@ impl<'a> ParseTokenIter<'a> {
             block_tokens.push(token);
         }
 
-        Ok(AstToken::Block(header, block_id, block_tokens))
+        Ok(AstToken::Block(header, file_pos, block_id, block_tokens))
+    }
+
+    /// Peeks at the next token in the iterator and returns its FilePosition.
+    pub fn peek_file_pos(&mut self) -> CustomResult<FilePosition> {
+        if let Some(lex_token) = self.peek_skip_space() {
+            Ok(lex_token.file_pos)
+        } else {
+            Err(self.err("Iter returned None when peeking FilePosition.".into(), None))
+        }
     }
 
     pub fn parse_keyword(
         &mut self,
         keyword: Kw,
-        file_pos: &FilePosition,
+        kw_file_pos: FilePosition,
     ) -> CustomResult<AstToken> {
-        KeyworkParser::parse(self, keyword, file_pos)
+        KeyworkParser::parse(self, keyword, kw_file_pos)
     }
 
     pub fn parse_expr(&mut self, stop_conds: &[Sym]) -> CustomResult<Expr> {
-        ExprParser::parse(self, stop_conds)
-            .map(|x| x.ok_or_else(|| self.err("Expression was empty.".into())))?
+        if let Some(expr) = ExprParser::parse(self, stop_conds)? {
+            Ok(expr)
+        } else {
+            let file_pos = self.iter.peek().map(|token| token.file_pos.to_owned());
+            Err(self.err("Expression was empty when not allowed.".into(), file_pos))
+        }
     }
 
     /// Parse the next expression. The next expression is allowed to be empty.
@@ -350,7 +371,7 @@ impl<'a> ParseTokenIter<'a> {
         ExprParser::parse(self, stop_conds)
     }
 
-    pub fn parse_type(&mut self, generics: Option<&Generics>) -> CustomResult<Ty> {
+    pub fn parse_type(&mut self, generics: Option<&Generics>) -> CustomResult<(Ty, FilePosition)> {
         TypeParser::parse(self, generics)
     }
 
@@ -367,26 +388,38 @@ impl<'a> ParseTokenIter<'a> {
         parse_value: bool,
         is_const: bool,
         generics: Option<&Generics>,
+        mut file_pos: FilePosition,
     ) -> CustomResult<Var> {
         // TODO: Handle file_pos.
 
-        let ty = if let Some(next_token) = self.peek_skip_space() {
+        let (ty, ty_file_pos) = if let Some(next_token) = self.peek_skip_space() {
             match next_token.kind {
                 LexTokenKind::Sym(Sym::Colon) if parse_type => {
                     self.next_skip_space(); // Skip the colon.
-                    Some(self.parse_type(generics)?)
+                    let (ty, ty_file_pos) = self.parse_type(generics)?;
+
+                    file_pos.set_end(&ty_file_pos)?;
+                    (Some(ty), Some(ty_file_pos))
                 }
-                _ => None,
+                _ => (None, None),
             }
         } else {
-            None
+            (None, None)
         };
 
         let value = if let Some(next_token) = self.peek_skip_space() {
             match next_token.kind {
                 LexTokenKind::Sym(Sym::Equals) if parse_value => {
                     self.next_skip_space(); // Skip the Equals.
-                    Some(Box::new(self.parse_expr(&DEFAULT_STOP_CONDS)?))
+                    let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
+
+                    if let Some(file_pos_last) = expr.file_pos() {
+                        file_pos.set_end(file_pos_last)?;
+                    } else {
+                        unreachable!("Value for var doesn't have a file_pos: {:#?}", expr);
+                    }
+
+                    Some(Box::new(expr))
                 }
                 _ => None,
             }
@@ -394,7 +427,15 @@ impl<'a> ParseTokenIter<'a> {
             None
         };
 
-        Ok(Var::new(ident.into(), ty, None, value, None, is_const))
+        Ok(Var::new(
+            ident.into(),
+            ty,
+            None,
+            value,
+            Some(file_pos),
+            ty_file_pos,
+            is_const,
+        ))
     }
 
     /// Parses a list of arguments. This can be used on generic list containing
@@ -404,7 +445,7 @@ impl<'a> ParseTokenIter<'a> {
         &mut self,
         start_symbol: Sym,
         end_symbol: Sym,
-    ) -> CustomResult<Vec<Argument>> {
+    ) -> CustomResult<(Vec<Argument>, FilePosition)> {
         let mut arguments = Vec::new();
 
         debug!(
@@ -412,19 +453,28 @@ impl<'a> ParseTokenIter<'a> {
             start_symbol, end_symbol
         );
 
+        let mut file_pos = self.peek_file_pos()?;
+
         // Skip the first symbol and ensure that it is the `start_symbol`.
         if let Some(start_token) = self.next_skip_space_line() {
             match start_token.kind {
                 LexTokenKind::Sym(s) if s == start_symbol => (),
                 _ => {
-                    return Err(self.err(format!(
-                        "Bad start symbol when parsing arg list. Expected: {:?}, got: {:?}",
-                        start_symbol, start_token
-                    )))
+                    return Err(self.err(
+                        format!(
+                            "Bad start symbol when parsing arg list. Expected: {:?}, got: {:?}",
+                            start_symbol, start_token
+                        ),
+                        Some(start_token.file_pos),
+                    ))
                 }
             }
         } else {
-            return Err(self.err("Received None when parsing `start_token` in arg list.".into()));
+            // TODO: Where should the `file_pos` be fetched from?
+            return Err(self.err(
+                "Received None when parsing `start_token` in arg list.".into(),
+                Some(file_pos),
+            ));
         }
 
         // Edge case if this arg list contains no items, do early return with
@@ -434,7 +484,9 @@ impl<'a> ParseTokenIter<'a> {
                 LexTokenKind::Sym(s) if s == end_symbol => {
                     // Consume the `end_symbol` of the list and return.
                     self.next_skip_space_line();
-                    return Ok(arguments);
+
+                    file_pos.set_end(&next.file_pos)?;
+                    return Ok((arguments, file_pos));
                 }
                 _ => (),
             }
@@ -496,7 +548,9 @@ impl<'a> ParseTokenIter<'a> {
                             match next.kind {
                                 LexTokenKind::Sym(s) if s == end_symbol => {
                                     self.next_skip_space_line();
-                                    return Ok(arguments);
+
+                                    file_pos.set_end(&next.file_pos)?;
+                                    return Ok((arguments, file_pos));
                                 }
                                 _ => (),
                             }
@@ -504,17 +558,24 @@ impl<'a> ParseTokenIter<'a> {
                         continue;
                     }
                     LexTokenKind::Sym(s) if s == end_symbol => {
-                        return Ok(arguments);
+                        file_pos.set_end(&lex_token.file_pos)?;
+                        return Ok((arguments, file_pos));
                     }
                     _ => {
-                        return Err(self.err(format!(
-                            "Received invalid LexToken at end of argument in list: {:?}",
-                            lex_token
-                        )))
+                        return Err(self.err(
+                            format!(
+                                "Received invalid LexToken at end of argument in list: {:?}",
+                                lex_token
+                            ),
+                            Some(lex_token.file_pos),
+                        ))
                     }
                 }
             } else {
-                return Err(self.err("Received None at end of argument in list.".into()));
+                return Err(self.err(
+                    "Received None at end of argument in list.".into(),
+                    Some(file_pos),
+                ));
             }
         }
     }
@@ -531,23 +592,31 @@ impl<'a> ParseTokenIter<'a> {
         start_symbol: Sym,
         end_symbol: Sym,
         generics: Option<&Generics>,
-    ) -> CustomResult<(Vec<Var>, bool)> {
+    ) -> CustomResult<(Vec<Var>, bool, FilePosition)> {
         let mut parameters = Vec::new();
         let mut is_var_arg = false;
+
+        let mut file_pos = self.peek_file_pos()?;
 
         // Skip the first symbol and ensure that it is the `start_symbol`.
         if let Some(start_token) = self.next_skip_space_line() {
             match start_token.kind {
                 LexTokenKind::Sym(s) if s == start_symbol => (),
                 _ => {
-                    return Err(self.err(format!(
-                        "Bad start symbol when parsing param list. Expected: {:?}, got: {:?}",
-                        start_symbol, start_token
-                    )))
+                    return Err(self.err(
+                        format!(
+                            "Bad start symbol when parsing param list. Expected: {:?}, got: {:?}",
+                            start_symbol, start_token
+                        ),
+                        Some(start_token.file_pos),
+                    ))
                 }
             }
         } else {
-            return Err(self.err("Received None when parsing `start_token` in param list.".into()));
+            return Err(self.err(
+                "Received None when parsing `start_token` in param list.".into(),
+                Some(file_pos),
+            ));
         }
 
         // Edge case if this param list contains no items, do early return with
@@ -557,7 +626,9 @@ impl<'a> ParseTokenIter<'a> {
                 LexTokenKind::Sym(s) if s == end_symbol => {
                     // Consume the `end_symbol` of the list and return.
                     self.next_skip_space_line();
-                    return Ok((parameters, is_var_arg));
+
+                    file_pos.set_end(&next.file_pos)?;
+                    return Ok((parameters, is_var_arg, file_pos));
                 }
                 _ => (),
             }
@@ -572,8 +643,14 @@ impl<'a> ParseTokenIter<'a> {
                         let parse_type = true;
                         let parse_value = true;
                         let is_const = false;
-                        let parameter =
-                            self.parse_var(&ident, parse_type, parse_value, is_const, generics)?;
+                        let parameter = self.parse_var(
+                            &ident,
+                            parse_type,
+                            parse_value,
+                            is_const,
+                            generics,
+                            lex_token.file_pos,
+                        )?;
 
                         parameters.push(parameter);
                     }
@@ -581,14 +658,22 @@ impl<'a> ParseTokenIter<'a> {
                     LexTokenKind::Sym(Sym::TripleDot) => is_var_arg = true,
 
                     _ => {
-                        return Err(self.err(format!(
-                            "Invalid token when parsing ident in param list: {:?}",
-                            lex_token
-                        )));
+                        return Err(self.err(
+                            format!(
+                                "Invalid token when parsing ident in param list: {:?}",
+                                lex_token
+                            ),
+                            Some(lex_token.file_pos),
+                        ));
                     }
                 }
             } else {
-                return Err(self.err("Received None when parsing ident in param list.".into()));
+                // TODO: Where should the `file_pos` be fetched from? Can probably
+                //       use one of the previous file_poses parsed in the logic above.
+                return Err(self.err(
+                    "Received None when parsing ident in param list.".into(),
+                    Some(file_pos),
+                ));
             };
 
             // A parameter has just been parsed above. The next character should
@@ -604,7 +689,9 @@ impl<'a> ParseTokenIter<'a> {
                             match next.kind {
                                 LexTokenKind::Sym(s) if s == end_symbol => {
                                     self.next_skip_space_line();
-                                    return Ok((parameters, is_var_arg));
+
+                                    file_pos.set_end(&next.file_pos)?;
+                                    return Ok((parameters, is_var_arg, file_pos));
                                 }
                                 _ => (),
                             }
@@ -612,17 +699,26 @@ impl<'a> ParseTokenIter<'a> {
                         continue;
                     }
                     LexTokenKind::Sym(s) if s == end_symbol => {
-                        return Ok((parameters, is_var_arg));
+                        file_pos.set_end(&lex_token.file_pos)?;
+                        return Ok((parameters, is_var_arg, file_pos));
                     }
                     _ => {
-                        return Err(self.err(format!(
-                            "Received invalid LexToken at end of parameter in list: {:?}",
-                            lex_token
-                        )))
+                        return Err(self.err(
+                            format!(
+                                "Received invalid LexToken at end of parameter in list: {:?}",
+                                lex_token
+                            ),
+                            Some(lex_token.file_pos),
+                        ))
                     }
                 }
             } else {
-                return Err(self.err("Received None at end of parameter in list.".into()));
+                // TODO: Where should the `file_pos` be fetched from? Can probably
+                //       use one of the previous file_poses parsed in the logic above.
+                return Err(self.err(
+                    "Received None at end of parameter in list.".into(),
+                    Some(file_pos),
+                ));
             }
         }
     }
@@ -646,7 +742,10 @@ impl<'a> ParseTokenIter<'a> {
             }
             Ok(())
         } else {
-            Err(self.err("Tried to rewind to before the iterator (pos < 0).".into()))
+            Err(self.err(
+                "Tried to rewind to before the iterator (pos < 0).".into(),
+                None,
+            ))
         }
     }
 
@@ -666,7 +765,7 @@ impl<'a> ParseTokenIter<'a> {
                     _ => return Ok(()),
                 }
             } else {
-                return Err(self.err("Got None when peeking during rewind.".into()));
+                return Err(self.err("Got None when peeking during rewind.".into(), None));
             }
         }
     }
@@ -777,18 +876,12 @@ impl<'a> ParseTokenIter<'a> {
     /// When a error is found, the iterator will move forward until a "break"
     /// symbol is found. This is done to try and find a good new starting point
     /// to continue parsing from.
-    pub(super) fn err(&mut self, msg: String) -> LangError {
+    pub(super) fn err(&mut self, msg: String, file_pos: Option<FilePosition>) -> LangError {
         while let Some(lex_token) = self.iter.next() {
             if lex_token.is_break_symbol() {
                 break;
             }
         }
-        LangError::new_backtrace(
-            msg,
-            ParseError {
-                file_pos: self.file_pos.to_owned(),
-            },
-            true,
-        )
+        LangError::new(msg, ParseError, file_pos)
     }
 }

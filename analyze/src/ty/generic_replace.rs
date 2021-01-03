@@ -87,7 +87,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         let new_struct_name = self.new_struct.borrow().name.clone();
 
-        if let AstToken::Block(BlockHeader::Function(func), old_id, ..) = ast_token {
+        if let AstToken::Block(BlockHeader::Function(func), _, old_id, ..) = ast_token {
             func.borrow_mut().method_structure = Some(self.new_ty.clone());
 
             // Insert a reference from the "new" structure to this new method.

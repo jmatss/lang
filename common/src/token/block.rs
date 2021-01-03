@@ -99,19 +99,24 @@ pub struct Struct {
     pub name: String,
     pub generics: Option<Vec<String>>,
     pub implements: Option<Vec<Ty>>,
-    pub members: Option<Vec<Rc<RefCell<Var>>>>, // TODO: extends: Vec<Type>
+    pub members: Option<Vec<Rc<RefCell<Var>>>>,
 
     /// The key is the name of the method.
     pub methods: Option<HashMap<String, Rc<RefCell<Function>>>>,
 }
 
 impl Struct {
-    pub fn new(name: String) -> Self {
+    pub fn new(
+        name: String,
+        generics: Option<Vec<String>>,
+        implements: Option<Vec<Ty>>,
+        members: Option<Vec<Rc<RefCell<Var>>>>,
+    ) -> Self {
         Self {
             name,
-            generics: None,
-            implements: None,
-            members: None,
+            generics,
+            implements,
+            members,
             methods: None,
         }
     }
@@ -166,9 +171,6 @@ impl Function {
 
     /// Returns the "full name" which is the name containing possible structure
     /// and generics as well.
-    ///
-    /// Format:
-    ///   "<STRUCTURE_NAME>:<GENERICS>-<FUNCTION_NAME>"
     pub fn full_name(&self) -> CustomResult<String> {
         if let Some(ty) = &self.method_structure {
             let (structure_name, generics) = if let Ty::CompoundType(inner_ty, generics) = ty {
@@ -182,6 +184,7 @@ impl Function {
                 return Err(LangError::new(
                     format!("Unable to get full name for method: {:#?}", self),
                     LangErrorKind::GeneralError,
+                    None,
                 ));
             };
 

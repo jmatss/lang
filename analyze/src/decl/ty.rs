@@ -38,7 +38,7 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
     }
 
     fn visit_struct(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Struct(struct_), struct_id, ..) = &mut ast_token {
+        if let AstToken::Block(BlockHeader::Struct(struct_), _, struct_id, ..) = &mut ast_token {
             let mut analyze_context = self.analyze_context.borrow_mut();
 
             // The struct will be added in the scope of its parent, so fetch the
@@ -71,7 +71,7 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
     }
 
     fn visit_enum(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Enum(enum_), enum_id, ..) = &mut ast_token {
+        if let AstToken::Block(BlockHeader::Enum(enum_), _, enum_id, ..) = &mut ast_token {
             let mut analyze_context = self.analyze_context.borrow_mut();
 
             // The enum will be added in the scope of its parent, so fetch the
@@ -103,7 +103,8 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
     }
 
     fn visit_interface(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Interface(interface), interface_id, ..) = &mut ast_token
+        if let AstToken::Block(BlockHeader::Interface(interface), _, interface_id, ..) =
+            &mut ast_token
         {
             let mut analyze_context = self.analyze_context.borrow_mut();
 

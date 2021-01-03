@@ -58,7 +58,7 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
     /// the identifiers with known names for the generics defined on the structure.
     /// This will be done for both the method headers and everything in their bodies.
     fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Implement(ident), _, body) = ast_token {
+        if let AstToken::Block(BlockHeader::Implement(ident), _, _, body) = ast_token {
             let analyze_context = self.analyze_context.borrow();
 
             // TODO: Will structures always be defined in the default block?

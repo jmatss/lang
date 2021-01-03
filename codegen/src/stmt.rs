@@ -1,6 +1,7 @@
 use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::CustomResult,
+    file::FilePosition,
     token::{
         expr::Expr,
         op::AssignOperator,
@@ -16,13 +17,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_stmt(&mut self, stmt: &mut Stmt) -> CustomResult<()> {
         match stmt {
             Stmt::Return(expr_opt, ..) => self.compile_return(expr_opt),
-            Stmt::Yield(expr, ..) => self.compile_yield(expr),
-            Stmt::Break(..) => self.compile_break(),
-            Stmt::Continue(..) => self.compile_continue(),
-            Stmt::Use(path, ..) => self.compile_use(path),
-            Stmt::Package(path, ..) => self.compile_package(path),
-            Stmt::Increment(expr, ..) => self.compile_inc(expr),
-            Stmt::Decrement(expr, ..) => self.compile_dec(expr),
+            Stmt::Yield(expr, file_pos) => self.compile_yield(expr, file_pos),
+            Stmt::Break(file_pos) => self.compile_break(file_pos),
+            Stmt::Continue(file_pos) => self.compile_continue(file_pos),
+            Stmt::Use(path) => self.compile_use(path),
+            Stmt::Package(path) => self.compile_package(path),
+            Stmt::Increment(expr, file_pos) => self.compile_inc(expr, file_pos),
+            Stmt::Decrement(expr, file_pos) => self.compile_dec(expr, file_pos),
             Stmt::Modifier(modifier) => self.compile_modifier(modifier),
 
             // Only the "DeferExecution" are compiled into code, the "Defer" is
@@ -42,21 +43,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     let basic_value = CodeGen::any_into_basic_value(any_value)?;
                     self.compile_var_store(&var, basic_value)?;
                 } else if var.is_const {
-                    return Err(self.err(format!(
-                        "const var decl of \"{}\" has no value set",
-                        &var.name
-                    )));
+                    return Err(self.err(
+                        format!("const var decl of \"{}\" has no value set", &var.name),
+                        var.file_pos.to_owned(),
+                    ));
                 }
                 Ok(())
             }
             // TODO: Add other external declares other than func (var, struct etc.)
-            Stmt::ExternalDecl(func, ..) => {
+            Stmt::ExternalDecl(func, file_pos) => {
                 let linkage = Linkage::External;
-                self.compile_func_proto(&func.borrow(), Some(linkage))?;
+                self.compile_func_proto(&func.borrow(), file_pos.to_owned(), Some(linkage))?;
                 Ok(())
             }
-            Stmt::Assignment(assign_op, lhs, rhs, ..) => {
-                self.compile_assign(assign_op, lhs, rhs)?;
+            Stmt::Assignment(assign_op, lhs, rhs, file_pos) => {
+                self.compile_assign(assign_op, lhs, rhs, file_pos)?;
                 Ok(())
             }
         }
@@ -73,23 +74,29 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    fn compile_yield(&mut self, expr: &Expr) -> CustomResult<()> {
-        Err(self.err("TODO: Implement \"yield\" statement.".into()))
+    fn compile_yield(&mut self, expr: &Expr, file_pos: &Option<FilePosition>) -> CustomResult<()> {
+        Err(self.err(
+            "TODO: Implement \"yield\" statement.".into(),
+            file_pos.to_owned(),
+        ))
     }
 
-    fn compile_break(&mut self) -> CustomResult<()> {
+    fn compile_break(&mut self, file_pos: &Option<FilePosition>) -> CustomResult<()> {
         let id = self.cur_block_id;
         let merge_block = self.get_branchable_merge_block(id)?;
         self.builder.build_unconditional_branch(merge_block);
         Ok(())
     }
 
-    fn compile_continue(&mut self) -> CustomResult<()> {
+    fn compile_continue(&mut self, file_pos: &Option<FilePosition>) -> CustomResult<()> {
         if let Some(branch_block) = self.cur_branch_block {
             self.builder.build_unconditional_branch(branch_block);
             Ok(())
         } else {
-            Err(self.err("Branch block None when compiling \"continue\".".into()))
+            Err(self.err(
+                "Branch block None when compiling \"continue\".".into(),
+                file_pos.to_owned(),
+            ))
         }
     }
 
@@ -99,19 +106,29 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_package(&mut self, path: &Path) -> CustomResult<()> {
-        Err(self.err("TODO: Implement \"package\" statement.".into()))
+        Err(self.err(
+            "TODO: Implement \"package\" statement.".into(),
+            Some(path.file_pos.to_owned()),
+        ))
     }
 
-    fn compile_inc(&mut self, expr: &mut Expr) -> CustomResult<()> {
+    fn compile_inc(
+        &mut self,
+        expr: &mut Expr,
+        file_pos: &Option<FilePosition>,
+    ) -> CustomResult<()> {
         let any_value = self.compile_expr(expr, ExprTy::LValue)?;
 
         let ptr = if let AnyTypeEnum::PointerType(_) = any_value.get_type() {
             any_value.into_pointer_value()
         } else {
-            return Err(self.err(format!(
-                "Increment expr didn't eval to pointer.\nExpr: {:#?}\nany_value: {:#?}",
-                expr, any_value
-            )));
+            return Err(self.err(
+                format!(
+                    "Increment expr didn't eval to pointer.\nExpr: {:#?}\nany_value: {:#?}",
+                    expr, any_value
+                ),
+                file_pos.to_owned(),
+            ));
         };
 
         let val = self.builder.build_load(ptr, "inc.load");
@@ -124,26 +141,36 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.builder.build_int_add(value, one, "inc")
             }
         } else {
-            return Err(self.err(format!(
-                "Increment value in pointer didn't eval to int.\nExpr: {:#?}\nany_value: {:#?}",
-                expr, any_value
-            )));
+            return Err(self.err(
+                format!(
+                    "Increment value in pointer didn't eval to int.\nExpr: {:#?}\nany_value: {:#?}",
+                    expr, any_value
+                ),
+                file_pos.to_owned(),
+            ));
         };
 
         self.builder.build_store(ptr, new_value);
         Ok(())
     }
 
-    fn compile_dec(&mut self, expr: &mut Expr) -> CustomResult<()> {
+    fn compile_dec(
+        &mut self,
+        expr: &mut Expr,
+        file_pos: &Option<FilePosition>,
+    ) -> CustomResult<()> {
         let any_value = self.compile_expr(expr, ExprTy::LValue)?;
 
         let ptr = if let AnyTypeEnum::PointerType(_) = any_value.get_type() {
             any_value.into_pointer_value()
         } else {
-            return Err(self.err(format!(
-                "Decrement expr didn't eval to pointer.\nExpr: {:#?}\nany_value: {:#?}",
-                expr, any_value
-            )));
+            return Err(self.err(
+                format!(
+                    "Decrement expr didn't eval to pointer.\nExpr: {:#?}\nany_value: {:#?}",
+                    expr, any_value
+                ),
+                file_pos.to_owned(),
+            ));
         };
 
         let val = self.builder.build_load(ptr, "dec.load");
@@ -156,10 +183,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.builder.build_int_sub(value, one, "dec")
             }
         } else {
-            return Err(self.err(format!(
-                "Decrement value in pointer didn't eval to int.\nExpr: {:#?}\nany_value: {:#?}",
-                expr, any_value
-            )));
+            return Err(self.err(
+                format!(
+                    "Decrement value in pointer didn't eval to int.\nExpr: {:#?}\nany_value: {:#?}",
+                    expr, any_value
+                ),
+                file_pos.to_owned(),
+            ));
         };
 
         self.builder.build_store(ptr, new_value);
@@ -167,7 +197,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     fn compile_modifier(&mut self, modifier: &Modifier) -> CustomResult<()> {
-        Err(self.err("TODO: Implement \"modifier\" statement.".into()))
+        Err(self.err("TODO: Implement \"modifier\" statement.".into(), None))
     }
 
     // TODO: Check type to see that the assignment is valid.
@@ -176,16 +206,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         assign_op: &AssignOperator,
         lhs: &mut Expr,
         rhs: &mut Expr,
+        file_pos: &Option<FilePosition>,
     ) -> CustomResult<InstructionValue<'ctx>> {
         let lhs_ptr = {
             let lhs_any = self.compile_expr(lhs, ExprTy::LValue)?;
             if lhs_any.is_pointer_value() {
                 lhs_any.into_pointer_value()
             } else {
-                return Err(self.err(format!(
-                    "Lhs not a pointer when compiling assignment\nlhs: {:#?}\nlhs_any: {:#?}, rhs: {:#?}",
-                    lhs, lhs_any, rhs
-                )));
+                return Err(self.err(
+                    format!(
+                        "Lhs not a pointer when compiling assignment\nlhs: {:#?}\nlhs_any: {:#?}, rhs: {:#?}",
+                        lhs, lhs_any, rhs
+                    ),
+                    file_pos.to_owned()
+                ));
             }
         };
         let lhs_val = self.builder.build_load(lhs_ptr, "assign.lhs.val");
@@ -211,10 +245,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .into(),
                 _ => {
-                    return Err(self.err(format!(
-                        "Invalid type for AssignAddition: {:?}",
-                        lhs_val.get_type()
-                    )))
+                    return Err(self.err(
+                        format!("Invalid type for AssignAddition: {:?}", lhs_val.get_type()),
+                        file_pos.to_owned(),
+                    ))
                 }
             },
             AssignOperator::AssignSub => match lhs_val {
@@ -235,10 +269,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .into(),
                 _ => {
-                    return Err(self.err(format!(
-                        "Invalid type for AssignSubtraction: {:?}",
-                        lhs_val.get_type()
-                    )))
+                    return Err(self.err(
+                        format!(
+                            "Invalid type for AssignSubtraction: {:?}",
+                            lhs_val.get_type()
+                        ),
+                        file_pos.to_owned(),
+                    ))
                 }
             },
             AssignOperator::AssignMul => match lhs_val {
@@ -259,10 +296,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .into(),
                 _ => {
-                    return Err(self.err(format!(
-                        "Invalid type for AssignMultiplication: {:?}",
-                        lhs_val.get_type()
-                    )))
+                    return Err(self.err(
+                        format!(
+                            "Invalid type for AssignMultiplication: {:?}",
+                            lhs_val.get_type()
+                        ),
+                        file_pos.to_owned(),
+                    ))
                 }
             },
             AssignOperator::AssignDiv => match lhs_val {
@@ -284,10 +324,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .into(),
                 _ => {
-                    return Err(self.err(format!(
-                        "Invalid type for AssignDivision: {:?}",
-                        lhs_val.get_type()
-                    )))
+                    return Err(self.err(
+                        format!("Invalid type for AssignDivision: {:?}", lhs_val.get_type()),
+                        file_pos.to_owned(),
+                    ))
                 }
             },
             AssignOperator::AssignMod => match lhs_val {
@@ -309,10 +349,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .into(),
                 _ => {
-                    return Err(self.err(format!(
-                        "Invalid type for AssignModulus: {:?}",
-                        lhs_val.get_type()
-                    )))
+                    return Err(self.err(
+                        format!("Invalid type for AssignModulus: {:?}", lhs_val.get_type()),
+                        file_pos.to_owned(),
+                    ))
                 }
             },
             AssignOperator::AssignBitAnd => match lhs_val {
@@ -325,10 +365,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .into(),
                 _ => {
-                    return Err(self.err(format!(
-                        "Invalid type for AssignBitAnd: {:?}",
-                        lhs_val.get_type()
-                    )))
+                    return Err(self.err(
+                        format!("Invalid type for AssignBitAnd: {:?}", lhs_val.get_type()),
+                        file_pos.to_owned(),
+                    ))
                 }
             },
             AssignOperator::AssignBitOr => match lhs_val {
@@ -341,10 +381,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .into(),
                 _ => {
-                    return Err(self.err(format!(
-                        "Invalid type for AssignBitOr: {:?}",
-                        lhs_val.get_type()
-                    )))
+                    return Err(self.err(
+                        format!("Invalid type for AssignBitOr: {:?}", lhs_val.get_type()),
+                        file_pos.to_owned(),
+                    ))
                 }
             },
             AssignOperator::AssignBitXor => match lhs_val {
@@ -357,10 +397,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .into(),
                 _ => {
-                    return Err(self.err(format!(
-                        "Invalid type for AssignBitXor: {:?}",
-                        lhs_val.get_type()
-                    )))
+                    return Err(self.err(
+                        format!("Invalid type for AssignBitXor: {:?}", lhs_val.get_type()),
+                        file_pos.to_owned(),
+                    ))
                 }
             },
             AssignOperator::AssignShl => match lhs_val {
@@ -373,10 +413,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .into(),
                 _ => {
-                    return Err(self.err(format!(
-                        "Invalid type for AssignLeftShift: {:?}",
-                        lhs_val.get_type()
-                    )))
+                    return Err(self.err(
+                        format!("Invalid type for AssignLeftShift: {:?}", lhs_val.get_type()),
+                        file_pos.to_owned(),
+                    ))
                 }
             },
             AssignOperator::AssignShr => match lhs_val {
@@ -391,10 +431,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                     .into(),
                 _ => {
-                    return Err(self.err(format!(
-                        "Invalid type for AssignRightShift: {:?}",
-                        lhs_val.get_type()
-                    )))
+                    return Err(self.err(
+                        format!(
+                            "Invalid type for AssignRightShift: {:?}",
+                            lhs_val.get_type()
+                        ),
+                        file_pos.to_owned(),
+                    ))
                 }
             },
         };
