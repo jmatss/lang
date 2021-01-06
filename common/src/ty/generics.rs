@@ -39,6 +39,14 @@ impl Generics {
         }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            names: Vec::with_capacity(0),
+            types: Vec::with_capacity(0),
+            lookup: HashMap::with_capacity(0),
+        }
+    }
+
     pub fn len(&self) -> usize {
         if self.names.is_empty() {
             self.types.len()

@@ -34,7 +34,6 @@ pub struct TraverseContext {
     pub copy_nr: Option<usize>,
 
     pub block_id: usize,
-    pub parent_block_id: usize,
 
     // TODO: Should this contains file information about the parent as well?
     //       Ex. if this is a type, should the information about what this type
@@ -58,7 +57,6 @@ impl<'a> AstTraverser<'a> {
                 deep_copy: false,
                 copy_nr: None,
                 block_id: 0,
-                parent_block_id: usize::MAX,
                 file_pos: FilePosition::default(),
             },
         }
@@ -107,24 +105,14 @@ impl<'a> AstTraverser<'a> {
             v.visit_token(ast_token, &self.traverse_context);
         }
 
-        // TODO: Can one move this into the match block below? Currently needed
-        //       since can't borrow mut twice.
-        if let AstToken::Block(_, _, id, _) = &ast_token {
-            if self.traverse_context.block_id != *id {
-                self.traverse_context.parent_block_id = self.traverse_context.block_id;
-                self.traverse_context.block_id = *id;
-            }
-            self.traverse_block(ast_token);
-        }
-
         match &mut ast_token {
-            AstToken::Block(_, _, id, body) => {
-                for body_token in body {
-                    if self.traverse_context.block_id != *id {
-                        self.traverse_context.parent_block_id = self.traverse_context.block_id;
+            AstToken::Block(..) => {
+                self.traverse_block(ast_token);
+                if let AstToken::Block(.., id, body) = ast_token {
+                    for body_token in body {
                         self.traverse_context.block_id = *id;
+                        self.traverse_token(body_token);
                     }
-                    self.traverse_token(body_token);
                 }
             }
             AstToken::Expr(expr) => self.traverse_expr(expr),
@@ -148,6 +136,10 @@ impl<'a> AstTraverser<'a> {
         let old_pos = self.traverse_context.file_pos.to_owned();
         if let Some(file_pos) = ast_token.file_pos() {
             self.traverse_context.file_pos = file_pos.to_owned();
+        }
+
+        if let AstToken::Block(.., id, _) = ast_token {
+            self.traverse_context.block_id = *id;
         }
 
         debug!("Visiting block -- {:#?}", ast_token);

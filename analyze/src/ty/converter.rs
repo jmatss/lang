@@ -12,7 +12,7 @@ use common::{
 use log::debug;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::{AnalyzeContext, BlockInfo};
+use crate::{block::BlockInfo, AnalyzeContext};
 
 use super::generic_replace::GenericsReplacer;
 
@@ -112,7 +112,7 @@ impl<'a> TypeConverter<'a> {
                     methods.clear();
                 }
 
-                let generics = if let Ty::CompoundType(.., generics) = gen_structure_ty {
+                let generics = if let Ty::CompoundType(_, generics, ..) = gen_structure_ty {
                     generics.clone()
                 } else {
                     let err = self.analyze_context.err(format!(
@@ -218,7 +218,7 @@ impl<'a> TypeConverter<'a> {
             // TODO: Implement for types other than structs.
 
             for (new_idx, gen_structure_ty) in generic_structure_tys.iter().enumerate() {
-                let generics = if let Ty::CompoundType(.., generics) = &gen_structure_ty {
+                let generics = if let Ty::CompoundType(_, generics, ..) = &gen_structure_ty {
                     generics.clone()
                 } else {
                     let err = self.analyze_context.err(format!(

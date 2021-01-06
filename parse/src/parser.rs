@@ -169,7 +169,7 @@ impl<'a> ParseTokenIter<'a> {
 
     /// Takes ownership of the current `block_id` so that it can be given to a
     /// block and updates the `self.block_id` to a new unique ID.
-    pub fn reserve_block_id(&mut self) -> usize {
+    pub fn reserve_block_id(&mut self) -> BlockId {
         let block_id = self.block_id;
         self.block_id += 1;
         block_id
@@ -182,21 +182,12 @@ impl<'a> ParseTokenIter<'a> {
 
     /// Returns the next ParseToken from the iterator.
     pub fn next_token(&mut self) -> CustomResult<AstToken> {
-        let mark = self.iter.mark();
-
-        if let Some(lex_token) = self.iter.next() {
+        if let Some(lex_token) = self.next_skip_space_line() {
             // TODO: Clean up this mess with a mix of ParseToken/ParseTokenKind
             //       (some arms returns ParseTokens, others cascades ParseTokenKinds).
+            debug!("lex_token: {:#?}", lex_token);
 
             let mut file_pos = lex_token.file_pos.to_owned();
-
-            // Skip any "break" and white space symbols. Call this function
-            // recursively to get an "actual" token.
-            if lex_token.is_break_symbol() {
-                return self.next_token();
-            } else if let LexTokenKind::Sym(Sym::WhiteSpace(_)) = lex_token.kind {
-                return self.next_token();
-            }
 
             Ok(match lex_token.kind {
                 LexTokenKind::Kw(keyword) => self.parse_keyword(keyword, lex_token.file_pos)?,
@@ -213,7 +204,7 @@ impl<'a> ParseTokenIter<'a> {
                 // expression atm) or it will be an expression.
                 LexTokenKind::Ident(_) => {
                     // Put back the ident, it is a part of a expression.
-                    self.rewind_to_mark(mark);
+                    self.rewind()?;
 
                     // The first parsed expr can either be the lhs or the rhs.
                     // This will be figure out later in this block.
@@ -253,7 +244,7 @@ impl<'a> ParseTokenIter<'a> {
                 LexTokenKind::Sym(Sym::CurlyBracketBegin) => {
                     // Put back the CurlyBracketBegin, it is expected to be the
                     // first symbol found in the `self.next_block` function.
-                    self.rewind_to_mark(mark);
+                    self.rewind()?;
                     self.next_block(BlockHeader::Anonymous)?
                 }
 
@@ -288,7 +279,7 @@ impl<'a> ParseTokenIter<'a> {
                 LexTokenKind::Lit(_) | LexTokenKind::Sym(_) => {
                     // Put back the token that was just popped and then parse
                     // everything together as an expression.
-                    self.rewind_to_mark(mark);
+                    self.rewind()?;
                     let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
                     AstToken::Expr(expr)
                 }
@@ -371,7 +362,7 @@ impl<'a> ParseTokenIter<'a> {
         ExprParser::parse(self, stop_conds)
     }
 
-    pub fn parse_type(&mut self, generics: Option<&Generics>) -> CustomResult<(Ty, FilePosition)> {
+    pub fn parse_type(&mut self, generics: Option<&Generics>) -> CustomResult<Ty> {
         TypeParser::parse(self, generics)
     }
 
@@ -396,7 +387,8 @@ impl<'a> ParseTokenIter<'a> {
             match next_token.kind {
                 LexTokenKind::Sym(Sym::Colon) if parse_type => {
                     self.next_skip_space(); // Skip the colon.
-                    let (ty, ty_file_pos) = self.parse_type(generics)?;
+                    let ty = self.parse_type(generics)?;
+                    let ty_file_pos = *ty.file_pos().unwrap();
 
                     file_pos.set_end(&ty_file_pos)?;
                     (Some(ty), Some(ty_file_pos))
@@ -448,12 +440,12 @@ impl<'a> ParseTokenIter<'a> {
     ) -> CustomResult<(Vec<Argument>, FilePosition)> {
         let mut arguments = Vec::new();
 
-        debug!(
-            "Parsing arg list, start symbol: {:?}, end symbol: {:?}",
-            start_symbol, end_symbol
-        );
-
         let mut file_pos = self.peek_file_pos()?;
+
+        debug!(
+            "Parsing arg list, start symbol: {:?}, end symbol: {:?}, file_pos: {:#?}",
+            start_symbol, end_symbol, file_pos
+        );
 
         // Skip the first symbol and ensure that it is the `start_symbol`.
         if let Some(start_token) = self.next_skip_space_line() {

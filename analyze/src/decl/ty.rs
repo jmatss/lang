@@ -43,7 +43,7 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
 
             // The struct will be added in the scope of its parent, so fetch the
             // block id for the parent.
-            let parent_id = match analyze_context.get_parent(*struct_id) {
+            let parent_id = match analyze_context.get_parent_id(*struct_id) {
                 Ok(parent_id) => parent_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -76,7 +76,7 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
 
             // The enum will be added in the scope of its parent, so fetch the
             // block id for the parent.
-            let parent_id = match analyze_context.get_parent(*enum_id) {
+            let parent_id = match analyze_context.get_parent_id(*enum_id) {
                 Ok(parent_id) => parent_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -110,7 +110,7 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
 
             // The interface will be added in the scope of its parent, so fetch
             // the block id for the parent.
-            let parent_id = match analyze_context.get_parent(*interface_id) {
+            let parent_id = match analyze_context.get_parent_id(*interface_id) {
                 Ok(parent_id) => parent_id,
                 Err(err) => {
                     self.errors.push(err);

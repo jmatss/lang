@@ -8,6 +8,7 @@ use common::{
         inner_ty::InnerTy,
         ty::Ty,
     },
+    type_info::TypeInfo,
 };
 use lex::token::{LexToken, LexTokenKind, Sym};
 
@@ -27,7 +28,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     pub fn parse(
         iter: &'a mut ParseTokenIter<'b>,
         generics: Option<&'a Generics>,
-    ) -> CustomResult<(Ty, FilePosition)> {
+    ) -> CustomResult<Ty> {
         Self::new(iter, generics).parse_type()
     }
 
@@ -44,7 +45,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     ///   C                     Lang
     ///   uint32_t *(*x)[]      x: {[{u32}]}
     ///   char *x               x: {char}
-    fn parse_type(&mut self) -> CustomResult<(Ty, FilePosition)> {
+    fn parse_type(&mut self) -> CustomResult<Ty> {
         let mut file_pos = self.iter.peek_file_pos()?;
 
         if let Some(lex_token) = self.iter.next_skip_space() {
@@ -75,30 +76,38 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                             panic!("TODO: Generic decl in type has generics itself.");
                         }
 
-                        Ok((Ty::Generic(ident.clone(), None), file_pos))
+                        let type_info = TypeInfo::Generic(file_pos);
+                        Ok(Ty::Generic(ident.clone(), type_info))
                     } else {
                         let inner_ty = InnerTy::ident_to_type(&ident, self.iter.current_block_id());
-                        Ok((Ty::CompoundType(inner_ty, generics), file_pos))
+                        let type_info = TypeInfo::Default(file_pos);
+                        Ok(Ty::CompoundType(inner_ty, generics, type_info))
                     }
                 }
 
                 // Pointer.
                 LexTokenKind::Sym(Sym::CurlyBracketBegin) => {
-                    let (ty, file_pos_last) = self.parse_type_pointer()?;
-                    file_pos.set_end(&file_pos_last)?;
-                    Ok((ty, file_pos))
+                    self.iter.rewind_skip_space()?; // Rewind the CurlyBracketBegin.
+
+                    let ty = self.parse_type_pointer()?;
+                    file_pos.set_end(&ty.file_pos().unwrap())?;
+
+                    Ok(ty)
                 }
 
                 // Array/slice.
                 LexTokenKind::Sym(Sym::SquareBracketBegin) => {
-                    let (ty, file_pos_last) = self.parse_type_array()?;
-                    file_pos.set_end(&file_pos_last)?;
-                    Ok((ty, file_pos))
+                    self.iter.rewind_skip_space()?; // Rewind the SquareBracketBegin.
+
+                    let ty = self.parse_type_array()?;
+                    file_pos.set_end(&ty.file_pos().unwrap())?;
+
+                    Ok(ty)
                 }
 
                 // Built in call.
                 LexTokenKind::Sym(Sym::At) => {
-                    self.iter.rewind_skip_space()?;
+                    self.iter.rewind_skip_space()?; // Rewind the At.
 
                     // Need to add stop conditions for if the the start/end of
                     // a generic list is reached.
@@ -115,7 +124,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     }
 
                     if let Expr::BuiltInCall(..) = expr {
-                        Ok((Ty::Expr(Box::new(expr)), file_pos))
+                        Ok(Ty::Expr(Box::new(expr), TypeInfo::Default(file_pos)))
                     } else {
                         Err(self.iter.err(
                             format!("\"At\"(@) in type NOT built-in call, was: {:#?}", expr),
@@ -182,9 +191,9 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     cur_file_pos
                 }
                 GenericsKind::Impl => {
-                    let (ty, cur_file_pos) = self.parse_type()?;
-                    generics.insert_type(ty);
-                    cur_file_pos
+                    let ty = self.parse_type()?;
+                    generics.insert_type(ty.clone());
+                    *ty.file_pos().unwrap()
                 }
                 _ => panic!("Bad GenericsKind: {:#?}", generics),
             };
@@ -269,20 +278,18 @@ impl<'a, 'b> TypeParser<'a, 'b> {
 
     /// Parses a pointer type.
     ///   {X}       // Pointer to type (is the {X} syntax be weird/ambiguous?)
-    fn parse_type_pointer(&mut self) -> CustomResult<(Ty, FilePosition)> {
+    fn parse_type_pointer(&mut self) -> CustomResult<Ty> {
         let mut file_pos = self.iter.peek_file_pos()?;
 
-        // The "CurlyBracketBegin" has already been skipped.
-        // Parse the type and then wrap it into a Pointer type.
-        let (ty, _) = self.parse_type()?;
-        let ptr_ty = Ty::Pointer(Box::new(ty));
+        self.iter.next_skip_space(); // Consume the CurlyBracketBegin.
+        let ty = self.parse_type()?;
 
         // At this point the token should be a "CurlyBracketEnd" since this is
         // the end of the pointer.
         if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Sym(Sym::CurlyBracketEnd) = lex_token.kind {
                 file_pos.set_end(&lex_token.file_pos)?;
-                Ok((ptr_ty, file_pos))
+                Ok(Ty::Pointer(Box::new(ty), TypeInfo::Default(file_pos)))
             } else {
                 Err(self.iter.err(
                     format!(
@@ -296,7 +303,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             // TODO: Where to fetch file_pos from?
             Err(self.iter.err(
                 "Received None at end of pointer type.".into(),
-                Some(file_pos),
+                ty.file_pos().cloned(),
             ))
         }
     }
@@ -305,11 +312,11 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     ///   [X]       // Array of type X with unknown size (slice).
     ///   [X: 3]    // Array of type X with size 3.
     ///   [X: _]    // Array of type X with infered size.
-    fn parse_type_array(&mut self) -> CustomResult<(Ty, FilePosition)> {
+    fn parse_type_array(&mut self) -> CustomResult<Ty> {
         let mut file_pos = self.iter.peek_file_pos()?;
 
-        // The "SquareBracketBegin" has already been skipped.
-        let (gen_ty, _) = self.parse_type()?;
+        self.iter.next_skip_space(); // Consume the SquareBracketBegin.
+        let gen_ty = self.parse_type()?;
 
         // At this point the token can either be a "Colon" to indicate that this
         // array type has a size specificed or it can be a "SquareBracketEnd"
@@ -327,7 +334,15 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                         panic!("TODO: Underscore in array dimension.");
                     } else {
                         let stop_conds = [Sym::SquareBracketEnd];
-                        Some(Box::new(self.iter.parse_expr(&stop_conds)?))
+                        let expr = self.iter.parse_expr(&stop_conds)?;
+
+                        if let Some(expr_file_pos) = expr.file_pos() {
+                            file_pos.set_end(expr_file_pos)?;
+                        } else {
+                            unreachable!();
+                        }
+
+                        Some(Box::new(expr))
                     }
                 } else {
                     return Err(self.iter.err(
@@ -349,14 +364,16 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                 .err("Received None at end of array type.".into(), Some(file_pos)));
         };
 
-        let array_ty = Ty::Array(Box::new(gen_ty), size);
-
         // The next token must be a "SquareBracketEnd" or something has
         // gone wrong.
         if let Some(next_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Sym(Sym::SquareBracketEnd) = next_token.kind {
                 file_pos.set_end(&next_token.file_pos)?;
-                Ok((array_ty, file_pos))
+                Ok(Ty::Array(
+                    Box::new(gen_ty),
+                    size,
+                    TypeInfo::Default(file_pos),
+                ))
             } else {
                 Err(self.iter.err(
                     format!(

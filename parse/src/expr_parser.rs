@@ -15,6 +15,7 @@ use common::{
         inner_ty::InnerTy,
         ty::Ty,
     },
+    type_info::TypeInfo,
 };
 use lex::token::{LexTokenKind, Sym};
 use log::debug;
@@ -275,8 +276,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 | LexTokenKind::Sym(symbol @ Sym::Of) => {
                     if let Some(op) = get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
-                        let (ty_expr, ty_file_pos) = self.iter.parse_type(None)?;
-                        let expr = Expr::Type(ty_expr, Some(ty_file_pos));
+                        let ty_expr = self.iter.parse_type(None)?;
+                        let ty_expr_file_pos = ty_expr.file_pos().cloned();
+                        let expr = Expr::Type(ty_expr, ty_expr_file_pos);
 
                         if let Some(expr_file_pos) = expr.file_pos() {
                             file_pos.set_end(expr_file_pos)?;
@@ -625,7 +627,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     Ok(Expr::Type(
                         Ty::CompoundType(
                             InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
-                            generics.unwrap_or_else(Generics::new),
+                            generics.unwrap_or_else(Generics::empty),
+                            TypeInfo::Default(file_pos.to_owned()),
                         ),
                         Some(file_pos.to_owned()),
                     ))
@@ -644,8 +647,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                                 // identifier and parse as type.
                                 self.iter.rewind_to_mark(mark);
 
-                                let (ty, ty_file_pos) = self.iter.parse_type(None)?;
-                                return Ok(Expr::Type(ty, Some(ty_file_pos)));
+                                let ty = self.iter.parse_type(None)?;
+                                let ty_file_pos = ty.file_pos().cloned();
+                                return Ok(Expr::Type(ty, ty_file_pos));
                             }
 
                             _ => (),

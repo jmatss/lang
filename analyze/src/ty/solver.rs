@@ -8,8 +8,9 @@ use common::{
     ty::{inner_ty::InnerTy, ty::Ty},
     visitor::Visitor,
 };
+use log::debug;
 
-use crate::BlockInfo;
+use crate::block::BlockInfo;
 
 use super::context::{SubResult, TypeContext};
 
@@ -64,7 +65,7 @@ impl<'a> TypeSolver<'a> {
     /// set and that information is attainable.
     fn create_generic_struct(&mut self, ty: &mut Ty) {
         let ident = match ty {
-            Ty::CompoundType(inner_ty, generics) => {
+            Ty::CompoundType(inner_ty, generics, ..) => {
                 if !generics.is_empty() {
                     inner_ty.to_string()
                 } else {
@@ -72,7 +73,7 @@ impl<'a> TypeSolver<'a> {
                 }
             }
 
-            Ty::Pointer(ty_box) | Ty::Array(ty_box, ..) => {
+            Ty::Pointer(ty_box, ..) | Ty::Array(ty_box, ..) => {
                 self.create_generic_struct(ty_box);
                 return;
             }
@@ -91,7 +92,26 @@ impl<'a> TypeSolver<'a> {
 
         match self.generic_structures.entry(ident) {
             Entry::Occupied(mut o) => {
-                if !o.get_mut().contains(ty) {
+                debug!("INSERT -- ty: {:#?}, entry: {:#?}", ty, o.get());
+
+                // TODO: Fix and Clean up.
+
+                if !o.get_mut().iter().any(|elem| match (&ty, elem) {
+                    (Ty::CompoundType(a1, a2, ..), Ty::CompoundType(b1, b2, ..)) => {
+                        for (i1, i2) in a2.iter_types().zip(b2.iter_types()) {
+                            match (i1, i2) {
+                                (Ty::CompoundType(a3, ..), Ty::CompoundType(b3, ..)) => {
+                                    if a3 != b3 {
+                                        return false;
+                                    }
+                                }
+                                _ => return false,
+                            }
+                        }
+                        a1 == b1
+                    }
+                    _ => false,
+                }) {
                     o.get_mut().push(ty.clone());
                 }
             }
@@ -121,7 +141,7 @@ impl<'a> Visitor for TypeSolver<'a> {
             // TODO: Fix this, seems very random to fix this here.
             // The `method_structure` might possible be a pointer to the
             // structure, need to get the actual structure type in that case.
-            if let Ty::Pointer(ty) = structure_ty {
+            if let Ty::Pointer(ty, ..) = structure_ty {
                 *structure_ty = *ty.clone();
             }
         }

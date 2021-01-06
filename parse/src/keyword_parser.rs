@@ -18,6 +18,7 @@ use common::{
         inner_ty::InnerTy,
         ty::Ty,
     },
+    type_info::TypeInfo,
 };
 use lex::token::{Kw, LexTokenKind, Sym};
 use std::{cell::RefCell, rc::Rc};
@@ -741,10 +742,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // assume that the function returns void.
         let (return_ty, ty_file_pos) = if let Some(lex_token) = self.iter.peek_skip_space_line() {
             if let LexTokenKind::Sym(Sym::Arrow) = lex_token.kind {
-                // Consume the arrow.
-                self.iter.next_skip_space_line();
-                let (return_ty, ty_file_pos) = self.iter.parse_type(None)?;
-                (Some(return_ty), Some(ty_file_pos))
+                self.iter.next_skip_space_line(); // Consume the arrow.
+
+                let return_ty = self.iter.parse_type(None)?;
+                let return_ty_file_pos = return_ty.file_pos().cloned();
+                (Some(return_ty), return_ty_file_pos)
             } else {
                 (None, None)
             }
@@ -870,40 +872,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         file_pos.set_end(&par_file_pos)?;
 
-        // TODO: How should the type of the enum be decided? Should it be possible
-        //       to specify as a generic on the enum declaration? But in that case
-        //       it would take a generic impl instead of a generic decl as structs.
-        //       Is this ok?
-        // The type of the enum values. This will assigned to both the whole enum
-        // structure, but also the enum values to help during type inference.
-        let enum_ty = Ty::CompoundType(InnerTy::Enum(ident.clone()), Generics::new());
-        let i32_ty = Ty::CompoundType(InnerTy::I32, Generics::new());
-
-        const RADIX: u32 = 10;
-
-        // TODO: This should probably be done somewhere else in a better way.
-        //       In the future all enums might not be i32 and might not have the
-        //       value of their index position, that might be configurable.
-        // TODO: The type of the enum (Enum) and the type of the members (i32)
-        //       are different. Can this cause any issues in the future?
-        // Wraps all members of the en um into RCs so that they can be stored
-        // in look-up tables during the analyze stage.
-        // Also assign all members the type `Enum(ident)` and give them their
-        // values according to their index position in the enum.
-        let members = members
-            .iter_mut()
-            .enumerate()
-            .map(|(idx, m)| {
-                m.ty = Some(enum_ty.clone());
-                m.value = Some(Box::new(Expr::Lit(
-                    Lit::Integer(idx.to_string(), RADIX),
-                    Some(i32_ty.clone()),
-                    None,
-                )));
-                Rc::new(RefCell::new(m.clone()))
-            })
-            .collect::<Vec<_>>();
-
         if is_var_arg {
             return Err(self.iter.err(
                 format!("Found invalid var_arg symbol in enum with name: {}", &ident),
@@ -911,11 +879,60 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             ));
         }
 
-        let members_opt = if !members.is_empty() {
-            Some(members)
+        const RADIX: u32 = 10;
+        let mut members_rc = Vec::default();
+
+        // TODO: This should probably be done somewhere else in a better way.
+        //       In the future all enums might not be i32 and might not have the
+        //       value of their index position, that might be configurable.
+        // TODO: The type of the enum (Enum) and the type of the members (i32)
+        //       are different. Can this cause any issues in the future?
+        // Wraps all members of the enum into RCs so that they can be stored
+        // in look-up tables during the analyze stage.
+        // Also assign all members the type `Enum(ident)` and give them their
+        // values according to their index position in the enum.
+        for (idx, member) in members.iter_mut().enumerate() {
+            let member_file_pos = member.file_pos.clone().unwrap();
+
+            let enum_type_info = (ident.clone(), file_pos.to_owned());
+            let member_type_info = (member.name.clone(), member_file_pos);
+            let member_value_ty = Ty::CompoundType(
+                InnerTy::I32,
+                Generics::empty(),
+                TypeInfo::EnumMember(enum_type_info, member_type_info),
+            );
+
+            let enum_ty = Ty::CompoundType(
+                InnerTy::Enum(ident.clone()),
+                Generics::empty(),
+                TypeInfo::Enum(member_file_pos.to_owned()),
+            );
+
+            member.ty = Some(enum_ty);
+            member.value = Some(Box::new(Expr::Lit(
+                Lit::Integer(idx.to_string(), RADIX),
+                Some(member_value_ty),
+                None,
+            )));
+
+            members_rc.push(Rc::new(RefCell::new(member.clone())));
+        }
+
+        let members_opt = if !members_rc.is_empty() {
+            Some(members_rc)
         } else {
             None
         };
+
+        // TODO: How should the type of the enum be decided? Should it be possible
+        //       to specify as a generic on the enum declaration? But in that case
+        //       it would take a generic impl instead of a generic decl as structs.
+        //       Is this ok?
+        let enum_ty = Ty::CompoundType(
+            InnerTy::Enum(ident.clone()),
+            Generics::empty(),
+            TypeInfo::Enum(file_pos.to_owned()),
+        );
 
         let enum_ = Enum::new(ident, enum_ty, members_opt);
         let header = BlockHeader::Enum(Rc::new(RefCell::new(enum_)));

@@ -446,7 +446,7 @@ impl FuncCall {
 
         if let Some(ty) = &self.method_structure {
             let (structure_name, func_generics) =
-                if let Ty::CompoundType(inner_ty, func_generics) = ty {
+                if let Ty::CompoundType(inner_ty, func_generics, ..) = ty {
                     match inner_ty {
                         InnerTy::Struct(ident)
                         | InnerTy::Enum(ident)
@@ -536,7 +536,7 @@ impl StructInit {
     /// function will replace the types of the types parsed during type inference
     /// with type specified at the init call.
     pub fn generics(&mut self) -> Option<&Generics> {
-        let ty_generics = if let Some(Ty::CompoundType(_, ty_generics)) = &self.ret_type {
+        let ty_generics = if let Some(Ty::CompoundType(_, ty_generics, _)) = &self.ret_type {
             ty_generics
         } else {
             panic!("Struct init type not struct.");
@@ -564,7 +564,7 @@ impl StructInit {
         };
 
         if let Some(ty) = &self.ret_type {
-            if let Ty::CompoundType(InnerTy::Struct(ident), struct_generics) = ty {
+            if let Ty::CompoundType(InnerTy::Struct(ident), struct_generics, ..) = ty {
                 let generics = if let Some(struct_init_generics) = struct_init_generics {
                     struct_init_generics
                 } else {

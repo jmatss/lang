@@ -18,6 +18,7 @@ use common::{
     },
     traverser::TraverseContext,
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
+    type_info::TypeInfo,
     visitor::Visitor,
 };
 use either::Either;
@@ -122,15 +123,21 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// analyzing step is done.
 
     fn visit_lit(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
-        if let Expr::Lit(lit, gen_ty_opt, ..) = expr {
-            if gen_ty_opt.is_none() {
+        if let Expr::Lit(lit, ty_opt, file_pos) = expr {
+            let type_info = TypeInfo::Lit(file_pos.clone());
+
+            if ty_opt.is_none() {
                 let inner_ty = match lit {
                     Lit::String(_) => {
                         // TODO: Have a custom struct "String" instead of "*u8"?
-                        *gen_ty_opt = Some(Ty::Pointer(Box::new(Ty::CompoundType(
-                            InnerTy::U8,
-                            Generics::new(),
-                        ))));
+                        *ty_opt = Some(Ty::Pointer(
+                            Box::new(Ty::CompoundType(
+                                InnerTy::U8,
+                                Generics::empty(),
+                                type_info.clone(),
+                            )),
+                            type_info,
+                        ));
                         return;
                     }
 
@@ -142,8 +149,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     Lit::Float(_) => InnerTy::UnknownFloat(self.new_unknown_ident("float_literal")),
                 };
 
-                let new_gen_ty = Ty::CompoundType(inner_ty, Generics::new());
-                *gen_ty_opt = Some(new_gen_ty);
+                let new_gen_ty = Ty::CompoundType(inner_ty, Generics::empty(), type_info);
+                *ty_opt = Some(new_gen_ty);
             }
         }
     }
@@ -178,6 +185,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let new_type = Ty::CompoundType(
                 InnerTy::Unknown(self.new_unknown_ident(&format!("var_use({})", var.name))),
                 Generics::new(),
+                TypeInfo::VarUse(var.file_pos.unwrap()),
             );
             var.ty = Some(new_type.clone());
             new_type
@@ -229,7 +237,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // will fetch the structure and combine the names for the generics
             // found in the structure declaration with potential generic impls
             // in the struct init/func call.
-            if let Ty::CompoundType(inner_ty, generic_types) = &mut structure_ty {
+            if let Ty::CompoundType(inner_ty, generic_types, ..) = &mut structure_ty {
                 match inner_ty {
                     InnerTy::Struct(ident)
                     | InnerTy::Enum(ident)
@@ -294,8 +302,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             for gen_name in generic_names {
                                 let unknown_ident =
                                     self.new_unknown_ident(&format!("generic_{}", gen_name));
-                                let gen_ty =
-                                    Ty::GenericInstance(gen_name.clone(), unknown_ident, None);
+                                let gen_ty = Ty::GenericInstance(
+                                    gen_name.clone(),
+                                    unknown_ident,
+                                    TypeInfo::None,
+                                );
 
                                 generics.insert(gen_name.clone(), gen_ty);
                             }
@@ -328,6 +339,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     Box::new(structure_ty.clone()),
                     func_call.name.clone(),
                     position,
+                    TypeInfo::DefaultOpt(arg.value.file_pos().cloned()),
                 );
 
                 let arg_expr_ty = match arg.value.get_expr_type() {
@@ -349,7 +361,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
 
             // The expected return type of the function call.
-            Ty::UnknownStructureMethod(Box::new(structure_ty), func_call.name.clone())
+            Ty::UnknownStructureMethod(
+                Box::new(structure_ty),
+                func_call.name.clone(),
+                TypeInfo::FuncCall(func_call.file_pos.unwrap()),
+            )
         } else {
             let func = match self
                 .type_context
@@ -425,10 +441,15 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
 
             let func = func.borrow();
-            if let Some(ty) = func.ret_type.clone() {
+            if let Some(mut ty) = func.ret_type.clone() {
+                *ty.file_pos_mut().unwrap() = func_call.file_pos.unwrap();
                 ty
             } else {
-                Ty::CompoundType(InnerTy::Void, Generics::new())
+                Ty::CompoundType(
+                    InnerTy::Void,
+                    Generics::empty(),
+                    TypeInfo::FuncCall(func_call.file_pos.unwrap()),
+                )
             }
         };
 
@@ -441,8 +462,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             for generic in &generics {
                 if let Ty::Generic(ident, ..) = generic {
-                    let generic_impl =
-                        Ty::GenericInstance(ident.into(), self.type_id.to_string(), None);
+                    let generic_impl = Ty::GenericInstance(
+                        ident.into(),
+                        self.type_id.to_string(),
+                        TypeInfo::DefaultOpt(generic.file_pos().cloned()),
+                    );
                     self.type_id += 1;
 
                     generics_impl.insert(ident.into(), generic_impl);
@@ -544,11 +568,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
 
         // TODO: Temporary ugly hack to make "@type" to work. Should do this in
-        //       a adifferent way and somewhere else.
+        //       a different way and somewhere else.
         if &built_in_call.name == "type" {
-            built_in_call.ret_type = Some(Ty::Expr(Box::new(
-                built_in_call.arguments.first().unwrap().value.clone(),
-            )));
+            built_in_call.ret_type = Some(Ty::Expr(
+                Box::new(built_in_call.arguments.first().unwrap().value.clone()),
+                TypeInfo::BuiltInCall(built_in_call.file_pos),
+            ));
         }
 
         warn!("Built in call: {:#?}", built_in_call);
@@ -606,7 +631,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     for generic_name in generic_names {
                         let unknown_ident =
                             self.new_unknown_ident(&format!("generic_{}", generic_name));
-                        let gen_ty = Ty::GenericInstance(generic_name.clone(), unknown_ident, None);
+                        let gen_ty = Ty::GenericInstance(
+                            generic_name.clone(),
+                            unknown_ident,
+                            TypeInfo::None,
+                        );
 
                         generics.insert(generic_name.clone(), gen_ty);
                     }
@@ -626,6 +655,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     struct_init.ret_type = Some(Ty::CompoundType(
                         InnerTy::UnknownIdent(struct_init.name.clone(), ctx.block_id),
                         generics.clone(),
+                        TypeInfo::Default(struct_init.file_pos.unwrap()),
                     ));
                 }
             }
@@ -697,6 +727,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             self.type_context
                                 .insert_constraint(arg_ty.clone(), member_type);
 
+                            let arg_file_pos = arg_ty.file_pos().cloned();
+
                             // Bind type of member to the struct.
                             self.type_context.insert_constraint(
                                 arg_ty.clone(),
@@ -708,6 +740,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                             .expect("Will always be set at this point"),
                                     ),
                                     new_member.name.clone(),
+                                    TypeInfo::DefaultOpt(arg_file_pos),
                                 ),
                             );
                         } else {
@@ -742,6 +775,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let new_ty = Ty::CompoundType(
                 InnerTy::Unknown(self.new_unknown_ident("array_init")),
                 Generics::new(),
+                TypeInfo::Default(array_init.file_pos),
             );
 
             array_init.ret_type = Some(new_ty.clone());
@@ -762,7 +796,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
 
         // TODO: What should the type of the index for the array size be?
-        let array_index_type = Ty::CompoundType(InnerTy::U32, Generics::new());
+        let array_index_type = Ty::CompoundType(InnerTy::U32, Generics::empty(), TypeInfo::None);
         let dim = array_init.arguments.len();
         let dim_expr = Expr::Lit(
             Lit::Integer(dim.to_string(), 10),
@@ -778,7 +812,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             self.type_context.insert_constraint(
                 ret_ty.clone(),
-                Ty::Array(Box::new(left.clone()), Some(Box::new(dim_expr.clone()))),
+                Ty::Array(
+                    Box::new(left.clone()),
+                    Some(Box::new(dim_expr.clone())),
+                    TypeInfo::Default(array_init.file_pos),
+                ),
             );
 
             for j in i + 1..array_init.arguments.len() {
@@ -801,6 +839,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let new_ty = Ty::CompoundType(
                 InnerTy::Unknown(self.new_unknown_ident("bin_op")),
                 Generics::new(),
+                TypeInfo::Default(bin_op.file_pos.unwrap()),
             );
 
             bin_op.ret_type = Some(new_ty.clone());
@@ -823,7 +862,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
         };
 
-        let boolean = Ty::CompoundType(InnerTy::Boolean, Generics::new());
+        let boolean = Ty::CompoundType(
+            InnerTy::Boolean,
+            Generics::empty(),
+            TypeInfo::Default(bin_op.file_pos.unwrap()),
+        );
 
         match bin_op.operator {
             // The lhs and rhs can be different in these operations, so shouldn't
@@ -903,6 +946,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let new_ty = Ty::CompoundType(
                 InnerTy::Unknown(self.new_unknown_ident("un_op")),
                 Generics::new(),
+                TypeInfo::Default(un_op.file_pos.unwrap()),
             );
 
             un_op.ret_type = Some(new_ty.clone());
@@ -917,6 +961,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
         };
 
+        let type_info = TypeInfo::Default(un_op.file_pos.unwrap());
+
         match &mut un_op.operator {
             UnOperator::Positive
             | UnOperator::Negative
@@ -926,20 +972,20 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
             UnOperator::Deref => {
                 self.type_context
-                    .insert_constraint(Ty::Pointer(Box::new(ret_ty)), val_ty);
+                    .insert_constraint(Ty::Pointer(Box::new(ret_ty), type_info), val_ty);
             }
             UnOperator::Address => {
                 self.type_context
-                    .insert_constraint(ret_ty, Ty::Pointer(Box::new(val_ty)));
+                    .insert_constraint(ret_ty, Ty::Pointer(Box::new(val_ty), type_info));
             }
             UnOperator::ArrayAccess(_) => {
                 self.type_context
-                    .insert_constraint(ret_ty, Ty::UnknownArrayMember(Box::new(val_ty)));
+                    .insert_constraint(ret_ty, Ty::UnknownArrayMember(Box::new(val_ty), type_info));
             }
             UnOperator::StructAccess(member_name, ..) | UnOperator::EnumAccess(member_name, ..) => {
                 self.type_context.insert_constraint(
                     ret_ty,
-                    Ty::UnknownStructureMember(Box::new(val_ty), member_name.clone()),
+                    Ty::UnknownStructureMember(Box::new(val_ty), member_name.clone(), type_info),
                 );
             }
         }
@@ -962,7 +1008,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         let ty = if func_ref.modifiers.contains(&Modifier::This) {
                             structure
                         } else if func_ref.modifiers.contains(&Modifier::ThisPointer) {
-                            Ty::Pointer(Box::new(structure))
+                            // TODO: What file_pos should this pointer have?
+                            Ty::Pointer(Box::new(structure), TypeInfo::None)
                         } else {
                             // TODO: This should be caught somewhere else earlier.
                             //       Keyword is not allowed to be used as parameter
@@ -1116,7 +1163,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 let func_ret_ty = if let Some(ty) = &func.borrow().ret_type {
                     ty.clone()
                 } else {
-                    Ty::CompoundType(InnerTy::Void, Generics::new())
+                    // TODO: Where should this pos be fetched from?
+                    Ty::CompoundType(InnerTy::Void, Generics::empty(), TypeInfo::None)
                 };
 
                 let expr_ty = match self.type_context.get_expr_type(expr_opt.as_ref()) {
@@ -1238,9 +1286,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let new_type = if var.ty.is_some() {
                 var.ty.clone()
             } else {
+                // If the type isn't hardcoded, there are no file position since
+                // it doesn't exist in the source code. In that case use the
+                // position of the variable identifier instead.
                 Some(Ty::CompoundType(
                     InnerTy::Unknown(self.new_unknown_ident(&format!("var_decl({})", var.name))),
                     Generics::new(),
+                    TypeInfo::VarDecl(var.file_pos.unwrap(), false),
                 ))
             };
             var.ty = new_type;
@@ -1276,6 +1328,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let int_ty = Ty::CompoundType(
                 InnerTy::UnknownInt(self.new_unknown_ident("increment"), 10),
                 Generics::new(),
+                TypeInfo::Default(*expr_ty.file_pos().unwrap()),
             );
 
             self.type_context.insert_constraint(expr_ty, int_ty)
@@ -1295,6 +1348,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let int_ty = Ty::CompoundType(
                 InnerTy::UnknownInt(self.new_unknown_ident("decrement"), 10),
                 Generics::new(),
+                TypeInfo::Default(*expr_ty.file_pos().unwrap()),
             );
 
             self.type_context.insert_constraint(expr_ty, int_ty)
