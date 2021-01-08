@@ -8,7 +8,7 @@ use common::{
     visitor::Visitor,
 };
 
-use crate::{AnalyzeContext, BlockInfo};
+use crate::{block::BlockInfo, AnalyzeContext};
 
 /// Iterates through "generic" parameters tied to structures and functions (TODO)
 /// and replaces the uses of the generics with "Generic" types instead if the
@@ -72,7 +72,7 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
                     .generics
                     .clone()
                     .unwrap_or_else(Vec::default)
-            } else if let Ok(_) = analyze_context.get_enum(ident, block_id) {
+            } else if analyze_context.get_enum(ident, block_id).is_ok() {
                 Vec::default()
             } else if let Ok(interface) = analyze_context.get_interface(ident, block_id) {
                 Vec::default()

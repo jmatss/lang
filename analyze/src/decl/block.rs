@@ -1,6 +1,6 @@
 use std::cell::{RefCell, RefMut};
 
-use crate::{AnalyzeContext, BlockInfo};
+use crate::{block::BlockInfo, AnalyzeContext};
 use common::{
     error::LangError,
     token::{ast::AstToken, block::BlockHeader, stmt::Stmt},

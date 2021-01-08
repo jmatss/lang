@@ -77,7 +77,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
 
                         _ => {
                             let err = analyze_context.err(format!(
-                                "Lhs of DoubleColon not a UnknownIdent type, was: {:?}",
+                                "Lhs of DoubleColon expected to be a type, was: {:#?}",
                                 bin_op.lhs
                             ));
                             self.errors.push(err);

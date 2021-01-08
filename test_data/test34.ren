@@ -1,0 +1,44 @@
+use std.assert
+use std.nullable
+
+external function printf(format: {u8}, ...) -> i32
+
+struct TypeStruct
+{
+    len: u64,
+}
+
+implement TypeStruct
+{
+    function this len() -> u64
+    {
+        return this.len
+    }
+}
+
+function main() -> i32
+{
+    // var y = x.?.len()
+    // var y = (x != null) ? x.len() : null
+
+    var x = Nullable<TypeStruct>::init(TypeStruct { 123 })
+    // type Nullable<TypeStruct> == type TypeStruct?
+
+    var y
+    if not x.is_null()
+    {
+        y = Nullable<@type(x.get().len())>::init(x.get().len())
+        printf("NOT NULL")
+    }
+    else
+    {
+        y = Nullable<@type(x.get().len())>::init()
+        printf("NULL")
+    }
+    assert(not y.is_null())
+
+    printf(" -- y: %lld", y)
+    assert(y.get() == 123)
+
+    return 0
+}

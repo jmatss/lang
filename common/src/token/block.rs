@@ -173,7 +173,7 @@ impl Function {
     /// and generics as well.
     pub fn full_name(&self) -> CustomResult<String> {
         if let Some(ty) = &self.method_structure {
-            let (structure_name, generics) = if let Ty::CompoundType(inner_ty, generics) = ty {
+            let (structure_name, generics) = if let Ty::CompoundType(inner_ty, generics, ..) = ty {
                 match inner_ty {
                     InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
                         (ident, generics)

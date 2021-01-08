@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use common::{
     token::{block::BuiltIn, expr::Var},
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
+    type_info::TypeInfo,
 };
 
 /// Stores information about all built-in functions into a hashmap.
@@ -11,8 +12,8 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
 
     let name = "size";
     let parameters = Vec::with_capacity(0);
-    let generics = Some(vec![Ty::Any]);
-    let ret_ty = Ty::CompoundType(InnerTy::U32, Generics::new());
+    let generics = Some(vec![Ty::Any(TypeInfo::None)]);
+    let ret_ty = Ty::CompoundType(InnerTy::U32, Generics::empty(), TypeInfo::None);
     built_ins.insert(
         name,
         BuiltIn::new(name, parameters, generics, ret_ty, false),
@@ -23,7 +24,7 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
     let name = "type";
     let parameters = vec![Var::new(
         "expr".into(),
-        Some(Ty::Any),
+        Some(Ty::Any(TypeInfo::None)),
         None,
         None,
         None,
@@ -31,7 +32,7 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
         false,
     )];
     let generics = None;
-    let ret_ty = Ty::Any;
+    let ret_ty = Ty::Any(TypeInfo::None);
     built_ins.insert(
         name,
         BuiltIn::new(name, parameters, generics, ret_ty, false),
@@ -39,8 +40,8 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
 
     let name = "null";
     let parameters = Vec::with_capacity(0);
-    let generics = Some(vec![Ty::Any]);
-    let ret_ty = Ty::Any;
+    let generics = Some(vec![Ty::Any(TypeInfo::None)]);
+    let ret_ty = Ty::Any(TypeInfo::None);
     built_ins.insert(
         name,
         BuiltIn::new(name, parameters, generics, ret_ty, false),
@@ -49,7 +50,7 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
     let name = "file";
     let parameters = Vec::with_capacity(0);
     let generics = None;
-    let ret_ty = Ty::CompoundType(InnerTy::String, Generics::new());
+    let ret_ty = Ty::CompoundType(InnerTy::String, Generics::empty(), TypeInfo::None);
     built_ins.insert(
         name,
         BuiltIn::new(name, parameters, generics, ret_ty, false),
@@ -58,7 +59,7 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
     let name = "line";
     let parameters = Vec::with_capacity(0);
     let generics = None;
-    let ret_ty = Ty::CompoundType(InnerTy::U32, Generics::new());
+    let ret_ty = Ty::CompoundType(InnerTy::U32, Generics::empty(), TypeInfo::None);
     built_ins.insert(
         name,
         BuiltIn::new(name, parameters, generics, ret_ty, false),
@@ -67,7 +68,7 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
     let name = "column";
     let parameters = Vec::with_capacity(0);
     let generics = None;
-    let ret_ty = Ty::CompoundType(InnerTy::U32, Generics::new());
+    let ret_ty = Ty::CompoundType(InnerTy::U32, Generics::empty(), TypeInfo::None);
     built_ins.insert(
         name,
         BuiltIn::new(name, parameters, generics, ret_ty, false),
@@ -76,7 +77,7 @@ pub fn init_built_ins() -> HashMap<&'static str, BuiltIn> {
     let name = "unreachable";
     let parameters = Vec::with_capacity(0);
     let generics = None;
-    let ret_ty = Ty::CompoundType(InnerTy::Void, Generics::new());
+    let ret_ty = Ty::CompoundType(InnerTy::Void, Generics::empty(), TypeInfo::None);
     built_ins.insert(
         name,
         BuiltIn::new(name, parameters, generics, ret_ty, false),

@@ -336,7 +336,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let address_space = AddressSpace::Generic;
 
         Ok(match ty {
-            Ty::Pointer(ref ptr) => {
+            Ty::Pointer(ptr, ..) => {
                 // Get the type of the inner type and wrap into a "PointerType".
                 match self.compile_type(ptr, file_pos)? {
                     AnyTypeEnum::ArrayType(ty) => ty.ptr_type(address_space).into(),
@@ -356,7 +356,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             // TODO: Calculate array size that contains ther things than just
             //       a single integer literal
-            Ty::Array(inner_ty, dim_opt) => {
+            Ty::Array(inner_ty, dim_opt, ..) => {
                 let lit_dim = if let Some(dim) = dim_opt {
                     match dim.as_ref() {
                         Expr::Lit(Lit::Integer(num, radix), ..) => {
@@ -398,7 +398,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
 
             // TODO: Implement for other types (enum/interface) as well.
-            Ty::CompoundType(inner_ty, generics) => {
+            Ty::CompoundType(inner_ty, generics, ..) => {
                 match inner_ty {
                     InnerTy::Struct(ident) => {
                         let ident = if !generics.is_empty() {

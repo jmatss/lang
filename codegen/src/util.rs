@@ -1,8 +1,7 @@
 use super::generator::CodeGen;
-use analyze::BlockInfo;
+use analyze::block::BlockInfo;
 use common::{
     error::{CustomResult, LangError, LangErrorKind::CodeGenError},
-    file::FilePosition,
     BlockId,
 };
 use inkwell::{

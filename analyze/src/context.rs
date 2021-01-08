@@ -1,4 +1,4 @@
-use crate::{decl, BlockInfo};
+use crate::{block::BlockInfo, decl};
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
     file::{FileId, FileInfo, FilePosition},
@@ -73,13 +73,29 @@ impl AnalyzeContext {
         debug!("Block info:\n{:#?}", self.block_info);
     }
 
-    /// Returns the block ID for the block with ID `id`.
-    pub fn get_parent(&self, id: BlockId) -> CustomResult<BlockId> {
+    /// Returns the parent block ID for the block with ID `id`.
+    pub fn get_parent_id(&self, id: BlockId) -> CustomResult<BlockId> {
         if let Some(block_info) = self.block_info.get(&id) {
             Ok(block_info.parent_id)
         } else {
             Err(self.err(format!(
                 "Unable to find block info for block with id: {}",
+                id
+            )))
+        }
+    }
+
+    /// Returns the root block ID for the block with ID `id`.
+    pub fn get_root_id(&self, id: BlockId) -> CustomResult<BlockId> {
+        if let Some(block_info) = self.block_info.get(&id) {
+            if block_info.is_root_block {
+                Ok(block_info.block_id)
+            } else {
+                self.get_root_id(block_info.parent_id)
+            }
+        } else {
+            Err(self.err(format!(
+                "Unable to find block info for block with id \"{}\" when looking for a root block.",
                 id
             )))
         }
@@ -106,7 +122,7 @@ impl AnalyzeContext {
         } else {
             // Unable to find declaration in the current block scope. See
             // recursively if the declaration exists in a parent scope.
-            let parent_id = self.get_parent(id)?;
+            let parent_id = self.get_parent_id(id)?;
 
             if id != parent_id {
                 self.get_decl_scope(ident, parent_id, map)

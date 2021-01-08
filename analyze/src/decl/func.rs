@@ -1,4 +1,4 @@
-use crate::{AnalyzeContext, BlockInfo};
+use crate::{block::BlockInfo, AnalyzeContext};
 use common::{
     error::LangError,
     token::expr::Var,
@@ -10,6 +10,7 @@ use common::{
     },
     traverser::TraverseContext,
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
+    type_info::TypeInfo,
     visitor::Visitor,
     BlockId,
 };
@@ -35,7 +36,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
     fn analyze_func_header(&mut self, func: &mut Rc<RefCell<Function>>, func_id: BlockId) {
         // The function will be added in the scope of its parent, so fetch the
         // block id for the parent.
-        let parent_id = match self.analyze_context.borrow().get_parent(func_id) {
+        let parent_id = match self.analyze_context.borrow().get_parent_id(func_id) {
             Ok(parent_id) => parent_id,
             Err(err) => {
                 self.errors.push(err);
@@ -144,10 +145,8 @@ impl<'a> DeclFuncAnalyzer<'a> {
         func: &mut Rc<RefCell<Function>>,
         func_id: BlockId,
     ) {
-        // TODO: Make this work for all structures.
-
         // The method will be added in the scope of its wrapping structure, so
-        // fetch the block id for the struct.
+        // fetch the block id for the structure.
         let (decl_id, inner_ty) = if let Ok(decl_id) = self
             .analyze_context
             .borrow()
@@ -184,10 +183,15 @@ impl<'a> DeclFuncAnalyzer<'a> {
 
             let generics = Generics::new();
 
+            // TODO: Will `TypeInfo::None` work? Does this need some sort of type
+            //       info?
             let ty = if func.modifiers.contains(&Modifier::This) {
-                Ty::CompoundType(inner_ty, generics)
+                Ty::CompoundType(inner_ty, generics, TypeInfo::None)
             } else if func.modifiers.contains(&Modifier::ThisPointer) {
-                Ty::Pointer(Box::new(Ty::CompoundType(inner_ty, generics)))
+                Ty::Pointer(
+                    Box::new(Ty::CompoundType(inner_ty, generics, TypeInfo::None)),
+                    TypeInfo::None,
+                )
             } else {
                 let err = self.analyze_context.borrow().err(format!(
                     "Non static function did not contain \"this\" or \"this ptr\" reference. Structure name: {}, func: {:#?}.",
@@ -274,7 +278,9 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
                 return;
             };
 
-            let ty = Ty::CompoundType(inner_ty, Generics::new());
+            // TODO: Will `TypeInfo::None` work? Does this need some sort of type
+            //       info?
+            let ty = Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None);
 
             for mut body_token in body {
                 if let AstToken::Block(BlockHeader::Function(func), ..) = &mut body_token {
@@ -300,7 +306,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
             };
 
             if let Some(structure_ty) = structure_ty {
-                if let Ty::CompoundType(inner_ty, _) = structure_ty {
+                if let Ty::CompoundType(inner_ty, ..) = structure_ty {
                     match inner_ty {
                         InnerTy::Struct(ident)
                         | InnerTy::Enum(ident)

@@ -146,7 +146,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // TODO: Where should the integer literal conversion be made?
 
         let inner_ty = match gen_ty_opt {
-            Some(Ty::CompoundType(inner_ty, _)) => inner_ty.clone(),
+            Some(Ty::CompoundType(inner_ty, ..)) => inner_ty.clone(),
             None => InnerTy::default_int(),
             _ => {
                 return Err(self.err(
@@ -214,7 +214,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         file_pos: Option<FilePosition>,
     ) -> CustomResult<FloatValue<'ctx>> {
         let inner_ty = match gen_ty_opt {
-            Some(Ty::CompoundType(inner_ty, _)) => inner_ty.clone(),
+            Some(Ty::CompoundType(inner_ty, ..)) => inner_ty.clone(),
             None => InnerTy::default_float(),
             _ => {
                 return Err(self.err(

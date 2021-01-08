@@ -17,5 +17,6 @@ pub mod iter;
 pub mod token;
 pub mod traverser;
 pub mod ty;
+pub mod type_info;
 pub mod util;
 pub mod visitor;

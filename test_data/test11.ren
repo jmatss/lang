@@ -12,7 +12,8 @@ function main() -> i32
     var ptr = integer.&
 
     var ret = ptr.* + ptr.*
+    printf("ret: %d", ret)
     assert(ret == 246)
-    
-    return ret
+
+    return 0
 }

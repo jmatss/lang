@@ -646,9 +646,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         body: &mut [AstToken],
     ) -> CustomResult<()> {
         let file_pos = expr.file_pos().cloned();
-        let start_block = self
-            .cur_basic_block
-            .ok_or_else(|| self.err("cur_block is None for \"Match\".".into(), file_pos.clone()))?;
+        let start_block = self.cur_basic_block.ok_or_else(|| {
+            self.err(
+                "cur_block is None for \"Match\".".into(),
+                file_pos.to_owned(),
+            )
+        })?;
 
         let codegen_ty = CodeGenTy::new(&expr.get_expr_type()?, file_pos)?;
 

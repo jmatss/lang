@@ -7,7 +7,7 @@ use common::{
     },
 };
 use inkwell::module::Linkage;
-use log::warn;
+use log::debug;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -38,13 +38,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // Step 2: Figure out the correct order to compile them in.
         self.step1(ast_token, &mut structs, &mut enums, &mut references)?;
 
-        warn!(
+        debug!(
             "structs: {:#?}\nenums: {:#?}\nreferences: {:#?}\n",
             structs, enums, references
         );
 
         for ident in self.step2(&mut references)? {
-            warn!("compile ident: {}", ident);
             if let Some(struct_) = structs.get(&ident) {
                 self.compile_struct(&struct_.borrow())?;
             } else if let Some(enum_) = enums.get(&ident) {
@@ -189,7 +188,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
 
-        warn!("order: {:#?}", order);
+        debug!("order: {:#?}", order);
 
         Ok(order)
     }

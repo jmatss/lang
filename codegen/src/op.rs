@@ -1,6 +1,3 @@
-// TODO: Check constness for operators. Ex. adding two consts should use a
-//       const add instruction so that the result also is const.
-
 use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::CustomResult,
@@ -17,6 +14,9 @@ use inkwell::{
     FloatPredicate, IntPredicate,
 };
 use log::debug;
+
+// TODO: Check constness for operators. Ex. adding two consts should use a
+//       const add instruction so that the result also is const.
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_op(
@@ -255,10 +255,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let val = self.compile_un_op_struct_access(un_op, expr_ty)?;
                 match expr_ty {
                     ExprTy::LValue => Ok(val),
-                    ExprTy::RValue => Ok(self
-                        .builder
-                        .build_load(val.into_pointer_value(), "struct.gep.rval")
-                        .into()),
+                    ExprTy::RValue => Ok(if val.is_pointer_value() {
+                        self.builder
+                            .build_load(val.into_pointer_value(), "struct.gep.rval")
+                            .into()
+                    } else {
+                        val
+                    }),
                 }
             }
             UnOperator::EnumAccess(..) => match expr_ty {
@@ -1267,13 +1270,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             ));
         };
 
-        let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
+        let mut any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
         un_op.is_const = CodeGen::is_const(&[any_value]);
 
         debug!(
-            "Compilng struct access -- un_op: {:#?}\n\nidx: {:?}",
-            un_op, idx
+            "Compilng struct access, idx: {} -- un_op: {:#?}\nany_value: {:#?}",
+            idx, un_op, any_value
         );
+
+        // TODO: Better way to do this? Can one skip this stack allocation
+        //       in some way and GEP the value without a pointer?
+        // If the value is given as a struct value and it isn't a const, it needs
+        // to be stored temporarily on the stack to get a pointer which can then
+        // be non-const GEPd.
+        if any_value.is_struct_value() && !un_op.is_const {
+            let ptr = self
+                .builder
+                .build_alloca(any_value.into_struct_value().get_type(), "struct.tmp.alloc");
+            self.builder
+                .build_store(ptr, CodeGen::any_into_basic_value(any_value)?);
+            any_value = ptr.into();
+        }
 
         if any_value.is_pointer_value() {
             let ptr = any_value.into_pointer_value();
@@ -1287,7 +1304,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     )
                 })
         } else if any_value.is_struct_value() {
-            // Can only be a StructValue if this is a rvalue.
+            // Known to be const at this point, so safe to "const extract".
             if let ExprTy::RValue = expr_ty {
                 Ok(any_value
                     .into_struct_value()
@@ -1300,10 +1317,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 ))
             }
         } else {
-            Err(self.err(format!(
-                "Expr in struct access not a pointer orr struct. Un up: {:#?}\ncompiled expr: {:#?}",
-                un_op, any_value
-            ),None,))
+            Err(self.err(
+                format!(
+                    "Expr in struct access not a pointer or struct. Un up: {:#?}\ncompiled expr: {:#?}",
+                    un_op, any_value
+                ),
+                None,
+            ))
         }
     }
 

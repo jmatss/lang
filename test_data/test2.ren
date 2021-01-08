@@ -1,5 +1,13 @@
+function main() -> i32
+{
+    return 0
+}
+
+// TODO: Test const stuff.
+/*
 function test_func()
 {
     var x: i32 = 123
     const y: i32 = x + 456
 }
+*/

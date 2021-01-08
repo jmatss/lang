@@ -12,7 +12,7 @@ use common::{
 use log::debug;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::{AnalyzeContext, BlockInfo};
+use crate::{block::BlockInfo, AnalyzeContext};
 
 use super::generic_replace::GenericsReplacer;
 
@@ -38,26 +38,8 @@ pub struct TypeConverter<'a> {
 impl<'a> TypeConverter<'a> {
     pub fn new(
         analyze_context: &'a mut AnalyzeContext,
-        mut generic_structures: HashMap<String, Vec<Ty>>,
+        generic_structures: HashMap<String, Vec<Ty>>,
     ) -> Self {
-        // TODO: Are there any other way to do this in a better way?
-        // Removes the `generic_structures` that contains generics themselves.
-        // This can happen for example if a structure with a generic `T` has
-        // a method that creates a new instance of itself with the generic `T`
-        // as a generic impl.
-        for generic_structure in generic_structures.values_mut() {
-            *generic_structure = generic_structure
-                .iter()
-                .filter_map(|ty| {
-                    if ty.contains_generic() {
-                        None
-                    } else {
-                        Some(ty.clone())
-                    }
-                })
-                .collect::<Vec<_>>();
-        }
-
         debug!("generic_structures: {:#?}", generic_structures);
 
         Self {
@@ -112,7 +94,7 @@ impl<'a> TypeConverter<'a> {
                     methods.clear();
                 }
 
-                let generics = if let Ty::CompoundType(.., generics) = gen_structure_ty {
+                let generics = if let Ty::CompoundType(_, generics, ..) = gen_structure_ty {
                     generics.clone()
                 } else {
                     let err = self.analyze_context.err(format!(
@@ -218,7 +200,7 @@ impl<'a> TypeConverter<'a> {
             // TODO: Implement for types other than structs.
 
             for (new_idx, gen_structure_ty) in generic_structure_tys.iter().enumerate() {
-                let generics = if let Ty::CompoundType(.., generics) = &gen_structure_ty {
+                let generics = if let Ty::CompoundType(_, generics, ..) = &gen_structure_ty {
                     generics.clone()
                 } else {
                     let err = self.analyze_context.err(format!(
