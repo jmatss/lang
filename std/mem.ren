@@ -8,10 +8,7 @@ implement Allocator
 {
     function init(value: T = @null<T>()) -> {T}
     {
-        // TODO: Why doesn't this work? Is it possible to make it work the same way?
-        //       It seems like it isn't able to solve `T` since T is "nested" twice.
-        //var ptr = Allocator<     T      >::init_size(@size<     T      >())
-          var ptr = Allocator<@type(value)>::init_size(@size<@type(value)>())
+        var ptr = Allocator::init_size(@size<T>())
         ptr.* = value
         return ptr
     }
