@@ -3,6 +3,7 @@ struct TestStruct<T>
     inner: T,
 }
 
+// Issue #3
 function main() -> i32
 {
     var ts = TestStruct { 34 }
