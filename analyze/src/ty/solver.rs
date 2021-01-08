@@ -1,5 +1,6 @@
-use std::collections::{hash_map::Entry, HashMap};
+use crate::block::BlockInfo;
 
+use super::context::{SubResult, TypeContext};
 use common::{
     error::LangError,
     token::op::UnOperator,
@@ -7,12 +8,9 @@ use common::{
     traverser::TraverseContext,
     ty::{inner_ty::InnerTy, ty::Ty},
     visitor::Visitor,
+    BlockId,
 };
-use log::debug;
-
-use crate::block::BlockInfo;
-
-use super::context::{SubResult, TypeContext};
+use std::collections::{hash_map::Entry, HashMap};
 
 pub struct TypeSolver<'a> {
     type_context: &'a mut TypeContext<'a>,
@@ -35,21 +33,26 @@ impl<'a> TypeSolver<'a> {
         }
     }
 
-    fn subtitute_type(&mut self, ty: &mut Ty, finalize: bool) {
-        match self.type_context.solve_substitution(ty, finalize) {
-            SubResult::Solved(sub_ty) => {
-                *ty = sub_ty;
+    fn subtitute_type(&mut self, ty: &mut Ty, block_id: BlockId) {
+        match self.type_context.solve_substitution(ty, true, block_id) {
+            SubResult::Solved(solved_ty) => {
+                *ty = solved_ty;
             }
 
-            SubResult::UnSolved(un_sub_ty) if finalize => {
+            // TODO: There might be other unsolved types other than generics
+            //       inside the `unsolved_ty` which is missed when doing this
+            //       check. Can this be a problem?
+            SubResult::UnSolved(unsolved_ty) if unsolved_ty.contains_generic() => {
+                *ty = unsolved_ty;
+            }
+
+            SubResult::UnSolved(unsolved_ty) => {
                 let err = self.type_context.analyze_context.err(format!(
-                    "Unable to resolve type {:?}. Got back unsolved: {:?}.",
-                    ty, un_sub_ty
+                    "Unable to resolve type {:#?} in block ID {}. Got back unsolved: {:#?}.",
+                    ty, block_id, unsolved_ty
                 ));
                 self.errors.push(err);
             }
-
-            SubResult::UnSolved(un_sub_ty) => *ty = un_sub_ty,
 
             SubResult::Err(err) => {
                 self.errors.push(err);
@@ -64,6 +67,13 @@ impl<'a> TypeSolver<'a> {
     /// This function also adds the names for the generics if they aren't already
     /// set and that information is attainable.
     fn create_generic_struct(&mut self, ty: &mut Ty) {
+        // Do not create a "copy" of the actual structure type that contains the
+        // generic declarations, should only create "copies" for the structures
+        // that "implements" the generics.
+        if ty.contains_generic() {
+            return;
+        }
+
         let ident = match ty {
             Ty::CompoundType(inner_ty, generics, ..) => {
                 if !generics.is_empty() {
@@ -92,26 +102,7 @@ impl<'a> TypeSolver<'a> {
 
         match self.generic_structures.entry(ident) {
             Entry::Occupied(mut o) => {
-                debug!("INSERT -- ty: {:#?}, entry: {:#?}", ty, o.get());
-
-                // TODO: Fix and Clean up.
-
-                if !o.get_mut().iter().any(|elem| match (&ty, elem) {
-                    (Ty::CompoundType(a1, a2, ..), Ty::CompoundType(b1, b2, ..)) => {
-                        for (i1, i2) in a2.iter_types().zip(b2.iter_types()) {
-                            match (i1, i2) {
-                                (Ty::CompoundType(a3, ..), Ty::CompoundType(b3, ..)) => {
-                                    if a3 != b3 {
-                                        return false;
-                                    }
-                                }
-                                _ => return false,
-                            }
-                        }
-                        a1 == b1
-                    }
-                    _ => false,
-                }) {
+                if !o.get().contains(ty) {
                     o.get_mut().push(ty.clone());
                 }
             }
@@ -131,8 +122,8 @@ impl<'a> Visitor for TypeSolver<'a> {
         }
     }
 
-    fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
-        self.subtitute_type(ty, true);
+    fn visit_type(&mut self, ty: &mut Ty, ctx: &TraverseContext) {
+        self.subtitute_type(ty, ctx.block_id);
         self.create_generic_struct(ty);
     }
 

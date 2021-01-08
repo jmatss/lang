@@ -20,9 +20,10 @@ use common::{
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     type_info::TypeInfo,
     visitor::Visitor,
+    BlockId,
 };
 use either::Either;
-use log::{debug, warn};
+use log::debug;
 
 use super::context::TypeContext;
 
@@ -86,6 +87,15 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
         self.type_id += 1;
         type_ident
     }
+
+    /// Helper function to insert a new constraint and store a potential error
+    /// in `self.errors()`. Use this function do it in a single line func call
+    /// instead of having to check for errors every time.
+    fn insert_constraint(&mut self, lhs: Ty, rhs: Ty, root_id: BlockId) {
+        if let Err(err) = self.type_context.insert_constraint(lhs, rhs, root_id) {
+            self.errors.push(err);
+        }
+    }
 }
 
 impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
@@ -106,9 +116,16 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {
         self.type_context.analyze_context.file_pos = FilePosition::default();
 
-        let mut result = self.type_context.solve_constraints(true);
-        if let Err(errors) = &mut result {
-            self.errors.append(errors);
+        let root_ids = self
+            .type_context
+            .constraints
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for root_id in root_ids {
+            if let Err(mut errors) = self.type_context.solve_constraints(root_id) {
+                self.errors.append(&mut errors);
+            }
         }
 
         debug!(
@@ -124,7 +141,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     fn visit_lit(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
         if let Expr::Lit(lit, ty_opt, file_pos) = expr {
-            let type_info = TypeInfo::Lit(file_pos.clone());
+            let type_info = TypeInfo::Lit(file_pos.to_owned());
 
             if ty_opt.is_none() {
                 let inner_ty = match lit {
@@ -192,7 +209,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         };
 
         // Add type constraint between var "use" and var "decl",
-        self.type_context.insert_constraint(var_decl_ty, var_ty);
+        self.insert_constraint(var_decl_ty, var_ty, ctx.block_id);
     }
 
     // TODO: Clean up.
@@ -281,7 +298,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
                         // If the generics impls have been specified, use those
                         // to populate the Generics.
-                        // Else fifno generic implements have been specified,
+                        // Else if no generic implements have been specified,
                         // create new "GenericInstance"s.
                         if generic_types.len_types() > 0 {
                             if generic_names.len() != generic_types.len_types() {
@@ -356,7 +373,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 // Don't add a constraint if the argument has the same type as
                 // the structure.
                 if arg_expr_ty != structure_ty {
-                    self.type_context.insert_constraint(arg_ty, arg_expr_ty);
+                    self.insert_constraint(arg_ty, arg_expr_ty, ctx.block_id);
                 }
             }
 
@@ -436,7 +453,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         return;
                     };
 
-                    self.type_context.insert_constraint(arg_ty, par_ty);
+                    self.insert_constraint(arg_ty, par_ty, ctx.block_id);
                 }
             }
 
@@ -575,8 +592,6 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 TypeInfo::BuiltInCall(built_in_call.file_pos),
             ));
         }
-
-        warn!("Built in call: {:#?}", built_in_call);
 
         // TODO: Is it correct to directly set the return type for the function
         //       call? Should be inserted as a constraint instead? Will this
@@ -724,13 +739,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             };
 
                             // Bind init member to actual type in struct definition.
-                            self.type_context
-                                .insert_constraint(arg_ty.clone(), member_type);
+                            self.insert_constraint(arg_ty.clone(), member_type, ctx.block_id);
 
                             let arg_file_pos = arg_ty.file_pos().cloned();
 
                             // Bind type of member to the struct.
-                            self.type_context.insert_constraint(
+                            self.insert_constraint(
                                 arg_ty.clone(),
                                 Ty::UnknownStructureMember(
                                     Box::new(
@@ -742,6 +756,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                     new_member.name.clone(),
                                     TypeInfo::DefaultOpt(arg_file_pos),
                                 ),
+                                ctx.block_id,
                             );
                         } else {
                             let err = self.type_context.analyze_context.err(format!(
@@ -768,7 +783,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_array_init(&mut self, array_init: &mut ArrayInit, _ctx: &TraverseContext) {
+    fn visit_array_init(&mut self, array_init: &mut ArrayInit, ctx: &TraverseContext) {
         let ret_ty = if let Some(ret_ty) = &array_init.ret_type {
             ret_ty.clone()
         } else {
@@ -810,25 +825,26 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         for i in 0..array_init.arguments.len() {
             let left = arg_types.get(i).cloned().unwrap();
 
-            self.type_context.insert_constraint(
+            self.insert_constraint(
                 ret_ty.clone(),
                 Ty::Array(
                     Box::new(left.clone()),
                     Some(Box::new(dim_expr.clone())),
                     TypeInfo::Default(array_init.file_pos),
                 ),
+                ctx.block_id,
             );
 
             for j in i + 1..array_init.arguments.len() {
                 let right = arg_types.get(j).cloned().unwrap();
-                self.type_context.insert_constraint(left.clone(), right)
+                self.insert_constraint(left.clone(), right, ctx.block_id);
             }
         }
     }
 
     /// Adds constraints for binary operations. Most of the bin ops requires
     /// that the lhs and rhs has the same type.
-    fn visit_bin_op(&mut self, bin_op: &mut BinOp, _ctx: &TraverseContext) {
+    fn visit_bin_op(&mut self, bin_op: &mut BinOp, ctx: &TraverseContext) {
         // The lhs and rhs exprs will already have been traversed and should
         // have been given a "unknown" type if they didn't have a type already.
         // The "ret_type" of this bin op will also be given a ret_type if it
@@ -893,12 +909,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
 
             BinOperator::Dot | BinOperator::DoubleColon => {
-                self.type_context.insert_constraint(ret_ty, rhs_ty);
+                self.insert_constraint(ret_ty, rhs_ty, ctx.block_id);
             }
 
             // TODO: What ret type should they have?
             BinOperator::Range | BinOperator::RangeInclusive => {
-                self.type_context.insert_constraint(lhs_ty, rhs_ty);
+                self.insert_constraint(lhs_ty, rhs_ty, ctx.block_id);
             }
 
             BinOperator::Equals
@@ -907,14 +923,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | BinOperator::GreaterThan
             | BinOperator::LessThanOrEquals
             | BinOperator::GreaterThanOrEquals => {
-                self.type_context.insert_constraint(ret_ty, boolean);
-                self.type_context.insert_constraint(lhs_ty, rhs_ty);
+                self.insert_constraint(ret_ty, boolean, ctx.block_id);
+                self.insert_constraint(lhs_ty, rhs_ty, ctx.block_id);
             }
 
             BinOperator::BoolAnd | BinOperator::BoolOr => {
-                self.type_context.insert_constraint(ret_ty, boolean.clone());
-                self.type_context.insert_constraint(lhs_ty, boolean.clone());
-                self.type_context.insert_constraint(rhs_ty, boolean);
+                self.insert_constraint(ret_ty, boolean.clone(), ctx.block_id);
+                self.insert_constraint(lhs_ty, boolean.clone(), ctx.block_id);
+                self.insert_constraint(rhs_ty, boolean, ctx.block_id);
             }
 
             BinOperator::Addition
@@ -927,15 +943,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | BinOperator::BitXor
             | BinOperator::ShiftLeft
             | BinOperator::ShiftRight => {
-                self.type_context
-                    .insert_constraint(ret_ty.clone(), lhs_ty.clone());
-                self.type_context.insert_constraint(ret_ty, rhs_ty.clone());
-                self.type_context.insert_constraint(lhs_ty, rhs_ty);
+                self.insert_constraint(ret_ty.clone(), lhs_ty.clone(), ctx.block_id);
+                self.insert_constraint(ret_ty, rhs_ty.clone(), ctx.block_id);
+                self.insert_constraint(lhs_ty, rhs_ty, ctx.block_id);
             }
         }
     }
 
-    fn visit_un_op(&mut self, un_op: &mut UnOp, _ctx: &TraverseContext) {
+    fn visit_un_op(&mut self, un_op: &mut UnOp, ctx: &TraverseContext) {
         // The expr value of this un op will already have been traversed and should
         // have been given a "unknown" type if it didn't have one type already.
         // The "ret_type" of this un op will also be given a ret_type if it
@@ -968,24 +983,34 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | UnOperator::Negative
             | UnOperator::BitComplement
             | UnOperator::BoolNot => {
-                self.type_context.insert_constraint(ret_ty, val_ty);
+                self.insert_constraint(ret_ty, val_ty, ctx.block_id);
             }
             UnOperator::Deref => {
-                self.type_context
-                    .insert_constraint(Ty::Pointer(Box::new(ret_ty), type_info), val_ty);
+                self.insert_constraint(
+                    Ty::Pointer(Box::new(ret_ty), type_info),
+                    val_ty,
+                    ctx.block_id,
+                );
             }
             UnOperator::Address => {
-                self.type_context
-                    .insert_constraint(ret_ty, Ty::Pointer(Box::new(val_ty), type_info));
+                self.insert_constraint(
+                    ret_ty,
+                    Ty::Pointer(Box::new(val_ty), type_info),
+                    ctx.block_id,
+                );
             }
             UnOperator::ArrayAccess(_) => {
-                self.type_context
-                    .insert_constraint(ret_ty, Ty::UnknownArrayMember(Box::new(val_ty), type_info));
+                self.insert_constraint(
+                    ret_ty,
+                    Ty::UnknownArrayMember(Box::new(val_ty), type_info),
+                    ctx.block_id,
+                );
             }
             UnOperator::StructAccess(member_name, ..) | UnOperator::EnumAccess(member_name, ..) => {
-                self.type_context.insert_constraint(
+                self.insert_constraint(
                     ret_ty,
                     Ty::UnknownStructureMember(Box::new(val_ty), member_name.clone(), type_info),
+                    ctx.block_id,
                 );
             }
         }
@@ -1037,7 +1062,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Tie the generics in this specific struct to each other with constraints.
     /// Ties the generics in the struct members, method parameters and method
     /// return types.
-    fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Struct(struct_), ..) = &ast_token {
             let struct_ = struct_.borrow();
 
@@ -1148,7 +1173,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
                     for j in i + 1..ident_generics.len() {
                         let right = ident_generics.get(j).cloned().unwrap();
-                        self.type_context.insert_constraint(left.clone(), right)
+                        self.insert_constraint(left.clone(), right, ctx.block_id);
                     }
                 }
             }
@@ -1157,7 +1182,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Need to make sure that a return statement has the same type as the
     /// function return type. Add it as a constraint.
-    fn visit_return(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
+    fn visit_return(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
         if let Stmt::Return(expr_opt, ..) = stmt {
             if let Some(func) = &self.cur_func {
                 let func_ret_ty = if let Some(ty) = &func.borrow().ret_type {
@@ -1175,7 +1200,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     }
                 };
 
-                self.type_context.insert_constraint(func_ret_ty, expr_ty);
+                self.insert_constraint(func_ret_ty, expr_ty, ctx.block_id);
             } else {
                 let err = self
                     .type_context
@@ -1199,7 +1224,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Need to make sure that the match expr and the match case exprs have the
     /// same type. Add it as a constraint.
-    fn visit_match_case(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_match_case(&mut self, mut ast_token: &mut AstToken, ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token {
             if let Some(match_expr) = self.cur_match_expr.clone() {
                 let match_expr_ty = match match_expr.get_expr_type() {
@@ -1219,8 +1244,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         }
                     };
 
-                    self.type_context
-                        .insert_constraint(match_expr_ty, case_expr_ty);
+                    self.insert_constraint(match_expr_ty, case_expr_ty, ctx.block_id);
                 }
             } else {
                 let err = self
@@ -1234,7 +1258,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// The types of the lhs and rhs of a assignment should be of the same type.
     /// Add it as a constraint.
-    fn visit_assignment(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
+    fn visit_assignment(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
         if let Stmt::Assignment(_, lhs, rhs, ..) = stmt {
             debug!("ASSIGNMENT\nlhs: {:#?}\nrhs: {:#?}", lhs, rhs);
 
@@ -1254,13 +1278,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             };
 
-            self.type_context.insert_constraint(lhs_ty, rhs_ty);
+            self.insert_constraint(lhs_ty, rhs_ty, ctx.block_id);
         }
     }
 
     /// The types of the lhs and rhs of a variable declaration with a init value
     /// should be of the same type, add as constraints.
-    fn visit_var_decl(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
+    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
         if let Stmt::VariableDecl(var, ..) = stmt {
             let mut var = var.borrow_mut();
 
@@ -1310,12 +1334,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             // Add constraints only if this var decl has a init value.
             if let Some(rhs_ty) = rhs_ty_opt {
-                self.type_context.insert_constraint(lhs_ty, rhs_ty);
+                self.insert_constraint(lhs_ty, rhs_ty, ctx.block_id);
             }
         }
     }
 
-    fn visit_inc(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
+    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
         if let Stmt::Increment(expr, ..) = stmt {
             let expr_ty = match expr.get_expr_type() {
                 Ok(ty) => ty,
@@ -1331,11 +1355,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 TypeInfo::Default(*expr_ty.file_pos().unwrap()),
             );
 
-            self.type_context.insert_constraint(expr_ty, int_ty)
+            self.insert_constraint(expr_ty, int_ty, ctx.block_id);
         }
     }
 
-    fn visit_dec(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
+    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
         if let Stmt::Increment(expr, ..) = stmt {
             let expr_ty = match expr.get_expr_type() {
                 Ok(ty) => ty,
@@ -1351,7 +1375,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 TypeInfo::Default(*expr_ty.file_pos().unwrap()),
             );
 
-            self.type_context.insert_constraint(expr_ty, int_ty)
+            self.insert_constraint(expr_ty, int_ty, ctx.block_id);
         }
     }
 }

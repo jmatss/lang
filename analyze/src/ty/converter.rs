@@ -38,26 +38,8 @@ pub struct TypeConverter<'a> {
 impl<'a> TypeConverter<'a> {
     pub fn new(
         analyze_context: &'a mut AnalyzeContext,
-        mut generic_structures: HashMap<String, Vec<Ty>>,
+        generic_structures: HashMap<String, Vec<Ty>>,
     ) -> Self {
-        // TODO: Are there any other way to do this in a better way?
-        // Removes the `generic_structures` that contains generics themselves.
-        // This can happen for example if a structure with a generic `T` has
-        // a method that creates a new instance of itself with the generic `T`
-        // as a generic impl.
-        for generic_structure in generic_structures.values_mut() {
-            *generic_structure = generic_structure
-                .iter()
-                .filter_map(|ty| {
-                    if ty.contains_generic() {
-                        None
-                    } else {
-                        Some(ty.clone())
-                    }
-                })
-                .collect::<Vec<_>>();
-        }
-
         debug!("generic_structures: {:#?}", generic_structures);
 
         Self {

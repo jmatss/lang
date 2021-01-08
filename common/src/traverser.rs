@@ -10,6 +10,7 @@ use crate::{
     },
     ty::ty::Ty,
     visitor::Visitor,
+    BlockId,
 };
 use std::{cell::RefCell, rc::Rc};
 
@@ -33,7 +34,7 @@ pub struct TraverseContext {
     /// This will only be used if `deep_copy` is set to true.
     pub copy_nr: Option<usize>,
 
-    pub block_id: usize,
+    pub block_id: BlockId,
 
     // TODO: Should this contains file information about the parent as well?
     //       Ex. if this is a type, should the information about what this type

@@ -1,5 +1,11 @@
 use super::{generics::Generics, inner_ty::InnerTy};
-use crate::{file::FilePosition, token::expr::Expr, type_info::TypeInfo, util};
+use crate::{
+    error::{CustomResult, LangError, LangErrorKind},
+    file::FilePosition,
+    token::expr::Expr,
+    type_info::TypeInfo,
+    util,
+};
 use core::panic;
 use either::Either;
 use std::{collections::HashSet, fmt::Display, hash::Hash};
@@ -785,6 +791,21 @@ impl Ty {
     pub fn contains_unknown_array_member(&self) -> bool {
         let tmp_ty = Ty::CompoundType(InnerTy::Void, Generics::empty(), TypeInfo::None);
         self.contains_ty(&Ty::UnknownArrayMember(Box::new(tmp_ty), TypeInfo::None))
+    }
+
+    pub fn assert_compatible(&self, other: &Ty) -> CustomResult<()> {
+        if self.is_compatible(other) {
+            Ok(())
+        } else {
+            Err(LangError::new(
+                format!(
+                    "Tried to map incompatible types.\nFirst:\n{:#?}\nSecond:\n{:#?}",
+                    self, other
+                ),
+                LangErrorKind::AnalyzeError,
+                None,
+            ))
+        }
     }
 
     // TODO: Currently aggregated types with different inner types will return
