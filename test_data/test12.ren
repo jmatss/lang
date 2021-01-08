@@ -1,7 +1,7 @@
 use std.assert
 
 //external function printf(format: {u8}, ...) -> i32
-external function malloc(size: i32) -> {void}
+external function malloc(size: i32) -> {u8}
 
 function double(n: {i32})
 {
@@ -22,43 +22,50 @@ struct TestArrayStruct
 
 function main() -> i32
 {
-    var x2 = [[1.1, 2.2], [3.3, 4.4]]
-    // TODO: Uncommenting this line current crashes the code gen.
-    //       "Assertion failed: getOperand(0)->getType() == getOperand(1)->getType() && "Both operands to FCmp instruction are not of the same type!", file D:\LLVM\llvmenv\10.0.1\include\llvm/IR/Instructions.h, line 1304"
-    //x2.[0].[1] = 2.2
-    x2.[1].[0] = 5.5 as f64
-    assert(x2.[0].[0] == 1.1 and x2.[0].[1] == 2.2 and x2.[1].[0] == 5.5 and x2.[1].[1] == 4.4)
-    printf(
-        "\nx2.[0].[0]: %f, x2.[0].[1]: %f, x2.[1].[0]: %f, x2.[1].[1]: %f",
-        x2.[0].[0] as f64,
-        x2.[0].[1] as f64,
-        x2.[1].[0] as f64,
-        x2.[1].[1] as f64,
-    )
+    var x1 = [[1.1, 2.2], [3.3, 4.4]]
+    x1.[1].[0] = 5.5
 
-    var x3 = [1, 2, 3]
+    // TODO: Make this work, should convert the array from a "[[f32: 2]: 2]" to "[[f64: 2]: 2]".
+    //       The f32 is currently inferred from a "UnknownFloat", but f64 should be preferred.
+    //var f64_var: f64 = 3.0
+    //x1.[1].[0] = 5.5 + f64_var
+
+    printf(
+        "\nx1.[0].[0]: %f, x1.[0].[1]: %f, x1.[1].[0]: %f, x1.[1].[1]: %f",
+        x1.[0].[0] as f64,
+        x1.[0].[1] as f64,
+        x1.[1].[0] as f64,
+        x1.[1].[1] as f64,
+    )
+    assert(x1.[0].[0] == 1.1 and x1.[0].[1] == 2.2 and x1.[1].[0] == 5.5 and x1.[1].[1] == 4.4)
+
+
+    var x2 = [1, 2, 3]
     var i = 0
     while i < 3
     {
-        double(x3.[i].&)
+        double(x2.[i].&)
         i += 1
     }
-    assert(x3.[0] == 2 and x3.[1] == 4 and x3.[2] == 6)
-    printf("\nx3.[0]: %d, x3.[1] %d, x3.[2]: %d", x3.[0], x3.[1], x3.[2])
+    printf("\nx2.[0]: %d, x2.[1] %d, x2.[2]: %d", x2.[0], x2.[1], x2.[2])
+    assert(x2.[0] == 2 and x2.[1] == 4 and x2.[2] == 6)
 
-    var x4 = [ TestStruct{ 12, 34.5 } ]
-    x4.[0].b = 123.456
-    var tmp_var = x4.[0].b
-    assert(x4.[0].b == 123.456)
+
+    var x3 = [ TestStruct{ 12, 34.5 } ]
+    x3.[0].b = 123.456
+    var tmp_var = x3.[0].b
+    printf("\nx3.[0].b: %f", x3.[0].b)
+    assert(x3.[0].b == 123.456)
+
 
     var heap_array = malloc(8) as {[i32: 2]}
     heap_array.* = [12, 24]
-    assert(heap_array.*.[0] == 12 and (heap_array.*).[1] == 24)
     printf("\nheap_array.*.[0]: %d, (heap_array.*).[1]: %d", heap_array.*.[0], (heap_array.*).[1])
+    assert(heap_array.*.[0] == 12 and (heap_array.*).[1] == 24)
 
     var abc = TestArrayStruct { 456, heap_array }
-    assert(abc.a == 456 and abc.b.*.[0] == 12 and abc.b.*.[1] == 24)
     printf("\nabc.a: %d, abc.b.*.[0]: %d, abc.b.*.[1]: %d", abc.a, abc.b.*.[0], abc.b.*.[1])
+    assert(abc.a == 456 and abc.b.*.[0] == 12 and abc.b.*.[1] == 24)
 
-    return 123
+    return 0
 }

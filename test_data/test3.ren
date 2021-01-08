@@ -2,7 +2,7 @@ function test_func() -> i32
 {
     var res: i32
     
-    var x: i32 = 3
+    var x: i32 = 2
     if x >= 3
     {
         res = 1
@@ -13,4 +13,9 @@ function test_func() -> i32
     }
     
     return res
+}
+
+function main() -> i32
+{
+    return test_func()
 }

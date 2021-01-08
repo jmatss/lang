@@ -12,7 +12,7 @@ struct TestStruct
     y: {NestedStruct},
 }
 
-function double(n: {i32})
+function double(n: {u32})
 {
     n.* *= 2
 }

@@ -9,5 +9,5 @@ function main() -> i32
     double(i.&)
     printf("i: %d", i)
 
-    return 123
+    return 0
 }
