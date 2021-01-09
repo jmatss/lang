@@ -495,6 +495,7 @@ impl<'a> ParseTokenIter<'a> {
             // See if the first scenario is true. If it is not, assume that
             // the secound scenario is correct.
             let mut name = None;
+            let mut name_file_pos = None;
 
             let first_opt = self.peek_skip_space_line();
             let second_opt = self.peek_skip_space_line_n(1);
@@ -507,8 +508,9 @@ impl<'a> ParseTokenIter<'a> {
                         self.next_skip_space_line();
 
                         name = Some(ident.clone());
+                        name_file_pos = Some(first.file_pos);
                     }
-                }
+                };
 
                 // Edge case if the stop condition is a parenthesis. The reason
                 // is that parenthesis are allowed in expression, so one doesn't
@@ -516,11 +518,12 @@ impl<'a> ParseTokenIter<'a> {
                 // itself has logic internally that stop the parsing if a
                 // parenthesis is found that doesn't belong to the expression,
                 // so this should not be a problem.
-                let arg = if end_symbol == Sym::ParenthesisEnd {
-                    Argument::new(name, self.parse_expr(&[Sym::Comma])?)
+                let expr = if end_symbol == Sym::ParenthesisEnd {
+                    self.parse_expr(&[Sym::Comma])?
                 } else {
-                    Argument::new(name, self.parse_expr(&[Sym::Comma, end_symbol.clone()])?)
+                    self.parse_expr(&[Sym::Comma, end_symbol.clone()])?
                 };
+                let arg = Argument::new(name, name_file_pos, expr);
 
                 arguments.push(arg);
             } else {

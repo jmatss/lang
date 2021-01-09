@@ -56,7 +56,8 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
                 match bin_op.operator {
                     // Instance structure access/method call.
                     BinOperator::Dot => {
-                        let arg = Argument::new(Some(THIS_VAR_NAME.into()), *bin_op.lhs.clone());
+                        let arg =
+                            Argument::new(Some(THIS_VAR_NAME.into()), None, *bin_op.lhs.clone());
 
                         method_call.arguments.insert(0, arg);
                         method_call.is_method = true;

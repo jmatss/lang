@@ -10,7 +10,11 @@ use common::{
     util,
     visitor::Visitor,
 };
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    rc::Rc,
+};
 
 /// Iterates through all function and method calls and re-orders all named
 /// arguments so that they are put in the correct index position so that
@@ -31,96 +35,92 @@ impl<'a> CallArgs<'a> {
         }
     }
 
-    fn reorder_func_call(
-        &mut self,
-        func_call: &mut FuncCall,
-        params: &[Rc<RefCell<Var>>],
-    ) -> CustomResult<()> {
-        let mut idx: u64 = 0;
-        while idx < func_call.arguments.len() as u64 {
-            let arg = func_call
-                .arguments
-                .get(idx as usize)
-                .expect("Known to be in bounds.");
+    /// If any of the given `args` are named arguments, check so that every name
+    /// is unique and is found only ones in the given argument list.
+    /// Reports errors into `self.errors` if duplicates are found and returns
+    /// false. Returns true if no duplicates are found.
+    fn names_are_unique(&mut self, args: &[Argument]) -> bool {
+        let mut name_to_arg: HashMap<_, Vec<&Argument>> = HashMap::new();
+        let mut names_are_unique = true;
 
-            // TODO: Can this lead to a infinite loop where two named arguments
-            //       with the same name will be swapped back over and over?
-            if let Some(arg_name) = &arg.name {
-                let mut new_idx = 0;
-                let mut found = false;
-                for param in params {
-                    if arg_name == &param.borrow().name {
-                        found = true;
-                        break;
-                    }
-                    new_idx += 1;
+        for arg in args.iter().filter(|arg| arg.name.is_some()) {
+            match name_to_arg.entry(arg.name.clone().unwrap()) {
+                Entry::Occupied(mut o) => {
+                    names_are_unique = false;
+                    o.get_mut().push(arg);
                 }
-
-                if found && idx == new_idx {
-                    idx += 1;
-                } else if found {
-                    // The `idx` is not increment if a swap was made. This is done
-                    // since then you wan't to see if the new argument at this idx
-                    // needs to be swapped to somewhere else.
-                    func_call.arguments.swap(idx as usize, new_idx as usize);
-                } else {
-                    return Err(self.analyze_context.err(format!(
-                        "Unable to find parameter \"{}\" in function \"{}\".",
-                        arg_name, &func_call.name
-                    )));
+                Entry::Vacant(v) => {
+                    v.insert(vec![arg]);
                 }
-            } else {
-                idx += 1;
             }
         }
 
-        Ok(())
+        // Create a "nicely" formatted error message if a duplicate is found.
+        if !names_are_unique {
+            for (arg_name, dup_args) in name_to_arg.iter() {
+                if dup_args.len() > 1 {
+                    let mut err_pos_msg = String::new();
+
+                    for (i, arg) in dup_args.iter().enumerate() {
+                        err_pos_msg.push_str(&format!(
+                            "\nuse {} at position:\n{:#?}",
+                            i + 1,
+                            arg.name_file_pos
+                        ));
+                    }
+
+                    let err = self.analyze_context.err(format!(
+                        "Found multiple arguments with the name \"{}\" in argument list:{}",
+                        arg_name, &err_pos_msg
+                    ));
+                    self.errors.push(err);
+                }
+            }
+        }
+
+        names_are_unique
     }
 
-    fn reorder_struct_init(
-        &mut self,
-        struct_init: &mut StructInit,
-        members: &[Rc<RefCell<Var>>],
-    ) -> CustomResult<()> {
-        let mut idx: u64 = 0;
-        while idx < struct_init.arguments.len() as u64 {
-            let arg = struct_init
-                .arguments
-                .get(idx as usize)
-                .expect("Known to be in bounds.");
-
-            // TODO: Can this lead to a infinite loop where two named arguments
-            //       with the same name will be swapped back over and over?
-            if let Some(arg_name) = &arg.name {
-                let mut new_idx = 0;
-                let mut found = false;
-                for member in members {
-                    if arg_name == &member.borrow().name {
-                        found = true;
-                        break;
-                    }
-                    new_idx += 1;
-                }
-
-                if found && idx == new_idx {
-                    idx += 1;
-                } else if found {
-                    // The `idx` is not increment if a swap was made. This is done
-                    // since then you wan't to see if the new argument at this idx
-                    // needs to be swapped to somewhere else.
-                    struct_init.arguments.swap(idx as usize, new_idx as usize);
-                } else {
-                    return Err(self.analyze_context.err(format!(
-                        "Unable to find member \"{}\" in struct \"{}\".",
-                        arg_name, &struct_init.name
-                    )));
-                }
-            } else {
-                idx += 1;
-            }
+    fn reorder(&mut self, args: &mut Vec<Argument>, params: &[Rc<RefCell<Var>>]) {
+        if !self.names_are_unique(args) {
+            return;
         }
 
-        Ok(())
+        let mut param_name_to_idx = HashMap::new();
+        for (idx, param) in params.iter().enumerate() {
+            param_name_to_idx.insert(param.borrow().name.clone(), idx);
+        }
+
+        let mut arg_idx = 0;
+        while arg_idx < args.len() {
+            let arg = args.get(arg_idx).expect("Known to be in bounds.");
+
+            let arg_name = if let Some(arg_name) = &arg.name {
+                arg_name
+            } else {
+                arg_idx += 1;
+                continue;
+            };
+
+            if let Some(param_idx) = param_name_to_idx.get(arg_name) {
+                if arg_idx != *param_idx {
+                    // The `arg_idx` is not increment if a swap was made. This is
+                    // done since then you wan't to see if the new argument at this
+                    // `arg_idx` needs to be swapped to somewhere else.
+                    args.swap(arg_idx, *param_idx);
+                    continue;
+                }
+            } else {
+                let err = self.analyze_context.err(format!(
+                    "Unable to find parameter with name \"{}\" given in argument list at: {:#?}",
+                    arg_name,
+                    arg.value.file_pos()
+                ));
+                self.errors.push(err);
+            }
+
+            arg_idx += 1;
+        }
     }
 
     fn default_args(
@@ -141,7 +141,7 @@ impl<'a> CallArgs<'a> {
 
                 if let Some(default_value) = &param.value {
                     let default_arg =
-                        Argument::new(Some(param.name.clone()), *default_value.clone());
+                        Argument::new(Some(param.name.clone()), None, *default_value.clone());
                     func_call.arguments.push(default_arg);
                 } else {
                     return Err(self.analyze_context.err(format!(
@@ -222,10 +222,7 @@ impl<'a> Visitor for CallArgs<'a> {
 
         // Reorder the arguments of the function call according to the parameter
         // names used for the arguments.
-        if let Err(err) = self.reorder_func_call(func_call, params) {
-            self.errors.push(err);
-            return;
-        }
+        self.reorder(&mut func_call.arguments, params);
 
         // Assign any default value for arguments that are missing a value in
         // the function call.
@@ -266,10 +263,7 @@ impl<'a> Visitor for CallArgs<'a> {
 
         // Reorder the arguments of the struct init call according to the member
         // names used for the arguments.
-        if let Err(err) = self.reorder_struct_init(struct_init, members) {
-            self.errors.push(err);
-            return;
-        }
+        self.reorder(&mut struct_init.arguments, members);
 
         // TODO: Should there be default values for structs (?). Arrange that
         //       here in that case.

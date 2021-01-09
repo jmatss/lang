@@ -606,12 +606,17 @@ impl ArrayInit {
 pub struct Argument {
     // Named used for named arguments.
     pub name: Option<String>,
+    pub name_file_pos: Option<FilePosition>,
     pub value: Expr,
 }
 
 impl Argument {
-    pub fn new(name: Option<String>, value: Expr) -> Self {
-        Argument { name, value }
+    pub fn new(name: Option<String>, name_file_pos: Option<FilePosition>, value: Expr) -> Self {
+        Argument {
+            name,
+            name_file_pos,
+            value,
+        }
     }
 }
 
