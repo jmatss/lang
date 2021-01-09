@@ -29,7 +29,7 @@ function main() -> i32
     //       it is infered to being a unknown int and becomes i32 because the type of the `i4`
     //       is prefereed, and the assert with the i8 is solved "to late".
     //var expected_i8: i8 = 4
-    var expected_f32 = 123.
+    //var expected_f32 = 123.
     var expected_f64 = 456.
 
     //printf("expected_i32: %d, test_struct_i32.inner: %d\n", expected_i32, test_struct_i32.inner)

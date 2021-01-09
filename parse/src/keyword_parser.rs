@@ -61,11 +61,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             Kw::Package => self.parse_package(kw_file_pos),
             Kw::External => self.parse_external(kw_file_pos),
 
-            Kw::Var => self.parse_var_decl(kw_file_pos),
-            Kw::Const => {
-                // TODO: self.parse_const_decl()
-                self.parse_var_decl(kw_file_pos)
-            }
+            Kw::Var => self.parse_var_decl(false, kw_file_pos),
+            Kw::Const => self.parse_var_decl(true, kw_file_pos),
             Kw::Static => Err(self.iter.err(
                 "\"Static\" keyword not implemented.".into(),
                 Some(kw_file_pos),
@@ -503,7 +500,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a var statement.
     ///   "var <ident> [: <type>] [= <expr>]"
     /// The "var" keyword has already been consumed when this function is called.
-    fn parse_var_decl(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_var_decl(
+        &mut self,
+        is_const: bool,
+        mut file_pos: FilePosition,
+    ) -> CustomResult<AstToken> {
         // Start by parsing the identifier.
         let lex_token = self.iter.next_skip_space_line();
         let (ident, var_file_pos) = if let Some((LexTokenKind::Ident(ident), var_file_pos)) =
@@ -523,7 +524,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let parse_type = true;
         let parse_value = true;
-        let is_const = false;
         let var = Rc::new(RefCell::new(self.iter.parse_var(
             &ident,
             parse_type,
@@ -542,68 +542,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let var_decl = Stmt::VariableDecl(var, Some(file_pos));
         Ok(AstToken::Stmt(var_decl))
     }
-
-    /*
-    // TODO: Maybe don't force a type, let the type be infered (?).
-    /// Parses a const statement.
-    ///   "const <ident> : <type> = <expr>"
-    /// The "const" keyword has already been consumed when this function is called.
-    fn parse_const_decl(&mut self) -> CustomResult<ParseToken> {
-        // Start by parsing the identifier
-        let ident = if let Some(lex_token) = self.iter.next_skip_space() {
-            if let LexTokenKind::Identifier(ident) = lex_token.kind {
-                ident
-            } else {
-                return Err(self.iter.err(format!(
-                    "Expected ident when parsing \"const\", got: {:?}",
-                    lex_token
-                )));
-            }
-        } else {
-            return Err(self
-                .iter
-                .err("Received None when looking at token after \"const\".".into()));
-        };
-
-        // The the next token should be a "Colon", parse the type.
-        let var_type = if let Some(lex_token) = self.iter.next_skip_space() {
-            if let LexTokenKind::Symbol(Symbol::Colon) = lex_token.kind {
-                self.iter.parse_type()?
-            } else {
-                return Err(self.iter.err(format!(
-                    "Expected type when parsing \"const\", got: {:?}",
-                    lex_token
-                )));
-            }
-        } else {
-            return Err(self
-                .iter
-                .err("Received None when looking at token after \"const <ident>\".".into()));
-        };
-
-        // The the next token should be a "Equals" (assignment), parse the expr.
-        let expr = if let Some(lex_token) = self.iter.next_skip_space() {
-            if let LexTokenKind::Symbol(Symbol::Equals) = lex_token.kind {
-                self.iter.parse_expr(&DEFAULT_STOP_CONDS)?
-            } else {
-                return Err(self.iter.err(format!(
-                    "Expected expressing when parsing \"const\", got: {:?}",
-                    lex_token
-                )));
-            }
-        } else {
-            return Err(self
-                .iter
-                .err("Received None when looking at \"const\" assigned value.".into()));
-        };
-
-        let is_const = true;
-        let variable = Variable::new(ident, Some(var_type), None, is_const);
-        let var_decl = Statement::VariableDecl(variable, Some(expr));
-        let kind = ParseTokenKind::Statement(var_decl);
-        Ok(ParseToken::new(kind, self.line_nr, self.column_nr))
-    }
-    */
 
     /// Parses a function and its body. See `parse_func_proto` for the structure
     /// of a function header/prototype.

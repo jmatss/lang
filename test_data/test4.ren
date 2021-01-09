@@ -1,5 +1,37 @@
+use std.assert
+
 function main() -> i32
 {
+    const a: i32 = 5
+    const b: i32 = 123
+    const x = a + b
+
+    var correct
+
+    // Can only match/switch on constant values.
+    match x
+    {
+        128 {
+            correct = true
+        }
+        default {
+            correct = false
+        }
+    }
+    assert(correct)
+
+
+    match 3 - 2
+    {
+        123 {
+            correct = false
+        }
+        default {
+            correct = true
+        }
+    }
+    assert(correct)
+
     return 0
 }
 

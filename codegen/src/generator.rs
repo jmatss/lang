@@ -228,7 +228,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         debug!("Compiling var var_decl: {:#?}", &var);
 
         // Constants are never "compiled" into instructions, they are handled
-        // "internaly" in this code during compilation.
+        // "internally" in this code during compilation.
         if !var.is_const {
             let decl_block_id = self
                 .analyze_context
@@ -246,13 +246,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         var: &Var,
         basic_value: BasicValueEnum<'ctx>,
-    ) -> CustomResult<InstructionValue<'ctx>> {
+    ) -> CustomResult<()> {
         debug!(
-            "Compile var_store, var name: {:?}\nret_type: {:#?}\nbasic_value: {:#?}.",
-            &var.name, &var.ty, &basic_value
+            "Compile var_store, var: {:#?}\nbasic_value: {:#?}.",
+            &var, &basic_value
         );
 
-        // TODO: Const isn't working atm.
         if var.is_const {
             let block_id = self.cur_block_id;
             let decl_block_id = self
@@ -261,21 +260,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let key = (var.full_name(), decl_block_id);
 
             self.constants.insert(key, basic_value);
+        } else {
+            let ptr = self.get_var_ptr(var)?;
+            self.builder.build_store(ptr, basic_value);
         }
 
-        let ptr = self.get_var_ptr(var)?;
-        debug!("ptr value: {:?}", ptr);
-
-        Ok(self.builder.build_store(ptr, basic_value))
+        Ok(())
     }
 
     pub(super) fn compile_var_load(&mut self, var: &Var) -> CustomResult<BasicValueEnum<'ctx>> {
-        if var.is_const {
-            self.get_const_value(var)
-        } else {
-            let ptr = self.get_var_ptr(var)?;
-            Ok(self.builder.build_load(ptr, "load"))
-        }
+        // If unable to find variable pointer, assume it is a const variable
+        // that is stored in another place.
+        Ok(match self.get_var_ptr(var) {
+            Ok(ptr) => self.builder.build_load(ptr, "load"),
+            Err(_) => self.get_const_value(var)?,
+        })
     }
 
     // TODO: Implement logic to load both regular variables and struct members
@@ -286,7 +285,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .analyze_context
             .get_var_decl_scope(&var.full_name(), block_id)?;
         let key = (var.full_name(), decl_block_id);
-        debug!("Loading constant pointer. Key: {:?}", &key);
+        debug!("Loading constant value. Key: {:?}", &key);
 
         if let Some(const_value) = self.constants.get(&key) {
             Ok(*const_value)
