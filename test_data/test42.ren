@@ -23,11 +23,12 @@ struct Error
 
 implement Disposable for Error
 {
-    function this deinit()
+    function {this} deinit()
     {
-        if this.msg_needs_deinit
+        if this.*.msg_needs_deinit
         {
-            Allocator<u8>::deinit(this.msg)
+            Allocator<u8>::deinit(this.*.msg)
+            this.*.msg_needs_deinit = false
         }
     }
 }
@@ -49,7 +50,7 @@ function main() -> i32
     var heap_err = Error { kind, msg, needs_deinit }
 
     var a = Ptr::init(heap_err)
-    a.deinit()
+    a.&.deinit()
 
     printf("Stack: %s", stack_err.msg)
     printf("\nHeap: %s", heap_err.msg)

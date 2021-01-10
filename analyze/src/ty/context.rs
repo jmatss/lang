@@ -667,6 +667,15 @@ impl<'a> TypeContext<'a> {
 
                 Ty::CompoundType(inner_ty, generics, ..) => (inner_ty, generics),
 
+                Ty::Pointer(ty_box, ..) => {
+                    if let Ty::CompoundType(inner_ty, generics, ..) = ty_box.as_ref() {
+                        (inner_ty, generics)
+                    } else {
+                        self.cur_ty = cur_ty_backup;
+                        return SubResult::UnSolved(cur_ty_modified);
+                    }
+                }
+
                 _ => {
                     return SubResult::Err(self.analyze_context.err(format!(
                         "Invalid struct type of UnknownStructureMember: {:#?}",

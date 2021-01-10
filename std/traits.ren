@@ -1,4 +1,4 @@
 trait Disposable
 {
-    function this deinit();
+    function {this} deinit();
 }

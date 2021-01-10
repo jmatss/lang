@@ -64,6 +64,7 @@ implement Allocator
     }
 }
 
+
 /// Represent a heap allocated value of type `T`.
 struct Ptr<T> where T implements Disposable
 {
@@ -84,9 +85,9 @@ implement Disposable for Ptr
 {
     /// Disposes of the allocated heap memory. Before freeing the memory, the inner
     /// value of type `T` is disposed of.
-    function this deinit()
+    function {this} deinit()
     {
-        this.ptr.*.deinit()
-        Allocator<T>::deinit(this.ptr)
+        this.*.ptr.deinit()
+        Allocator<T>::deinit(this.*.ptr)
     }
 }
