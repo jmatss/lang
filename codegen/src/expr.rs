@@ -252,7 +252,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Wrong amount of args given when calling func \"{}\". Expected: {}, got: {}",
-                        &func_call.name,
+                        &func_call.full_name()?,
                         func_ptr.count_params(),
                         func_call.arguments.len()
                     ),
@@ -272,7 +272,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     // Checks to see if the types of the parameter and the
                     // argument are the same. If they are different, see if the
                     // type of the argument can be casted to the same type.
-                    self.infer_arg_type(i, &func_call.name, &param.get_type(), &arg.get_type())?;
+                    self.infer_arg_type(
+                        i,
+                        &func_call.full_name()?,
+                        &param.get_type(),
+                        &arg.get_type(),
+                    )?;
                 } else {
                     unreachable!("None when comparing arg and par in func call compile.");
                 }

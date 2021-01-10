@@ -220,17 +220,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     ExprTy::LValue => Ok(any_value),
                     ExprTy::RValue => {
                         if any_value.is_pointer_value() {
-                            // TODO: Find better way to do this.
-                            // Edge case if this is a pointer value containing a struct value.
-                            // Struct values should ALWAYS be wrapped in a pointer, otherwise
-                            // the members can't be accessed. Prevent deref of the pointer if
-                            // this is the case.
                             let ptr = any_value.into_pointer_value();
-                            if let AnyTypeEnum::StructType(_) = ptr.get_type().get_element_type() {
-                                Ok(any_value)
-                            } else {
-                                Ok(self.builder.build_load(ptr, "deref.rval").into())
-                            }
+                            Ok(self.builder.build_load(ptr, "deref.rval").into())
                         } else {
                             Err(self.err(
                                 format!("Tried to deref non pointer in rvalue {:?}", any_value),

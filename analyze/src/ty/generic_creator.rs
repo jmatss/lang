@@ -1,7 +1,4 @@
-use super::{
-    context::TypeContext, generic_replace::GenericsReplacer,
-    generic_structs::GenericStructsCollector, solver::TypeSolver,
-};
+use super::{context::TypeContext, generic_replace::GenericsReplacer};
 use crate::block::BlockInfo;
 use common::{
     error::LangError,
@@ -15,11 +12,7 @@ use common::{
     BlockId,
 };
 use log::debug;
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 pub struct GenericCreator<'a, 'tctx> {
     /// Needed to look up structures and types.
@@ -31,7 +24,7 @@ pub struct GenericCreator<'a, 'tctx> {
     ///
     /// The key is the name of the structure and the values are the unique types
     /// of the structure with the generics implemented.
-    generic_structures: HashMap<String, Vec<Ty>>,
+    generic_struct: HashMap<String, Vec<Ty>>,
 
     errors: Vec<LangError>,
 }
@@ -43,13 +36,13 @@ pub struct GenericCreator<'a, 'tctx> {
 impl<'a, 'tctx> GenericCreator<'a, 'tctx> {
     pub fn new(
         type_context: &'a mut TypeContext<'tctx>,
-        generic_structures: HashMap<String, Vec<Ty>>,
+        generic_struct: HashMap<String, Vec<Ty>>,
     ) -> Self {
-        debug!("generic_structures: {:#?}", generic_structures);
+        debug!("generic_struct: {:#?}", generic_struct);
 
         Self {
             type_context,
-            generic_structures,
+            generic_struct,
             errors: Vec::default(),
         }
     }
@@ -71,7 +64,7 @@ impl<'a, 'tctx> GenericCreator<'a, 'tctx> {
         old_id: BlockId,
         parent_id: BlockId,
     ) -> Option<usize> {
-        if let Some(generic_structure_tys) = self.generic_structures.get(old_name).cloned() {
+        if let Some(generic_structure_tys) = self.generic_struct.get(old_name).cloned() {
             // TODO: Do not hardcode default block ID, get ID from somewhere else.
             let id = BlockInfo::DEFAULT_BLOCK_ID;
 
@@ -157,40 +150,15 @@ impl<'a, 'tctx> GenericCreator<'a, 'tctx> {
                 // into the AST.
                 let header = BlockHeader::Struct(Rc::clone(&new_struct_rc));
                 let struct_body = Vec::with_capacity(0);
-                let ast_token = AstToken::Block(header, file_pos.to_owned(), old_id, struct_body);
-
-                /*
-                // Iterate through this new AstToken and find potential new
-                // `generic_structures` that has been created now that the generics
-                // have been replaced in this AstToken.
-                let mut collector = GenericStructsCollector::new(self.type_context);
-                let mut traverser = AstTraverser::new();
-                if let Err(mut errs) = traverser
-                    .add_visitor(&mut collector)
-                    .traverse_token(&mut ast_token)
-                    .take_errors()
-                {
-                    self.errors.append(&mut errs)
-                }
-
-                // Fill the `self.generic_structures` with the potential new ones.
-                for (name, new_tys) in std::mem::take(&mut collector.generic_structures) {
-                    match self.generic_structures.entry(name) {
-                        Entry::Occupied(mut o) => {
-                            o.get_mut().extend(new_tys);
-                        }
-                        Entry::Vacant(v) => {
-                            v.insert(new_tys);
-                        }
-                    }
-                }
-                */
 
                 // Slower to shift all the ast tokens to the
                 // right, but ensure that the tokens are
                 // inserted next to the old struct and
                 // doesn't ex. get added after the EOF token.
-                body.insert(old_idx + 1, ast_token);
+                body.insert(
+                    old_idx + 1,
+                    AstToken::Block(header, file_pos.to_owned(), old_id, struct_body),
+                );
             }
 
             // Remove the old, now unused, structure.
@@ -227,7 +195,7 @@ impl<'a, 'tctx> GenericCreator<'a, 'tctx> {
         old_name: &str,
         old_impl_token: &mut AstToken,
     ) -> Option<usize> {
-        if let Some(generic_structure_tys) = self.generic_structures.get(old_name).cloned() {
+        if let Some(generic_structure_tys) = self.generic_struct.get(old_name).cloned() {
             // TODO: Implement for types other than structs.
 
             for (new_idx, gen_structure_ty) in generic_structure_tys.iter().enumerate() {
@@ -354,7 +322,7 @@ impl<'a, 'tctx> Visitor for GenericCreator<'a, 'tctx> {
                 if let AstToken::Block(BlockHeader::Struct(struct_), file_pos, old_id, ..) =
                     &body_token
                 {
-                    if self.generic_structures.contains_key(&struct_.borrow().name) {
+                    if self.generic_struct.contains_key(&struct_.borrow().name) {
                         if let Some(skip) = self.create_structure_instance(
                             &struct_.borrow().name.clone(),
                             body,
@@ -403,7 +371,7 @@ impl<'a, 'tctx> Visitor for GenericCreator<'a, 'tctx> {
                 {
                     let structure_name = structure_name.clone();
 
-                    if self.generic_structures.contains_key(&structure_name) {
+                    if self.generic_struct.contains_key(&structure_name) {
                         if let Some(skip) =
                             self.create_method_instance(body, i, &structure_name, &mut body_token)
                         {

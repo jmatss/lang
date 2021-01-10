@@ -98,7 +98,11 @@ impl<'a> ParseTokenIter<'a> {
         }
     }
 
+    /// Called when all files have been parsed and one wants to get the new whole
+    /// AST. When this function is called, a EOF is added to the end of the AST.
     pub fn take_root_block(&mut self) -> AstToken {
+        self.root_block_body.push(AstToken::EOF);
+
         AstToken::Block(
             BlockHeader::Default,
             FilePosition::default(),
@@ -141,7 +145,6 @@ impl<'a> ParseTokenIter<'a> {
                 Ok(parse_token) => {
                     match &parse_token {
                         AstToken::EOF => {
-                            cur_block_body.push(parse_token);
                             break;
                         }
                         AstToken::Stmt(Stmt::Use(path)) => {

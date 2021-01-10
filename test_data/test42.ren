@@ -1,0 +1,58 @@
+use std.mem
+
+// TODO: std.mem already includes std.traits. Should rework import logic.
+//use std.traits
+
+external function strlen(str: {u8}) -> i32
+
+enum ErrorKind
+{
+    FIRST,
+    SECOND,
+}
+
+struct Error
+{
+    kind: ErrorKind,
+    msg: {u8},
+    
+    /// Keeps track of the state of `msg`.
+    /// If `msg` needs to be deallocated, this will be set to `true`.
+    msg_needs_deinit: bool,
+}
+
+implement Disposable for Error
+{
+    function this deinit()
+    {
+        if this.msg_needs_deinit
+        {
+            Allocator<u8>::deinit(this.msg)
+        }
+    }
+}
+
+function main() -> i32
+{
+    var kind
+    var msg
+    var needs_deinit
+
+    kind = ErrorKind::FIRST
+    msg = "A stack allocated error message."
+    needs_deinit = false
+    var stack_err = Error { kind, msg, needs_deinit }
+
+    kind = ErrorKind::SECOND
+    msg = Allocator::clone("A heap allocated error message.", 32)
+    needs_deinit = true
+    var heap_err = Error { kind, msg, needs_deinit }
+
+    var a = Ptr::init(heap_err)
+    a.deinit()
+
+    printf("Stack: %s", stack_err.msg)
+    printf("\nHeap: %s", heap_err.msg)
+
+    return 0
+}

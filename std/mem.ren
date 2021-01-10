@@ -64,8 +64,6 @@ implement Allocator
     }
 }
 
-// See issue #6
-/*
 /// Represent a heap allocated value of type `T`.
 struct Ptr<T> where T implements Disposable
 {
@@ -92,4 +90,3 @@ implement Disposable for Ptr
         Allocator<T>::deinit(this.ptr)
     }
 }
-*/

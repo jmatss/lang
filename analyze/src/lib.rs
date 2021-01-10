@@ -25,8 +25,8 @@ use post::{
 use pre::{indexing::IndexingAnalyzer, method::MethodAnalyzer};
 use std::{cell::RefCell, collections::HashMap};
 use ty::{
-    context::TypeContext, generic_creator::GenericCreator, generic_structs::GenericStructsCollector,
-    inferencer::TypeInferencer, solver::TypeSolver,
+    context::TypeContext, generic_collector::GenericStructsCollector,
+    generic_creator::GenericCreator, inferencer::TypeInferencer, solver::TypeSolver,
 };
 
 // TODO: Error if a function that doesn't have a return type has a return in it.
@@ -139,8 +139,8 @@ pub fn analyze(
         .traverse_token(ast_root)
         .take_errors()?;
 
-    debug!("Running TypeConverter");
-    let generic_structs = generic_structs_collector.generic_structures;
+    debug!("Running GenericCreator");
+    let generic_structs = generic_structs_collector.generic_structs;
     let mut type_converter = GenericCreator::new(&mut type_context, generic_structs);
     AstTraverser::new()
         .add_visitor(&mut type_converter)
