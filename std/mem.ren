@@ -1,7 +1,10 @@
+use std.traits
+
 external function malloc(size: u32) -> {u8}
 external function free(ptr: {u8})
 external function realloc(ptr: {u8}, size: u32) -> {u8}
 external function printf(format: {u8}, ...) -> i32
+external function memcpy(dest: {u8}, src: {u8}, size: u32) -> {u8}
 
 struct Allocator<T>;
 implement Allocator
@@ -40,4 +43,53 @@ implement Allocator
         printf("Deallocation (ptr: 0x%p)\n", ptr)
         free(ptr as {u8})
     }
+
+    /// Clones `size` bytes from the `src` into a new heap allocation
+    /// and returns a pointer to the new allocation.
+    /// If `size` isn't set, it will default to the size of `T`.
+    /// Implemented using libc `memcpy`.
+    function clone(src: {T}, size: u32 = @size<T>() as u32) -> {T}
+    {
+        var dest = Allocator<T>::init_size(size)
+        memcpy(dest as {u8}, src as {u8}, size)
+        return dest
+    }
+
+    /// Copies the `size` bytes from `src` to `dest`.
+    /// If `size` isn't set, it will default to the size of `T`.
+    /// Implemented using libc `memcpy`.
+    function copy(dest: {T}, src: {T}, size: u32 = @size<T>() as u32)
+    {
+        memcpy(dest as {u8}, src as {u8}, size)
+    }
 }
+
+// See issue #6
+/*
+/// Represent a heap allocated value of type `T`.
+struct Ptr<T> where T implements Disposable
+{
+    ptr: {T},
+}
+
+implement Ptr
+{
+    /// Allocates a value of type `T` on the heap.
+    /// If no `value` is given, the memory will be initialized with null.
+    function init(value: T = @null<T>()) -> Ptr<T>
+    {
+        return Ptr<T> { Allocator<T>::init(value) }
+    }
+}
+
+implement Disposable for Ptr
+{
+    /// Disposes of the allocated heap memory. Before freeing the memory, the inner
+    /// value of type `T` is disposed of.
+    function this deinit()
+    {
+        this.ptr.*.deinit()
+        Allocator<T>::deinit(this.ptr)
+    }
+}
+*/

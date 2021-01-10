@@ -657,7 +657,10 @@ impl<'a> TypeContext<'a> {
                 Ty::CompoundType(InnerTy::UnknownIdent(..), ..)
                 | Ty::UnknownStructureMember(..)
                 | Ty::UnknownStructureMethod(..)
-                | Ty::UnknownMethodArgument(..) => {
+                | Ty::UnknownMethodArgument(..)
+                | Ty::Generic(..)
+                | Ty::GenericInstance(..)
+                | Ty::Any(..) => {
                     self.cur_ty = cur_ty_backup;
                     return SubResult::UnSolved(cur_ty_modified);
                 }
@@ -776,7 +779,10 @@ impl<'a> TypeContext<'a> {
                 Ty::CompoundType(InnerTy::UnknownIdent(..), ..)
                 | Ty::UnknownStructureMember(..)
                 | Ty::UnknownStructureMethod(..)
-                | Ty::UnknownMethodArgument(..) => {
+                | Ty::UnknownMethodArgument(..)
+                | Ty::Generic(..)
+                | Ty::GenericInstance(..)
+                | Ty::Any(..) => {
                     self.cur_ty = cur_ty_backup;
                     return SubResult::UnSolved(cur_ty_modified);
                 }
@@ -894,7 +900,10 @@ impl<'a> TypeContext<'a> {
                 Ty::CompoundType(InnerTy::UnknownIdent(..), ..)
                 | Ty::UnknownStructureMember(..)
                 | Ty::UnknownStructureMethod(..)
-                | Ty::UnknownMethodArgument(..) => {
+                | Ty::UnknownMethodArgument(..)
+                | Ty::Generic(..)
+                | Ty::GenericInstance(..)
+                | Ty::Any(..) => {
                     self.cur_ty = cur_ty_backup;
                     return SubResult::UnSolved(cur_ty_modified);
                 }

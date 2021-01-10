@@ -1,5 +1,4 @@
-use std::cell::RefCell;
-
+use crate::{block::BlockInfo, AnalyzeContext};
 use common::{
     error::LangError,
     token::{ast::AstToken, block::BlockHeader},
@@ -7,8 +6,7 @@ use common::{
     ty::ty::Ty,
     visitor::Visitor,
 };
-
-use crate::{block::BlockInfo, AnalyzeContext};
+use std::cell::RefCell;
 
 /// Iterates through "generic" parameters tied to structures and functions (TODO)
 /// and replaces the uses of the generics with "Generic" types instead if the

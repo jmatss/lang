@@ -605,8 +605,6 @@ impl<'a> AstTraverser<'a> {
                 }
             }
             Stmt::VariableDecl(var, _) => {
-                warn!("var visit: {:#?}", var);
-
                 if self.traverse_context.deep_copy {
                     let mut new_var = var.borrow().clone();
                     new_var.set_copy_nr(self.traverse_context.copy_nr.unwrap());

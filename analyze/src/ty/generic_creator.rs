@@ -1,3 +1,8 @@
+use super::{
+    context::TypeContext, generic_replace::GenericsReplacer,
+    generic_structs::GenericStructsCollector, solver::TypeSolver,
+};
+use crate::block::BlockInfo;
 use common::{
     error::LangError,
     file::FilePosition,
@@ -10,15 +15,15 @@ use common::{
     BlockId,
 };
 use log::debug;
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    rc::Rc,
+};
 
-use crate::{block::BlockInfo, AnalyzeContext};
-
-use super::generic_replace::GenericsReplacer;
-
-pub struct TypeConverter<'a> {
-    /// Needed to look up structures.
-    analyze_context: &'a mut AnalyzeContext,
+pub struct GenericCreator<'a, 'tctx> {
+    /// Needed to look up structures and types.
+    type_context: &'a mut TypeContext<'tctx>,
 
     /// Contains types/structures that have generic placeholders. These structures
     /// should be removed and new structure/methods should be created that have
@@ -35,15 +40,15 @@ pub struct TypeConverter<'a> {
 /// that contain replaced generics (static dispatch). The old blocks are set to
 /// "Empty". This will done for the "implement" block and all its contained
 /// methods as well.
-impl<'a> TypeConverter<'a> {
+impl<'a, 'tctx> GenericCreator<'a, 'tctx> {
     pub fn new(
-        analyze_context: &'a mut AnalyzeContext,
+        type_context: &'a mut TypeContext<'tctx>,
         generic_structures: HashMap<String, Vec<Ty>>,
     ) -> Self {
         debug!("generic_structures: {:#?}", generic_structures);
 
         Self {
-            analyze_context,
+            type_context,
             generic_structures,
             errors: Vec::default(),
         }
@@ -72,7 +77,7 @@ impl<'a> TypeConverter<'a> {
 
             // TODO: Implement for types other than structs.
 
-            let struct_ = match self.analyze_context.get_struct(old_name, id) {
+            let struct_ = match self.type_context.analyze_context.get_struct(old_name, id) {
                 Ok(struct_) => Rc::clone(&struct_),
                 Err(err) => {
                     self.errors.push(err);
@@ -97,7 +102,7 @@ impl<'a> TypeConverter<'a> {
                 let generics = if let Ty::CompoundType(_, generics, ..) = gen_structure_ty {
                     generics.clone()
                 } else {
-                    let err = self.analyze_context.err(format!(
+                    let err = self.type_context.analyze_context.err(format!(
                         "Generic instance type not compound: {:#?}",
                         gen_structure_ty
                     ));
@@ -143,7 +148,8 @@ impl<'a> TypeConverter<'a> {
 
                 // Insert the new struct into the lookup table.
                 let key = (new_name.clone(), parent_id);
-                self.analyze_context
+                self.type_context
+                    .analyze_context
                     .structs
                     .insert(key, Rc::clone(&new_struct_rc));
 
@@ -151,15 +157,40 @@ impl<'a> TypeConverter<'a> {
                 // into the AST.
                 let header = BlockHeader::Struct(Rc::clone(&new_struct_rc));
                 let struct_body = Vec::with_capacity(0);
+                let ast_token = AstToken::Block(header, file_pos.to_owned(), old_id, struct_body);
+
+                /*
+                // Iterate through this new AstToken and find potential new
+                // `generic_structures` that has been created now that the generics
+                // have been replaced in this AstToken.
+                let mut collector = GenericStructsCollector::new(self.type_context);
+                let mut traverser = AstTraverser::new();
+                if let Err(mut errs) = traverser
+                    .add_visitor(&mut collector)
+                    .traverse_token(&mut ast_token)
+                    .take_errors()
+                {
+                    self.errors.append(&mut errs)
+                }
+
+                // Fill the `self.generic_structures` with the potential new ones.
+                for (name, new_tys) in std::mem::take(&mut collector.generic_structures) {
+                    match self.generic_structures.entry(name) {
+                        Entry::Occupied(mut o) => {
+                            o.get_mut().extend(new_tys);
+                        }
+                        Entry::Vacant(v) => {
+                            v.insert(new_tys);
+                        }
+                    }
+                }
+                */
 
                 // Slower to shift all the ast tokens to the
                 // right, but ensure that the tokens are
                 // inserted next to the old struct and
                 // doesn't ex. get added after the EOF token.
-                body.insert(
-                    old_idx + 1,
-                    AstToken::Block(header, file_pos.to_owned(), old_id, struct_body),
-                );
+                body.insert(old_idx + 1, ast_token);
             }
 
             // Remove the old, now unused, structure.
@@ -181,7 +212,7 @@ impl<'a> TypeConverter<'a> {
         parent_id: BlockId,
     ) {
         let key = (old_name.into(), parent_id);
-        self.analyze_context.structs.remove(&key);
+        self.type_context.analyze_context.structs.remove(&key);
 
         *body.get_mut(old_idx).expect("Known to be in bounds.") = AstToken::Empty;
     }
@@ -203,7 +234,7 @@ impl<'a> TypeConverter<'a> {
                 let generics = if let Ty::CompoundType(_, generics, ..) = &gen_structure_ty {
                     generics.clone()
                 } else {
-                    let err = self.analyze_context.err(format!(
+                    let err = self.type_context.analyze_context.err(format!(
                         "Generic instance type not compound: {:#?}",
                         gen_structure_ty
                     ));
@@ -229,7 +260,7 @@ impl<'a> TypeConverter<'a> {
 
                 // Get the new instance of the structure that has had the generics
                 // implemented.
-                let new_struct = match self.analyze_context.get_struct(&new_name, id) {
+                let new_struct = match self.type_context.analyze_context.get_struct(&new_name, id) {
                     Ok(new_struct) => Rc::clone(&new_struct),
                     Err(err) => {
                         self.errors.push(err);
@@ -238,7 +269,7 @@ impl<'a> TypeConverter<'a> {
                 };
 
                 let mut generics_replacer = GenericsReplacer::new(
-                    &mut self.analyze_context,
+                    &mut self.type_context.analyze_context,
                     Rc::clone(&new_struct),
                     &generics,
                     old_name,
@@ -292,7 +323,7 @@ impl<'a> TypeConverter<'a> {
     }
 }
 
-impl<'a> Visitor for TypeConverter<'a> {
+impl<'a, 'tctx> Visitor for GenericCreator<'a, 'tctx> {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -386,11 +417,20 @@ impl<'a> Visitor for TypeConverter<'a> {
                         // If this is a impl block for a structure that has been
                         // removed, remove the impl block as well.
                         if self
+                            .type_context
                             .analyze_context
                             .get_struct(&structure_name, id)
                             .is_err()
-                            && self.analyze_context.get_enum(&structure_name, id).is_err()
-                            && self.analyze_context.get_trait(&structure_name, id).is_err()
+                            && self
+                                .type_context
+                                .analyze_context
+                                .get_enum(&structure_name, id)
+                                .is_err()
+                            && self
+                                .type_context
+                                .analyze_context
+                                .get_trait(&structure_name, id)
+                                .is_err()
                         {
                             self.remove_impl_instance(body, i);
                         }
