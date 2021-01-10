@@ -235,6 +235,14 @@ impl<'a> AstTraverser<'a> {
                         }
                     }
 
+                    if let Some(impls) = &mut struct_.borrow_mut().implements {
+                        for tys in impls.values_mut() {
+                            for ty in tys {
+                                self.traverse_type(ty);
+                            }
+                        }
+                    }
+
                     debug!("Visiting struct");
                     for v in self.visitors.iter_mut() {
                         v.visit_struct(ast_token, &self.traverse_context);
@@ -269,36 +277,15 @@ impl<'a> AstTraverser<'a> {
                         v.visit_enum(ast_token, &self.traverse_context);
                     }
                 }
-                BlockHeader::Interface(interface) => {
-                    if self.traverse_context.deep_copy {
-                        let mut new_interface = interface.borrow().clone();
+                BlockHeader::Trait(_) => {
+                    // TODO: Visit containing methods?
 
-                        if let Some(members) = &mut new_interface.members {
-                            for member in members {
-                                let mut new_member = member.borrow().clone();
-                                new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
-                                *member = Rc::new(RefCell::new(new_member));
-                            }
-                        }
-
-                        *interface = Rc::new(RefCell::new(new_interface));
-                    }
-
-                    // TODO: Visit possible generics?
-                    if let Some(members) = &mut interface.borrow_mut().members {
-                        for member in members {
-                            if let Some(ty) = &mut member.borrow_mut().ty {
-                                self.traverse_type(ty);
-                            }
-                        }
-                    }
-
-                    debug!("Visiting interface");
+                    debug!("Visiting trait");
                     for v in self.visitors.iter_mut() {
-                        v.visit_interface(ast_token, &self.traverse_context);
+                        v.visit_trait(ast_token, &self.traverse_context);
                     }
                 }
-                BlockHeader::Implement(_) => {
+                BlockHeader::Implement(..) => {
                     debug!("Visiting impl");
                     for v in self.visitors.iter_mut() {
                         v.visit_impl(ast_token, &self.traverse_context);
@@ -618,6 +605,8 @@ impl<'a> AstTraverser<'a> {
                 }
             }
             Stmt::VariableDecl(var, _) => {
+                warn!("var visit: {:#?}", var);
+
                 if self.traverse_context.deep_copy {
                     let mut new_var = var.borrow().clone();
                     new_var.set_copy_nr(self.traverse_context.copy_nr.unwrap());

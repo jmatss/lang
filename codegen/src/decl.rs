@@ -123,9 +123,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                     references.insert(enum_name, local_references);
                 }
-                BlockHeader::Interface(interface) => {
-                    panic!("TODO: interface");
-                }
                 _ => (),
             }
 
@@ -257,7 +254,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         Some(linkage),
                     )?;
                 }
-                BlockHeader::Implement(_) => {
+                BlockHeader::Implement(..) => {
                     for mut ast_token in body.iter_mut() {
                         if let AstToken::Block(BlockHeader::Function(func), ..) = &mut ast_token {
                             let linkage = Linkage::External;

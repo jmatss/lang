@@ -102,15 +102,13 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
         }
     }
 
-    fn visit_interface(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Interface(interface), _, interface_id, ..) =
-            &mut ast_token
-        {
+    fn visit_trait(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Trait(trait_), _, trait_id, ..) = &mut ast_token {
             let mut analyze_context = self.analyze_context.borrow_mut();
 
-            // The interface will be added in the scope of its parent, so fetch
+            // The trait will be added in the scope of its parent, so fetch
             // the block id for the parent.
-            let parent_id = match analyze_context.get_parent_id(*interface_id) {
+            let parent_id = match analyze_context.get_parent_id(*trait_id) {
                 Ok(parent_id) => parent_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -118,22 +116,20 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
                 }
             };
 
-            if let Ok(prev_interface) =
-                analyze_context.get_interface(&interface.borrow().name, *interface_id)
-            {
+            if let Ok(prev_trait) = analyze_context.get_trait(&trait_.borrow().name, *trait_id) {
                 // TODO: Should this be done in the same way as function, that
                 //       one just checks that the declarations are equals and doesn't
                 //       throw a exception? This would allow for "extern" declarations
                 //       but might be problematic if it two defines.
                 let err = analyze_context.err(format!(
-                    "A interface with name \"{}\" already defined.",
-                    prev_interface.borrow().name
+                    "A trait with name \"{}\" already defined.",
+                    prev_trait.borrow().name
                 ));
                 self.errors.push(err);
             } else {
-                // Add the interface into decl lookup maps.
-                let key = (interface.borrow().name.clone(), parent_id);
-                analyze_context.interfaces.insert(key, Rc::clone(interface));
+                // Add the trait into decl lookup maps.
+                let key = (trait_.borrow().name.clone(), parent_id);
+                analyze_context.traits.insert(key, Rc::clone(trait_));
             }
         }
     }

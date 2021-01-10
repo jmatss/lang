@@ -1,4 +1,7 @@
-use super::{generics::Generics, inner_ty::InnerTy};
+use super::{
+    generics::Generics,
+    inner_ty::{self, InnerTy},
+};
 use crate::{
     error::{CustomResult, LangError, LangErrorKind},
     file::FilePosition,
@@ -188,6 +191,22 @@ impl Ty {
     pub fn get_inner(&self) -> Option<&InnerTy> {
         if let Ty::CompoundType(inner_ty, ..) = self {
             Some(inner_ty)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the identifier if this type represents a structure. If this type
+    /// isn't a structure, None is returned.
+    pub fn get_ident(&self) -> Option<String> {
+        if let Ty::CompoundType(inner_ty, ..) = self {
+            match inner_ty {
+                InnerTy::Struct(ident)
+                | InnerTy::Enum(ident)
+                | InnerTy::Trait(ident)
+                | InnerTy::UnknownIdent(ident, ..) => Some(ident.clone()),
+                _ => None,
+            }
         } else {
             None
         }
@@ -439,7 +458,7 @@ impl Ty {
                 match inner_ty {
                     InnerTy::Struct(ident)
                     | InnerTy::Enum(ident)
-                    | InnerTy::Interface(ident)
+                    | InnerTy::Trait(ident)
                     | InnerTy::UnknownIdent(ident, ..) => {
                         names.insert(util::to_generic_struct_name(ident, generics));
                     }
@@ -484,7 +503,7 @@ impl Ty {
             Ty::CompoundType(inner_ty, ..) => match inner_ty {
                 InnerTy::Struct(ident)
                 | InnerTy::Enum(ident)
-                | InnerTy::Interface(ident)
+                | InnerTy::Trait(ident)
                 | InnerTy::UnknownIdent(ident, ..) => {
                     if ident == old_name {
                         *self = new_self_ty.clone();

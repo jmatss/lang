@@ -34,7 +34,7 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
             BlockHeader::Function(_)
             | BlockHeader::Struct(_)
             | BlockHeader::Enum(_)
-            | BlockHeader::Interface(_)
+            | BlockHeader::Trait(_)
             | BlockHeader::Implement(..)
             | BlockHeader::Default => true,
             _ => false,
@@ -128,7 +128,7 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
                     AstToken::Block(BlockHeader::Default, ..)
                     | AstToken::Block(BlockHeader::Struct(_), ..)
                     | AstToken::Block(BlockHeader::Enum(_), ..)
-                    | AstToken::Block(BlockHeader::Interface(_), ..)
+                    | AstToken::Block(BlockHeader::Trait(_), ..)
                     | AstToken::Block(BlockHeader::Implement(..), ..) => {
                         self.analyze_block(child_token, analyze_context, *id);
                     }

@@ -3,7 +3,7 @@ use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
     file::{FileId, FileInfo, FilePosition},
     token::{
-        block::{BuiltIn, Enum, Function, Interface, Struct},
+        block::{BuiltIn, Enum, Function, Struct, Trait},
         expr::Var,
         stmt::Path,
     },
@@ -27,7 +27,7 @@ pub struct AnalyzeContext {
     pub(super) functions: HashMap<(String, BlockId), Rc<RefCell<Function>>>,
     pub(super) structs: HashMap<(String, BlockId), Rc<RefCell<Struct>>>,
     pub(super) enums: HashMap<(String, BlockId), Rc<RefCell<Enum>>>,
-    pub(super) interfaces: HashMap<(String, BlockId), Rc<RefCell<Interface>>>,
+    pub(super) traits: HashMap<(String, BlockId), Rc<RefCell<Trait>>>,
 
     /// Contains all built-in "functions".
     pub(super) built_ins: HashMap<&'static str, BuiltIn>,
@@ -57,7 +57,7 @@ impl AnalyzeContext {
             functions: HashMap::default(),
             structs: HashMap::default(),
             enums: HashMap::default(),
-            interfaces: HashMap::default(),
+            traits: HashMap::default(),
 
             built_ins: decl::built_in::init_built_ins(),
 
@@ -161,8 +161,8 @@ impl AnalyzeContext {
 
     /// Given a name of a interface `ident` and a block scope `id`, returns
     /// the block in which the sought after interface was declared.
-    pub fn get_interface_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
-        self.get_decl_scope(ident, id, &self.interfaces)
+    pub fn get_trait_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
+        self.get_decl_scope(ident, id, &self.traits)
     }
 
     /// Given a name of a declaration `ident` and the block in which this
@@ -272,18 +272,18 @@ impl AnalyzeContext {
         self.get_mut(ident, decl_block_id, &self.enums)
     }
 
-    /// Given a name of a interface `ident` and a block scope `id`, returns
+    /// Given a name of a trait `ident` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
-    pub fn get_interface(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Interface>>> {
-        let decl_block_id = self.get_interface_decl_scope(ident, id)?;
-        self.get(ident, decl_block_id, &self.interfaces)
+    pub fn get_trait(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Trait>>> {
+        let decl_block_id = self.get_trait_decl_scope(ident, id)?;
+        self.get(ident, decl_block_id, &self.traits)
     }
 
-    /// Given a name of a interface `ident` and a block scope `id`, returns
+    /// Given a name of a trait `ident` and a block scope `id`, returns
     /// a mutable reference to the declaration in the AST.
-    pub fn get_interface_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Interface>> {
-        let decl_block_id = self.get_interface_decl_scope(ident, id)?;
-        self.get_mut(ident, decl_block_id, &self.interfaces)
+    pub fn get_trait_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Trait>> {
+        let decl_block_id = self.get_trait_decl_scope(ident, id)?;
+        self.get_mut(ident, decl_block_id, &self.traits)
     }
 
     /// Given a name of a structure `structure_name`, a name of a method `func`
@@ -326,7 +326,7 @@ impl AnalyzeContext {
                     &func_name, &enum_,
                 )))
             }
-        } else if let Ok(decl_block_id) = self.get_interface_decl_scope(structure_name, id) {
+        } else if let Ok(decl_block_id) = self.get_trait_decl_scope(structure_name, id) {
             panic!("TODO: Get method interface.");
         } else {
             Err(self.err(format!(
@@ -365,7 +365,7 @@ impl AnalyzeContext {
             }
 
             Ok(methods)
-        } else if let Ok(decl_block_id) = self.get_interface_decl_scope(structure_name, id) {
+        } else if let Ok(decl_block_id) = self.get_trait_decl_scope(structure_name, id) {
             panic!("TODO: Get methods interface.");
         } else {
             Err(self.err(format!(
@@ -414,7 +414,7 @@ impl AnalyzeContext {
             methods.insert(func_name, Rc::clone(&func));
 
             Ok(())
-        } else if let Ok(decl_block_id) = self.get_interface_decl_scope(structure_name, id) {
+        } else if let Ok(decl_block_id) = self.get_trait_decl_scope(structure_name, id) {
             panic!("TODO: Insert method into interface.");
         } else {
             Err(self.err(format!(
@@ -434,7 +434,7 @@ impl AnalyzeContext {
         id: BlockId,
     ) -> CustomResult<Rc<RefCell<Var>>> {
         let struct_ = self.get_struct(struct_name, id)?;
-        let struct_ = struct_.borrow_mut();
+        let struct_ = struct_.borrow();
 
         if let Some(members) = &struct_.members {
             if let Some(var) = members
@@ -489,7 +489,7 @@ impl AnalyzeContext {
         id: BlockId,
     ) -> CustomResult<Rc<RefCell<Var>>> {
         let enum_ = self.get_enum(enum_name, id)?;
-        let enum_ = enum_.borrow_mut();
+        let enum_ = enum_.borrow();
 
         if let Some(members) = &enum_.members {
             if let Some(var) = members

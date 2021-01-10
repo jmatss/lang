@@ -58,7 +58,7 @@ impl Visitor for DummyVisitor {
         unreachable!()
     }
 
-    fn visit_interface(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_trait(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         unreachable!()
     }
 

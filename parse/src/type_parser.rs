@@ -17,9 +17,6 @@ pub struct TypeParser<'a, 'b> {
     generics: Option<&'a Generics>,
 }
 
-// TODO: Need to accept "right shift" (>>) as part of a type when generics are
-//       implemented.
-
 impl<'a, 'b> TypeParser<'a, 'b> {
     pub fn new(iter: &'a mut ParseTokenIter<'b>, generics: Option<&'a Generics>) -> Self {
         Self { iter, generics }

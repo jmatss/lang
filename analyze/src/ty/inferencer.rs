@@ -258,7 +258,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 match inner_ty {
                     InnerTy::Struct(ident)
                     | InnerTy::Enum(ident)
-                    | InnerTy::Interface(ident)
+                    | InnerTy::Trait(ident)
                     | InnerTy::UnknownIdent(ident, ..) => {
                         let generic_names = if let Ok(struct_) = self
                             .type_context
@@ -282,9 +282,9 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         } else if let Ok(interface) = self
                             .type_context
                             .analyze_context
-                            .get_interface(ident, ctx.block_id)
+                            .get_trait(ident, ctx.block_id)
                         {
-                            *inner_ty = InnerTy::Interface(ident.clone());
+                            *inner_ty = InnerTy::Trait(ident.clone());
                             interface
                                 .borrow()
                                 .generics
@@ -617,162 +617,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         };
 
         let struct_ = struct_.borrow();
-        if let Some(members) = &struct_.members {
-            // Gets a map if the generics that maps the ident of the generic
-            // (ex. "T", "U" etc.) to a new unknown generic type. This is needed
-            // to ensure that two members of a struct with the same ident uses
-            // the same unknown generic type. It is also needed to ensure that
-            // different struct uses different types for the generics.
-            let generics = if let Some(generic_names) = &struct_.generics {
-                let mut generics = Generics::new();
 
-                // If the struct init call has specified explicitly the implementation
-                // types for the generics, use those instead of unknown generics.
-                // Currently these explicit types must be solved types.
-                if let Some(generics_impl) = &struct_init.generics {
-                    if generic_names.len() != generics_impl.len() {
-                        let err = self.type_context.analyze_context.err(format!(
-                            "Wrong amount of generics for struct init. Struct init: {:#?}, struct: {:#?}",
-                            struct_init, struct_
-                        ));
-                        self.errors.push(err);
-                        return;
-                    }
-
-                    for (name, gen_ty) in generic_names.iter().zip(generics_impl.iter_types()) {
-                        generics.insert(name.clone(), gen_ty.clone());
-                    }
-                } else {
-                    for generic_name in generic_names {
-                        let unknown_ident =
-                            self.new_unknown_ident(&format!("generic_{}", generic_name));
-                        let gen_ty = Ty::GenericInstance(
-                            generic_name.clone(),
-                            unknown_ident,
-                            TypeInfo::None,
-                        );
-
-                        generics.insert(generic_name.clone(), gen_ty);
-                    }
-                }
-
-                generics
-            } else {
-                Generics::new()
-            };
-
-            match &struct_init.ret_type {
-                Some(Ty::CompoundType(..)) => {
-                    // If the type already is set to a compound, use that
-                    // already set type.
-                }
-                _ => {
-                    struct_init.ret_type = Some(Ty::CompoundType(
-                        InnerTy::UnknownIdent(struct_init.name.clone(), ctx.block_id),
-                        generics.clone(),
-                        TypeInfo::Default(struct_init.file_pos.unwrap()),
-                    ));
-                }
-            }
-
-            if members.len() != struct_init.arguments.len() {
-                let err = self.type_context.analyze_context.err(
-                    format!(
-                        "Struct \"{}\" and struct init has diff amount of members. Struct#: {:?}, init#: {:?}.",
-                        &struct_.name, members.len(), struct_init.arguments.len()
-                    ),
-                );
-                self.errors.push(err);
-                return;
-            }
-
-            // TODO: Verify that all members are initialized.
-
-            for (i, arg) in struct_init.arguments.iter_mut().enumerate() {
-                // If a name is set, this is a named member init. Don't use the
-                // iterator index, get the corrent index of the struct field with
-                // the name `arg.name`.
-                let index: usize = if let Some(arg_name) = &arg.name {
-                    match self.type_context.analyze_context.get_struct_member_index(
-                        &struct_.name,
-                        arg_name,
-                        ctx.block_id,
-                    ) {
-                        Ok(idx) => idx as usize,
-                        Err(err) => {
-                            self.errors.push(err);
-                            return;
-                        }
-                    }
-                } else {
-                    i
-                };
-
-                // TODO: Make sure that the struct init argument is compatible
-                //       with the member struct type. Currently this doesn't
-                //       get caught until the codegen stage.
-
-                // Add constraints mapping the type of the struct init argument
-                // to the corresponding actual struct member type.
-                match arg.value.get_expr_type() {
-                    Ok(arg_ty) => {
-                        if let Some(member) = members.get(index) {
-                            // Make a copy of the type to allow for multiple
-                            // struct inits with different types for the generics.
-                            let mut new_member = member.borrow().clone();
-
-                            // Get the "actual" type of the member. If it contains
-                            // a generic, it needs to get the actual unknown
-                            // generic type from the `unknown_generics` map.
-                            // Otherwise reuse the already set type.
-                            let member_type = if let Some(ty) = &mut new_member.ty {
-                                ty.replace_generics_impl(&generics);
-                                ty.clone()
-                            } else {
-                                let err = self.type_context.analyze_context.err(format!(
-                                    "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
-                                    members.get(index),
-                                    &struct_.name
-                                ));
-                                self.errors.push(err);
-                                return;
-                            };
-
-                            // Bind init member to actual type in struct definition.
-                            self.insert_constraint(arg_ty.clone(), member_type, ctx.block_id);
-
-                            let arg_file_pos = arg_ty.file_pos().cloned();
-
-                            // Bind type of member to the struct.
-                            self.insert_constraint(
-                                arg_ty.clone(),
-                                Ty::UnknownStructureMember(
-                                    Box::new(
-                                        struct_init
-                                            .ret_type
-                                            .clone()
-                                            .expect("Will always be set at this point"),
-                                    ),
-                                    new_member.name.clone(),
-                                    TypeInfo::DefaultOpt(arg_file_pos),
-                                ),
-                                ctx.block_id,
-                            );
-                        } else {
-                            let err = self.type_context.analyze_context.err(format!(
-                                "Unable to get member at index {} in struct \"{:?}\".",
-                                index, &struct_.name
-                            ));
-                            self.errors.push(err);
-                            return;
-                        }
-                    }
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
-                }
-            }
+        let empty_vec = Vec::with_capacity(0);
+        let members = if let Some(members) = &struct_.members {
+            members
         } else if !struct_init.arguments.is_empty() {
             let err = self.type_context.analyze_context.err(format!(
                 "Struct \"{}\" has no members, but struct init specified members.",
@@ -780,6 +628,161 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             ));
             self.errors.push(err);
             return;
+        } else {
+            &empty_vec
+        };
+
+        // Gets a map if the generics that maps the ident of the generic
+        // (ex. "T", "U" etc.) to a new unknown generic type. This is needed
+        // to ensure that two members of a struct with the same ident uses
+        // the same unknown generic type. It is also needed to ensure that
+        // different struct uses different types for the generics.
+        let generics = if let Some(generic_names) = &struct_.generics {
+            let mut generics = Generics::new();
+
+            // If the struct init call has specified explicitly the implementation
+            // types for the generics, use those instead of unknown generics.
+            // Currently these explicit types must be solved types.
+            if let Some(generics_impl) = &struct_init.generics {
+                if generic_names.len() != generics_impl.len() {
+                    let err = self.type_context.analyze_context.err(format!(
+                            "Wrong amount of generics for struct init. Struct init: {:#?}, struct: {:#?}",
+                            struct_init, struct_
+                        ));
+                    self.errors.push(err);
+                    return;
+                }
+
+                for (name, gen_ty) in generic_names.iter().zip(generics_impl.iter_types()) {
+                    generics.insert(name.clone(), gen_ty.clone());
+                }
+            } else {
+                for generic_name in generic_names {
+                    let unknown_ident =
+                        self.new_unknown_ident(&format!("generic_{}", generic_name));
+                    let gen_ty =
+                        Ty::GenericInstance(generic_name.clone(), unknown_ident, TypeInfo::None);
+
+                    generics.insert(generic_name.clone(), gen_ty);
+                }
+            }
+
+            generics
+        } else {
+            Generics::new()
+        };
+
+        match &struct_init.ret_type {
+            Some(Ty::CompoundType(..)) => {
+                // If the type already is set to a compound, use that
+                // already set type.
+            }
+            _ => {
+                struct_init.ret_type = Some(Ty::CompoundType(
+                    InnerTy::UnknownIdent(struct_init.name.clone(), ctx.block_id),
+                    generics.clone(),
+                    TypeInfo::Default(struct_init.file_pos.unwrap()),
+                ));
+            }
+        }
+
+        if members.len() != struct_init.arguments.len() {
+            let err = self.type_context.analyze_context.err(
+                    format!(
+                        "Struct \"{}\" and struct init has diff amount of members. Struct#: {:?}, init#: {:?}.",
+                        &struct_.name, members.len(), struct_init.arguments.len()
+                    ),
+                );
+            self.errors.push(err);
+            return;
+        }
+
+        // TODO: Verify that all members are initialized.
+
+        for (i, arg) in struct_init.arguments.iter_mut().enumerate() {
+            // If a name is set, this is a named member init. Don't use the
+            // iterator index, get the corrent index of the struct field with
+            // the name `arg.name`.
+            let index: usize = if let Some(arg_name) = &arg.name {
+                match self.type_context.analyze_context.get_struct_member_index(
+                    &struct_.name,
+                    arg_name,
+                    ctx.block_id,
+                ) {
+                    Ok(idx) => idx as usize,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                }
+            } else {
+                i
+            };
+
+            // TODO: Make sure that the struct init argument is compatible
+            //       with the member struct type. Currently this doesn't
+            //       get caught until the codegen stage.
+
+            // Add constraints mapping the type of the struct init argument
+            // to the corresponding actual struct member type.
+            match arg.value.get_expr_type() {
+                Ok(arg_ty) => {
+                    if let Some(member) = members.get(index) {
+                        // Make a copy of the type to allow for multiple
+                        // struct inits with different types for the generics.
+                        let mut new_member = member.borrow().clone();
+
+                        // Get the "actual" type of the member. If it contains
+                        // a generic, it needs to get the actual unknown
+                        // generic type from the `unknown_generics` map.
+                        // Otherwise reuse the already set type.
+                        let member_type = if let Some(ty) = &mut new_member.ty {
+                            ty.replace_generics_impl(&generics);
+                            ty.clone()
+                        } else {
+                            let err = self.type_context.analyze_context.err(format!(
+                                "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
+                                members.get(index),
+                                &struct_.name
+                            ));
+                            self.errors.push(err);
+                            return;
+                        };
+
+                        // Bind init member to actual type in struct definition.
+                        self.insert_constraint(arg_ty.clone(), member_type, ctx.block_id);
+
+                        let arg_file_pos = arg_ty.file_pos().cloned();
+
+                        // Bind type of member to the struct.
+                        self.insert_constraint(
+                            arg_ty.clone(),
+                            Ty::UnknownStructureMember(
+                                Box::new(
+                                    struct_init
+                                        .ret_type
+                                        .clone()
+                                        .expect("Will always be set at this point"),
+                                ),
+                                new_member.name.clone(),
+                                TypeInfo::DefaultOpt(arg_file_pos),
+                            ),
+                            ctx.block_id,
+                        );
+                    } else {
+                        let err = self.type_context.analyze_context.err(format!(
+                            "Unable to get member at index {} in struct \"{:?}\".",
+                            index, &struct_.name
+                        ));
+                        self.errors.push(err);
+                        return;
+                    }
+                }
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            }
         }
     }
 

@@ -428,7 +428,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             ));
                         }
                     }
-                    InnerTy::Interface(_) => {
+                    InnerTy::Trait(_) => {
                         panic!("TODO: interface")
                     }
                     InnerTy::Void => AnyTypeEnum::VoidType(self.context.void_type()),

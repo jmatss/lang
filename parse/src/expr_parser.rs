@@ -338,12 +338,24 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             self.prev_was_operand = true;
             Ok(())
         } else {
+            // Need to rewind twice to get to the previous expr. The first rewind
+            // gets the current expr again. Also make sure to "forward" the iter
+            // again to the end position.
+            self.iter.rewind_skip_space()?;
+            self.iter.rewind_skip_space()?;
+
+            let prev_operand = self.iter.next_skip_space().unwrap();
+            self.iter.next_skip_space(); // Skip cur expr.
+
+            let mut err_file_pos = prev_operand.file_pos.to_owned();
+            err_file_pos.set_end(expr.file_pos().unwrap())?;
+
             Err(self.iter.err(
                 format!(
-                    "Received two operands in a row (or a postfix operator). Cur expr: {:#?}",
-                    expr
+                    "Found two operands in a row when parsing expr. Prev: {:#?}, cur: {:#?}",
+                    prev_operand, expr
                 ),
-                expr.file_pos().cloned(),
+                Some(err_file_pos),
             ))
         }
     }

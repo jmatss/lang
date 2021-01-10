@@ -162,9 +162,9 @@ impl<'a> DeclFuncAnalyzer<'a> {
         } else if let Ok(decl_id) = self
             .analyze_context
             .borrow()
-            .get_interface_decl_scope(structure_name, func_id)
+            .get_trait_decl_scope(structure_name, func_id)
         {
-            (decl_id, InnerTy::Interface(structure_name.into()))
+            (decl_id, InnerTy::Trait(structure_name.into()))
         } else {
             let err = self.analyze_context.borrow().err(format!(
                 "Unable to find structure with name \"{}\" from block ID {}.",
@@ -260,15 +260,15 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
     fn visit_impl(&mut self, mut ast_token: &mut AstToken, ctx: &TraverseContext) {
         let analyze_context = self.analyze_context.borrow();
 
-        if let AstToken::Block(BlockHeader::Implement(ident), _, _, body) = &mut ast_token {
+        if let AstToken::Block(BlockHeader::Implement(ident, _), .., body) = &mut ast_token {
             // Check if this unknown structure can be found and then
             // replaced the inner type with the correct structure.
             let inner_ty = if analyze_context.get_struct(ident, ctx.block_id).is_ok() {
                 InnerTy::Struct(ident.clone())
             } else if analyze_context.get_enum(ident, ctx.block_id).is_ok() {
                 InnerTy::Enum(ident.clone())
-            } else if analyze_context.get_interface(ident, ctx.block_id).is_ok() {
-                InnerTy::Interface(ident.clone())
+            } else if analyze_context.get_trait(ident, ctx.block_id).is_ok() {
+                InnerTy::Trait(ident.clone())
             } else {
                 let err = analyze_context.err(format!(
                     "Unable to find structure for impl block: {:#?}",
@@ -310,7 +310,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
                     match inner_ty {
                         InnerTy::Struct(ident)
                         | InnerTy::Enum(ident)
-                        | InnerTy::Interface(ident) => {
+                        | InnerTy::Trait(ident) => {
                             self.analyze_method_header(&ident, func, *func_id);
                         }
 

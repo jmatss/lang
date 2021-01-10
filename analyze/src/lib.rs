@@ -19,7 +19,9 @@ use decl::{
 };
 use log::debug;
 use mid::{defer::DeferAnalyzer, generics::GenericsAnalyzer};
-use post::{call_args::CallArgs, clean_up::clean_up, exhaust::ExhaustAnalyzer};
+use post::{
+    call_args::CallArgs, clean_up::clean_up, exhaust::ExhaustAnalyzer, traits::TraitsAnalyzer,
+};
 use pre::{indexing::IndexingAnalyzer, method::MethodAnalyzer};
 use std::{cell::RefCell, collections::HashMap};
 use ty::{
@@ -137,6 +139,13 @@ pub fn analyze(
         .traverse_token(ast_root)
         .take_errors()?;
 
+    debug!("Running CallArgs");
+    let mut call_args = CallArgs::new(&analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut call_args)
+        .traverse_token(ast_root)
+        .take_errors()?;
+
     debug!("Running ExhaustAnalyzer");
     let mut exhaust_analyze = ExhaustAnalyzer::new(&analyze_context);
     AstTraverser::new()
@@ -144,10 +153,10 @@ pub fn analyze(
         .traverse_token(ast_root)
         .take_errors()?;
 
-    debug!("Running CallArgs");
-    let mut call_args = CallArgs::new(&analyze_context);
+    debug!("Running TraitsAnalyzer");
+    let mut traits_analyze = TraitsAnalyzer::new(&analyze_context);
     AstTraverser::new()
-        .add_visitor(&mut call_args)
+        .add_visitor(&mut traits_analyze)
         .traverse_token(ast_root)
         .take_errors()?;
 

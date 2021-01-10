@@ -172,7 +172,7 @@ impl<'a> Visitor for CallArgs<'a> {
         let func_res = if let Some(ty) = &func_call.method_structure {
             let full_struct_name = match ty {
                 Ty::CompoundType(inner_ty, generics, ..) => match inner_ty {
-                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
+                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
                         util::to_generic_struct_name(ident, generics)
                     }
                     _ => {

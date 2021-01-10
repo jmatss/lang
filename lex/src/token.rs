@@ -58,8 +58,10 @@ pub enum Kw {
     Function,
     Struct,
     Enum,
-    Interface,
+    Trait,
     Implement,
+    Implements,
+    Where,
     //Macro,
     Defer,
 
@@ -222,7 +224,9 @@ impl LexToken {
             "struct" => LexTokenKind::Kw(Kw::Struct),
             "enum" => LexTokenKind::Kw(Kw::Enum),
             "implement" => LexTokenKind::Kw(Kw::Implement),
-            "interface" => LexTokenKind::Kw(Kw::Interface),
+            "implements" => LexTokenKind::Kw(Kw::Implements),
+            "trait" => LexTokenKind::Kw(Kw::Trait),
+            "where" => LexTokenKind::Kw(Kw::Where),
 
             "defer" => LexTokenKind::Kw(Kw::Defer),
 

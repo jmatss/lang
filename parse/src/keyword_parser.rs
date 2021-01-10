@@ -8,7 +8,7 @@ use common::{
     file::FilePosition,
     token::{
         ast::AstToken,
-        block::{BlockHeader, Enum, Function, Struct},
+        block::{BlockHeader, Enum, Function, Struct, Trait},
         expr::Expr,
         lit::Lit,
         stmt::{Modifier, Path, Stmt},
@@ -21,7 +21,7 @@ use common::{
     type_info::TypeInfo,
 };
 use lex::token::{Kw, LexTokenKind, Sym};
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 pub struct KeyworkParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
@@ -78,15 +78,20 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
             Kw::Struct => self.parse_struct(kw_file_pos),
             Kw::Enum => self.parse_enum(kw_file_pos),
-            Kw::Interface => Err(self.iter.err(
-                "\"Interface\" keyword not implemented.".into(),
-                Some(kw_file_pos),
-            )),
+            Kw::Trait => self.parse_trait(kw_file_pos),
 
             Kw::Defer => self.parse_defer(kw_file_pos),
 
             Kw::Test => Err(self.iter.err(
                 "\"Test\" keyword not implemented.".into(),
+                Some(kw_file_pos),
+            )),
+
+            Kw::Implements | Kw::Where => Err(self.iter.err(
+                format!(
+                    "Unexpected keyword when parsing keyword start: {:#?}",
+                    keyword
+                ),
                 Some(kw_file_pos),
             )),
         }
@@ -734,6 +739,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             None
         };
 
+        let implements = self.parse_where(generics)?;
+
         // Parse the members of the struct. If the next token isn't a
         // "CurlyBracketBegin" symbol, assume this is a struct with no members.
         let (members, is_var_arg) = if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
@@ -774,7 +781,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         };
 
         let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
-        let implements = None;
         let struct_ = Struct::new(ident, generic_names, implements, members_opt);
         let header = BlockHeader::Struct(Rc::new(RefCell::new(struct_)));
 
@@ -882,8 +888,91 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     }
 
     // TODO: Generics
-    /// Parses a implement header.
-    ///   "implement <ident> { [<func> ...] }"
+    /// Parses a trait header.
+    ///   "trait <ident> [ < <generic>, ... > ] { [<func> ...] }"
+    /// The "trait" keyword has already been consumed when this function is called.
+    fn parse_trait(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+        // Start by parsing the identifier.
+        let lex_token = self.iter.next_skip_space_line();
+        let ident =
+            if let Some(LexTokenKind::Ident(ident)) = lex_token.as_ref().map(|token| &token.kind) {
+                ident.clone()
+            } else {
+                return Err(self.iter.err(
+                    format!("Not ident after parsing \"trait\": {:?}", lex_token),
+                    lex_token.map(|t| t.file_pos),
+                ));
+            };
+
+        let mut type_parse = TypeParser::new(self.iter, None);
+        let (generics, gens_file_pos) = type_parse.parse_type_generics(GenericsKind::Decl)?;
+
+        if let Some(gens_file_pos) = gens_file_pos {
+            file_pos.set_end(&gens_file_pos)?;
+        }
+
+        let generics = if !generics.is_empty() {
+            Some(&generics)
+        } else {
+            None
+        };
+
+        // Consume the expected CurlyBracketBegin.
+        let start_token = self.iter.next_skip_space_line();
+        if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
+            start_token.as_ref().map(|t| &t.kind)
+        {
+        } else {
+            return Err(self.iter.err(
+                format!(
+                    "Expected CurlyBracketBegin at start if trait block, got: {:#?}",
+                    start_token
+                ),
+                start_token.map(|t| t.file_pos),
+            ));
+        }
+
+        // TODO: Allow to set default bodies for the functions?
+        let mut methods = Vec::default();
+
+        while let Some(lex_token) = self.iter.next_skip_space_line() {
+            file_pos.set_end(&lex_token.file_pos)?;
+
+            match lex_token.kind {
+                LexTokenKind::Kw(Kw::Function) => {
+                    let method = self.parse_func_proto(lex_token.file_pos)?;
+                    methods.push(method);
+                }
+
+                // End of trait block.
+                LexTokenKind::Sym(Sym::CurlyBracketEnd) => break,
+
+                _ => {
+                    return Err(self.iter.err(
+                        format!(
+                            "Unexpected token when parsing functions in trait: {:#?}",
+                            lex_token
+                        ),
+                        Some(lex_token.file_pos),
+                    ))
+                }
+            }
+        }
+
+        let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
+        let trait_ = Trait::new(ident, generic_names, methods);
+        let header = BlockHeader::Trait(Rc::new(RefCell::new(trait_)));
+
+        let block_id = self.iter.reserve_block_id();
+        let body = Vec::with_capacity(0);
+
+        Ok(AstToken::Block(header, file_pos, block_id, body))
+    }
+
+    // TODO: Generics
+    /// Parses a implement header. This can either be a impl for the methods of
+    /// a structure or it can also be a impl of a trait for a structure.
+    ///   "implement <ident> [for <ident>] { [<func> ...] }"
     /// The "implement" keyword has already been consumed when this function is called.
     fn parse_impl(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
         // Start by parsing the identifier.
@@ -898,12 +987,44 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 ));
             };
 
-        let header = BlockHeader::Implement(ident);
+        // If the next token is a "for" keyword, this is a impl for a trait
+        // and the previosly parsed `ident` is the name of the trait. If not,
+        // the previous `ident` is the name of a structure.
+        let (ident, trait_name) = if let Some(LexTokenKind::Kw(Kw::For)) =
+            self.iter.peek_skip_space_line().as_ref().map(|t| &t.kind)
+        {
+            self.iter.next_skip_space_line();
+
+            // Parse the name of the structure here. This will be used as the
+            // `ident` and the old `ident` will be the name of the trait.
+            let new_ident = if let Some(LexTokenKind::Ident(new_ident)) = self
+                .iter
+                .next_skip_space_line()
+                .as_ref()
+                .map(|token| &token.kind)
+            {
+                new_ident.clone()
+            } else {
+                return Err(self.iter.err(
+                    format!(
+                        "Not ident after parsing \"for\" in \"implement\": {:?}",
+                        lex_token
+                    ),
+                    lex_token.map(|t| t.file_pos),
+                ));
+            };
+
+            (new_ident, Some(ident))
+        } else {
+            (ident, None)
+        };
+
+        let header = BlockHeader::Implement(ident, trait_name);
         let impl_token = self.iter.next_block(header)?;
 
         // Iterate through the tokens in the body and make sure that all tokens
         // are functions.
-        if let AstToken::Block(BlockHeader::Implement(_), file_pos, _, body) = &impl_token {
+        if let AstToken::Block(BlockHeader::Implement(..), file_pos, _, body) = &impl_token {
             for ast_token in body {
                 if let AstToken::Block(BlockHeader::Function(_), ..) = ast_token {
                     // Do nothing, the token is of correct type.
@@ -929,6 +1050,98 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
 
         Ok(impl_token)
+    }
+
+    /// Parses a where caluse. Every "implements" statement are parsed to the
+    /// end of the line.
+    ///   "where [<ident> implements <trait> [,<trait>]...]"
+    /// The "where" keyword has NOT been parsed at this point. If the next token
+    /// isn't the "where" keyword, no where clause exists so a None should
+    /// be returned.
+    fn parse_where(
+        &mut self,
+        generics: Option<&Generics>,
+    ) -> CustomResult<Option<HashMap<String, Vec<Ty>>>> {
+        // Next token isn't a "where" keyword => early None return.
+        if let Some(LexTokenKind::Kw(Kw::Where)) = self.iter.peek_skip_space_line().map(|t| t.kind)
+        {
+            self.iter.next_skip_space_line();
+        } else {
+            return Ok(None);
+        }
+
+        let mut implements = HashMap::new();
+
+        loop {
+            // Start by parsing the identifier.
+            let lex_token = self.iter.next_skip_space_line();
+            let ident = if let Some(LexTokenKind::Ident(ident)) =
+                lex_token.as_ref().map(|token| &token.kind)
+            {
+                ident.clone()
+            } else {
+                return Err(self.iter.err(
+                    format!(
+                        "Expected ident when parsing \"where\" clause, got: {:#?}",
+                        lex_token
+                    ),
+                    lex_token.map(|t| t.file_pos),
+                ));
+            };
+
+            // Consume and make sure that the next token is a "implements" keyword .
+            let lex_token = self.iter.next_skip_space_line();
+            if let Some(LexTokenKind::Kw(Kw::Implements)) = lex_token.as_ref().map(|t| &t.kind) {
+            } else {
+                return Err(self.iter.err(
+                    format!(
+                        "Expected \"implements\" when parsing \"where\" clause, got: {:#?}",
+                        lex_token
+                    ),
+                    lex_token.map(|t| t.file_pos),
+                ));
+            }
+
+            let mut types = Vec::default();
+            loop {
+                let ty = self.iter.parse_type(generics)?;
+                types.push(ty);
+
+                // If the next token is a comma, continue parsing types. If it
+                // is a line break symbol, stop parsing the types. Else, unexpected
+                // symbol; return error.
+                if let Some(next_token) = self.iter.next_skip_space() {
+                    if next_token.is_break_symbol() {
+                        break;
+                    } else if let LexTokenKind::Sym(Sym::Comma) = next_token.kind {
+                        continue;
+                    } else {
+                        return Err(self.iter.err(
+                            format!(
+                                "Expected \"implements\" when parsing \"where\" clause, got: {:#?}",
+                                lex_token
+                            ),
+                            Some(next_token.file_pos),
+                        ));
+                    }
+                } else {
+                    return Err(self.iter.err(
+                        "Got back None when parsing \"where\" clause.".into(),
+                        None, // TODO: Filepos
+                    ));
+                }
+            }
+
+            implements.insert(ident, types);
+
+            if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
+                self.iter.peek_skip_space_line().as_ref().map(|t| &t.kind)
+            {
+                break;
+            }
+        }
+
+        Ok(Some(implements))
     }
 
     /// Parses a defer statement.

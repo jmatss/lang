@@ -450,7 +450,7 @@ impl FuncCall {
                     match inner_ty {
                         InnerTy::Struct(ident)
                         | InnerTy::Enum(ident)
-                        | InnerTy::Interface(ident) => (ident, func_generics),
+                        | InnerTy::Trait(ident) => (ident, func_generics),
                         _ => unreachable!("Method call on non structure type: {:#?}", self),
                     }
                 } else {

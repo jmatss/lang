@@ -8,7 +8,7 @@ pub fn clean_up(analyze_context: &mut AnalyzeContext) {
     remove_unused(&mut analyze_context.functions);
     remove_unused(&mut analyze_context.structs);
     remove_unused(&mut analyze_context.enums);
-    remove_unused(&mut analyze_context.interfaces);
+    remove_unused(&mut analyze_context.traits);
 }
 
 fn remove_unused<K, V>(map: &mut HashMap<K, Rc<V>>)

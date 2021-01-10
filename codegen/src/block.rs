@@ -203,7 +203,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BlockHeader::Function(func) => {
                 self.compile_func(&func.borrow(), file_pos, id, body)?;
             }
-            BlockHeader::Implement(_) => {
+            BlockHeader::Implement(..) => {
                 for mut ast_token in body {
                     if let AstToken::Block(
                         BlockHeader::Function(func),
@@ -238,8 +238,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 ));
             }
 
-            BlockHeader::Struct(_) | BlockHeader::Enum(_) | BlockHeader::Interface(_) => {
-                // All structs, enums and interfaces already compiled at this stage.
+            BlockHeader::Struct(_) | BlockHeader::Enum(_) | BlockHeader::Trait(_) => {
+                // All structs, enums and traits already compiled at this stage.
             }
 
             //BlockHeader::For(var, expr) => self.compile_for(var, expr),

@@ -21,11 +21,14 @@ pub enum BlockHeader {
     Function(Rc<RefCell<Function>>),
     Struct(Rc<RefCell<Struct>>),
     Enum(Rc<RefCell<Enum>>),
-    Interface(Rc<RefCell<Interface>>),
+    Trait(Rc<RefCell<Trait>>),
 
-    /// The string is the name of the structure that this impl block implements
-    /// and the body of this block will contain the functions.
-    Implement(String),
+    /// The first string is the name of the structure that this impl block
+    /// implements and the second optional string is the name of the trait if
+    /// impl block implements a trait. If this is just a impl for the struct,
+    /// the optional will be None.
+    /// The body of this block will contain thefunctions.
+    Implement(String, Option<String>),
 
     /// A anonymous block "{ ... }" that can be used to limit the scope.
     Anonymous,
@@ -98,7 +101,10 @@ pub enum BlockHeader {
 pub struct Struct {
     pub name: String,
     pub generics: Option<Vec<String>>,
-    pub implements: Option<Vec<Ty>>,
+
+    /// The key is the the name of the generic type it and the values are the
+    /// traits that the specific generic type needs to implement.
+    pub implements: Option<HashMap<String, Vec<Ty>>>,
     pub members: Option<Vec<Rc<RefCell<Var>>>>,
 
     /// The key is the name of the method.
@@ -109,7 +115,7 @@ impl Struct {
     pub fn new(
         name: String,
         generics: Option<Vec<String>>,
-        implements: Option<Vec<Ty>>,
+        implements: Option<HashMap<String, Vec<Ty>>>,
         members: Option<Vec<Rc<RefCell<Var>>>>,
     ) -> Self {
         Self {
@@ -149,6 +155,19 @@ pub struct Function {
     pub method_structure: Option<Ty>,
 }
 
+pub enum TraitCompareError {
+    /// Param len diff (`self`, `trait`). The bool indicates if `this`/`self`
+    /// is exludeded.
+    ParamLenDiff(usize, usize, bool),
+
+    /// If some parameter type differs. The bool indicates if `this`/`self`
+    /// is exludeded.
+    ParamTypeDiff(usize, bool),
+
+    /// Diff return types.
+    ReturnTypeDiff,
+}
+
 impl Function {
     pub fn new(
         name: String,
@@ -169,13 +188,91 @@ impl Function {
         }
     }
 
+    /// Checks if the name, parameter count, parameters types and return types
+    /// are the same.
+    pub fn trait_cmp(&self, trait_func: &Function) -> Result<(), Vec<TraitCompareError>> {
+        let mut errors = Vec::default();
+
+        // Since the `this`/`self` parameter won't be set for the trait function,
+        // need to take that into consideration if the function as a `this` modifier.
+        let contains_this = self.modifiers.contains(&Modifier::This)
+            || self.modifiers.contains(&Modifier::ThisPointer);
+
+        if self.parameters.is_some() && trait_func.parameters.is_some() {
+            let self_params = self.parameters.as_ref().unwrap();
+            let trait_params = trait_func.parameters.as_ref().unwrap();
+
+            if contains_this {
+                if self_params.len() != trait_params.len() + 1 {
+                    errors.push(TraitCompareError::ParamLenDiff(
+                        self_params.len(),
+                        trait_params.len(),
+                        true,
+                    ));
+                    return Err(errors);
+                }
+
+                // Take a slice of `self_paramss`  where the `this` parameter has
+                // been skipped so that the parameters can be compared to the
+                // `trait_func` parameters correctly.
+                for (idx, (self_param, other_param)) in self_params[1..self_params.len()]
+                    .iter()
+                    .zip(trait_params)
+                    .enumerate()
+                {
+                    if self_param.borrow().ty != other_param.borrow().ty {
+                        errors.push(TraitCompareError::ParamTypeDiff(idx, true));
+                    }
+                }
+            } else {
+                if self_params.len() != trait_params.len() {
+                    errors.push(TraitCompareError::ParamLenDiff(
+                        self_params.len(),
+                        trait_params.len(),
+                        false,
+                    ));
+                    return Err(errors);
+                }
+
+                for (idx, (self_param, other_param)) in
+                    self_params.iter().zip(trait_params).enumerate()
+                {
+                    if self_param.borrow().ty != other_param.borrow().ty {
+                        errors.push(TraitCompareError::ParamTypeDiff(idx, false));
+                    }
+                }
+            }
+        } else if self.parameters.is_some()
+            && contains_this
+            && self.parameters.as_ref().unwrap().len() == 1
+        {
+            // `self` has a single `this`/`self` parameter, OK.
+        } else if self.parameters.is_none() && trait_func.parameters.is_some() {
+            errors.push(TraitCompareError::ParamLenDiff(
+                0,
+                trait_func.parameters.as_ref().unwrap().len(),
+                contains_this,
+            ));
+        }
+
+        if self.ret_type != trait_func.ret_type {
+            errors.push(TraitCompareError::ReturnTypeDiff);
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
     /// Returns the "full name" which is the name containing possible structure
     /// and generics as well.
     pub fn full_name(&self) -> CustomResult<String> {
         if let Some(ty) = &self.method_structure {
             let (structure_name, generics) = if let Ty::CompoundType(inner_ty, generics, ..) = ty {
                 match inner_ty {
-                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
+                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
                         (ident, generics)
                     }
                     _ => unreachable!("Method on non structure type: {:#?}", self),
@@ -264,22 +361,18 @@ impl Enum {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Interface {
+pub struct Trait {
     pub name: String,
     pub generics: Option<Vec<String>>,
-    pub members: Option<Vec<Rc<RefCell<Var>>>>,
+    pub methods: Vec<Function>,
 }
 
-impl Interface {
-    pub fn new(
-        name: String,
-        generics: Option<Vec<String>>,
-        members: Option<Vec<Rc<RefCell<Var>>>>,
-    ) -> Self {
-        Interface {
+impl Trait {
+    pub fn new(name: String, generics: Option<Vec<String>>, methods: Vec<Function>) -> Self {
+        Trait {
             name,
             generics,
-            members,
+            methods,
         }
     }
 }

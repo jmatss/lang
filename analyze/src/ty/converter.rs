@@ -215,7 +215,7 @@ impl<'a> TypeConverter<'a> {
                 // this new impl block to contain the generics.
                 let mut new_impl_token = old_impl_token.clone();
                 let (new_impl_body, new_name) =
-                    if let AstToken::Block(BlockHeader::Implement(ident), .., new_impl_body) =
+                    if let AstToken::Block(BlockHeader::Implement(ident, _), .., new_impl_body) =
                         &mut new_impl_token
                     {
                         *ident = util::to_generic_struct_name(&old_name, &generics);
@@ -257,9 +257,11 @@ impl<'a> TypeConverter<'a> {
                 // This will be done for parameters, return types and bodies.
                 // New instances will be created for all shared references (see
                 // `set_deep_copy(true)` in `AstTraverser`).
-                for method in new_impl_body {
+                for mut method in new_impl_body {
                     if let AstToken::Block(BlockHeader::Function(..), ..) = method {
-                        traverser.set_deep_copy_nr(new_idx).traverse_token(method);
+                        traverser
+                            .set_deep_copy_nr(new_idx)
+                            .traverse_token(&mut method);
                     }
                 }
 
@@ -366,7 +368,8 @@ impl<'a> Visitor for TypeConverter<'a> {
                 // contains generics. These new impl blocks will contain the actual
                 // generic implementations/instances. The old impl blocks containing
                 // the generic placeholders will be removed.
-                if let AstToken::Block(BlockHeader::Implement(structure_name), ..) = &body_token {
+                if let AstToken::Block(BlockHeader::Implement(structure_name, _), ..) = &body_token
+                {
                     let structure_name = structure_name.clone();
 
                     if self.generic_structures.contains_key(&structure_name) {
@@ -387,10 +390,7 @@ impl<'a> Visitor for TypeConverter<'a> {
                             .get_struct(&structure_name, id)
                             .is_err()
                             && self.analyze_context.get_enum(&structure_name, id).is_err()
-                            && self
-                                .analyze_context
-                                .get_interface(&structure_name, id)
-                                .is_err()
+                            && self.analyze_context.get_trait(&structure_name, id).is_err()
                         {
                             self.remove_impl_instance(body, i);
                         }
@@ -403,6 +403,6 @@ impl<'a> Visitor for TypeConverter<'a> {
     }
 
     // TODO: Implement similar generic logic as for structs.
-    fn visit_interface(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {}
+    fn visit_trait(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {}
     fn visit_enum(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {}
 }

@@ -768,13 +768,14 @@ impl<'a> ParseTokenIter<'a> {
     /// Gets the next item from the iterator that is NOT a white space.
     /// If the item at the current position of the iterator is a white space,
     /// it will be skipped and the item after that will be fetched.
+    /// Also skips comments.
     #[inline]
     pub fn next_skip_space(&mut self) -> Option<LexToken> {
         while let Some(lex_token) = self.iter.next() {
             self.file_pos = lex_token.file_pos;
 
             match lex_token.kind {
-                LexTokenKind::Sym(Sym::WhiteSpace(_)) => {
+                LexTokenKind::Sym(Sym::WhiteSpace(_)) | LexTokenKind::Comment(..) => {
                     continue;
                 }
                 _ => return Some(lex_token),
@@ -789,6 +790,7 @@ impl<'a> ParseTokenIter<'a> {
     /// Gets the next item from the iterator that is NOT a white space or a
     /// line break (including semi colon). Will loop until a non white space/line
     /// break is found.
+    /// Also skips comments.
     #[inline]
     pub fn next_skip_space_line(&mut self) -> Option<LexToken> {
         while let Some(lex_token) = self.iter.next() {
@@ -797,7 +799,8 @@ impl<'a> ParseTokenIter<'a> {
             match lex_token.kind {
                 LexTokenKind::Sym(Sym::WhiteSpace(_))
                 | LexTokenKind::Sym(Sym::LineBreak)
-                | LexTokenKind::Sym(Sym::SemiColon) => {
+                | LexTokenKind::Sym(Sym::SemiColon)
+                | LexTokenKind::Comment(..) => {
                     continue;
                 }
                 _ => return Some(lex_token),
@@ -811,25 +814,26 @@ impl<'a> ParseTokenIter<'a> {
 
     /// Peeks and clones the item behind the current position of the iterator
     /// that is NOT a white space.
+    /// Also skips comments.
     #[inline]
     pub fn peek_skip_space(&mut self) -> Option<LexToken> {
-        // Since the lexer parses all consecutive white spaces, this code only
-        // needs to check for a white space ones, since there is no possiblity
-        // that two tokens in a row are white spaces.
-        if let Some(tokens) = self.iter.peek_two() {
-            if let LexTokenKind::Sym(Sym::WhiteSpace(_)) = tokens.0.kind {
-                tokens.1
-            } else {
-                Some(tokens.0)
+        let mut i = 0;
+        while let Some(current) = self.iter.peek_at_n(i) {
+            match current.kind {
+                LexTokenKind::Sym(Sym::WhiteSpace(_)) | LexTokenKind::Comment(..) => (),
+                _ => {
+                    return Some(current);
+                }
             }
-        } else {
-            None
+            i += 1;
         }
+        None
     }
 
     /// Peeks and clones the next item from the iterator that is NOT a
     /// white space or a line break (including semi colon). Will loop until a non
     /// white space/line break is found.
+    /// Also skips comments.
     #[inline]
     pub fn peek_skip_space_line(&mut self) -> Option<LexToken> {
         self.peek_skip_space_line_n(0)
@@ -838,6 +842,7 @@ impl<'a> ParseTokenIter<'a> {
     /// Peeks and clones the item `peek_count` items from the current iterator
     /// position. This count does NOT include the space/lines/semiColin. Will
     /// loop until a non white space/line break is found.
+    /// Also skips comments.
     #[inline]
     pub fn peek_skip_space_line_n(&mut self, peek_count: usize) -> Option<LexToken> {
         let mut i = 0;
@@ -846,7 +851,8 @@ impl<'a> ParseTokenIter<'a> {
             match current.kind {
                 LexTokenKind::Sym(Sym::WhiteSpace(_))
                 | LexTokenKind::Sym(Sym::LineBreak)
-                | LexTokenKind::Sym(Sym::SemiColon) => (),
+                | LexTokenKind::Sym(Sym::SemiColon)
+                | LexTokenKind::Comment(..) => (),
                 _ => {
                     if cur_count == peek_count {
                         return Some(current);

@@ -58,7 +58,7 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
     /// the identifiers with known names for the generics defined on the structure.
     /// This will be done for both the method headers and everything in their bodies.
     fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Implement(ident), _, _, body) = ast_token {
+        if let AstToken::Block(BlockHeader::Implement(ident, _), .., body) = ast_token {
             let analyze_context = self.analyze_context.borrow();
 
             // TODO: Will structures always be defined in the default block?
@@ -74,7 +74,7 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
                     .unwrap_or_else(Vec::default)
             } else if analyze_context.get_enum(ident, block_id).is_ok() {
                 Vec::default()
-            } else if let Ok(interface) = analyze_context.get_interface(ident, block_id) {
+            } else if let Ok(interface) = analyze_context.get_trait(ident, block_id) {
                 Vec::default()
             } else {
                 let err = analyze_context.err(format!(

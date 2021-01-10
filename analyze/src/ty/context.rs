@@ -549,8 +549,8 @@ impl<'a> TypeContext<'a> {
                         *inner_ty = InnerTy::Struct(ident.clone());
                     } else if self.analyze_context.get_enum(ident, *id).is_ok() {
                         *inner_ty = InnerTy::Enum(ident.clone());
-                    } else if self.analyze_context.get_interface(ident, *id).is_ok() {
-                        *inner_ty = InnerTy::Interface(ident.clone());
+                    } else if self.analyze_context.get_trait(ident, *id).is_ok() {
+                        *inner_ty = InnerTy::Trait(ident.clone());
                     } else {
                         is_solved = false;
                     }
@@ -693,7 +693,7 @@ impl<'a> TypeContext<'a> {
                     }
                 }
 
-                InnerTy::Interface(ident) => {
+                InnerTy::Trait(ident) => {
                     panic!("TODO: Interface");
                 }
 
@@ -806,7 +806,7 @@ impl<'a> TypeContext<'a> {
             };
 
             let method = match inner_ty {
-                InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Interface(ident) => {
+                InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
                     match self.analyze_context.get_method(ident, &method_name, id) {
                         Ok(method) => method,
                         Err(err) => return SubResult::Err(err),
@@ -922,7 +922,7 @@ impl<'a> TypeContext<'a> {
             let structure_name = match inner_ty {
                 InnerTy::Struct(structure_name)
                 | InnerTy::Enum(structure_name)
-                | InnerTy::Interface(structure_name) => structure_name,
+                | InnerTy::Trait(structure_name) => structure_name,
 
                 _ => {
                     return if finalize {
