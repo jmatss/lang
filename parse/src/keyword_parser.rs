@@ -1107,11 +1107,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 let ty = self.iter.parse_type(generics)?;
                 types.push(ty);
 
+                // TODO: Should trailing commas be allowed?
                 // If the next token is a comma, continue parsing types. If it
                 // is a line break symbol, stop parsing the types. Else, unexpected
                 // symbol; return error.
                 if let Some(next_token) = self.iter.next_skip_space() {
                     if next_token.is_break_symbol() {
+                        self.iter.rewind_skip_space()?;
                         break;
                     } else if let LexTokenKind::Sym(Sym::Comma) = next_token.kind {
                         continue;
@@ -1137,6 +1139,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
                 self.iter.peek_skip_space_line().as_ref().map(|t| &t.kind)
             {
+                break;
+            } else if let Some(LexTokenKind::Sym(Sym::SemiColon)) =
+                self.iter.peek_skip_space().as_ref().map(|t| &t.kind)
+            {
+                self.iter.next_skip_space();
                 break;
             }
         }

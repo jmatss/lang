@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 /// Checks that all generics that have specified "where implements" clauses
 /// actual are instances of types that implements the specified trait and all
 /// its methods.
-pub struct TraitsAnalyzer<'a> {
+pub struct TraitsGenericAnalyzer<'a> {
     analyze_context: &'a AnalyzeContext,
 
     /// Contains a set keeping track of all seen types. This is done to prevent
@@ -23,7 +23,7 @@ pub struct TraitsAnalyzer<'a> {
     errors: Vec<LangError>,
 }
 
-impl<'a> TraitsAnalyzer<'a> {
+impl<'a> TraitsGenericAnalyzer<'a> {
     pub fn new(analyze_context: &'a AnalyzeContext) -> Self {
         Self {
             analyze_context,
@@ -247,7 +247,7 @@ impl<'a> TraitsAnalyzer<'a> {
     }
 }
 
-impl<'a> Visitor for TraitsAnalyzer<'a> {
+impl<'a> Visitor for TraitsGenericAnalyzer<'a> {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None

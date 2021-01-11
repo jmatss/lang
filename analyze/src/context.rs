@@ -322,12 +322,12 @@ impl AnalyzeContext {
                 Ok(Rc::clone(method))
             } else {
                 Err(self.err(format!(
-                    "Unable to find method named \"{}\" in struct \"{:#?}\".",
+                    "Unable to find method named \"{}\" in enum \"{:#?}\".",
                     &func_name, &enum_,
                 )))
             }
-        } else if let Ok(decl_block_id) = self.get_trait_decl_scope(structure_name, id) {
-            panic!("TODO: Get method interface.");
+        } else if self.get_trait_decl_scope(structure_name, id).is_ok() {
+            panic!("Not implemented for traits.");
         } else {
             Err(self.err(format!(
                 "Unable to find structure with name \"{}\" from block ID {}.",
@@ -365,8 +365,46 @@ impl AnalyzeContext {
             }
 
             Ok(methods)
+        } else if self.get_trait_decl_scope(structure_name, id).is_ok() {
+            panic!("Not implemented for traits.");
+        } else {
+            Err(self.err(format!(
+                "Unable to find structure with name \"{}\" from block ID {}.",
+                structure_name, id
+            )))
+        }
+    }
+
+    /// Given a name of a structure `structure_name` and a block scope `id`, returns
+    /// names of all methods declared for the structure in the AST.
+    pub fn get_method_names(&self, structure_name: &str, id: BlockId) -> CustomResult<Vec<String>> {
+        if let Ok(decl_block_id) = self.get_struct_decl_scope(structure_name, id) {
+            let struct_ = self.get_struct(structure_name, decl_block_id)?;
+            let struct_ = struct_.borrow();
+
+            Ok(struct_
+                .methods
+                .as_ref()
+                .map(|mets| mets.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default())
+        } else if let Ok(decl_block_id) = self.get_enum_decl_scope(structure_name, id) {
+            let enum_ = self.get_enum(structure_name, decl_block_id)?;
+            let enum_ = enum_.borrow();
+
+            Ok(enum_
+                .methods
+                .as_ref()
+                .map(|mets| mets.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default())
         } else if let Ok(decl_block_id) = self.get_trait_decl_scope(structure_name, id) {
-            panic!("TODO: Get methods interface.");
+            let trait_ = self.get_trait(structure_name, decl_block_id)?;
+            let trait_ = trait_.borrow();
+
+            Ok(trait_
+                .methods
+                .iter()
+                .map(|func| func.name.clone())
+                .collect::<Vec<_>>())
         } else {
             Err(self.err(format!(
                 "Unable to find structure with name \"{}\" from block ID {}.",
@@ -414,8 +452,8 @@ impl AnalyzeContext {
             methods.insert(func_name, Rc::clone(&func));
 
             Ok(())
-        } else if let Ok(decl_block_id) = self.get_trait_decl_scope(structure_name, id) {
-            panic!("TODO: Insert method into interface.");
+        } else if self.get_trait_decl_scope(structure_name, id).is_ok() {
+            panic!("Not implemented for traits.");
         } else {
             Err(self.err(format!(
                 "Unable to find structure with name \"{}\" from block ID {}.",

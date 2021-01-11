@@ -1,0 +1,25 @@
+trait TestTrait
+{
+    function static_method()
+    function this instance_method()
+}
+
+struct TestStruct<T> where T implements TestTrait;
+implement TestStruct
+{
+    function abc(value: T)
+    {
+        // Should fail to compile since `T` only implements `TestTrait` which
+        // means that `value`/`T` only have "access" to `TestTrait`s functions.
+        //T::unknown_static_method()
+        //value.unknown_instance_method()
+
+        T::static_method()
+        value.instance_method()
+    }
+}
+
+function main() -> i32
+{
+    return 0
+}

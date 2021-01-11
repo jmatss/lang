@@ -20,7 +20,8 @@ use decl::{
 use log::debug;
 use mid::{defer::DeferAnalyzer, generics::GenericsAnalyzer};
 use post::{
-    call_args::CallArgs, clean_up::clean_up, exhaust::ExhaustAnalyzer, traits::TraitsAnalyzer,
+    call_args::CallArgs, clean_up::clean_up, exhaust::ExhaustAnalyzer,
+    traits_func::TraitsFuncAnalyzer, traits_generic::TraitsGenericAnalyzer,
 };
 use pre::{indexing::IndexingAnalyzer, method::MethodAnalyzer};
 use std::{cell::RefCell, collections::HashMap};
@@ -132,6 +133,13 @@ pub fn analyze(
         .traverse_token(ast_root)
         .take_errors()?;
 
+    debug!("Running TraitsFuncAnalyzer");
+    let mut traits_func_analyze = TraitsFuncAnalyzer::new(&type_context.analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut traits_func_analyze)
+        .traverse_token(ast_root)
+        .take_errors()?;
+
     debug!("Running GenericStructsCollector");
     let mut generic_structs_collector = GenericStructsCollector::new(&mut type_context);
     AstTraverser::new()
@@ -161,10 +169,10 @@ pub fn analyze(
         .traverse_token(ast_root)
         .take_errors()?;
 
-    debug!("Running TraitsAnalyzer");
-    let mut traits_analyze = TraitsAnalyzer::new(&analyze_context);
+    debug!("Running TraitsGenericAnalyzer");
+    let mut traits_generic_analyze = TraitsGenericAnalyzer::new(&analyze_context);
     AstTraverser::new()
-        .add_visitor(&mut traits_analyze)
+        .add_visitor(&mut traits_generic_analyze)
         .traverse_token(ast_root)
         .take_errors()?;
 

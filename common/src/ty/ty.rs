@@ -196,19 +196,19 @@ impl Ty {
         }
     }
 
-    /// Returns the identifier if this type represents a structure. If this type
-    /// isn't a structure, None is returned.
+    /// Returns the identifier if this type represents a structure or a generic.
+    /// If this type isn't a structure or generic, None is returned.
     pub fn get_ident(&self) -> Option<String> {
-        if let Ty::CompoundType(inner_ty, ..) = self {
-            match inner_ty {
+        match self {
+            Ty::CompoundType(inner_ty, ..) => match inner_ty {
                 InnerTy::Struct(ident)
                 | InnerTy::Enum(ident)
                 | InnerTy::Trait(ident)
                 | InnerTy::UnknownIdent(ident, ..) => Some(ident.clone()),
                 _ => None,
-            }
-        } else {
-            None
+            },
+            Ty::Generic(ident, ..) | Ty::GenericInstance(ident, ..) => Some(ident.clone()),
+            _ => None,
         }
     }
 
