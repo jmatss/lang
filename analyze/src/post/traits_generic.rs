@@ -32,17 +32,13 @@ impl<'a> TraitsGenericAnalyzer<'a> {
         }
     }
 
-    fn check_struct_traits_tmp(
+    fn verify_struct_traits(
         &mut self,
         old_struct_name: &str,
         generics: &Generics,
         block_id: BlockId,
     ) {
-        if generics.is_empty() {
-            return;
-        }
-
-        let struct_name = util::to_generic_struct_name(old_struct_name, generics);
+        let struct_name = util::to_generic_name(old_struct_name, generics);
 
         let struct_ = match self.analyze_context.get_struct(&struct_name, block_id) {
             Ok(struct_) => struct_,
@@ -190,6 +186,49 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                                         trait_method.ret_type,
                                     )
                                 }
+                                TraitCompareError::GenericsLenDiff(s_len, t_len) => {
+                                    format!(
+                                        "Generic list length differs. Struct len: {}, trait len: {}",
+                                        s_len,
+                                        t_len,
+                                    )
+                                }
+                                TraitCompareError::GenericsNameDiff(idx) => {
+                                    format!(
+                                        "Generic at idx {} differs. Struct generic name: {:#?}, trait generic name: {:#?}",
+                                        idx,
+                                        struct_method_borrow.generics.as_ref().unwrap().get(idx).unwrap(),
+                                        trait_method.generics.as_ref().unwrap().get(idx).unwrap(),
+                                    )
+                                }
+                                TraitCompareError::ImplsLenDiff(s_len, t_len) => {
+                                    format!(
+                                        "Implements list length differs. Struct len: {}, trait len: {}",
+                                        s_len,
+                                        t_len,
+                                    )
+                                }
+                                TraitCompareError::ImplsNameDiff(Some(s_name), None) => {
+                                    format!(
+                                        "Found impls for generic with name \"{}\" in struct, not found trait.",
+                                        s_name,
+                                    )
+                                }
+                                TraitCompareError::ImplsNameDiff(None, Some(t_name)) => {
+                                    format!(
+                                        "Found impls for generic with name \"{}\" in trait, not found struct.",
+                                        t_name,
+                                    )
+                                }
+                                TraitCompareError::ImplsNameDiff(..) => {
+                                    unreachable!()
+                                }
+                                TraitCompareError::ImplsTypeDiff(gen_name) => {
+                                    format!(
+                                        "Impls list diff for generic with name \"{}\".",
+                                        gen_name,
+                                    )
+                                }
                             };
 
                             let err = self
@@ -204,8 +243,8 @@ impl<'a> TraitsGenericAnalyzer<'a> {
     }
 
     /// Recursively gets the types for the given `ty`. If any of the types are
-    /// a struct, checks that the generics of that struct with "where" clauses
-    /// actually implements the specified traits.
+    /// a struct with a generic, checks that the generics of that struct actually
+    /// implements the specified traits in the "where" clause (if any).
     fn check_struct_traits(&mut self, ty: &Ty, block_id: BlockId) {
         match ty {
             Ty::CompoundType(inner_ty, generics, ..) => {
@@ -214,7 +253,9 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                 }
 
                 if let InnerTy::Struct(struct_name) = inner_ty {
-                    self.check_struct_traits_tmp(struct_name, generics, block_id);
+                    if !generics.is_empty() {
+                        self.verify_struct_traits(struct_name, generics, block_id);
+                    }
                 }
             }
 
@@ -238,6 +279,7 @@ impl<'a> TraitsGenericAnalyzer<'a> {
             | Ty::UnknownStructureMember(ty_i, ..)
             | Ty::UnknownStructureMethod(ty_i, ..)
             | Ty::UnknownMethodArgument(ty_i, ..)
+            | Ty::UnknownMethodGeneric(ty_i, ..)
             | Ty::UnknownArrayMember(ty_i, ..) => {
                 self.check_struct_traits(ty_i, block_id);
             }

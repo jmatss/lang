@@ -17,7 +17,6 @@ use crate::AnalyzeContext;
 
 pub struct GenericsReplacer<'a> {
     analyze_context: &'a mut AnalyzeContext,
-    new_struct: Rc<RefCell<Struct>>,
 
     /// A set containing the name+blockID for the "old" variables that now have
     /// been modified and given a `copy_nr`. This set will be used to figure out
@@ -25,8 +24,10 @@ pub struct GenericsReplacer<'a> {
     modified_variables: HashSet<(String, BlockId)>,
 
     generics_impl: &'a Generics,
-    old_name: &'a str,
-    new_ty: &'a Ty,
+
+    new_struct: Option<Rc<RefCell<Struct>>>,
+    old_name: Option<&'a str>,
+    new_ty: Option<&'a Ty>,
 
     errors: Vec<LangError>,
 }
@@ -34,8 +35,11 @@ pub struct GenericsReplacer<'a> {
 /// Used when replacing generics in methods containing to a specific generic
 /// implementation. This will be used to replace all types in the body of the
 /// methods.
+/// This can be used for replacing generics declared in structs and generics
+/// declared in functions. If they are declared in functions, the struct related
+/// fields will be set to None.
 impl<'a> GenericsReplacer<'a> {
-    pub fn new(
+    pub fn new_struct(
         analyze_context: &'a mut AnalyzeContext,
         new_struct: Rc<RefCell<Struct>>,
         generics_impl: &'a Generics,
@@ -44,11 +48,23 @@ impl<'a> GenericsReplacer<'a> {
     ) -> Self {
         Self {
             analyze_context,
-            new_struct,
             modified_variables: HashSet::default(),
             generics_impl,
-            old_name,
-            new_ty,
+            new_struct: Some(new_struct),
+            old_name: Some(old_name),
+            new_ty: Some(new_ty),
+            errors: Vec::default(),
+        }
+    }
+
+    pub fn new_func(analyze_context: &'a mut AnalyzeContext, generics_impl: &'a Generics) -> Self {
+        Self {
+            analyze_context,
+            modified_variables: HashSet::default(),
+            generics_impl,
+            new_struct: None,
+            old_name: None,
+            new_ty: None,
             errors: Vec::default(),
         }
     }
@@ -65,7 +81,10 @@ impl<'a> Visitor for GenericsReplacer<'a> {
 
     fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
         ty.replace_generics_impl(self.generics_impl);
-        ty.replace_self(self.old_name, self.new_ty);
+
+        if let (Some(old_name), Some(new_ty)) = (self.old_name, self.new_ty) {
+            ty.replace_self(old_name, new_ty);
+        }
     }
 
     /// Since this `GenericsReplacer` is called with `deep_copy` set to true,
@@ -85,23 +104,25 @@ impl<'a> Visitor for GenericsReplacer<'a> {
     /// Since this `GenericsReplacer` is called with `deep_copy` set to true,
     /// this logic inserts a reference from the new structure type to the new method.
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        let new_struct_name = self.new_struct.borrow().name.clone();
+        if let Some(new_struct) = &self.new_struct {
+            let new_struct_name = new_struct.borrow().name.clone();
 
-        if let AstToken::Block(BlockHeader::Function(func), _, old_id, ..) = ast_token {
-            func.borrow_mut().method_structure = Some(self.new_ty.clone());
+            if let AstToken::Block(BlockHeader::Function(func), _, old_id, ..) = ast_token {
+                func.borrow_mut().method_structure = self.new_ty.cloned();
 
-            // Insert a reference from the "new" structure to this new method.
-            if let Some(methods) = self.new_struct.borrow_mut().methods.as_mut() {
-                methods.insert(func.borrow().name.clone(), Rc::clone(&func));
-            }
+                // Insert a reference from the "new" structure to this new method.
+                if let Some(methods) = new_struct.borrow_mut().methods.as_mut() {
+                    methods.insert(func.borrow().name.clone(), Rc::clone(&func));
+                }
 
-            // Inserts a reference to this new method into the `analyze_context`
-            // look-up table.
-            if let Err(err) =
-                self.analyze_context
-                    .insert_method(&new_struct_name, Rc::clone(&func), *old_id)
-            {
-                self.errors.push(err);
+                // Inserts a reference to this new method into the `analyze_context`
+                // look-up table.
+                if let Err(err) =
+                    self.analyze_context
+                        .insert_method(&new_struct_name, Rc::clone(&func), *old_id)
+                {
+                    self.errors.push(err);
+                }
             }
         }
     }

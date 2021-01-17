@@ -2,7 +2,7 @@ use super::constraint_sets::ConstraintSets;
 use crate::{block::BlockInfo, AnalyzeContext};
 use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
-    token::expr::Expr,
+    token::{block::Function, expr::Expr},
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     type_info::TypeInfo,
     BlockId,
@@ -482,6 +482,9 @@ impl<'a> TypeContext<'a> {
                     Ty::UnknownMethodArgument(..) => {
                         return self.solve_unknown_method_argument(finalize, root_id);
                     }
+                    Ty::UnknownMethodGeneric(..) => {
+                        return self.solve_unknown_method_generic(finalize, root_id);
+                    }
                     Ty::UnknownArrayMember(..) => {
                         return self.solve_unknown_array_member(finalize, root_id);
                     }
@@ -604,8 +607,11 @@ impl<'a> TypeContext<'a> {
     /// Solves generic types.
     fn solve_generic(&mut self, finalize: bool) -> SubResult {
         match self.cur_ty {
+            /*/
             Ty::Generic(..) if finalize => SubResult::Solved(self.cur_ty.clone()),
             Ty::Generic(..) if !finalize => SubResult::UnSolved(self.cur_ty.clone()),
+            */
+            Ty::Generic(..) => SubResult::Solved(self.cur_ty.clone()),
             Ty::GenericInstance(..) => SubResult::Solved(self.cur_ty.clone()),
             _ => unreachable!(),
         }
@@ -658,6 +664,7 @@ impl<'a> TypeContext<'a> {
                 | Ty::UnknownStructureMember(..)
                 | Ty::UnknownStructureMethod(..)
                 | Ty::UnknownMethodArgument(..)
+                | Ty::UnknownMethodGeneric(..)
                 | Ty::Generic(..)
                 | Ty::GenericInstance(..)
                 | Ty::Any(..) => {
@@ -758,7 +765,7 @@ impl<'a> TypeContext<'a> {
         let cur_ty_backup = self.cur_ty.clone();
         let mut cur_ty_modified = self.cur_ty.clone();
 
-        if let Ty::UnknownStructureMethod(ty, method_name, ..) = &mut cur_ty_modified {
+        if let Ty::UnknownStructureMethod(ty, method_name, _, type_info) = &mut cur_ty_modified {
             // Work around to make borrow checker happy (so that one can use
             // `local_cur_ty` further down in this block).
             let method_name = method_name.clone();
@@ -784,11 +791,12 @@ impl<'a> TypeContext<'a> {
                 return SubResult::Err(err);
             }
 
-            let (inner_ty, generics) = match &solved_ty {
+            let (inner_ty, structure_generics) = match &solved_ty {
                 Ty::CompoundType(InnerTy::UnknownIdent(..), ..)
                 | Ty::UnknownStructureMember(..)
                 | Ty::UnknownStructureMethod(..)
                 | Ty::UnknownMethodArgument(..)
+                | Ty::UnknownMethodGeneric(..)
                 | Ty::Generic(..)
                 | Ty::GenericInstance(..)
                 | Ty::Any(..) => {
@@ -842,12 +850,20 @@ impl<'a> TypeContext<'a> {
             };
 
             let method = method.borrow();
+            // Add constraints for the now solved return type.
             if let Some(mut new_ty) = method.ret_type.clone() {
-                new_ty.replace_generics_impl(generics);
+                new_ty.replace_generics_impl(structure_generics);
 
-                // Add a substitution from the "UnknownStructureMethod" to the
+                // Replace any `Generic` with `GenericInstance` to prevent them
+                // from leaking outside the function.
+                if let Some(method_generics) = &TypeContext::new_method_generics(&method, type_info)
+                {
+                    new_ty.replace_generics_impl(method_generics);
+                }
+
+                // Add a constraint from the "UnknownStructureMethod" to the
                 // actual type fetched from the method of the structure.
-                if let Err(err) = self.insert_substitution(cur_ty_backup, new_ty.clone(), root_id) {
+                if let Err(err) = self.insert_constraint(cur_ty_backup, new_ty.clone(), root_id) {
                     return SubResult::Err(err);
                 }
 
@@ -855,7 +871,7 @@ impl<'a> TypeContext<'a> {
             } else {
                 // The return type of the method is None == Void.
                 let ty = Ty::CompoundType(InnerTy::Void, Generics::empty(), TypeInfo::None);
-                if let Err(err) = self.insert_substitution(cur_ty_backup, ty.clone(), root_id) {
+                if let Err(err) = self.insert_constraint(cur_ty_backup, ty.clone(), root_id) {
                     SubResult::Err(err)
                 } else {
                     SubResult::Solved(ty)
@@ -875,7 +891,9 @@ impl<'a> TypeContext<'a> {
         let cur_ty_backup = self.cur_ty.clone();
         let mut cur_ty_modified = self.cur_ty.clone();
 
-        if let Ty::UnknownMethodArgument(ty, method_name, name_or_idx, ..) = &mut cur_ty_modified {
+        if let Ty::UnknownMethodArgument(ty, method_name, name_or_idx, _, type_info) =
+            &mut cur_ty_modified
+        {
             // Work around to make borrow checker happy (so that one can use
             // `local_cur_ty` further down in this block).
             let method_name = method_name.clone();
@@ -910,6 +928,7 @@ impl<'a> TypeContext<'a> {
                 | Ty::UnknownStructureMember(..)
                 | Ty::UnknownStructureMethod(..)
                 | Ty::UnknownMethodArgument(..)
+                | Ty::UnknownMethodGeneric(..)
                 | Ty::Generic(..)
                 | Ty::GenericInstance(..)
                 | Ty::Any(..) => {
@@ -980,20 +999,169 @@ impl<'a> TypeContext<'a> {
                 BlockInfo::DEFAULT_BLOCK_ID,
             ) {
                 Ok(ty) => ty,
-                Err(err) => {
-                    return SubResult::Err(err);
-                }
+                Err(err) => return SubResult::Err(err),
             };
 
             arg_ty.replace_generics_impl(generics);
 
-            // Add a substitution from the "UnknownMethodArgument" to the
+            // Replace any `Generic` with `GenericInstance` to prevent them from
+            // leaking outside the function.
+            match self
+                .analyze_context
+                .get_method(structure_name, &method_name, id)
+            {
+                Ok(method) => {
+                    if let Some(method_generics) =
+                        &TypeContext::new_method_generics(&method.borrow(), type_info)
+                    {
+                        arg_ty.replace_generics_impl(method_generics);
+                    }
+                }
+                Err(err) => return SubResult::Err(err),
+            };
+
+            // Add a constraint from the "UnknownMethodArgument" to the
             // actual type fetched from the method of the structure.
-            if let Err(err) = self.insert_substitution(cur_ty_backup, arg_ty.clone(), root_id) {
+            if let Err(err) = self.insert_constraint(cur_ty_backup, arg_ty.clone(), root_id) {
                 return SubResult::Err(err);
             }
 
             self.solve_substitution(&arg_ty, finalize, root_id)
+        } else {
+            unreachable!(
+                "This function will only be called when it is a UnknownMethodArgument type."
+            );
+        }
+    }
+
+    fn solve_unknown_method_generic(&mut self, finalize: bool, root_id: BlockId) -> SubResult {
+        // Since this function will call other functions that updates `cur_ty`
+        // recursively, need to save a local copy that will be restored before
+        // this function returns.
+        let cur_ty_backup = self.cur_ty.clone();
+        let mut cur_ty_modified = self.cur_ty.clone();
+
+        if let Ty::UnknownMethodGeneric(ty, method_name, idx, _, type_info) = &mut cur_ty_modified {
+            // Work around to make borrow checker happy (so that one can use
+            // `local_cur_ty` further down in this block).
+            let method_name = method_name.clone();
+
+            // Get any possible substitution and replace the current type with
+            // the new substituted type. The returned value might be the same as
+            // the current, but doesn't hurt to replace with itself.
+            let mut solved_ty = match self.solve_substitution(ty, finalize, root_id) {
+                SubResult::Solved(solved_ty) => {
+                    *ty = Box::new(solved_ty.clone());
+                    solved_ty
+                }
+
+                SubResult::UnSolved(..) => {
+                    self.cur_ty = cur_ty_backup;
+                    return SubResult::UnSolved(cur_ty_modified);
+                }
+
+                err => return err,
+            };
+
+            // TODO: Don't hardcode default id.
+            let id = BlockInfo::DEFAULT_BLOCK_ID;
+
+            if let Err(err) = self.set_generic_names(&mut solved_ty, id) {
+                return SubResult::Err(err);
+            }
+
+            let inner_ty = match &solved_ty {
+                Ty::CompoundType(InnerTy::UnknownIdent(..), ..)
+                | Ty::UnknownStructureMember(..)
+                | Ty::UnknownStructureMethod(..)
+                | Ty::UnknownMethodArgument(..)
+                | Ty::UnknownMethodGeneric(..)
+                | Ty::Generic(..)
+                | Ty::GenericInstance(..)
+                | Ty::Any(..) => {
+                    self.cur_ty = cur_ty_backup;
+                    return SubResult::UnSolved(cur_ty_modified);
+                }
+
+                Ty::CompoundType(inner_ty, ..) => inner_ty,
+
+                // TODO: Solve nested ty in better way.
+                Ty::Pointer(ty_box, ..) => {
+                    if let Ty::CompoundType(inner_ty, ..) = ty_box.as_ref() {
+                        inner_ty
+                    } else {
+                        self.cur_ty = cur_ty_backup;
+                        return SubResult::UnSolved(cur_ty_modified);
+                    }
+                }
+
+                _ => {
+                    return SubResult::Err(self.analyze_context.err(format!(
+                        "Invalid struct type of UnknownMethodArgument: {:#?}",
+                        solved_ty
+                    )))
+                }
+            };
+
+            let structure_name = match inner_ty {
+                InnerTy::Struct(structure_name)
+                | InnerTy::Enum(structure_name)
+                | InnerTy::Trait(structure_name) => structure_name,
+
+                _ => {
+                    return if finalize {
+                        SubResult::Err(self.analyze_context.err(format!(
+                            "Invalid inner type when solving UnknownStructureMethod: {:#?}",
+                            inner_ty
+                        )))
+                    } else {
+                        self.cur_ty = cur_ty_backup;
+                        SubResult::UnSolved(cur_ty_modified)
+                    };
+                }
+            };
+
+            let method = match self.analyze_context.get_method(
+                structure_name,
+                &method_name,
+                BlockInfo::DEFAULT_BLOCK_ID,
+            ) {
+                Ok(method) => method,
+                Err(err) => return SubResult::Err(err),
+            };
+            let method = method.borrow();
+
+            let generic_name = if let Some(generic_name) = method
+                .generics
+                .as_ref()
+                .map(|gens| gens.get(*idx))
+                .flatten()
+            {
+                generic_name.clone()
+            } else {
+                let err = self.analyze_context.err(format!(
+                    "Method call specified generic at index {}. Method declaration for \"{}\" has no generic at that index.",
+                    idx, method_name
+                ));
+                return SubResult::Err(err);
+            };
+
+            // Get some arbitrary data from the file_pos to create a unique ID.
+            let file_pos = type_info.file_pos().unwrap();
+            let id = format!(
+                "R:{}-Cs:{}-Ce:{}",
+                file_pos.line_start, file_pos.column_start, file_pos.column_end
+            );
+            let ty = Ty::GenericInstance(generic_name, id, type_info.clone());
+            //let ty = Ty::Generic(generic_name, type_info.clone());
+
+            // Add a substitution from the "UnknownMethodGeneric" to the
+            // actual type created above.
+            if let Err(err) = self.insert_constraint(cur_ty_backup, ty.clone(), root_id) {
+                return SubResult::Err(err);
+            }
+
+            self.solve_substitution(&ty, finalize, root_id)
         } else {
             unreachable!(
                 "This function will only be called when it is a UnknownMethodArgument type."
@@ -1080,6 +1248,36 @@ impl<'a> TypeContext<'a> {
         }
 
         Ok(())
+    }
+
+    /// Creates new a new `Generic` where the types will be new `GenericInstance`s.
+    /// This `Generic` can be used to replace `Ty::Generic` with new
+    /// `Ty::GenericInstance`s found in this returned value.
+    /// This is needed to ensure that no "raw" `Ty::Generic`s are leaked outside
+    /// the function body itself. I.e. this can be used to replace arguments and
+    /// return values of function calls.
+    pub fn new_method_generics(method: &Function, type_info: &TypeInfo) -> Option<Generics> {
+        // TODO: This should be done somewhere else. This feels like a really
+        //       random place to do it.
+        if let Some(method_generic_names) = &method.generics {
+            let mut method_generics = Generics::new();
+
+            for generic_name in method_generic_names.iter() {
+                // Get some arbitrary data from the file_pos to create a unique ID.
+                let file_pos = type_info.file_pos().unwrap();
+                let id = format!(
+                    "R:{}-Cs:{}-Ce:{}",
+                    file_pos.line_start, file_pos.column_start, file_pos.column_end
+                );
+                let ty = Ty::GenericInstance(generic_name.clone(), id, type_info.clone());
+
+                method_generics.insert(generic_name.clone(), ty);
+            }
+
+            Some(method_generics)
+        } else {
+            None
+        }
     }
 
     // TODO: Is it possible to move this function to "Expr" in some way?

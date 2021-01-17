@@ -560,7 +560,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a function prototype/header.
     ///   "function [ <modifier>... ] <ident> [ < <generic>, ... > ] ( [<ident>: <type>] [= <default value>], ... ) [ "->" <type> ]"
     /// The "function" keyword has already been consumed when this function is called.
-    fn parse_func_proto(&mut self, file_pos: FilePosition) -> CustomResult<Function> {
+    fn parse_func_proto(&mut self, mut file_pos: FilePosition) -> CustomResult<Function> {
         let mut modifiers = Vec::new();
 
         // TODO: Handle FilePosition.
@@ -655,19 +655,18 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             }
         };
 
-        let mut type_parser = TypeParser::new(self.iter, None);
-        let (generics, ty_file_pos) = type_parser.parse_type_generics(GenericsKind::Decl)?;
-        let generics = generics.iter_names().cloned().collect::<Vec<_>>();
-        let generics_opt = if !generics.is_empty() {
-            Some(generics)
-        } else {
-            None
-        };
+        let mut type_parse = TypeParser::new(self.iter, None);
+        let (generics, gens_file_pos) = type_parse.parse_type_generics(GenericsKind::Decl)?;
+
+        if let Some(gens_file_pos) = gens_file_pos {
+            file_pos.set_end(&gens_file_pos)?;
+        }
 
         let start_symbol = Sym::ParenthesisBegin;
         let end_symbol = Sym::ParenthesisEnd;
         let (params, is_var_arg, par_file_pos) =
-            self.iter.parse_par_list(start_symbol, end_symbol, None)?;
+            self.iter
+                .parse_par_list(start_symbol, end_symbol, generics.as_ref())?;
 
         // Wrap the params into RC & RefCell.
         let params = params
@@ -700,9 +699,15 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             ));
         };
 
+        let generic_names = generics
+            .as_ref()
+            .map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
+        let implements = self.parse_where(generics.as_ref())?;
+
         Ok(Function::new(
             ident,
-            generics_opt,
+            generic_names,
+            implements,
             params_opt,
             return_ty,
             modifiers,
@@ -733,13 +738,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             file_pos.set_end(&gens_file_pos)?;
         }
 
-        let generics = if !generics.is_empty() {
-            Some(&generics)
-        } else {
-            None
-        };
-
-        let implements = self.parse_where(generics)?;
+        let implements = self.parse_where(generics.as_ref())?;
 
         // Parse the members of the struct. If the next token isn't a
         // "CurlyBracketBegin" symbol, assume this is a struct with no members.
@@ -750,7 +749,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             let end_symbol = Sym::CurlyBracketEnd;
             let (members, is_var_arg, par_file_pos) =
                 self.iter
-                    .parse_par_list(start_symbol, end_symbol, generics)?;
+                    .parse_par_list(start_symbol, end_symbol, generics.as_ref())?;
 
             file_pos.set_end(&par_file_pos)?;
 
@@ -904,18 +903,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 ));
             };
 
-        let mut type_parse = TypeParser::new(self.iter, None);
-        let (generics, gens_file_pos) = type_parse.parse_type_generics(GenericsKind::Decl)?;
-
+        let (generic_names, gens_file_pos) = self.parse_generics()?;
         if let Some(gens_file_pos) = gens_file_pos {
             file_pos.set_end(&gens_file_pos)?;
         }
-
-        let generics = if !generics.is_empty() {
-            Some(&generics)
-        } else {
-            None
-        };
 
         // Consume the expected CurlyBracketBegin.
         let start_token = self.iter.next_skip_space_line();
@@ -959,7 +950,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             }
         }
 
-        let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
         let trait_ = Trait::new(ident, generic_names, methods);
         let header = BlockHeader::Trait(Rc::new(RefCell::new(trait_)));
 
@@ -1052,12 +1042,29 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         Ok(impl_token)
     }
 
-    /// Parses a where caluse. Every "implements" statement are parsed to the
+    /// Parses a generic parameter list. The generics will be returned as Strings
+    /// stored in a vector. If at least on generic was found and was parsed
+    /// correctly, the FilePosition will point to the PointyBracketEnd that ends
+    /// the generic parameter list.
+    fn parse_generics(&mut self) -> CustomResult<(Option<Vec<String>>, Option<FilePosition>)> {
+        let mut type_parse = TypeParser::new(self.iter, None);
+        match type_parse.parse_type_generics(GenericsKind::Decl) {
+            Ok((generics, file_pos_opt)) => Ok((
+                generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>()),
+                file_pos_opt,
+            )),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Parses a where clause. Every "implements" statement are parsed to the
     /// end of the line.
     ///   "where [<ident> implements <trait> [,<trait>]...]"
     /// The "where" keyword has NOT been parsed at this point. If the next token
     /// isn't the "where" keyword, no where clause exists so a None should
     /// be returned.
+    /// A "where" clause should be ended either with a CurlyBracketBegin or
+    /// a semi colon.
     fn parse_where(
         &mut self,
         generics: Option<&Generics>,

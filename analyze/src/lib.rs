@@ -26,8 +26,9 @@ use post::{
 use pre::{indexing::IndexingAnalyzer, method::MethodAnalyzer};
 use std::{cell::RefCell, collections::HashMap};
 use ty::{
-    context::TypeContext, generic_collector::GenericStructsCollector,
-    generic_creator::GenericCreator, inferencer::TypeInferencer, solver::TypeSolver,
+    context::TypeContext, generic_collector::GenericCollector,
+    generic_func_creator::GenericFuncCreator, generic_struct_creator::GenericStructCreator,
+    inferencer::TypeInferencer, solver::TypeSolver,
 };
 
 // TODO: Error if a function that doesn't have a return type has a return in it.
@@ -140,18 +141,27 @@ pub fn analyze(
         .traverse_token(ast_root)
         .take_errors()?;
 
-    debug!("Running GenericStructsCollector");
-    let mut generic_structs_collector = GenericStructsCollector::new(&mut type_context);
+    debug!("Running GenericCollector");
+    let mut generic_collector = GenericCollector::new(&mut type_context);
     AstTraverser::new()
-        .add_visitor(&mut generic_structs_collector)
+        .add_visitor(&mut generic_collector)
         .traverse_token(ast_root)
         .take_errors()?;
 
-    debug!("Running GenericCreator");
-    let generic_structs = generic_structs_collector.generic_structs;
-    let mut type_converter = GenericCreator::new(&mut type_context, generic_structs);
+    let generic_methods = generic_collector.generic_methods;
+    let generic_structs = generic_collector.generic_structs;
+
+    debug!("Running GenericFuncCreator");
+    let mut generic_func_creator = GenericFuncCreator::new(&mut type_context, generic_methods);
     AstTraverser::new()
-        .add_visitor(&mut type_converter)
+        .add_visitor(&mut generic_func_creator)
+        .traverse_token(ast_root)
+        .take_errors()?;
+
+    debug!("Running GenericStructCreator");
+    let mut generic_struct_creator = GenericStructCreator::new(&mut type_context, generic_structs);
+    AstTraverser::new()
+        .add_visitor(&mut generic_struct_creator)
         .traverse_token(ast_root)
         .take_errors()?;
 

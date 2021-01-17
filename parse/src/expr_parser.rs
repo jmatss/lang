@@ -175,7 +175,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             match TypeParser::new(self.iter, None)
                                 .parse_type_generics(GenericsKind::Impl)
                             {
-                                Ok((generics, _)) => Some(generics),
+                                Ok((generics, _)) => generics,
                                 Err(_) => {
                                     self.iter.rewind_to_mark(mark);
                                     None
@@ -571,9 +571,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 match TypeParser::new(self.iter, None).parse_type_generics(GenericsKind::Impl) {
                     Ok((generics, Some(tmp_file_pos))) => {
                         file_pos.set_end(&tmp_file_pos)?;
-                        Some(generics)
+                        generics
                     }
-                    Ok((generics, None)) => Some(generics),
+                    Ok((generics, None)) => generics,
                     Err(_) => {
                         self.iter.rewind_to_mark(mark);
                         None

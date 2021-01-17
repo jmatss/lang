@@ -434,23 +434,14 @@ impl FuncCall {
 
     /// Returns the "full name" which is the name containing possible structure
     /// and generics as well.
-    ///
-    /// Format:
-    ///   "<STRUCTURE_NAME>:<GENERICS>-<FUNCTION_NAME>"
     pub fn full_name(&self) -> CustomResult<String> {
-        let mut func_call_generics = if let Some(generics) = self.generics() {
-            Some(generics.clone())
-        } else {
-            None
-        };
-
-        if let Some(ty) = &self.method_structure {
-            let (structure_name, func_generics) =
-                if let Ty::CompoundType(inner_ty, func_generics, ..) = ty {
+        let (structure_name, structure_generics) =
+            if let Some(structure_ty) = &self.method_structure {
+                if let Ty::CompoundType(inner_ty, structure_generics, ..) = structure_ty {
                     match inner_ty {
-                        InnerTy::Struct(ident)
-                        | InnerTy::Enum(ident)
-                        | InnerTy::Trait(ident) => (ident, func_generics),
+                        InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
+                            (ident, Some(structure_generics))
+                        }
                         _ => unreachable!("Method call on non structure type: {:#?}", self),
                     }
                 } else {
@@ -459,24 +450,26 @@ impl FuncCall {
                         LangErrorKind::GeneralError,
                         self.file_pos.to_owned(),
                     ));
-                };
-
-            let generics = if let Some(func_call_generics) = &mut func_call_generics {
-                // TODO: This is done every time this function is called.
-                //       Better way to do this?
-                for (idx, name) in func_generics.iter_names().enumerate() {
-                    func_call_generics.insert_lookup(name.clone(), idx);
                 }
-
-                func_call_generics
             } else {
-                func_generics
+                return Ok(self.name.clone());
             };
 
-            Ok(util::to_method_name(structure_name, generics, &self.name))
+        Ok(util::to_method_name(
+            structure_name,
+            structure_generics,
+            &self.name,
+            self.generics.as_ref(),
+        ))
+    }
+
+    /// Returns the "half name" which is the name that does NOT contain anything
+    /// related to the structure but will contain function generics (if any).
+    pub fn half_name(&self) -> String {
+        if let Some(generics) = &self.generics {
+            util::to_generic_name(&self.name, generics)
         } else {
-            // TODO: Possible generics on functions, need to handle it here.
-            Ok(self.name.clone())
+            self.name.clone()
         }
     }
 }
@@ -571,7 +564,7 @@ impl StructInit {
                     struct_generics.clone()
                 };
 
-                Ok(util::to_generic_struct_name(ident, &generics))
+                Ok(util::to_generic_name(ident, &generics))
             } else {
                 Err(LangError::new(
                     format!("Unable to get full name for struct init: {:#?}", self),

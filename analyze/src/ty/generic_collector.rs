@@ -2,10 +2,11 @@ use super::context::TypeContext;
 use crate::block::BlockInfo;
 use common::{
     error::LangError,
-    token::{ast::AstToken, block::BlockHeader},
+    token::{ast::AstToken, block::BlockHeader, expr::FuncCall},
     traverser::{AstTraverser, TraverseContext},
-    ty::ty::Ty,
+    ty::{generics::Generics, ty::Ty},
     visitor::Visitor,
+    BlockId,
 };
 use std::collections::{hash_map::Entry, HashMap};
 
@@ -13,7 +14,7 @@ use std::collections::{hash_map::Entry, HashMap};
 /// This information will be used to create new instances of the structures where
 /// the generics are "implemented". Ex. "Struct<T>" might be implemented as
 /// "Struct<i64>" & "Struct<f32>".
-pub struct GenericStructsCollector<'a, 'tctx> {
+pub struct GenericCollector<'a, 'tctx> {
     type_context: &'a mut TypeContext<'tctx>,
 
     /// Will contain all types containing generics. This will then be used to
@@ -38,15 +39,20 @@ pub struct GenericStructsCollector<'a, 'tctx> {
     /// before this stage is done. This one will be left empty.
     nested_generic_structs: HashMap<String, Vec<Ty>>,
 
+    /// The first string is the name of the structure and the second string is
+    /// the name of the method.
+    pub generic_methods: HashMap<String, HashMap<String, Vec<Generics>>>,
+
     errors: Vec<LangError>,
 }
 
-impl<'a, 'tctx> GenericStructsCollector<'a, 'tctx> {
+impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
     pub fn new(type_context: &'a mut TypeContext<'tctx>) -> Self {
         Self {
             type_context,
             generic_structs: HashMap::default(),
             nested_generic_structs: HashMap::default(),
+            generic_methods: HashMap::default(),
             errors: Vec::default(),
         }
     }
@@ -154,9 +160,99 @@ impl<'a, 'tctx> GenericStructsCollector<'a, 'tctx> {
             }
         }
     }
+
+    /// If the method with name `method_name`, on the structure with type
+    /// `structure_ty`, contains generics,
+    ///  
+    /// If the given type represents a type that contains generics, this function
+    /// will insert those into `self.generic_structs`. This map will in a later
+    /// stage be used to create all the structures containing the different
+    /// generic types.
+    /// This function also adds the names for the generics if they aren't already
+    /// set and that information is attainable.
+    fn collect_generic_method(
+        &mut self,
+        structure_ty: &Ty,
+        method_call: &FuncCall,
+        block_id: BlockId,
+    ) {
+        let method_call_generics = if let Some(func_call_generics) = &method_call.generics {
+            func_call_generics.clone()
+        } else {
+            return;
+        };
+
+        let method_name = method_call.name.clone();
+
+        let structure_name = if let Some(structure_name) = structure_ty.get_ident() {
+            structure_name
+        } else {
+            return;
+        };
+
+        let method = match self.type_context.analyze_context.get_method(
+            &structure_name,
+            &method_name,
+            block_id,
+        ) {
+            Ok(method) => method,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+        let method = method.borrow();
+
+        if let Some(func_generic_names) = &method.generics {
+            // Ensure that the func call has the same amount of generic impls
+            // as the func declaration has declared.
+            if method_call_generics.len_types() != func_generic_names.len() {
+                let err = self.type_context.analyze_context.err(format!(
+                    "Func call for method \"{}\" has {} generics, but func decl expected {}.",
+                    &method_name,
+                    method_call_generics.len_types(),
+                    func_generic_names.len()
+                ));
+                self.errors.push(err);
+                return;
+            }
+
+            let mut new_generics = Generics::new();
+            for (name, ty) in func_generic_names
+                .iter()
+                .zip(method_call_generics.iter_types())
+            {
+                new_generics.insert(name.clone(), ty.clone());
+            }
+
+            // Insert the new generic types into `self.generic_funcs`. These
+            // generics will then be used when creating copies of the method.
+            match self.generic_methods.entry(structure_name) {
+                Entry::Occupied(mut o1) => match o1.get_mut().entry(method_name) {
+                    Entry::Occupied(mut o2) => {
+                        o2.get_mut().push(new_generics);
+                    }
+                    Entry::Vacant(v2) => {
+                        v2.insert(vec![new_generics]);
+                    }
+                },
+                Entry::Vacant(v1) => {
+                    let mut m = HashMap::default();
+                    m.insert(method_name, vec![new_generics]);
+                    v1.insert(m);
+                }
+            }
+        } else {
+            let err = self.type_context.analyze_context.err(format!(
+                "Func call for method \"{}\" on struct \"{}\"has generics, but func decl doesn't.",
+                &method_name, &structure_name
+            ));
+            self.errors.push(err);
+        }
+    }
 }
 
-impl<'a, 'tctx> Visitor for GenericStructsCollector<'a, 'tctx> {
+impl<'a, 'tctx> Visitor for GenericCollector<'a, 'tctx> {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -173,6 +269,12 @@ impl<'a, 'tctx> Visitor for GenericStructsCollector<'a, 'tctx> {
 
     fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
         self.collect_generic_struct(ty);
+    }
+
+    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
+        if let Some(structure_ty) = &func_call.method_structure {
+            self.collect_generic_method(structure_ty, func_call, ctx.block_id);
+        }
     }
 
     fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {
@@ -235,6 +337,8 @@ impl<'a, 'tctx> Visitor for GenericStructsCollector<'a, 'tctx> {
         }
     }
 }
+
+// TODO: I think generics for functions also needs to be collected nested as well.
 
 pub struct NestedGenericStructsCollector<'a> {
     struct_name: &'a str,

@@ -1,0 +1,19 @@
+struct TestStruct;
+implement TestStruct
+{
+    function method<T, V>(value: T, other: V)
+    {
+    }
+}
+
+function main() -> i32
+{
+    var i: u8 = 123
+    var o: i64 = 456
+    var u: u32 = 789
+
+    TestStruct::method<u8, i64>(i, o)
+    TestStruct::method<u32, i64>(u, o)
+
+    return 0
+}

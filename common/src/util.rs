@@ -2,19 +2,24 @@ use crate::ty::generics::Generics;
 
 /// Concatenates a structure name and a method name to create the name that will
 /// be used to refer to this function. The name is concatenated with a dash.
-///
-/// Format:
-///   "<STRUCTURE_NAME>:<STRUCTURE_GENERICS>-<FUNCTION_NAME>"
 pub fn to_method_name(
     structure_name: &str,
-    structure_generics: &Generics,
+    structure_generics: Option<&Generics>,
     method_name: &str,
+    method_generics: Option<&Generics>,
 ) -> String {
-    format!(
-        "{}-{}",
-        to_generic_struct_name(structure_name, structure_generics),
-        method_name
-    )
+    let struct_generic_name = if let Some(structure_generics) = structure_generics {
+        to_generic_name(structure_name, structure_generics)
+    } else {
+        structure_name.into()
+    };
+    let method_generic_name = if let Some(method_generics) = method_generics {
+        to_generic_name(method_name, method_generics)
+    } else {
+        method_name.into()
+    };
+
+    format!("{}-{}", struct_generic_name, method_generic_name)
 }
 
 /// Adds the `copy_nr` information to the end of a variable name. This will come
@@ -24,17 +29,15 @@ pub fn to_var_name(name: &str, copy_nr: usize) -> String {
     format!("{}:{}", name, copy_nr)
 }
 
-/// Formats the name of a struct with generics.
-/// The struct names will be prepended with its generics as a comma seperated
-/// list of the new real types that have replaced the generics.
+/// Formats the name of a struct/func with generics.
 ///
 /// Example A struct with two generics K and V:
 ///    TestStruct<K,V>
 /// This would be the exact format, case sensitive, no spaces etc.
-pub fn to_generic_struct_name(old_struct_name: &str, generics: &Generics) -> String {
+pub fn to_generic_name(old_name: &str, generics: &Generics) -> String {
     if generics.is_empty() {
-        old_struct_name.to_owned()
+        old_name.to_owned()
     } else {
-        format!("{}{}", old_struct_name, generics.to_string())
+        format!("{}{}", old_name, generics.to_string())
     }
 }

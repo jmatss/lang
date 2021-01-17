@@ -62,6 +62,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                             generics
                         }
                     };
+                    let generics = generics.unwrap();
 
                     // Wrap the current ident into a "Generic" if it exists in
                     // the `self.generics` map. Otherwise return it as a
@@ -149,7 +150,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     pub(crate) fn parse_type_generics(
         &mut self,
         kind: GenericsKind,
-    ) -> CustomResult<(Generics, Option<FilePosition>)> {
+    ) -> CustomResult<(Option<Generics>, Option<FilePosition>)> {
         let mut generics = Generics::new();
 
         let mut file_pos = self.iter.peek_file_pos()?;
@@ -162,7 +163,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                 // Do nothing, parse generic list in logic underneath.
             } else {
                 self.iter.rewind_to_mark(mark);
-                return Ok((generics, None));
+                return Ok((Some(generics), None));
             }
         }
 
@@ -211,14 +212,14 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                                 self.iter.next_skip_space_line();
 
                                 file_pos.set_end(&next.file_pos)?;
-                                return Ok((generics, Some(file_pos)));
+                                return Ok((Some(generics), Some(file_pos)));
                             }
                         }
                         continue;
                     }
                     LexTokenKind::Sym(Sym::PointyBracketEnd) => {
                         file_pos.set_end(&lex_token.file_pos)?;
-                        return Ok((generics, Some(file_pos)));
+                        return Ok((Some(generics), Some(file_pos)));
                     }
                     LexTokenKind::Sym(Sym::ShiftRight) => {
                         self.iter.rewind_to_mark(mark);
@@ -228,7 +229,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                         self.iter.replace(token);
 
                         file_pos.set_end(&lex_token.file_pos)?;
-                        return Ok((generics, Some(file_pos)));
+                        return Ok((Some(generics), Some(file_pos)));
                     }
                     _ => {
                         return Err(self.iter.err(

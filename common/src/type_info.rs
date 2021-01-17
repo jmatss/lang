@@ -48,3 +48,24 @@ pub enum TypeInfo {
     /// A "default" `TypeInfo` that doesn't contain any information at all.
     None,
 }
+
+impl TypeInfo {
+    pub fn file_pos(&self) -> Option<&FilePosition> {
+        match self {
+            TypeInfo::Default(file_pos)
+            | TypeInfo::Enum(file_pos)
+            | TypeInfo::VarUse(file_pos)
+            | TypeInfo::BuiltInCall(file_pos)
+            | TypeInfo::FuncCall(file_pos)
+            | TypeInfo::VarDecl(file_pos, _)
+            | TypeInfo::EnumMember((_, file_pos), _)
+            | TypeInfo::Generic(file_pos) => Some(file_pos),
+
+            TypeInfo::DefaultOpt(file_pos_opt) | TypeInfo::Lit(file_pos_opt) => {
+                file_pos_opt.as_ref()
+            }
+
+            TypeInfo::None => None,
+        }
+    }
+}

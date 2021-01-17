@@ -462,6 +462,48 @@ impl AnalyzeContext {
         }
     }
 
+    /// Removes the method with name `method_name` from the structure with name
+    /// `structure_name` that can be found from the block id `id`. This structure
+    /// can be a struct, enum or interface.
+    /// Returns true if the method was removed, returns false if no method with
+    /// that name exists for the structure. Returns error if the structure can't
+    /// be found.
+    pub fn remove_method(
+        &mut self,
+        structure_name: &str,
+        method_name: &str,
+        id: BlockId,
+    ) -> CustomResult<bool> {
+        if let Ok(decl_block_id) = self.get_struct_decl_scope(structure_name, id) {
+            if let Some(methods) = &mut self
+                .get_struct(structure_name, decl_block_id)?
+                .borrow_mut()
+                .methods
+            {
+                Ok(methods.remove(method_name).is_some())
+            } else {
+                Ok(false)
+            }
+        } else if let Ok(decl_block_id) = self.get_enum_decl_scope(structure_name, id) {
+            if let Some(methods) = &mut self
+                .get_enum(structure_name, decl_block_id)?
+                .borrow_mut()
+                .methods
+            {
+                Ok(methods.remove(method_name).is_some())
+            } else {
+                Ok(false)
+            }
+        } else if self.get_trait_decl_scope(structure_name, id).is_ok() {
+            panic!("Not implemented for traits.");
+        } else {
+            Err(self.err(format!(
+                "Unable to find structure with name \"{}\" from block ID {}.",
+                structure_name, id
+            )))
+        }
+    }
+
     /// Finds the struct with the name `struct_name` in a scope containing the block
     /// with ID `id` and returns the member with name `member_name`.
     /// The struct can ex. be declared in parent block scope.

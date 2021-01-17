@@ -144,6 +144,11 @@ impl Struct {
 pub struct Function {
     pub name: String,
     pub generics: Option<Vec<String>>,
+
+    /// The key is the the name of the generic type it and the values are the
+    /// traits that the specific generic type needs to implement.
+    pub implements: Option<HashMap<String, Vec<Ty>>>,
+
     pub parameters: Option<Vec<Rc<RefCell<Var>>>>,
     pub ret_type: Option<Ty>,
     pub modifiers: Vec<Modifier>,
@@ -160,18 +165,36 @@ pub enum TraitCompareError {
     /// is exludeded.
     ParamLenDiff(usize, usize, bool),
 
+    GenericsLenDiff(usize, usize),
+
+    ImplsLenDiff(usize, usize),
+
     /// If some parameter type differs. The bool indicates if `this`/`self`
     /// is exludeded.
     ParamTypeDiff(usize, bool),
 
+    GenericsNameDiff(usize),
+
+    /// The first string is the name found in the structs implementation of the
+    /// trait function, and the second string is the name found in the trait
+    /// declaration of the function.
+    /// If one of them is None, it means that the name couldn't be found.
+    ImplsNameDiff(Option<String>, Option<String>),
+
     /// Diff return types.
     ReturnTypeDiff,
+
+    // TODO: Can add more information here to better pin point where the error
+    //       actualy are.
+    /// The string is the name generic that the impl is for.
+    ImplsTypeDiff(String),
 }
 
 impl Function {
     pub fn new(
         name: String,
         generics: Option<Vec<String>>,
+        implements: Option<HashMap<String, Vec<Ty>>>,
         parameters: Option<Vec<Rc<RefCell<Var>>>>,
         ret_type: Option<Ty>,
         modifiers: Vec<Modifier>,
@@ -180,6 +203,7 @@ impl Function {
         Function {
             name,
             generics,
+            implements,
             parameters,
             ret_type,
             is_var_arg,
@@ -188,8 +212,8 @@ impl Function {
         }
     }
 
-    /// Checks if the name, parameter count, parameters types and return types
-    /// are the same.
+    /// Checks if the name, parameter count, parameters types, generic count,
+    /// generic names, implements and return types are the same.
     pub fn trait_cmp(&self, trait_func: &Function) -> Result<(), Vec<TraitCompareError>> {
         let mut errors = Vec::default();
 
@@ -198,11 +222,10 @@ impl Function {
         let contains_this = self.modifiers.contains(&Modifier::This)
             || self.modifiers.contains(&Modifier::ThisPointer);
 
-        if self.parameters.is_some() && trait_func.parameters.is_some() {
-            let self_params = self.parameters.as_ref().unwrap();
-            let trait_params = trait_func.parameters.as_ref().unwrap();
-
-            if contains_this {
+        // Check parameters in this match-statement.
+        match (&self.parameters, &trait_func.parameters, contains_this) {
+            // Both functions have parameters and contains "this".
+            (Some(self_params), Some(trait_params), true) => {
                 if self_params.len() != trait_params.len() + 1 {
                     errors.push(TraitCompareError::ParamLenDiff(
                         self_params.len(),
@@ -212,7 +235,7 @@ impl Function {
                     return Err(errors);
                 }
 
-                // Take a slice of `self_paramss`  where the `this` parameter has
+                // Take a slice of `self_paramss` where the `this` parameter has
                 // been skipped so that the parameters can be compared to the
                 // `trait_func` parameters correctly.
                 for (idx, (self_param, other_param)) in self_params[1..self_params.len()]
@@ -224,7 +247,10 @@ impl Function {
                         errors.push(TraitCompareError::ParamTypeDiff(idx, true));
                     }
                 }
-            } else {
+            }
+
+            // Both functions have parameters and does NOT contain "this".
+            (Some(self_params), Some(trait_params), false) => {
                 if self_params.len() != trait_params.len() {
                     errors.push(TraitCompareError::ParamLenDiff(
                         self_params.len(),
@@ -242,17 +268,94 @@ impl Function {
                     }
                 }
             }
-        } else if self.parameters.is_some()
-            && contains_this
-            && self.parameters.as_ref().unwrap().len() == 1
-        {
+
             // `self` has a single `this`/`self` parameter, OK.
-        } else if self.parameters.is_none() && trait_func.parameters.is_some() {
-            errors.push(TraitCompareError::ParamLenDiff(
-                0,
-                trait_func.parameters.as_ref().unwrap().len(),
-                contains_this,
-            ));
+            (Some(self_params), None, true) if self_params.len() == 1 => (),
+
+            // Only one has parameters, error unless `self` has single "this" param.
+            // That edge case is handled in the above match case.
+            (Some(self_params), None, contains_this) => errors.push(
+                TraitCompareError::ParamLenDiff(self_params.len(), 0, contains_this),
+            ),
+            (None, Some(trait_params), contains_this) => errors.push(
+                TraitCompareError::ParamLenDiff(0, trait_params.len(), contains_this),
+            ),
+
+            // Both have 0 parameters, OK.
+            (None, None, _) => (),
+        }
+
+        // Check generics in this match-statement.
+        match (&self.generics, &trait_func.generics) {
+            // Diff length of impls, error.
+            (Some(self_generics), Some(trait_generics))
+                if self_generics.len() != trait_generics.len() =>
+            {
+                errors.push(TraitCompareError::GenericsLenDiff(
+                    self_generics.len(),
+                    trait_generics.len(),
+                ));
+            }
+            (Some(self_generics), None) => {
+                errors.push(TraitCompareError::GenericsLenDiff(self_generics.len(), 0));
+            }
+            (None, Some(trait_generics)) => {
+                errors.push(TraitCompareError::GenericsLenDiff(0, trait_generics.len()));
+            }
+
+            // Both functions have generics.
+            (Some(self_generics), Some(trait_generics)) => {
+                for (idx, (self_param, other_param)) in
+                    self_generics.iter().zip(trait_generics.iter()).enumerate()
+                {
+                    if self_param != other_param {
+                        errors.push(TraitCompareError::GenericsNameDiff(idx));
+                    }
+                }
+            }
+
+            // Both have 0 generics, OK.
+            (None, None) => (),
+        }
+
+        // Check implements in this match-statement.
+        match (&self.implements, &trait_func.implements) {
+            // Diff length of impls, error.
+            (Some(self_impls), Some(trait_impls)) if self_impls.len() != trait_impls.len() => {
+                errors.push(TraitCompareError::ImplsLenDiff(
+                    self_impls.len(),
+                    trait_impls.len(),
+                ))
+            }
+            (Some(self_impls), None) => {
+                errors.push(TraitCompareError::ImplsLenDiff(self_impls.len(), 0))
+            }
+            (None, Some(trait_impls)) => {
+                errors.push(TraitCompareError::ImplsLenDiff(0, trait_impls.len()))
+            }
+
+            // Both functions have impls.
+            (Some(self_impls), Some(trait_impls)) => {
+                for (self_impl_name, self_impl_tys) in self_impls.iter() {
+                    let trait_impl_tys =
+                        if let Some(trait_impl_tys) = trait_impls.get(self_impl_name) {
+                            trait_impl_tys
+                        } else {
+                            errors.push(TraitCompareError::ImplsNameDiff(
+                                Some(self_impl_name.clone()),
+                                None,
+                            ));
+                            continue;
+                        };
+
+                    if self_impl_tys != trait_impl_tys {
+                        errors.push(TraitCompareError::ImplsTypeDiff(self_impl_name.clone()));
+                    }
+                }
+            }
+
+            // Both have 0 impls, OK.
+            (None, None) => (),
         }
 
         if self.ret_type != trait_func.ret_type {
@@ -269,25 +372,32 @@ impl Function {
     /// Returns the "full name" which is the name containing possible structure
     /// and generics as well.
     pub fn full_name(&self) -> CustomResult<String> {
+        // If this function contains generics, the generics will already
+        // be included in the `self.name`.
         if let Some(ty) = &self.method_structure {
-            let (structure_name, generics) = if let Ty::CompoundType(inner_ty, generics, ..) = ty {
-                match inner_ty {
-                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
-                        (ident, generics)
+            let (structure_name, structure_generics) =
+                if let Ty::CompoundType(inner_ty, generics, ..) = ty {
+                    match inner_ty {
+                        InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
+                            (ident, generics)
+                        }
+                        _ => unreachable!("Method on non structure type: {:#?}", self),
                     }
-                    _ => unreachable!("Method on non structure type: {:#?}", self),
-                }
-            } else {
-                return Err(LangError::new(
-                    format!("Unable to get full name for method: {:#?}", self),
-                    LangErrorKind::GeneralError,
-                    None,
-                ));
-            };
+                } else {
+                    return Err(LangError::new(
+                        format!("Unable to get full name for method: {:#?}", self),
+                        LangErrorKind::GeneralError,
+                        None,
+                    ));
+                };
 
-            Ok(util::to_method_name(structure_name, generics, &self.name))
+            Ok(util::to_method_name(
+                structure_name,
+                Some(structure_generics),
+                &self.name,
+                None,
+            ))
         } else {
-            // TODO: Possible generics on functions, need to handle it here.
             Ok(self.name.clone())
         }
     }

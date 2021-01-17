@@ -20,7 +20,7 @@ use common::{
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     type_info::TypeInfo,
     visitor::Visitor,
-    BlockId,
+    BlockId, TypeId,
 };
 use either::Either;
 use log::debug;
@@ -73,7 +73,7 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
     /// The new string will containg information about the position of the type
     /// in a file and a free text to give the unknown type some more context for
     /// readability.
-    fn new_unknown_ident(&mut self, text: &str) -> String {
+    fn new_unknown_ident(&mut self, text: &str) -> TypeId {
         let file_nr = self.type_context.analyze_context.file_pos.file_nr;
         let line_nr = self.type_context.analyze_context.file_pos.line_start;
         let column_nr = self.type_context.analyze_context.file_pos.column_start;
@@ -356,6 +356,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     Box::new(structure_ty.clone()),
                     func_call.name.clone(),
                     position,
+                    self.new_unknown_ident(""),
                     TypeInfo::DefaultOpt(arg.value.file_pos().cloned()),
                 );
 
@@ -377,10 +378,27 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             }
 
+            // Insert constraints between the function call generic type and
+            // the method generic types that will be figured out later.
+            if let Some(generics) = &func_call.generics {
+                for (idx, ty) in generics.iter_types().enumerate() {
+                    let unknown_ty = Ty::UnknownMethodGeneric(
+                        Box::new(structure_ty.clone()),
+                        func_call.name.clone(),
+                        idx,
+                        self.new_unknown_ident(""),
+                        TypeInfo::DefaultOpt(ty.file_pos().cloned()),
+                    );
+
+                    self.insert_constraint(unknown_ty, ty.clone(), ctx.block_id);
+                }
+            }
+
             // The expected return type of the function call.
             Ty::UnknownStructureMethod(
                 Box::new(structure_ty),
                 func_call.name.clone(),
+                self.new_unknown_ident(""),
                 TypeInfo::FuncCall(func_call.file_pos.unwrap()),
             )
         } else {
@@ -456,6 +474,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     self.insert_constraint(arg_ty, par_ty, ctx.block_id);
                 }
             }
+
+            // TODO: generics.
 
             let func = func.borrow();
             if let Some(mut ty) = func.ret_type.clone() {
@@ -755,6 +775,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         let arg_file_pos = arg_ty.file_pos().cloned();
 
                         // Bind type of member to the struct.
+                        let unknown_id = self.new_unknown_ident("");
                         self.insert_constraint(
                             arg_ty.clone(),
                             Ty::UnknownStructureMember(
@@ -765,6 +786,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                         .expect("Will always be set at this point"),
                                 ),
                                 new_member.name.clone(),
+                                unknown_id,
                                 TypeInfo::DefaultOpt(arg_file_pos),
                             ),
                             ctx.block_id,
@@ -1003,16 +1025,23 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 );
             }
             UnOperator::ArrayAccess(_) => {
+                let unknown_id = self.new_unknown_ident("");
                 self.insert_constraint(
                     ret_ty,
-                    Ty::UnknownArrayMember(Box::new(val_ty), type_info),
+                    Ty::UnknownArrayMember(Box::new(val_ty), unknown_id, type_info),
                     ctx.block_id,
                 );
             }
             UnOperator::StructAccess(member_name, ..) | UnOperator::EnumAccess(member_name, ..) => {
+                let unknown_id = self.new_unknown_ident("");
                 self.insert_constraint(
                     ret_ty,
-                    Ty::UnknownStructureMember(Box::new(val_ty), member_name.clone(), type_info),
+                    Ty::UnknownStructureMember(
+                        Box::new(val_ty),
+                        member_name.clone(),
+                        unknown_id,
+                        type_info,
+                    ),
                     ctx.block_id,
                 );
             }

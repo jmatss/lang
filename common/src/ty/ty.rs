@@ -1,13 +1,10 @@
-use super::{
-    generics::Generics,
-    inner_ty::{self, InnerTy},
-};
+use super::{generics::Generics, inner_ty::InnerTy};
 use crate::{
     error::{CustomResult, LangError, LangErrorKind},
     file::FilePosition,
     token::expr::Expr,
     type_info::TypeInfo,
-    util,
+    util, TypeId,
 };
 use core::panic;
 use either::Either;
@@ -43,9 +40,7 @@ pub enum Ty {
     /// or function call.
     ///
     /// The first String is the name of the generic type (ex. "T").
-    /// The second String is a unique ID that is used to differentiate between
-    /// the generic impls.
-    GenericInstance(String, String, TypeInfo),
+    GenericInstance(String, TypeId, TypeInfo),
 
     /// Represents a expression parsed as a type. The resulting type will be
     /// the return type of the expression.
@@ -60,19 +55,24 @@ pub enum Ty {
 
     /// Unknown member of the struct/enum/interface type "Type" with the member
     /// name "String".
-    UnknownStructureMember(Box<Ty>, String, TypeInfo),
+    UnknownStructureMember(Box<Ty>, String, TypeId, TypeInfo),
 
     /// Unknown method of the struct/enum/interface type "Type" with the name
     /// "String".
-    UnknownStructureMethod(Box<Ty>, String, TypeInfo),
+    UnknownStructureMethod(Box<Ty>, String, TypeId, TypeInfo),
 
     /// Unknown method argument of the struct/enum/interface type "Type" with
     /// the name "String". The "Either" is either the name of the argument or
     /// the index of the argument in the method call if no argument name is set.
-    UnknownMethodArgument(Box<Ty>, String, Either<String, usize>, TypeInfo),
+    UnknownMethodArgument(Box<Ty>, String, Either<String, usize>, TypeId, TypeInfo),
+
+    /// Unknown method generic argument of the struct/enum/interface type "Type"
+    /// with the name "String". The "usize" is the index of the generic argument
+    // in the method call.
+    UnknownMethodGeneric(Box<Ty>, String, usize, TypeId, TypeInfo),
 
     /// Unknown type of array member of array with type "Type".
-    UnknownArrayMember(Box<Ty>, TypeInfo),
+    UnknownArrayMember(Box<Ty>, TypeId, TypeInfo),
 }
 
 impl Hash for Ty {
@@ -110,25 +110,36 @@ impl Hash for Ty {
                 6.hash(state);
                 a.hash(state);
             }
-            Ty::UnknownStructureMember(a, b, ..) => {
+            Ty::UnknownStructureMember(a, b, c, ..) => {
                 7.hash(state);
-                a.hash(state);
-                b.hash(state);
-            }
-            Ty::UnknownStructureMethod(a, b, ..) => {
-                8.hash(state);
-                a.hash(state);
-                b.hash(state);
-            }
-            Ty::UnknownMethodArgument(a, b, c, ..) => {
-                9.hash(state);
                 a.hash(state);
                 b.hash(state);
                 c.hash(state);
             }
-            Ty::UnknownArrayMember(a, ..) => {
+            Ty::UnknownStructureMethod(a, b, c, ..) => {
+                8.hash(state);
+                a.hash(state);
+                b.hash(state);
+                c.hash(state);
+            }
+            Ty::UnknownMethodArgument(a, b, c, d, ..) => {
+                9.hash(state);
+                a.hash(state);
+                b.hash(state);
+                c.hash(state);
+                d.hash(state);
+            }
+            Ty::UnknownMethodGeneric(a, b, c, d, ..) => {
                 10.hash(state);
                 a.hash(state);
+                b.hash(state);
+                c.hash(state);
+                d.hash(state);
+            }
+            Ty::UnknownArrayMember(a, b, ..) => {
+                10.hash(state);
+                a.hash(state);
+                b.hash(state);
             }
         }
     }
@@ -163,23 +174,39 @@ impl PartialEq for Ty {
             (Ty::Expr(self_expr, ..), Ty::Expr(other_expr, ..)) => self_expr == other_expr,
 
             (
-                Ty::UnknownStructureMember(self_ty, self_ident, ..),
-                Ty::UnknownStructureMember(other_ty, other_ident, ..),
-            ) => self_ty == other_ty && self_ident == other_ident,
+                Ty::UnknownStructureMember(self_ty, self_ident, self_id, ..),
+                Ty::UnknownStructureMember(other_ty, other_ident, other_id, ..),
+            ) => self_ty == other_ty && self_ident == other_ident && self_id == other_id,
 
             (
-                Ty::UnknownStructureMethod(self_ty, self_ident, ..),
-                Ty::UnknownStructureMethod(other_ty, other_ident, ..),
-            ) => self_ty == other_ty && self_ident == other_ident,
+                Ty::UnknownStructureMethod(self_ty, self_ident, self_id, ..),
+                Ty::UnknownStructureMethod(other_ty, other_ident, other_id, ..),
+            ) => self_ty == other_ty && self_ident == other_ident && self_id == other_id,
 
             (
-                Ty::UnknownMethodArgument(self_ty, self_ident, self_pos, ..),
-                Ty::UnknownMethodArgument(other_ty, other_ident, other_pos, ..),
-            ) => self_ty == other_ty && self_ident == other_ident && self_pos == other_pos,
-
-            (Ty::UnknownArrayMember(self_ty, ..), Ty::UnknownArrayMember(other_ty, ..)) => {
+                Ty::UnknownMethodArgument(self_ty, self_ident, self_pos, self_id, ..),
+                Ty::UnknownMethodArgument(other_ty, other_ident, other_pos, other_id, ..),
+            ) => {
                 self_ty == other_ty
+                    && self_ident == other_ident
+                    && self_pos == other_pos
+                    && self_id == other_id
             }
+
+            (
+                Ty::UnknownMethodGeneric(self_ty, self_ident, self_pos, self_id, ..),
+                Ty::UnknownMethodGeneric(other_ty, other_ident, other_pos, other_id, ..),
+            ) => {
+                self_ty == other_ty
+                    && self_ident == other_ident
+                    && self_pos == other_pos
+                    && self_id == other_id
+            }
+
+            (
+                Ty::UnknownArrayMember(self_ty, self_id, ..),
+                Ty::UnknownArrayMember(other_ty, other_id, ..),
+            ) => self_ty == other_ty && self_id == other_id,
 
             _ => false,
         }
@@ -262,6 +289,7 @@ impl Ty {
             | Ty::UnknownStructureMember(.., type_info)
             | Ty::UnknownStructureMethod(.., type_info)
             | Ty::UnknownMethodArgument(.., type_info)
+            | Ty::UnknownMethodGeneric(.., type_info)
             | Ty::UnknownArrayMember(.., type_info) => type_info,
         }
     }
@@ -278,6 +306,7 @@ impl Ty {
             | Ty::UnknownStructureMember(.., type_info)
             | Ty::UnknownStructureMethod(.., type_info)
             | Ty::UnknownMethodArgument(.., type_info)
+            | Ty::UnknownMethodGeneric(.., type_info)
             | Ty::UnknownArrayMember(.., type_info) => type_info,
         }
     }
@@ -305,6 +334,7 @@ impl Ty {
             | Ty::UnknownStructureMember(ty, ..)
             | Ty::UnknownStructureMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => {
                 if let Some(inner_exprs) = ty.get_exprs_mut() {
                     for inner_expr in inner_exprs {
@@ -346,6 +376,7 @@ impl Ty {
             | Ty::UnknownStructureMember(ty, ..)
             | Ty::UnknownStructureMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => ty.replace_generics(generic_names),
 
             Ty::Expr(expr, ..) => {
@@ -386,6 +417,7 @@ impl Ty {
             | Ty::UnknownStructureMember(ty, ..)
             | Ty::UnknownStructureMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => ty.replace_generics_impl(generics_impl),
 
             Ty::Expr(expr, ..) => {
@@ -419,6 +451,7 @@ impl Ty {
             | Ty::UnknownStructureMember(ty, ..)
             | Ty::UnknownStructureMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => {
                 if let Some(mut inner_generics) = ty.get_generics() {
                     generics.append(&mut inner_generics);
@@ -460,7 +493,7 @@ impl Ty {
                     | InnerTy::Enum(ident)
                     | InnerTy::Trait(ident)
                     | InnerTy::UnknownIdent(ident, ..) => {
-                        names.insert(util::to_generic_struct_name(ident, generics));
+                        names.insert(util::to_generic_name(ident, generics));
                     }
                     _ => (),
                 }
@@ -471,6 +504,7 @@ impl Ty {
             | Ty::UnknownStructureMember(ty, ..)
             | Ty::UnknownStructureMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => {
                 if let Some(inner_names) = ty.get_structure_names() {
                     names.extend(inner_names.into_iter());
@@ -517,6 +551,7 @@ impl Ty {
             | Ty::UnknownStructureMember(ty, ..)
             | Ty::UnknownStructureMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => ty.replace_self(old_name, new_self_ty),
 
             Ty::Expr(expr, ..) => {
@@ -640,6 +675,14 @@ impl Ty {
         }
     }
 
+    pub fn is_unknown_method_generic(&self) -> bool {
+        if let Ty::UnknownMethodGeneric(..) = self {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn is_unknown_array_member(&self) -> bool {
         if let Ty::UnknownArrayMember(..) = self {
             true
@@ -653,6 +696,7 @@ impl Ty {
             Ty::UnknownStructureMember(..)
             | Ty::UnknownStructureMethod(..)
             | Ty::UnknownMethodArgument(..)
+            | Ty::UnknownMethodGeneric(..)
             | Ty::UnknownArrayMember(..) => true,
             Ty::CompoundType(inner_ty, ..) => {
                 inner_ty.is_unknown()
@@ -689,6 +733,7 @@ impl Ty {
             | (Ty::UnknownStructureMember(..), Ty::UnknownStructureMember(..))
             | (Ty::UnknownStructureMethod(..), Ty::UnknownStructureMethod(..))
             | (Ty::UnknownMethodArgument(..), Ty::UnknownMethodArgument(..))
+            | (Ty::UnknownMethodGeneric(..), Ty::UnknownMethodGeneric(..))
             | (Ty::UnknownArrayMember(..), Ty::UnknownArrayMember(..)) => return true,
             _ => (),
         }
@@ -710,6 +755,7 @@ impl Ty {
             | Ty::UnknownStructureMember(new_ty, ..)
             | Ty::UnknownStructureMethod(new_ty, ..)
             | Ty::UnknownMethodArgument(new_ty, ..)
+            | Ty::UnknownMethodGeneric(new_ty, ..)
             | Ty::UnknownArrayMember(new_ty, ..) => new_ty.contains_ty(ty),
 
             Ty::Expr(expr, ..) => {
@@ -745,6 +791,7 @@ impl Ty {
             | Ty::UnknownStructureMember(ty, ..)
             | Ty::UnknownStructureMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => ty.contains_inner_ty(inner_ty),
 
             Ty::Expr(expr, ..) => {
@@ -779,20 +826,34 @@ impl Ty {
             || self.contains_ty(&Ty::UnknownStructureMember(
                 Box::new(tmp_ty.clone()),
                 tmp_str.clone(),
+                "".into(),
                 TypeInfo::None,
             ))
             || self.contains_ty(&Ty::UnknownStructureMethod(
                 Box::new(tmp_ty.clone()),
                 tmp_str.clone(),
+                "".into(),
                 TypeInfo::None,
             ))
             || self.contains_ty(&Ty::UnknownMethodArgument(
                 Box::new(tmp_ty.clone()),
-                tmp_str,
+                tmp_str.clone(),
                 Either::Right(0),
+                "".into(),
                 TypeInfo::None,
             ))
-            || self.contains_ty(&Ty::UnknownArrayMember(Box::new(tmp_ty), TypeInfo::None))
+            || self.contains_ty(&Ty::UnknownMethodGeneric(
+                Box::new(tmp_ty.clone()),
+                tmp_str,
+                0,
+                "".into(),
+                TypeInfo::None,
+            ))
+            || self.contains_ty(&Ty::UnknownArrayMember(
+                Box::new(tmp_ty),
+                "".into(),
+                TypeInfo::None,
+            ))
     }
 
     pub fn contains_unknown_int(&self) -> bool {
@@ -809,7 +870,11 @@ impl Ty {
 
     pub fn contains_unknown_array_member(&self) -> bool {
         let tmp_ty = Ty::CompoundType(InnerTy::Void, Generics::empty(), TypeInfo::None);
-        self.contains_ty(&Ty::UnknownArrayMember(Box::new(tmp_ty), TypeInfo::None))
+        self.contains_ty(&Ty::UnknownArrayMember(
+            Box::new(tmp_ty),
+            "".into(),
+            TypeInfo::None,
+        ))
     }
 
     pub fn assert_compatible(&self, other: &Ty) -> CustomResult<()> {
@@ -948,13 +1013,14 @@ impl Ty {
     ///       contains unknown structure member (UnknownStructureMember)
     ///       contains unknown structure method (UnknownStructureMethod)
     ///       contains unknown structure method argument (UnknownMethodArgument)
+    ///       contains unknown structure method generic (UnknownMethodGeneric)
     ///   6   contains pointer
     ///       contains array
     ///   8   contains unknown array member (UnknownArrayMember)
-    ///   10  contains unknown int (UnknownInt)
+    ///   10  contains generic (Generic)
+    ///   12  contains unknown int (UnknownInt)
     ///       contains unknown float (UnknownFloat)
-    ///   12  contains generic implementation (GenericImpl)
-    ///   14  contains generic (Generic)
+    ///   14  contains generic implementation (GenericImpl)
     ///   16  contains unknown (Unknown)
     ///   18  contains any (Any)
     fn precedence_priv(&self, mut highest: usize, depth: usize, is_generic_param: bool) -> usize {
@@ -1008,13 +1074,14 @@ impl Ty {
                 }
             }
 
-            Ty::GenericInstance(..) => usize::max(highest, 12 + extra),
-            Ty::Generic(..) => usize::max(highest, 14 + extra),
+            Ty::GenericInstance(..) => usize::max(highest, 14 + extra),
+            Ty::Generic(..) => usize::max(highest, 10 + extra),
             Ty::Any(..) => usize::max(highest, 18 + extra),
 
             Ty::UnknownStructureMember(ty, ..)
             | Ty::UnknownStructureMethod(ty, ..)
-            | Ty::UnknownMethodArgument(ty, ..) => {
+            | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownMethodGeneric(ty, ..) => {
                 highest = usize::max(highest, 4 + extra);
                 ty.precedence_priv(highest, next_depth, is_generic_param)
             }

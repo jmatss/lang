@@ -401,7 +401,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 match inner_ty {
                     InnerTy::Struct(ident) => {
                         let ident = if !generics.is_empty() {
-                            util::to_generic_struct_name(ident, generics)
+                            util::to_generic_name(ident, generics)
                         } else {
                             ident.clone()
                         };

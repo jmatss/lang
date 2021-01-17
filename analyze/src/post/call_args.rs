@@ -173,7 +173,7 @@ impl<'a> Visitor for CallArgs<'a> {
             let full_struct_name = match ty {
                 Ty::CompoundType(inner_ty, generics, ..) => match inner_ty {
                     InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
-                        util::to_generic_struct_name(ident, generics)
+                        util::to_generic_name(ident, generics)
                     }
                     _ => {
                         let err = self.analyze_context.err(format!(
@@ -195,9 +195,10 @@ impl<'a> Visitor for CallArgs<'a> {
             };
 
             self.analyze_context
-                .get_method(&full_struct_name, &func_call.name, ctx.block_id)
+                .get_method(&full_struct_name, &func_call.half_name(), ctx.block_id)
         } else {
-            self.analyze_context.get_func(&func_call.name, ctx.block_id)
+            self.analyze_context
+                .get_func(&func_call.half_name(), ctx.block_id)
         };
 
         let func = match func_res {
