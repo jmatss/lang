@@ -34,6 +34,10 @@ impl<'a> Visitor for FuncGenericsCheck<'a> {
     /// at the method call is the same amount as declared on the actual method.
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
         if let Some(structure_ty) = &func_call.method_structure {
+            if structure_ty.is_generic() {
+                return;
+            }
+
             let structure_name = structure_ty.get_ident().unwrap();
 
             let method = match self.analyze_context.get_method(
@@ -50,6 +54,10 @@ impl<'a> Visitor for FuncGenericsCheck<'a> {
             let method = method.borrow();
 
             if let Some(method_generics) = &method.generics {
+                if method_generics.is_empty() {
+                    return;
+                }
+
                 if let Some(func_call_generics) = &func_call.generics {
                     if method_generics.len() != func_call_generics.len_types() {
                         let err = self.analyze_context.err(format!(
