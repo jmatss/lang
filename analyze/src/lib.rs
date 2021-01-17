@@ -21,7 +21,8 @@ use log::debug;
 use mid::{defer::DeferAnalyzer, generics::GenericsAnalyzer};
 use post::{
     call_args::CallArgs, clean_up::clean_up, exhaust::ExhaustAnalyzer,
-    traits_func::TraitsFuncAnalyzer, traits_generic::TraitsGenericAnalyzer,
+    func_generics_check::FuncGenericsCheck, traits_func::TraitsFuncAnalyzer,
+    traits_generic::TraitsGenericAnalyzer,
 };
 use pre::{indexing::IndexingAnalyzer, method::MethodAnalyzer};
 use std::{cell::RefCell, collections::HashMap};
@@ -131,6 +132,13 @@ pub fn analyze(
     let mut type_solver = TypeSolver::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut type_solver)
+        .traverse_token(ast_root)
+        .take_errors()?;
+
+    debug!("Running FuncGenericsCheck");
+    let mut func_generics_check = FuncGenericsCheck::new(&type_context.analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut func_generics_check)
         .traverse_token(ast_root)
         .take_errors()?;
 
