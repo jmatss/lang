@@ -137,7 +137,7 @@ impl Hash for Ty {
                 d.hash(state);
             }
             Ty::UnknownArrayMember(a, b, ..) => {
-                10.hash(state);
+                11.hash(state);
                 a.hash(state);
                 b.hash(state);
             }
@@ -477,13 +477,15 @@ impl Ty {
     }
 
     /// Gets a set of the names of all structures that is contained in the type.
-    pub fn get_structure_names(&self) -> Option<HashSet<String>> {
+    /// Set `full_names` to true to fetch the structure names as full names,
+    /// set to false to just returns as the structure name without generics.
+    pub fn get_structure_names(&self, full_names: bool) -> Option<HashSet<String>> {
         let mut names = HashSet::default();
 
         match self {
             Ty::CompoundType(inner_ty, generics, _) => {
                 for generic in generics.iter_types() {
-                    if let Some(inner_names) = generic.get_structure_names() {
+                    if let Some(inner_names) = generic.get_structure_names(full_names) {
                         names.extend(inner_names.into_iter());
                     }
                 }
@@ -493,7 +495,12 @@ impl Ty {
                     | InnerTy::Enum(ident)
                     | InnerTy::Trait(ident)
                     | InnerTy::UnknownIdent(ident, ..) => {
-                        names.insert(util::to_generic_name(ident, generics));
+                        let name = if full_names {
+                            util::to_generic_name(ident, generics)
+                        } else {
+                            ident.clone()
+                        };
+                        names.insert(name);
                     }
                     _ => (),
                 }
@@ -506,14 +513,14 @@ impl Ty {
             | Ty::UnknownMethodArgument(ty, ..)
             | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => {
-                if let Some(inner_names) = ty.get_structure_names() {
+                if let Some(inner_names) = ty.get_structure_names(full_names) {
                     names.extend(inner_names.into_iter());
                 }
             }
 
             Ty::Expr(expr, ..) => {
                 if let Ok(ty) = expr.get_expr_type() {
-                    if let Some(inner_names) = ty.get_structure_names() {
+                    if let Some(inner_names) = ty.get_structure_names(full_names) {
                         names.extend(inner_names.into_iter());
                     }
                 }

@@ -612,7 +612,9 @@ impl<'a> TypeContext<'a> {
             Ty::Generic(..) if !finalize => SubResult::UnSolved(self.cur_ty.clone()),
             */
             Ty::Generic(..) => SubResult::Solved(self.cur_ty.clone()),
-            Ty::GenericInstance(..) => SubResult::Solved(self.cur_ty.clone()),
+            Ty::GenericInstance(..) if finalize => SubResult::Solved(self.cur_ty.clone()),
+            Ty::GenericInstance(..) if !finalize => SubResult::UnSolved(self.cur_ty.clone()),
+            //Ty::GenericInstance(..) => SubResult::Solved(self.cur_ty.clone()),
             _ => unreachable!(),
         }
     }
@@ -1132,7 +1134,7 @@ impl<'a> TypeContext<'a> {
             let method = method.borrow();
 
             let generic_name = if let Some(generic_name) = method
-                .generics
+                .generic_names
                 .as_ref()
                 .map(|gens| gens.get(*idx))
                 .flatten()
@@ -1259,7 +1261,7 @@ impl<'a> TypeContext<'a> {
     pub fn new_method_generics(method: &Function, type_info: &TypeInfo) -> Option<Generics> {
         // TODO: This should be done somewhere else. This feels like a really
         //       random place to do it.
-        if let Some(method_generic_names) = &method.generics {
+        if let Some(method_generic_names) = &method.generic_names {
             let mut method_generics = Generics::new();
 
             for generic_name in method_generic_names.iter() {

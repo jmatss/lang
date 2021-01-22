@@ -11,7 +11,7 @@ use common::{
     visitor::Visitor,
     BlockId,
 };
-use log::debug;
+use log::{debug, warn};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 pub struct GenericStructCreator<'a, 'tctx> {
@@ -237,7 +237,7 @@ impl<'a, 'tctx> GenericStructCreator<'a, 'tctx> {
                 };
 
                 let mut generics_replacer = GenericsReplacer::new_struct(
-                    &mut self.type_context.analyze_context,
+                    &mut self.type_context,
                     Rc::clone(&new_struct),
                     &generics,
                     old_name,
@@ -268,6 +268,8 @@ impl<'a, 'tctx> GenericStructCreator<'a, 'tctx> {
                     self.errors.append(&mut err);
                     return None;
                 }
+
+                warn!("NEW_STRUCT: {:#?}", new_struct);
 
                 // Slower to shift all the ast tokens to the right, but ensure
                 // that the tokens are inserted next to the old "implement" and

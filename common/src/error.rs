@@ -11,6 +11,11 @@ use std::{
 
 pub type CustomResult<T> = Result<T, LangError>;
 
+/// Returned from function that checks cyclic dependencies. The two Strings will
+/// be the names/idents of the "things" that causes the cyclic dependency.
+#[derive(Debug, Clone)]
+pub struct CyclicDependencyError(pub String, pub String);
+
 #[derive(Debug, Clone)]
 pub struct LangError {
     pub msg: String,

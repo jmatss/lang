@@ -7,7 +7,11 @@ use super::{
 
 use crate::{
     error::{CustomResult, LangError, LangErrorKind},
-    ty::{inner_ty::InnerTy, ty::Ty},
+    ty::{
+        generics::{self, Generics},
+        inner_ty::InnerTy,
+        ty::Ty,
+    },
     util,
 };
 
@@ -140,26 +144,6 @@ impl Struct {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Function {
-    pub name: String,
-    pub generics: Option<Vec<String>>,
-
-    /// The key is the the name of the generic type it and the values are the
-    /// traits that the specific generic type needs to implement.
-    pub implements: Option<HashMap<String, Vec<Ty>>>,
-
-    pub parameters: Option<Vec<Rc<RefCell<Var>>>>,
-    pub ret_type: Option<Ty>,
-    pub modifiers: Vec<Modifier>,
-    pub is_var_arg: bool,
-
-    /// Will be set if this is a function in a "impl" block which means that
-    /// this is a function tied to a struct. The type will be the structure
-    /// (or the "ident" of the impl block if other than struct are allowed).
-    pub method_structure: Option<Ty>,
-}
-
 pub enum TraitCompareError {
     /// Param len diff (`self`, `trait`). The bool indicates if `this`/`self`
     /// is exludeded.
@@ -190,10 +174,34 @@ pub enum TraitCompareError {
     ImplsTypeDiff(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Function {
+    pub name: String,
+    pub generic_names: Option<Vec<String>>,
+
+    /// This is set when a new copy of this function is created that implements
+    /// the generics types (if any).
+    pub generic_impls: Option<Generics>,
+
+    /// The key is the the name of the generic type it and the values are the
+    /// traits that the specific generic type needs to implement.
+    pub implements: Option<HashMap<String, Vec<Ty>>>,
+
+    pub parameters: Option<Vec<Rc<RefCell<Var>>>>,
+    pub ret_type: Option<Ty>,
+    pub modifiers: Vec<Modifier>,
+    pub is_var_arg: bool,
+
+    /// Will be set if this is a function in a "impl" block which means that
+    /// this is a function tied to a struct. The type will be the structure
+    /// (or the "ident" of the impl block if other than struct are allowed).
+    pub method_structure: Option<Ty>,
+}
+
 impl Function {
     pub fn new(
         name: String,
-        generics: Option<Vec<String>>,
+        generic_names: Option<Vec<String>>,
         implements: Option<HashMap<String, Vec<Ty>>>,
         parameters: Option<Vec<Rc<RefCell<Var>>>>,
         ret_type: Option<Ty>,
@@ -202,7 +210,8 @@ impl Function {
     ) -> Self {
         Function {
             name,
-            generics,
+            generic_names,
+            generic_impls: None,
             implements,
             parameters,
             ret_type,
@@ -286,7 +295,7 @@ impl Function {
         }
 
         // Check generics in this match-statement.
-        match (&self.generics, &trait_func.generics) {
+        match (&self.generic_names, &trait_func.generic_names) {
             // Diff length of impls, error.
             (Some(self_generics), Some(trait_generics))
                 if self_generics.len() != trait_generics.len() =>
@@ -372,8 +381,6 @@ impl Function {
     /// Returns the "full name" which is the name containing possible structure
     /// and generics as well.
     pub fn full_name(&self) -> CustomResult<String> {
-        // If this function contains generics, the generics will already
-        // be included in the `self.name`.
         if let Some(ty) = &self.method_structure {
             let (structure_name, structure_generics) =
                 if let Ty::CompoundType(inner_ty, generics, ..) = ty {
@@ -395,10 +402,20 @@ impl Function {
                 structure_name,
                 Some(structure_generics),
                 &self.name,
-                None,
+                self.generic_impls.as_ref(),
             ))
         } else {
             Ok(self.name.clone())
+        }
+    }
+
+    /// Returns the "half name" which is the name that does NOT contain anything
+    /// related to the structure but will contain function generics (if any).
+    pub fn half_name(&self) -> String {
+        if let Some(generics) = &self.generic_impls {
+            util::to_generic_name(&self.name, generics)
+        } else {
+            self.name.clone()
         }
     }
 

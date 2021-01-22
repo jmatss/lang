@@ -1,3 +1,4 @@
+use super::context::{SubResult, TypeContext};
 use common::{
     error::LangError,
     token::{
@@ -11,12 +12,11 @@ use common::{
     visitor::Visitor,
     BlockId,
 };
+use log::warn;
 use std::{cell::RefCell, collections::HashSet, rc::Rc};
 
-use crate::AnalyzeContext;
-
-pub struct GenericsReplacer<'a> {
-    analyze_context: &'a mut AnalyzeContext,
+pub struct GenericsReplacer<'a, 'tctx> {
+    type_context: &'a mut TypeContext<'tctx>,
 
     /// A set containing the name+blockID for the "old" variables that now have
     /// been modified and given a `copy_nr`. This set will be used to figure out
@@ -38,16 +38,21 @@ pub struct GenericsReplacer<'a> {
 /// This can be used for replacing generics declared in structs and generics
 /// declared in functions. If they are declared in functions, the struct related
 /// fields will be set to None.
-impl<'a> GenericsReplacer<'a> {
+impl<'a, 'tctx> GenericsReplacer<'a, 'tctx> {
     pub fn new_struct(
-        analyze_context: &'a mut AnalyzeContext,
+        type_context: &'a mut TypeContext<'tctx>,
         new_struct: Rc<RefCell<Struct>>,
         generics_impl: &'a Generics,
         old_name: &'a str,
         new_ty: &'a Ty,
     ) -> Self {
+        warn!(
+            "NEW_STRUCT -- old_name: {:#?}, new_ty: {:#?}, new_struct: {:#?}, generics_impl: {:#?}",
+            old_name, new_ty, new_struct, generics_impl
+        );
+
         Self {
-            analyze_context,
+            type_context,
             modified_variables: HashSet::default(),
             generics_impl,
             new_struct: Some(new_struct),
@@ -57,9 +62,9 @@ impl<'a> GenericsReplacer<'a> {
         }
     }
 
-    pub fn new_func(analyze_context: &'a mut AnalyzeContext, generics_impl: &'a Generics) -> Self {
+    pub fn new_func(type_context: &'a mut TypeContext<'tctx>, generics_impl: &'a Generics) -> Self {
         Self {
-            analyze_context,
+            type_context,
             modified_variables: HashSet::default(),
             generics_impl,
             new_struct: None,
@@ -70,7 +75,7 @@ impl<'a> GenericsReplacer<'a> {
     }
 }
 
-impl<'a> Visitor for GenericsReplacer<'a> {
+impl<'a, 'tctx> Visitor for GenericsReplacer<'a, 'tctx> {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -79,11 +84,27 @@ impl<'a> Visitor for GenericsReplacer<'a> {
         }
     }
 
-    fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
+    fn visit_type(&mut self, ty: &mut Ty, ctx: &TraverseContext) {
         ty.replace_generics_impl(self.generics_impl);
 
         if let (Some(old_name), Some(new_ty)) = (self.old_name, self.new_ty) {
             ty.replace_self(old_name, new_ty);
+        }
+
+        // Now that the generics might have been replaced, try to solve the type
+        // again.
+        match self.type_context.solve_substitution(ty, true, ctx.block_id) {
+            SubResult::Solved(solved_ty) => *ty = solved_ty,
+            SubResult::UnSolved(_) => {
+                let err = self
+                    .type_context
+                    .analyze_context
+                    .err(format!("Unable to solve type: {:#?}", ty));
+                self.errors.push(err);
+            }
+            SubResult::Err(err) => {
+                self.errors.push(err);
+            }
         }
     }
 
@@ -95,7 +116,8 @@ impl<'a> Visitor for GenericsReplacer<'a> {
             self.modified_variables.insert(old_key);
 
             let new_key = (var.borrow().full_name(), ctx.block_id);
-            self.analyze_context
+            self.type_context
+                .analyze_context
                 .variables
                 .insert(new_key, Rc::clone(var));
         }
@@ -111,16 +133,19 @@ impl<'a> Visitor for GenericsReplacer<'a> {
                 func.borrow_mut().method_structure = self.new_ty.cloned();
 
                 // Insert a reference from the "new" structure to this new method.
+                // The name set will be the "half name" containing the generics
+                // for the function.
                 if let Some(methods) = new_struct.borrow_mut().methods.as_mut() {
-                    methods.insert(func.borrow().name.clone(), Rc::clone(&func));
+                    methods.insert(func.borrow().half_name(), Rc::clone(&func));
                 }
 
                 // Inserts a reference to this new method into the `analyze_context`
                 // look-up table.
-                if let Err(err) =
-                    self.analyze_context
-                        .insert_method(&new_struct_name, Rc::clone(&func), *old_id)
-                {
+                if let Err(err) = self.type_context.analyze_context.insert_method(
+                    &new_struct_name,
+                    Rc::clone(&func),
+                    *old_id,
+                ) {
                     self.errors.push(err);
                 }
             }
@@ -133,6 +158,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
     /// `self.modified_variables`.
     fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {
         match self
+            .type_context
             .analyze_context
             .get_var_decl_scope(&var.name, ctx.block_id)
         {

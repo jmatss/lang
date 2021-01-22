@@ -433,7 +433,7 @@ impl AnalyzeContext {
                 struct_.methods.as_mut().unwrap()
             };
 
-            let func_name = func.borrow().name.clone();
+            let func_name = func.borrow().half_name();
             methods.insert(func_name, Rc::clone(&func));
 
             Ok(())
@@ -448,7 +448,7 @@ impl AnalyzeContext {
                 enum_.methods.as_mut().unwrap()
             };
 
-            let func_name = func.borrow().name.clone();
+            let func_name = func.borrow().half_name();
             methods.insert(func_name, Rc::clone(&func));
 
             Ok(())

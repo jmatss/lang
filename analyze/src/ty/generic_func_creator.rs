@@ -7,10 +7,9 @@ use common::{
     traverser::AstTraverser,
     traverser::TraverseContext,
     ty::generics::Generics,
-    util,
     visitor::Visitor,
 };
-use log::debug;
+use log::{debug, warn};
 use std::{collections::HashMap, rc::Rc};
 
 pub struct GenericFuncCreator<'a, 'tctx> {
@@ -65,10 +64,10 @@ impl<'a, 'tctx> GenericFuncCreator<'a, 'tctx> {
                     for method_generics in generic_methods.get(&method_name).unwrap() {
                         let mut new_method = method.clone();
 
-                        let mut generics_replacer = GenericsReplacer::new_func(
-                            &mut self.type_context.analyze_context,
-                            method_generics,
-                        );
+                        warn!("BEFORE new_method: {:#?}", new_method);
+
+                        let mut generics_replacer =
+                            GenericsReplacer::new_func(&mut self.type_context, method_generics);
 
                         if let Err(mut err) = AstTraverser::new()
                             .add_visitor(&mut generics_replacer)
@@ -81,16 +80,16 @@ impl<'a, 'tctx> GenericFuncCreator<'a, 'tctx> {
                             return;
                         }
 
-                        // Set the new name of the method so that it contains
-                        // the generic impls.
+                        // Set the generic impls on the new copy of the function.
                         let func =
                             if let AstToken::Block(BlockHeader::Function(func), ..) = &new_method {
-                                func.borrow_mut().name =
-                                    util::to_generic_name(&method_name, method_generics);
+                                func.borrow_mut().generic_impls = Some(method_generics.clone());
                                 Rc::clone(func)
                             } else {
                                 panic!()
                             };
+
+                        warn!("AFTER new_method: {:#?}", new_method);
 
                         // Insert the method into the structure.
                         if let Err(err) = self.type_context.analyze_context.insert_method(
@@ -157,8 +156,48 @@ impl<'a, 'tctx> Visitor for GenericFuncCreator<'a, 'tctx> {
                     if self.generic_methods.contains_key(&structure_name) {
                         self.create_method_instance(&structure_name, impl_body);
                     }
-                    // else if
-                    // TODO: Remove generic methods that doesn't have any impls?
+
+                    // Go through the methods in the impl block one more time.
+                    // Remove any methods that have generics declared, but never
+                    // implemented. This is methods that isn't used anywhere in
+                    // the code and must be removed since the generics are never
+                    // replaced.
+                    let mut idx = 0;
+                    while idx < impl_body.len() {
+                        let method = impl_body.get(idx).unwrap();
+
+                        if let AstToken::Block(BlockHeader::Function(func), _, id, _) = method {
+                            let contains_gens_decl = func
+                                .borrow()
+                                .generic_names
+                                .as_ref()
+                                .map(|n| !n.is_empty())
+                                .unwrap_or(false);
+                            let contains_gens_impl = func.borrow().generic_impls.is_some();
+
+                            warn!(
+                                "contains_gens_decl: {}, contains_gens_impl: {}, name: {}",
+                                contains_gens_decl,
+                                contains_gens_impl,
+                                &func.borrow().half_name()
+                            );
+
+                            if contains_gens_decl && !contains_gens_impl {
+                                if let Err(err) = self.type_context.analyze_context.remove_method(
+                                    &structure_name,
+                                    &func.borrow().name,
+                                    *id,
+                                ) {
+                                    self.errors.push(err);
+                                    return;
+                                }
+
+                                impl_body.remove(idx);
+                            } else {
+                                idx += 1;
+                            }
+                        }
+                    }
                 }
 
                 i += 1;

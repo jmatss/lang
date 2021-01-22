@@ -5,6 +5,7 @@ mod mid;
 mod post;
 mod pre;
 mod ty;
+pub mod util;
 //mod unitialized;
 
 use common::{
@@ -172,6 +173,8 @@ pub fn analyze(
         .add_visitor(&mut generic_struct_creator)
         .traverse_token(ast_root)
         .take_errors()?;
+
+    debug!("\nAST after generic stuff:\n{:#?}", ast_root);
 
     debug!("Running CallArgs");
     let mut call_args = CallArgs::new(&analyze_context);

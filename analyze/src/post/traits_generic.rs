@@ -197,8 +197,8 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                                     format!(
                                         "Generic at idx {} differs. Struct generic name: {:#?}, trait generic name: {:#?}",
                                         idx,
-                                        struct_method_borrow.generics.as_ref().unwrap().get(idx).unwrap(),
-                                        trait_method.generics.as_ref().unwrap().get(idx).unwrap(),
+                                        struct_method_borrow.generic_names.as_ref().unwrap().get(idx).unwrap(),
+                                        trait_method.generic_names.as_ref().unwrap().get(idx).unwrap(),
                                     )
                                 }
                                 TraitCompareError::ImplsLenDiff(s_len, t_len) => {

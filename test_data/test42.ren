@@ -1,4 +1,4 @@
-use std.mem
+use std.mem_new
 
 // TODO: std.mem already includes std.traits. Should rework import logic.
 //use std.traits
@@ -27,7 +27,7 @@ implement Disposable for Error
     {
         if this.*.msg_needs_deinit
         {
-            Allocator<u8>::deinit(this.*.msg)
+            Allocator::deinit<u8>(this.*.msg)
             this.*.msg_needs_deinit = false
         }
     }
@@ -45,7 +45,7 @@ function main() -> i32
     var stack_err = Error { kind, msg, needs_deinit }
 
     kind = ErrorKind::SECOND
-    msg = Allocator::clone("A heap allocated error message.", 32)
+    msg = Allocator::clone<u8>("A heap allocated error message.", 32)
     needs_deinit = true
     var heap_err = Error { kind, msg, needs_deinit }
 

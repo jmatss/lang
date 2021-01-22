@@ -64,42 +64,65 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
 
             // TODO: Implement generics for iterfaces and enums (?).
 
-            let generic_names = if let Ok(struct_) = analyze_context.get_struct(ident, block_id) {
-                struct_
-                    .borrow()
-                    .generics
-                    .clone()
-                    .unwrap_or_else(Vec::default)
-            } else if analyze_context.get_enum(ident, block_id).is_ok() {
-                Vec::default()
-            } else if let Ok(interface) = analyze_context.get_trait(ident, block_id) {
-                Vec::default()
-            } else {
-                let err = analyze_context.err(format!(
-                    "Unable to find structure for impl block with name \"{}\" in block {}",
-                    ident, block_id
-                ));
-                self.errors.push(err);
-                return;
-            };
-
-            // Early return if the structure doesn't have any generics, nothing
-            // to replace in this function.
-            if generic_names.is_empty() {
-                return;
-            }
+            let structure_generic_names =
+                if let Ok(struct_) = analyze_context.get_struct(ident, block_id) {
+                    struct_
+                        .borrow()
+                        .generics
+                        .clone()
+                        .unwrap_or_else(Vec::default)
+                } else if analyze_context.get_enum(ident, block_id).is_ok() {
+                    Vec::default()
+                } else if let Ok(interface) = analyze_context.get_trait(ident, block_id) {
+                    Vec::default()
+                } else {
+                    let err = analyze_context.err(format!(
+                        "Unable to find structure for impl block with name \"{}\" in block {}",
+                        ident, block_id
+                    ));
+                    self.errors.push(err);
+                    return;
+                };
 
             // Iterate through the body of one method at a time and replace all
             // "UnknownIdent"s representing generics to "Generic"s.
             for method in body {
-                let mut func_replacer = FuncGenericsReplacer::new(&generic_names);
-                if let Err(mut err) = AstTraverser::new()
-                    .add_visitor(&mut func_replacer)
-                    .traverse_token(method)
-                    .take_errors()
-                {
-                    self.errors.append(&mut err);
-                    return;
+                let func_generic_names =
+                    if let AstToken::Block(BlockHeader::Function(func), ..) = method {
+                        func.borrow().generic_names.clone()
+                    } else {
+                        None
+                    };
+
+                // No generics declared on either sturcture or function, early skip.
+                if structure_generic_names.is_empty() && func_generic_names.is_none() {
+                    continue;
+                }
+
+                // Replaces any generics declared on the function.
+                if let Some(func_generic_names) = func_generic_names {
+                    let mut func_replacer = FuncGenericsReplacer::new(&func_generic_names);
+                    if let Err(mut err) = AstTraverser::new()
+                        .add_visitor(&mut func_replacer)
+                        .traverse_token(method)
+                        .take_errors()
+                    {
+                        self.errors.append(&mut err);
+                        return;
+                    }
+                }
+
+                // Replaces any generics declared on the structure.
+                if !structure_generic_names.is_empty() {
+                    let mut struct_replacer = FuncGenericsReplacer::new(&structure_generic_names);
+                    if let Err(mut err) = AstTraverser::new()
+                        .add_visitor(&mut struct_replacer)
+                        .traverse_token(method)
+                        .take_errors()
+                    {
+                        self.errors.append(&mut err);
+                        return;
+                    }
                 }
             }
         }

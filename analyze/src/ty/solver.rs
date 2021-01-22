@@ -33,6 +33,9 @@ impl<'a, 'tctx> TypeSolver<'a, 'tctx> {
             // TODO: There might be other unsolved types other than generics
             //       inside the `unsolved_ty` which is missed when doing this
             //       check. Can this be a problem?
+            // Need to allow for types that contains generics. This is because
+            // they might not be solved until the instances of structs/methods
+            // are created that implementes the generics.
             SubResult::UnSolved(unsolved_ty) if unsolved_ty.contains_generic() => {
                 *ty = unsolved_ty;
             }

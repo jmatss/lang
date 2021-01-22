@@ -53,17 +53,17 @@ impl<'a> Visitor for FuncGenericsCheck<'a> {
             };
             let method = method.borrow();
 
-            if let Some(method_generics) = &method.generics {
-                if method_generics.is_empty() {
+            if let Some(generic_impls) = &method.generic_impls {
+                if generic_impls.is_empty() {
                     return;
                 }
 
                 if let Some(func_call_generics) = &func_call.generics {
-                    if method_generics.len() != func_call_generics.len_types() {
+                    if generic_impls.len() != func_call_generics.len_types() {
                         let err = self.analyze_context.err(format!(
                             "Func decl and func call generic count differ. \
                             Func decl #: {}, func call #: {}. Func_call: {:#?}",
-                            method_generics.len(),
+                            generic_impls.len(),
                             func_call_generics.len_types(),
                             func_call
                         ));

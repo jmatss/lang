@@ -193,6 +193,12 @@ impl<'a> AstTraverser<'a> {
                         }
                     }
 
+                    if let Some(generic_impls) = &mut func.borrow_mut().generic_impls {
+                        for ty in generic_impls.iter_types_mut() {
+                            self.traverse_type(ty);
+                        }
+                    }
+
                     if let Some(ret_ty) = &mut func.borrow_mut().ret_type {
                         self.traverse_type(ret_ty);
                     }
