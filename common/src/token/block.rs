@@ -107,6 +107,8 @@ pub struct Struct {
     pub implements: Option<HashMap<String, Vec<Ty>>>,
     pub members: Option<Vec<Rc<RefCell<Var>>>>,
 
+    pub modifiers: Vec<Modifier>,
+
     /// The key is the name of the method.
     pub methods: Option<HashMap<String, Rc<RefCell<Function>>>>,
 }
@@ -117,12 +119,14 @@ impl Struct {
         generics: Option<Vec<String>>,
         implements: Option<HashMap<String, Vec<Ty>>>,
         members: Option<Vec<Rc<RefCell<Var>>>>,
+        modifiers: Vec<Modifier>,
     ) -> Self {
         Self {
             name,
             generics,
             implements,
             members,
+            modifiers,
             methods: None,
         }
     }
@@ -456,16 +460,24 @@ pub struct Enum {
     pub ty: Ty,
     pub members: Option<Vec<Rc<RefCell<Var>>>>,
 
+    pub modifiers: Vec<Modifier>,
+
     /// The key is the name of the method.
     pub methods: Option<HashMap<String, Rc<RefCell<Function>>>>,
 }
 
 impl Enum {
-    pub fn new(name: String, ty: Ty, members: Option<Vec<Rc<RefCell<Var>>>>) -> Self {
+    pub fn new(
+        name: String,
+        ty: Ty,
+        members: Option<Vec<Rc<RefCell<Var>>>>,
+        modifiers: Vec<Modifier>,
+    ) -> Self {
         Enum {
             name,
             ty,
             members,
+            modifiers,
             methods: None,
         }
     }
@@ -488,14 +500,21 @@ pub struct Trait {
     pub name: String,
     pub generics: Option<Vec<String>>,
     pub methods: Vec<Function>,
+    pub modifiers: Vec<Modifier>,
 }
 
 impl Trait {
-    pub fn new(name: String, generics: Option<Vec<String>>, methods: Vec<Function>) -> Self {
+    pub fn new(
+        name: String,
+        generics: Option<Vec<String>>,
+        methods: Vec<Function>,
+        modifiers: Vec<Modifier>,
+    ) -> Self {
         Trait {
             name,
             generics,
             methods,
+            modifiers,
         }
     }
 }

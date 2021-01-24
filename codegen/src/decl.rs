@@ -2,7 +2,7 @@ use crate::generator::CodeGen;
 use analyze::{block::BlockInfo, util::order::dependency_order};
 use common::{
     error::CustomResult,
-    token::{ast::AstToken, block::BlockHeader},
+    token::{ast::AstToken, block::BlockHeader, stmt::Modifier},
 };
 use inkwell::module::Linkage;
 
@@ -56,19 +56,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             match header {
                 BlockHeader::Function(func) => {
-                    let linkage = Linkage::External;
-                    self.compile_func_proto(
-                        &func.borrow(),
-                        Some(file_pos.to_owned()),
-                        Some(linkage),
-                    )?;
+                    let func = func.borrow();
+                    let linkage =
+                        if func.name == "main" || func.modifiers.contains(&Modifier::Public) {
+                            Linkage::External
+                        } else {
+                            // Private and Hidden.
+                            // TODO: Linkage::Private
+                            ();
+                            Linkage::External
+                        };
+                    self.compile_func_proto(&func, Some(file_pos.to_owned()), Some(linkage))?;
                 }
                 BlockHeader::Implement(..) => {
                     for mut ast_token in body.iter_mut() {
                         if let AstToken::Block(BlockHeader::Function(func), ..) = &mut ast_token {
-                            let linkage = Linkage::External;
+                            let func = func.borrow();
+                            let linkage = if func.name == "main"
+                                || func.modifiers.contains(&Modifier::Public)
+                            {
+                                Linkage::External
+                            } else {
+                                // Private and Hidden.
+                                Linkage::Private
+                            };
                             self.compile_func_proto(
-                                &func.borrow(),
+                                &func,
                                 Some(file_pos.to_owned()),
                                 Some(linkage),
                             )?;

@@ -72,6 +72,12 @@ pub enum Kw {
     Test,
 }
 
+impl Kw {
+    pub fn is_modifier(&self) -> bool {
+        matches!(self, Kw::Private | Kw::Public | Kw::Hidden)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Sym {
     ParenthesisBegin,

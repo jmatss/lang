@@ -34,10 +34,16 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         kw_file_pos: FilePosition,
     ) -> CustomResult<AstToken> {
         let mut keyword_parser = Self { iter };
-        keyword_parser.parse_keyword(keyword, kw_file_pos)
+        let modifiers = Vec::default();
+        keyword_parser.parse_keyword(keyword, modifiers, kw_file_pos)
     }
 
-    fn parse_keyword(&mut self, keyword: Kw, kw_file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_keyword(
+        &mut self,
+        keyword: Kw,
+        modifiers: Vec<Modifier>,
+        kw_file_pos: FilePosition,
+    ) -> CustomResult<AstToken> {
         match keyword {
             // Parses all the else(x)/else blocks after aswell.
             Kw::If => self.parse_if(kw_file_pos),
@@ -50,7 +56,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             Kw::For => self.parse_for(kw_file_pos),
             Kw::While => self.parse_while(kw_file_pos),
             Kw::Implement => self.parse_impl(kw_file_pos),
-            Kw::Function => self.parse_func(kw_file_pos),
+            Kw::Function => self.parse_func(modifiers, kw_file_pos),
 
             Kw::Return => self.parse_return(kw_file_pos),
             Kw::Yield => self.parse_yield(kw_file_pos),
@@ -59,7 +65,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
             Kw::Use => self.parse_use(kw_file_pos),
             Kw::Package => self.parse_package(kw_file_pos),
-            Kw::External => self.parse_external(kw_file_pos),
+            Kw::External => self.parse_external(modifiers, kw_file_pos),
 
             Kw::Var => self.parse_var_decl(false, kw_file_pos),
             Kw::Const => self.parse_var_decl(true, kw_file_pos),
@@ -67,22 +73,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 "\"Static\" keyword not implemented.".into(),
                 Some(kw_file_pos),
             )),
-            Kw::Private => Err(self.iter.err(
-                "\"Private\" keyword not implemented.".into(),
-                Some(kw_file_pos),
-            )),
-            Kw::Public => Err(self.iter.err(
-                "\"Public\" keyword not implemented.".into(),
-                Some(kw_file_pos),
-            )),
-            Kw::Hidden => Err(self.iter.err(
-                "\"Hidden\" keyword not implemented.".into(),
-                Some(kw_file_pos),
-            )),
 
-            Kw::Struct => self.parse_struct(kw_file_pos),
-            Kw::Enum => self.parse_enum(kw_file_pos),
-            Kw::Trait => self.parse_trait(kw_file_pos),
+            Kw::Private | Kw::Public | Kw::Hidden => {
+                self.parse_modifier(keyword, modifiers, kw_file_pos)
+            }
+
+            Kw::Struct => self.parse_struct(modifiers, kw_file_pos),
+            Kw::Enum => self.parse_enum(modifiers, kw_file_pos),
+            Kw::Trait => self.parse_trait(modifiers, kw_file_pos),
 
             Kw::Defer => self.parse_defer(kw_file_pos),
 
@@ -98,6 +96,42 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 ),
                 Some(kw_file_pos),
             )),
+        }
+    }
+
+    fn parse_modifier(
+        &mut self,
+        modifier_kw: Kw,
+        mut modifiers: Vec<Modifier>,
+        kw_file_pos: FilePosition,
+    ) -> CustomResult<AstToken> {
+        let modifier = match modifier_kw {
+            Kw::Private => Modifier::Private,
+            Kw::Public => Modifier::Public,
+            Kw::Hidden => Modifier::Hidden,
+            _ => panic!("TODO: Modifier \"{:?}\"", modifier_kw),
+        };
+        modifiers.push(modifier);
+
+        let lex_token = if let Some(lex_token) = self.iter.next_skip_space_line() {
+            lex_token
+        } else {
+            return Err(self.iter.err(
+                "Got None when looking a token after modifier.".into(),
+                Some(kw_file_pos),
+            ));
+        };
+
+        if let LexTokenKind::Kw(next_keyword) = lex_token.kind {
+            self.parse_keyword(next_keyword, modifiers, lex_token.file_pos)
+        } else {
+            Err(self.iter.err(
+                format!(
+                    "Token after modifier \"{:?}\" not a keyword, was: {:#?}",
+                    modifier_kw, lex_token
+                ),
+                Some(lex_token.file_pos),
+            ))
         }
     }
 
@@ -477,10 +511,16 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a external statement.
     ///   "external <function_prototype>"
     /// The "external" keyword has already been consumed when this function is called.
-    fn parse_external(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_external(
+        &mut self,
+        modifiers: Vec<Modifier>,
+        file_pos: FilePosition,
+    ) -> CustomResult<AstToken> {
         if let Some(lex_token) = self.iter.next_skip_space_line() {
             let func = match lex_token.kind {
-                LexTokenKind::Kw(Kw::Function) => self.parse_func_proto(lex_token.file_pos)?,
+                LexTokenKind::Kw(Kw::Function) => {
+                    self.parse_func_proto(modifiers, lex_token.file_pos)?
+                }
                 _ => {
                     return Err(self.iter.err(
                         format!("Invalid keyword after external keyword: {:?}", lex_token),
@@ -555,18 +595,24 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a function and its body. See `parse_func_proto` for the structure
     /// of a function header/prototype.
     /// The "function" keyword has already been consumed when this function is called.
-    fn parse_func(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
-        let func = self.parse_func_proto(file_pos)?;
+    fn parse_func(
+        &mut self,
+        modifiers: Vec<Modifier>,
+        file_pos: FilePosition,
+    ) -> CustomResult<AstToken> {
+        let func = self.parse_func_proto(modifiers, file_pos)?;
         let func_header = BlockHeader::Function(Rc::new(RefCell::new(func)));
         self.iter.next_block(func_header)
     }
 
     /// Parses a function prototype/header.
-    ///   "function [ <modifier>... ] <ident> [ < <generic>, ... > ] ( [<ident>: <type>] [= <default value>], ... ) [ "->" <type> ]"
+    ///   "[ <modifier>... ] function [ <modifier>... ] <ident> [ < <generic>, ... > ] ( [<ident>: <type>] [= <default value>], ... ) [ "->" <type> ]"
     /// The "function" keyword has already been consumed when this function is called.
-    fn parse_func_proto(&mut self, mut file_pos: FilePosition) -> CustomResult<Function> {
-        let mut modifiers = Vec::new();
-
+    fn parse_func_proto(
+        &mut self,
+        mut modifiers: Vec<Modifier>,
+        mut file_pos: FilePosition,
+    ) -> CustomResult<Function> {
         // TODO: Handle FilePosition.
 
         static THIS: &str = "this";
@@ -722,7 +768,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a struct header.
     ///   "struct <ident> [ < <generic>, ... > ] [{ [<ident>: <type>] [[,] ...] }]"
     /// The "struct" keyword has already been consumed when this function is called.
-    fn parse_struct(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_struct(
+        &mut self,
+        modifiers: Vec<Modifier>,
+        mut file_pos: FilePosition,
+    ) -> CustomResult<AstToken> {
         // Start by parsing the identifier.
         let lex_token = self.iter.next_skip_space_line();
         let ident =
@@ -784,7 +834,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         };
 
         let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
-        let struct_ = Struct::new(ident, generic_names, implements, members_opt);
+        let struct_ = Struct::new(ident, generic_names, implements, members_opt, modifiers);
         let header = BlockHeader::Struct(Rc::new(RefCell::new(struct_)));
 
         let block_id = self.iter.reserve_block_id();
@@ -798,7 +848,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a enum header.
     ///   "enum <ident> { <ident> [[,] ...] }"
     /// The "enum" keyword has already been consumed when this function is called.
-    fn parse_enum(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_enum(
+        &mut self,
+        modifiers: Vec<Modifier>,
+        mut file_pos: FilePosition,
+    ) -> CustomResult<AstToken> {
         // Start by parsing the identifier.
         let lex_token = self.iter.next_skip_space_line();
         let ident =
@@ -881,7 +935,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             TypeInfo::Enum(file_pos.to_owned()),
         );
 
-        let enum_ = Enum::new(ident, enum_ty, members_opt);
+        let enum_ = Enum::new(ident, enum_ty, members_opt, modifiers);
         let header = BlockHeader::Enum(Rc::new(RefCell::new(enum_)));
 
         let block_id = self.iter.reserve_block_id();
@@ -894,7 +948,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a trait header.
     ///   "trait <ident> [ < <generic>, ... > ] { [<func> ...] }"
     /// The "trait" keyword has already been consumed when this function is called.
-    fn parse_trait(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_trait(
+        &mut self,
+        modifiers: Vec<Modifier>,
+        mut file_pos: FilePosition,
+    ) -> CustomResult<AstToken> {
         // Start by parsing the identifier.
         let lex_token = self.iter.next_skip_space_line();
         let ident =
@@ -930,13 +988,26 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // TODO: Allow to set default bodies for the functions?
         let mut methods = Vec::default();
 
+        let mut modifiers = Vec::default();
+
         while let Some(lex_token) = self.iter.next_skip_space_line() {
             file_pos.set_end(&lex_token.file_pos)?;
 
             match lex_token.kind {
+                LexTokenKind::Kw(kw) if kw.is_modifier() => {
+                    let modifier = match kw {
+                        Kw::Private => Modifier::Private,
+                        Kw::Public => Modifier::Public,
+                        Kw::Hidden => Modifier::Hidden,
+                        _ => panic!("TODO: Modifier \"{:?}\"", kw),
+                    };
+                    modifiers.push(modifier);
+                }
+
                 LexTokenKind::Kw(Kw::Function) => {
-                    let method = self.parse_func_proto(lex_token.file_pos)?;
+                    let method = self.parse_func_proto(modifiers, lex_token.file_pos)?;
                     methods.push(method);
+                    modifiers = Vec::default();
                 }
 
                 // End of trait block.
@@ -954,7 +1025,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             }
         }
 
-        let trait_ = Trait::new(ident, generic_names, methods);
+        let trait_ = Trait::new(ident, generic_names, methods, modifiers);
         let header = BlockHeader::Trait(Rc::new(RefCell::new(trait_)));
 
         let block_id = self.iter.reserve_block_id();

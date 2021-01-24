@@ -361,7 +361,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    /// Compoles a function prototype.
+    /// Compiles a function prototype.
     pub(super) fn compile_func_proto(
         &self,
         func: &Function,
