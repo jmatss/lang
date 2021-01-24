@@ -215,6 +215,139 @@ impl PartialEq for Ty {
 
 #[allow(clippy::match_like_matches_macro)]
 impl Ty {
+    pub fn is_solved(&self) -> bool {
+        match self {
+            Ty::CompoundType(inner_ty, generics, ..) => {
+                let inner_solved = inner_ty.is_solved();
+                let gens_solved = generics.iter_types().all(|ty| ty.is_solved());
+                inner_solved && gens_solved
+            }
+
+            Ty::Pointer(ty, ..) => ty.is_solved(),
+
+            Ty::Array(ty, expr_opt, ..) => {
+                let ty_solved = ty.is_solved();
+                let expr_ty_solved = if let Some(ty) = expr_opt
+                    .as_ref()
+                    .map(|expr| expr.get_expr_type().ok())
+                    .flatten()
+                {
+                    ty.is_solved()
+                } else {
+                    true
+                };
+                ty_solved && expr_ty_solved
+            }
+
+            Ty::Expr(expr, ..) => {
+                if let Ok(ty) = expr.get_expr_type() {
+                    ty.is_solved()
+                } else {
+                    true
+                }
+            }
+
+            Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => true,
+
+            Ty::UnknownStructureMember(_, _, _, _)
+            | Ty::UnknownStructureMethod(_, _, _, _)
+            | Ty::UnknownMethodArgument(_, _, _, _, _)
+            | Ty::UnknownMethodGeneric(_, _, _, _, _)
+            | Ty::UnknownArrayMember(_, _, _) => false,
+        }
+    }
+
+    /// Checks if the given type contains only known types.
+    /// These are primitives, structures, pointers or arrays.
+    pub fn is_known(&self) -> bool {
+        match self {
+            Ty::CompoundType(inner_ty, generics, ..) => {
+                let inner_solved = inner_ty.is_solved();
+                let gens_solved = generics.iter_types().all(|ty| ty.is_known());
+                inner_solved && gens_solved
+            }
+
+            Ty::Pointer(ty, ..) => ty.is_known(),
+
+            Ty::Array(ty, expr_opt, ..) => {
+                let ty_solved = ty.is_known();
+                let expr_ty_solved = if let Some(ty) = expr_opt
+                    .as_ref()
+                    .map(|expr| expr.get_expr_type().ok())
+                    .flatten()
+                {
+                    ty.is_known()
+                } else {
+                    true
+                };
+                ty_solved && expr_ty_solved
+            }
+
+            Ty::Expr(expr, ..) => {
+                if let Ok(ty) = expr.get_expr_type() {
+                    ty.is_known()
+                } else {
+                    true
+                }
+            }
+
+            Ty::Any(..)
+            | Ty::Generic(..)
+            | Ty::GenericInstance(..)
+            | Ty::UnknownStructureMember(_, _, _, _)
+            | Ty::UnknownStructureMethod(_, _, _, _)
+            | Ty::UnknownMethodArgument(_, _, _, _, _)
+            | Ty::UnknownMethodGeneric(_, _, _, _, _)
+            | Ty::UnknownArrayMember(_, _, _) => false,
+        }
+    }
+
+    /// Converts any unknown values to their corresponding "default" values
+    /// if possible. This includes ints and floats that are converted to i32
+    /// and f32 respectively.
+    pub fn convert_defaults(&mut self) {
+        match self {
+            Ty::CompoundType(inner_ty, generics, ..) => {
+                if inner_ty.is_unknown_int() {
+                    *inner_ty = InnerTy::default_int();
+                } else if inner_ty.is_unknown_float() {
+                    *inner_ty = InnerTy::default_float();
+                }
+
+                for gen_ty in generics.iter_types_mut() {
+                    gen_ty.convert_defaults();
+                }
+            }
+
+            Ty::Array(ty, expr_opt, ..) => {
+                ty.convert_defaults();
+
+                if let Some(expr) = expr_opt {
+                    if let Ok(expr_ty) = expr.get_expr_type_mut() {
+                        expr_ty.convert_defaults();
+                    }
+                }
+            }
+
+            Ty::Expr(expr, _) => {
+                if let Ok(expr_ty) = expr.get_expr_type_mut() {
+                    expr_ty.convert_defaults();
+                }
+            }
+
+            Ty::Pointer(ty, ..)
+            | Ty::UnknownStructureMember(ty, ..)
+            | Ty::UnknownStructureMethod(ty, ..)
+            | Ty::UnknownMethodArgument(ty, ..)
+            | Ty::UnknownMethodGeneric(ty, ..)
+            | Ty::UnknownArrayMember(ty, ..) => {
+                ty.convert_defaults();
+            }
+
+            Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => (),
+        }
+    }
+
     pub fn get_inner(&self) -> Option<&InnerTy> {
         if let Ty::CompoundType(inner_ty, ..) = self {
             Some(inner_ty)
@@ -227,13 +360,7 @@ impl Ty {
     /// If this type isn't a structure or generic, None is returned.
     pub fn get_ident(&self) -> Option<String> {
         match self {
-            Ty::CompoundType(inner_ty, ..) => match inner_ty {
-                InnerTy::Struct(ident)
-                | InnerTy::Enum(ident)
-                | InnerTy::Trait(ident)
-                | InnerTy::UnknownIdent(ident, ..) => Some(ident.clone()),
-                _ => None,
-            },
+            Ty::CompoundType(inner_ty, ..) => inner_ty.get_ident(),
             Ty::Generic(ident, ..) | Ty::GenericInstance(ident, ..) => Some(ident.clone()),
             _ => None,
         }
@@ -976,6 +1103,12 @@ impl Ty {
         // After this number of iterations it will give up and return the current
         // highest precedence number.
         static MAX_DEPTH: usize = 10;
+
+        if self.is_known() && !other.is_known() {
+            return true;
+        } else if !self.is_known() && other.is_known() {
+            return false;
+        }
 
         // TODO: Makes this in a more effective way so that one doesn't have to
         //       re-calculate the "1..i" every iteration.

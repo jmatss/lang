@@ -46,6 +46,20 @@ pub enum InnerTy {
 
 #[allow(clippy::match_like_matches_macro)]
 impl InnerTy {
+    pub fn is_solved(&self) -> bool {
+        self.is_primitive() || self.is_string() || self.is_structure()
+    }
+
+    pub fn get_ident(&self) -> Option<String> {
+        match self {
+            InnerTy::Struct(ident)
+            | InnerTy::Enum(ident)
+            | InnerTy::Trait(ident)
+            | InnerTy::UnknownIdent(ident, ..) => Some(ident.clone()),
+            _ => None,
+        }
+    }
+
     pub fn default_int() -> InnerTy {
         InnerTy::I32
     }

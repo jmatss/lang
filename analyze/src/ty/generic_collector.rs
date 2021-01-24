@@ -12,7 +12,7 @@ use common::{
     BlockId,
 };
 use core::panic;
-use log::{debug, warn};
+use log::debug;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 /// Used to store information about a nested method.
@@ -89,7 +89,7 @@ pub struct GenericCollector<'a, 'tctx> {
     /// structure `A` depending on structure `B` would come before in the list.
     /// This is done since `A` should "expand" all its generic implementations
     /// before `B` is "calculated".
-    dependency_order: Vec<String>,
+    dependency_order_rev: Vec<String>,
 
     errors: Vec<LangError>,
 }
@@ -103,7 +103,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             generic_methods: HashMap::default(),
             nested_generic_methods: HashMap::default(),
             // Will be overwritten and set when the "default block" is visted.
-            dependency_order: Vec::with_capacity(0),
+            dependency_order_rev: Vec::with_capacity(0),
             errors: Vec::default(),
         }
     }
@@ -344,16 +344,13 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
     }
 
     fn convert_nested_to_regular(&mut self) {
-        warn!("BEFORE self.generic_structs: {:#?}", self.generic_structs);
-        warn!("BEFORE self.generic_methods: {:#?}", self.generic_methods);
-
-        warn!(
-            "self.nested_generic_structs: {:#?}",
-            self.nested_generic_structs
+        debug!(
+            "self.nested_generic_structs: {:#?}, self.nested_generic_methods: {:#?}",
+            self.nested_generic_structs, self.nested_generic_methods
         );
 
         // Converts all `self.nested_generic_structs` into regular `self.generic_structs`.
-        for struct_name in self.dependency_order.clone().iter().rev() {
+        for struct_name in self.dependency_order_rev.clone().iter() {
             if !self.nested_generic_structs.contains_key(struct_name) {
                 continue;
             }
@@ -387,14 +384,8 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             }
         }
 
-        warn!(
-            "self.dependency_order: {:#?}, self.nested_generic_methods: {:#?}",
-            self.dependency_order, self.nested_generic_methods
-        );
-
         // Converts all `self.nested_generic_methods` into regular `self.generic_methods`.
-        for struct_name in self.dependency_order.clone().iter().rev() {
-            warn!("loop struct_name: {}", struct_name);
+        for struct_name in self.dependency_order_rev.clone().iter() {
             if !self.nested_generic_methods.contains_key(struct_name) {
                 continue;
             }
@@ -417,10 +408,8 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             // in the same structure. The referencing methods needs to be converted
             // before the method that it is referencing
             for order_method_name in method_order.iter() {
-                warn!("order_method_name: {}", order_method_name);
                 for (method_info, nested_method_tys) in &nested_gen_methods {
                     if &method_info.method_call_name == order_method_name {
-                        warn!("INSIDE -- method_info: {:#?}", method_info);
                         for generics in nested_method_tys.iter() {
                             self.convert_nested_method_from_struct(
                                 &struct_name,
@@ -449,9 +438,6 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                 }
             }
         }
-
-        warn!("AFTER self.generic_structs: {:#?}", self.generic_structs);
-        warn!("AFTER self.generic_methods: {:#?}", self.generic_methods);
     }
 
     fn convert_nested_struct_from_struct(
@@ -573,7 +559,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                 if let Some(method_gen_names) = &method.borrow().generic_names {
                     method_gen_names.clone()
                 } else {
-                    panic!(
+                    unreachable!(
                         "method_structure_name: {}, method_call_name: {}, block_id: {}",
                         method_structure_name, method_call_name, block_id
                     );
@@ -585,13 +571,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             }
         };
 
-        warn!(
-            "DEF456 -- struct_name: {}, method_info: {:#?}, ",
-            struct_name, method_info
-        );
-
         for gen_struct_ty in gen_struct_tys {
-            warn!("gen_struct_ty: {:#?}", gen_struct_ty);
             let struct_generics = if let Ty::CompoundType(_, struct_generics, ..) = gen_struct_ty {
                 struct_generics
             } else {
@@ -603,8 +583,6 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                 return;
             };
 
-            warn!("BEFORE generics: {:#?}", generics);
-
             // Iterate through the types and replace any generics found in the
             // function declaration. Also add names of the generics into `Generics`
             // if they are missing (might have no effect if the names are set already).
@@ -614,8 +592,6 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                 new_ty.replace_generics_impl(&struct_generics);
                 new_generics.insert(name.clone(), new_ty);
             }
-
-            warn!("AFTER new_generics: {:#?}", new_generics);
 
             if &new_generics == generics {
                 continue;
@@ -656,11 +632,6 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
         let method_call_name = &method_info.method_call_name;
         let method_structure_name = &method_info.method_structure_name;
 
-        warn!(
-            "ABC123, method_name: {}, struct_name: {}, method_call_name: {}, method_structure_name: {}",
-            method_name, struct_name, method_call_name, method_structure_name
-        );
-
         let gen_func_tys = if let Some(gen_func_tys) = self
             .generic_methods
             .get(struct_name)
@@ -669,14 +640,8 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
         {
             gen_func_tys.clone()
         } else {
-            warn!("NOT!");
             return;
         };
-
-        warn!(
-            "ABC123, method_name: {}, method_call_name: {}, method_structure_name: {}, gen_func_tys: {:#?}",
-            method_name, method_call_name, method_structure_name, gen_func_tys
-        );
 
         // TODO:
         let block_id = BlockInfo::DEFAULT_BLOCK_ID;
@@ -690,7 +655,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                 if let Some(method_gen_names) = &method.borrow().generic_names {
                     method_gen_names.clone()
                 } else {
-                    panic!(
+                    unreachable!(
                         "method_structure_name: {}, method_call_name: {}, block_id: {}",
                         method_structure_name, method_call_name, block_id
                     );
@@ -813,8 +778,9 @@ impl<'a, 'tctx> Visitor for GenericCollector<'a, 'tctx> {
         let include_impls = true;
         let full_names = false;
         match dependency_order(ast_token, include_impls, full_names) {
-            Ok(dependency_order) => {
-                self.dependency_order = dependency_order;
+            Ok(mut dependency_order) => {
+                dependency_order.reverse();
+                self.dependency_order_rev = dependency_order;
             }
             Err(mut errs) => {
                 self.errors.append(&mut errs);
@@ -837,7 +803,10 @@ impl<'a, 'tctx> Visitor for GenericCollector<'a, 'tctx> {
     }
 
     fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        warn!("self.generic_structs: {:#?}", self.generic_structs);
+        debug!(
+            "self.generic_structs: {:#?}, self.generic_methods: {:#?}",
+            self.generic_structs, self.generic_methods
+        );
         self.convert_nested_to_regular();
     }
 }

@@ -1,4 +1,4 @@
-use super::context::{SubResult, TypeContext};
+use super::context::TypeContext;
 use common::{
     error::LangError,
     token::{
@@ -12,9 +12,14 @@ use common::{
     visitor::Visitor,
     BlockId,
 };
-use log::warn;
 use std::{cell::RefCell, collections::HashSet, rc::Rc};
 
+/// Used when replacing generics in methods containing to a specific generic
+/// implementation. This will be used to replace all types in the body of the
+/// methods.
+/// This can be used for replacing generics declared in structs and generics
+/// declared in functions. If they are declared in functions, the struct related
+/// fields will be set to None.
 pub struct GenericsReplacer<'a, 'tctx> {
     type_context: &'a mut TypeContext<'tctx>,
 
@@ -32,12 +37,6 @@ pub struct GenericsReplacer<'a, 'tctx> {
     errors: Vec<LangError>,
 }
 
-/// Used when replacing generics in methods containing to a specific generic
-/// implementation. This will be used to replace all types in the body of the
-/// methods.
-/// This can be used for replacing generics declared in structs and generics
-/// declared in functions. If they are declared in functions, the struct related
-/// fields will be set to None.
 impl<'a, 'tctx> GenericsReplacer<'a, 'tctx> {
     pub fn new_struct(
         type_context: &'a mut TypeContext<'tctx>,
@@ -46,11 +45,6 @@ impl<'a, 'tctx> GenericsReplacer<'a, 'tctx> {
         old_name: &'a str,
         new_ty: &'a Ty,
     ) -> Self {
-        warn!(
-            "NEW_STRUCT -- old_name: {:#?}, new_ty: {:#?}, new_struct: {:#?}, generics_impl: {:#?}",
-            old_name, new_ty, new_struct, generics_impl
-        );
-
         Self {
             type_context,
             modified_variables: HashSet::default(),
@@ -93,18 +87,22 @@ impl<'a, 'tctx> Visitor for GenericsReplacer<'a, 'tctx> {
 
         // Now that the generics might have been replaced, try to solve the type
         // again.
-        match self.type_context.solve_substitution(ty, true, ctx.block_id) {
-            SubResult::Solved(solved_ty) => *ty = solved_ty,
-            SubResult::UnSolved(_) => {
-                let err = self
-                    .type_context
-                    .analyze_context
-                    .err(format!("Unable to solve type: {:#?}", ty));
+        let inferred_ty = match self.type_context.inferred_type(ty, ctx.block_id) {
+            Ok(inferred_ty) => inferred_ty,
+            Err(err) => {
                 self.errors.push(err);
+                return;
             }
-            SubResult::Err(err) => {
-                self.errors.push(err);
-            }
+        };
+
+        if inferred_ty.is_solved() {
+            *ty = inferred_ty;
+        } else {
+            let err = self
+                .type_context
+                .analyze_context
+                .err(format!("Unable to solve type: {:#?}", ty));
+            self.errors.push(err);
         }
     }
 

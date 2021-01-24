@@ -1,4 +1,4 @@
-use super::context::{SubResult, TypeContext};
+use super::context::TypeContext;
 use common::{
     error::LangError,
     token::op::UnOperator,
@@ -25,32 +25,25 @@ impl<'a, 'tctx> TypeSolver<'a, 'tctx> {
     }
 
     fn subtitute_type(&mut self, ty: &mut Ty, block_id: BlockId) {
-        match self.type_context.solve_substitution(ty, true, block_id) {
-            SubResult::Solved(solved_ty) => {
-                *ty = solved_ty;
-            }
-
-            // TODO: There might be other unsolved types other than generics
-            //       inside the `unsolved_ty` which is missed when doing this
-            //       check. Can this be a problem?
-            // Need to allow for types that contains generics. This is because
-            // they might not be solved until the instances of structs/methods
-            // are created that implementes the generics.
-            SubResult::UnSolved(unsolved_ty) if unsolved_ty.contains_generic() => {
-                *ty = unsolved_ty;
-            }
-
-            SubResult::UnSolved(unsolved_ty) => {
-                let err = self.type_context.analyze_context.err(format!(
-                    "Unable to resolve type {:#?} in block ID {}. Got back unsolved: {:#?}.",
-                    ty, block_id, unsolved_ty
-                ));
+        let mut inferred_ty = match self.type_context.inferred_type(ty, block_id) {
+            Ok(inferred_ty) => inferred_ty,
+            Err(err) => {
                 self.errors.push(err);
+                return;
             }
+        };
 
-            SubResult::Err(err) => {
-                self.errors.push(err);
-            }
+        // Converts any "UnknownInt" to i32 and "UnknownFloat" to f32.
+        inferred_ty.convert_defaults();
+
+        if inferred_ty.is_solved() || inferred_ty.contains_generic() || inferred_ty.contains_any() {
+            *ty = inferred_ty;
+        } else {
+            let err = self.type_context.analyze_context.err(format!(
+                "Unable to resolve type {:#?} in block ID {}. Got back unsolved: {:#?}.",
+                ty, block_id, inferred_ty
+            ));
+            self.errors.push(err);
         }
     }
 }

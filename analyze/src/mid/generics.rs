@@ -71,9 +71,9 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
                         .generics
                         .clone()
                         .unwrap_or_else(Vec::default)
-                } else if analyze_context.get_enum(ident, block_id).is_ok() {
-                    Vec::default()
-                } else if let Ok(interface) = analyze_context.get_trait(ident, block_id) {
+                } else if analyze_context.get_enum(ident, block_id).is_ok()
+                    || analyze_context.get_trait(ident, block_id).is_ok()
+                {
                     Vec::default()
                 } else {
                     let err = analyze_context.err(format!(

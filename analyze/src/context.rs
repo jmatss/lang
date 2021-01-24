@@ -504,6 +504,26 @@ impl AnalyzeContext {
         }
     }
 
+    /// Finds the structure with the name `structure_name` in a scope containing
+    /// the block with ID `id` and returns the member with name `member_name`.
+    pub fn get_member(
+        &self,
+        structure_name: &str,
+        member_name: &str,
+        id: BlockId,
+    ) -> CustomResult<Rc<RefCell<Var>>> {
+        if let Ok(var) = self.get_struct_member(structure_name, member_name, id) {
+            Ok(var)
+        } else if let Ok(var) = self.get_enum_member(structure_name, member_name, id) {
+            Ok(var)
+        } else {
+            Err(self.err(format!(
+                "Unable to find structure with name \"{}\" in scope {}.",
+                &structure_name, &id
+            )))
+        }
+    }
+
     /// Finds the struct with the name `struct_name` in a scope containing the block
     /// with ID `id` and returns the member with name `member_name`.
     /// The struct can ex. be declared in parent block scope.

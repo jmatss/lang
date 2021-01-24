@@ -11,7 +11,7 @@ use common::{
     visitor::Visitor,
     BlockId,
 };
-use log::{debug, warn};
+use log::debug;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 pub struct GenericStructCreator<'a, 'tctx> {
@@ -268,8 +268,6 @@ impl<'a, 'tctx> GenericStructCreator<'a, 'tctx> {
                     self.errors.append(&mut err);
                     return None;
                 }
-
-                warn!("NEW_STRUCT: {:#?}", new_struct);
 
                 // Slower to shift all the ast tokens to the right, but ensure
                 // that the tokens are inserted next to the old "implement" and

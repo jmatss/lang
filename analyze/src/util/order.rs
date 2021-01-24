@@ -217,6 +217,9 @@ impl Visitor for ReferenceCollector {
             let structure_name = struct_.borrow().name.clone();
             if let Some(members) = &struct_.borrow().members {
                 self.collect_member_references(&structure_name, members);
+            } else {
+                self.references
+                    .insert(structure_name, HashSet::with_capacity(0));
             }
         }
     }
@@ -226,6 +229,9 @@ impl Visitor for ReferenceCollector {
             let structure_name = enum_.borrow().name.clone();
             if let Some(members) = &enum_.borrow().members {
                 self.collect_member_references(&structure_name, members);
+            } else {
+                self.references
+                    .insert(structure_name, HashSet::with_capacity(0));
             }
         }
     }

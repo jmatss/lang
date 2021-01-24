@@ -9,7 +9,7 @@ use common::{
     ty::generics::Generics,
     visitor::Visitor,
 };
-use log::{debug, warn};
+use log::debug;
 use std::{collections::HashMap, rc::Rc};
 
 pub struct GenericFuncCreator<'a, 'tctx> {
@@ -64,8 +64,6 @@ impl<'a, 'tctx> GenericFuncCreator<'a, 'tctx> {
                     for method_generics in generic_methods.get(&method_name).unwrap() {
                         let mut new_method = method.clone();
 
-                        warn!("BEFORE new_method: {:#?}", new_method);
-
                         let mut generics_replacer =
                             GenericsReplacer::new_func(&mut self.type_context, method_generics);
 
@@ -88,8 +86,6 @@ impl<'a, 'tctx> GenericFuncCreator<'a, 'tctx> {
                             } else {
                                 panic!()
                             };
-
-                        warn!("AFTER new_method: {:#?}", new_method);
 
                         // Insert the method into the structure.
                         if let Err(err) = self.type_context.analyze_context.insert_method(
@@ -174,13 +170,6 @@ impl<'a, 'tctx> Visitor for GenericFuncCreator<'a, 'tctx> {
                                 .map(|n| !n.is_empty())
                                 .unwrap_or(false);
                             let contains_gens_impl = func.borrow().generic_impls.is_some();
-
-                            warn!(
-                                "contains_gens_decl: {}, contains_gens_impl: {}, name: {}",
-                                contains_gens_decl,
-                                contains_gens_impl,
-                                &func.borrow().half_name()
-                            );
 
                             if contains_gens_decl && !contains_gens_impl {
                                 if let Err(err) = self.type_context.analyze_context.remove_method(

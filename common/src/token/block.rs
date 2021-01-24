@@ -7,11 +7,7 @@ use super::{
 
 use crate::{
     error::{CustomResult, LangError, LangErrorKind},
-    ty::{
-        generics::{self, Generics},
-        inner_ty::InnerTy,
-        ty::Ty,
-    },
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     util,
 };
 

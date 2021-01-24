@@ -17,7 +17,7 @@ use inkwell::{
     module::Module,
     targets::TargetMachine,
     types::{AnyTypeEnum, BasicTypeEnum},
-    values::{AnyValueEnum, BasicValueEnum, FunctionValue, InstructionValue, PointerValue},
+    values::{AnyValueEnum, BasicValueEnum, FunctionValue, PointerValue},
     AddressSpace,
 };
 use log::debug;
