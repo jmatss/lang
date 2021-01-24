@@ -67,7 +67,6 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
             | Stmt::Assignment(..)
             | Stmt::VariableDecl(..)
             | Stmt::ExternalDecl(..)
-            | Stmt::Modifier(_)
             | Stmt::DeferExec(_) => (),
         }
     }

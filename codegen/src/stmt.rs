@@ -5,7 +5,7 @@ use common::{
     token::{
         expr::Expr,
         op::AssignOperator,
-        stmt::{Modifier, Path, Stmt},
+        stmt::{Path, Stmt},
     },
 };
 use inkwell::{
@@ -24,7 +24,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Stmt::Package(path) => self.compile_package(path),
             Stmt::Increment(expr, file_pos) => self.compile_inc(expr, file_pos),
             Stmt::Decrement(expr, file_pos) => self.compile_dec(expr, file_pos),
-            Stmt::Modifier(modifier) => self.compile_modifier(modifier),
 
             // Only the "DeferExecution" are compiled into code, the "Defer" is
             // only used during analyzing.
@@ -194,10 +193,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         self.builder.build_store(ptr, new_value);
         Ok(())
-    }
-
-    fn compile_modifier(&mut self, modifier: &Modifier) -> CustomResult<()> {
-        Err(self.err("TODO: Implement \"modifier\" statement.".into(), None))
     }
 
     // TODO: Check type to see that the assignment is valid.

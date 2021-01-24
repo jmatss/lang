@@ -52,8 +52,12 @@ pub enum Kw {
     Var,
     Const,
     Static,
+    /// Only accessable from the same file (or "class" ?).
     Private,
+    /// Will be a exposed symbol, can be linked to from other "modules".
     Public,
+    /// Only accessable from the current module (not exposed as a symbol).
+    Hidden,
 
     Function,
     Struct,
@@ -219,6 +223,7 @@ impl LexToken {
             "static" => LexTokenKind::Kw(Kw::Static),
             "private" => LexTokenKind::Kw(Kw::Private),
             "public" => LexTokenKind::Kw(Kw::Public),
+            "hidden" => LexTokenKind::Kw(Kw::Hidden),
 
             "function" => LexTokenKind::Kw(Kw::Function),
             "struct" => LexTokenKind::Kw(Kw::Struct),

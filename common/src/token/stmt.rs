@@ -53,9 +53,6 @@ pub enum Stmt {
     // TODO: Implement extern for variables as well.
     /// Declaration of extern functions.
     ExternalDecl(Rc<RefCell<Function>>, Option<FilePosition>),
-
-    /// static, private etc.
-    Modifier(Modifier),
 }
 
 impl Stmt {
@@ -74,7 +71,7 @@ impl Stmt {
 
             Stmt::Use(path) | Stmt::Package(path) => Some(&path.file_pos),
 
-            Stmt::DeferExec(_) | Stmt::Modifier(_) => None,
+            Stmt::DeferExec(_) => None,
         }
     }
 }
@@ -86,6 +83,7 @@ pub enum Modifier {
     Static,
     Private,
     Public,
+    Hidden,
     This,
     ThisPointer,
 }

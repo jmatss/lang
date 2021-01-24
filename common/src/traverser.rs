@@ -636,12 +636,6 @@ impl<'a> AstTraverser<'a> {
                     v.visit_extern_decl(stmt, &self.traverse_context)
                 }
             }
-            Stmt::Modifier(_) => {
-                debug!("Visiting modifier");
-                for v in self.visitors.iter_mut() {
-                    v.visit_modifier(stmt, &self.traverse_context)
-                }
-            }
         }
 
         self.traverse_context.file_pos = old_pos;

@@ -75,6 +75,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 "\"Public\" keyword not implemented.".into(),
                 Some(kw_file_pos),
             )),
+            Kw::Hidden => Err(self.iter.err(
+                "\"Hidden\" keyword not implemented.".into(),
+                Some(kw_file_pos),
+            )),
 
             Kw::Struct => self.parse_struct(kw_file_pos),
             Kw::Enum => self.parse_enum(kw_file_pos),
