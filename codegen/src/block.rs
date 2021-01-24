@@ -7,7 +7,7 @@ use common::{
     file::FilePosition,
     token::{
         ast::AstToken,
-        block::{BlockHeader, Enum, Function, Struct},
+        block::{Adt, BlockHeader, Function},
         expr::{Expr, Var},
     },
     ty::{inner_ty::InnerTy, ty::Ty},
@@ -799,35 +799,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn compile_struct(&mut self, struct_: &Struct) -> CustomResult<()> {
+    pub(super) fn compile_struct(&mut self, struct_: &Adt) -> CustomResult<()> {
         debug!("Compiling struct -- {:#?}", struct_);
+
+        let members = &struct_.members;
+        let mut member_types = Vec::with_capacity(members.len());
 
         // Go through all members of the struct and create a vector containing
         // all their types.
-        let member_types = if let Some(members) = &struct_.members {
-            let mut v = Vec::with_capacity(members.len());
-            for member in members {
-                let member = member.borrow();
-                let member_file_pos = member.file_pos.to_owned();
+        for member in members {
+            let member = member.borrow();
+            let member_file_pos = member.file_pos.to_owned();
 
-                if let Some(member_type_struct) = &member.ty {
-                    let any_type = self.compile_type(&member_type_struct, member_file_pos)?;
-                    let basic_type = CodeGen::any_into_basic_type(any_type)?;
-                    v.push(basic_type);
-                } else {
-                    return Err(self.err(
-                        format!(
-                            "Bad type for struct \"{}\" member \"{}\".",
-                            &struct_.name, &member.name
-                        ),
-                        member_file_pos,
-                    ));
-                }
+            if let Some(member_type_struct) = &member.ty {
+                let any_type = self.compile_type(&member_type_struct, member_file_pos)?;
+                let basic_type = CodeGen::any_into_basic_type(any_type)?;
+                member_types.push(basic_type);
+            } else {
+                return Err(self.err(
+                    format!(
+                        "Bad type for struct \"{}\" member \"{}\".",
+                        &struct_.name, &member.name
+                    ),
+                    member_file_pos,
+                ));
             }
-            v
-        } else {
-            Vec::default()
-        };
+        }
 
         let packed = false;
         let struct_ty = self.context.opaque_struct_type(&struct_.name);
@@ -836,7 +833,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn compile_enum(&mut self, enum_: &Enum) -> CustomResult<()> {
+    pub(super) fn compile_enum(&mut self, enum_: &Adt) -> CustomResult<()> {
         debug!("Compiling enum -- {:#?}", enum_);
 
         // Create a new struct type containing a single member that has the type
@@ -845,34 +842,24 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // The type of the whole `enum_` will be Enum(ident). This type will be
         // set for the members as well. Only the given literal values of the members
         // will be the inner type.
-        let (ty, file_pos) = if let Some(members) = &enum_.members {
-            if let Some(member) = members.first() {
-                let member = member.borrow();
-                let member_file_pos = member.file_pos.to_owned();
+        let (ty, file_pos) = if let Some(member) = &enum_.members.first() {
+            let member = member.borrow();
+            let member_file_pos = member.file_pos.to_owned();
 
-                if let Some(ty) = &member.value {
-                    (ty.get_expr_type()?, member_file_pos)
-                } else {
-                    return Err(self.err(
-                        format!(
-                            "No default value set for first member in enum \"{}\".",
-                            &enum_.name
-                        ),
-                        member_file_pos,
-                    ));
-                }
+            if let Some(ty) = &member.value {
+                (ty.get_expr_type()?, member_file_pos)
             } else {
                 return Err(self.err(
-                    format!("Unable to find first member in enum \"{}\".", &enum_.name),
-                    None,
+                    format!(
+                        "No default value set for first member in enum \"{}\".",
+                        &enum_.name
+                    ),
+                    member_file_pos,
                 ));
             }
         } else {
             return Err(self.err(
-                format!(
-                    "No members set for enum \"{}\". Unable to figure out member type.",
-                    &enum_.name
-                ),
+                format!("Unable to find first member in enum \"{}\".", &enum_.name),
                 None,
             ));
         };

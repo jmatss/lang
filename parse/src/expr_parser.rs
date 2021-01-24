@@ -7,7 +7,8 @@ use common::{
     error::CustomResult,
     file::FilePosition,
     token::{
-        expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit},
+        block::AdtKind,
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FuncCall},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
     ty::{
@@ -613,7 +614,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     )))
                 }
 
-                // Struct construction.
+                // Struct or Union construction.
                 LexTokenKind::Sym(Sym::CurlyBracketBegin)
                     if !self.stop_conds.contains(&Sym::CurlyBracketBegin) =>
                 {
@@ -624,11 +625,12 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
                     file_pos.set_end(&args_file_pos)?;
 
-                    Ok(Expr::StructInit(StructInit::new(
+                    Ok(Expr::AdtInit(AdtInit::new(
                         ident.into(),
                         arguments,
                         generics,
                         Some(file_pos),
+                        AdtKind::Unknown,
                     )))
                 }
 

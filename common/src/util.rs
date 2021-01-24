@@ -1,17 +1,17 @@
 use crate::ty::generics::Generics;
 
-/// Concatenates a structure name and a method name to create the name that will
+/// Concatenates a ADT name and a method name to create the name that will
 /// be used to refer to this function. The name is concatenated with a dash.
 pub fn to_method_name(
-    structure_name: &str,
-    structure_generics: Option<&Generics>,
+    adt_name: &str,
+    adt_generics: Option<&Generics>,
     method_name: &str,
     method_generics: Option<&Generics>,
 ) -> String {
-    let struct_generic_name = if let Some(structure_generics) = structure_generics {
-        to_generic_name(structure_name, structure_generics)
+    let adt_generic_name = if let Some(adt_generics) = adt_generics {
+        to_generic_name(adt_name, adt_generics)
     } else {
-        structure_name.into()
+        adt_name.into()
     };
     let method_generic_name = if let Some(method_generics) = method_generics {
         to_generic_name(method_name, method_generics)
@@ -19,7 +19,7 @@ pub fn to_method_name(
         method_name.into()
     };
 
-    format!("{}-{}", struct_generic_name, method_generic_name)
+    format!("{}-{}", adt_generic_name, method_generic_name)
 }
 
 /// Adds the `copy_nr` information to the end of a variable name. This will come
@@ -29,7 +29,7 @@ pub fn to_var_name(name: &str, copy_nr: usize) -> String {
     format!("{}:{}", name, copy_nr)
 }
 
-/// Formats the name of a struct/func with generics.
+/// Formats the name of a ADT/func with generics.
 ///
 /// Example A struct with two generics K and V:
 ///    TestStruct<K,V>

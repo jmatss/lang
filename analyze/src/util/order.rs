@@ -12,38 +12,35 @@ use std::{
     rc::Rc,
 };
 
-/// Can be used to figure out the order in which different structs/enums depends
-/// on each other. This is needed to make sure that the "inner" structures are
-/// compiled/handled etc. first before the "outer" ones since they depend on them.
+/// Can be used to figure out the order in which different ADTs depends on each
+/// other. This is needed to make sure that the "inner" ADTs are compiled/handled
+/// first before the "outer" ones since they depend on them.
 ///
-/// The given `include_impls` specified if a reference in a impl block of a structure
+/// The given `include_impls` specified if a reference in a impl block of a ADT
 /// should count as a reference or not. If this is set to `true`, references to
-/// other structures in impl blocks are considered reference. If it is set to
-/// `false`, only the members of the structures are considered references,
-/// everything inside the impl blocks are ignored.
+/// other ADTs in impl blocks are considered reference. If it is set to `false`,
+/// only the members of the ADT are considered references, everything inside the
+/// impl blocks are ignored.
 pub fn dependency_order(
     ast_token: &mut AstToken,
     include_impls: bool,
     full_names: bool,
 ) -> Result<Vec<String>, Vec<LangError>> {
-    // Step 1: Find all structures and references between them.
+    // Step 1: Find all ADTs and references between them.
     // Step 2: Figure out the correct order to compile them in.
 
-    // The key is the name of a structure and the value set contains names of
-    // structures that is referenced from the given "key" structure. This does
-    // NOT include recursive dependencies, only direct "top level" references.
+    // The key is the name of a ADT and the value set contains names of ADTs that
+    // is referenced from the given "key" ADT. This does NOT include recursive
+    // dependencies, only direct "top level" references.
     let references = order_step1(ast_token, include_impls, full_names)?;
     match order_step2(&references) {
         Ok(order) => {
-            debug!(
-                "structures -- references: {:#?}, order: {:#?}",
-                references, order
-            );
+            debug!("ADTs -- references: {:#?}, order: {:#?}", references, order);
             Ok(order)
         }
         Err(cyc_err) => Err(vec![LangError::new(
             format!(
-                "Cyclic dependency between structures \"{}\" and \"{}\". All refs: {:#?}",
+                "Cyclic dependency between ADTs \"{}\" and \"{}\". All refs: {:#?}",
                 cyc_err.0, cyc_err.1, references
             ),
             LangErrorKind::GeneralError,
@@ -52,12 +49,9 @@ pub fn dependency_order(
     }
 }
 
-/// Iterate through all types in the structure and see if it uses/references
-/// other structures. In those cases, the referenced structures would need to
-/// be handled/compiled before the referencing structures.
-///
-/// This function will go through all structures in the given `ast_token`
-/// root and populate `references` with the references between the structures.
+/// Iterate through all types in the ADT and see if it uses/references other
+/// ADTs. In those cases, the referenced ADTs would need to be handled/compiled
+/// before the referencing ADT.
 fn order_step1(
     ast_token: &mut AstToken,
     include_impls: bool,
@@ -90,9 +84,9 @@ pub fn order_step2(
             if prev_references_cur && cur_references_prev {
                 return Err(CyclicDependencyError(cur_ident.into(), prev_ident.into()));
             } else if prev_references_cur {
-                // Can't insert the "current" structure before the "previous"
-                // since it is being referenced from it. Insert into `order`
-                // at this index so that "current" gets compiled before "previous".
+                // Can't insert the "current" ident before the "previous" since
+                // it is being referenced from it. Insert into `order` at this
+                // index so that "current" gets compiled before "previous".
                 break;
             } else {
                 // else if cur_references_prev = >
@@ -100,7 +94,7 @@ pub fn order_step2(
                 //   be compiled first. Keep iterating and find a spot after
                 //   "previous" to insert it.
                 // else
-                //   The two structures has no references between each other.
+                //   The two idents has no references between each other.
                 //   Keep iterating to find a spot to insert it as "late"
                 //   as possible.
             }
@@ -166,7 +160,7 @@ fn contains_rec(
 
 pub struct ReferenceCollector {
     pub references: HashMap<String, HashSet<String>>,
-    cur_structure_name: String,
+    cur_adt_name: String,
     include_impls: bool,
     full_names: bool,
     errors: Vec<LangError>,
@@ -176,21 +170,21 @@ impl ReferenceCollector {
     pub fn new(include_impls: bool, full_names: bool) -> Self {
         Self {
             references: HashMap::default(),
-            cur_structure_name: String::with_capacity(0),
+            cur_adt_name: String::with_capacity(0),
             include_impls,
             full_names,
             errors: Vec::default(),
         }
     }
 
-    fn collect_member_references(&mut self, structure_name: &str, members: &[Rc<RefCell<Var>>]) {
+    fn collect_member_references(&mut self, adt_name: &str, members: &[Rc<RefCell<Var>>]) {
         let mut local_references = HashSet::default();
 
         for member in members {
             if let Some(ty) = &member.borrow().ty {
-                if let Some(names) = ty.get_structure_names(self.full_names) {
+                if let Some(names) = ty.get_adt_and_trait_names(self.full_names) {
                     for name in names {
-                        if name != structure_name {
+                        if name != adt_name {
                             local_references.insert(name);
                         }
                     }
@@ -198,8 +192,7 @@ impl ReferenceCollector {
             }
         }
 
-        self.references
-            .insert(structure_name.into(), local_references);
+        self.references.insert(adt_name.into(), local_references);
     }
 }
 
@@ -213,42 +206,32 @@ impl Visitor for ReferenceCollector {
     }
 
     fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Struct(struct_), ..) = ast_token {
-            let structure_name = struct_.borrow().name.clone();
-            if let Some(members) = &struct_.borrow().members {
-                self.collect_member_references(&structure_name, members);
-            } else {
-                self.references
-                    .insert(structure_name, HashSet::with_capacity(0));
-            }
+        if let AstToken::Block(BlockHeader::Struct(adt), ..) = ast_token {
+            let adt_name = adt.borrow().name.clone();
+            self.collect_member_references(&adt_name, &adt.borrow().members);
         }
     }
 
     fn visit_enum(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Enum(enum_), ..) = ast_token {
-            let structure_name = enum_.borrow().name.clone();
-            if let Some(members) = &enum_.borrow().members {
-                self.collect_member_references(&structure_name, members);
-            } else {
-                self.references
-                    .insert(structure_name, HashSet::with_capacity(0));
-            }
+        if let AstToken::Block(BlockHeader::Enum(adt), ..) = ast_token {
+            let adt_name = adt.borrow().name.clone();
+            self.collect_member_references(&adt_name, &adt.borrow().members);
         }
     }
 
     fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Implement(ident, ..), ..) = ast_token {
-            self.cur_structure_name = ident.clone();
+            self.cur_adt_name = ident.clone();
         }
     }
 
     fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
         if self.include_impls {
-            if let Some(mut references) = ty.get_structure_names(self.full_names) {
+            if let Some(mut references) = ty.get_adt_and_trait_names(self.full_names) {
                 // Do not add references to itself.
-                references.remove(&self.cur_structure_name);
+                references.remove(&self.cur_adt_name);
 
-                match self.references.entry(self.cur_structure_name.clone()) {
+                match self.references.entry(self.cur_adt_name.clone()) {
                     Entry::Occupied(mut o) => {
                         o.get_mut().extend(references);
                     }

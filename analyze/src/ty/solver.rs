@@ -4,7 +4,7 @@ use common::{
     token::op::UnOperator,
     token::{expr::FuncCall, op::UnOp},
     traverser::TraverseContext,
-    ty::{inner_ty::InnerTy, ty::Ty},
+    ty::ty::Ty,
     visitor::Visitor,
     BlockId,
 };
@@ -62,7 +62,7 @@ impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
     }
 
     fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
-        if let Some(structure_ty) = &mut func_call.method_structure {
+        if let Some(structure_ty) = &mut func_call.method_adt {
             // TODO: Fix this, seems very random to fix this here.
             // The `method_structure` might possible be a pointer to the
             // structure, need to get the actual structure type in that case.
@@ -77,14 +77,15 @@ impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
         //       `visit_un_op()` can be removed. It doesn't feel like it should
         //       be in this file.
 
-        // Edge case logic for struct access. Need to figure out the index
-        // of the member that is being accessed.
-        if let UnOperator::StructAccess(member_name, member_idx) = &mut un_op.operator {
+        // Edge case logic for ADT access. Need to figure out the index of the
+        // member that is being accessed.
+        if let UnOperator::AdtAccess(member_name, member_idx) = &mut un_op.operator {
             match un_op.value.get_expr_type() {
-                // TODO: Implement for enum and interface as well.
-                Ok(Ty::CompoundType(InnerTy::Struct(ref old_name), ..)) => {
-                    let idx = match self.type_context.analyze_context.get_struct_member_index(
-                        old_name,
+                Ok(Ty::CompoundType(inner_ty, ..)) if inner_ty.is_adt() => {
+                    let old_name = inner_ty.get_ident().unwrap();
+
+                    let idx = match self.type_context.analyze_context.get_adt_member_index(
+                        &old_name,
                         member_name,
                         ctx.block_id,
                     ) {
@@ -98,14 +99,13 @@ impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
                     *member_idx = Some(idx as u64);
                 }
 
-                // TODO:
                 Err(err) => {
                     self.errors.push(err);
                 }
 
                 _ => {
                     let err = self.type_context.analyze_context.err(format!(
-                        "Expression that was struct accessed wasn't struct or compound, was: {:#?}",
+                        "Expression that was ADT accessed wasn't ADT or compound, was: {:#?}",
                         un_op.value
                     ));
                     self.errors.push(err);

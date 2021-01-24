@@ -3,7 +3,8 @@ use common::{
     error::CustomResult,
     file::FilePosition,
     token::{
-        expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit},
+        block::AdtKind,
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FuncCall},
         lit::Lit,
     },
     ty::{inner_ty::InnerTy, ty::Ty},
@@ -48,7 +49,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Expr::FuncCall(func_call) => self.compile_func_call(func_call),
             Expr::BuiltInCall(built_in_call) => self.compile_built_in_call(built_in_call),
             Expr::Op(op) => self.compile_op(op, expr_ty, file_pos),
-            Expr::StructInit(struct_init) => self.compile_struct_init(struct_init),
+            Expr::AdtInit(adt_init) => match adt_init.kind {
+                AdtKind::Struct => self.compile_struct_init(adt_init),
+                _ => panic!("Tried to compile AdtInit for kind: {:?}", adt_init.kind),
+            },
             Expr::ArrayInit(array_init) => self.compile_array_init(array_init),
             Expr::Type(ty, ..) => {
                 // TODO: Does something need to be done here? Does a proper value
@@ -406,7 +410,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// Generates a struct creation/initialization.
     pub fn compile_struct_init(
         &mut self,
-        struct_init: &mut StructInit,
+        struct_init: &mut AdtInit,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
         let full_name = struct_init.full_name()?;
 

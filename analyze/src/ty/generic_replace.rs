@@ -3,7 +3,7 @@ use common::{
     error::LangError,
     token::{
         ast::AstToken,
-        block::{BlockHeader, Struct},
+        block::{Adt, BlockHeader},
         expr::Var,
         stmt::Stmt,
     },
@@ -17,8 +17,9 @@ use std::{cell::RefCell, collections::HashSet, rc::Rc};
 /// Used when replacing generics in methods containing to a specific generic
 /// implementation. This will be used to replace all types in the body of the
 /// methods.
-/// This can be used for replacing generics declared in structs and generics
-/// declared in functions. If they are declared in functions, the struct related
+///
+/// This can be used for replacing generics declared in ADTs and generics
+/// declared in functions. If they are declared in functions, the ADT related
 /// fields will be set to None.
 pub struct GenericsReplacer<'a, 'tctx> {
     type_context: &'a mut TypeContext<'tctx>,
@@ -30,7 +31,7 @@ pub struct GenericsReplacer<'a, 'tctx> {
 
     generics_impl: &'a Generics,
 
-    new_struct: Option<Rc<RefCell<Struct>>>,
+    new_adt: Option<Rc<RefCell<Adt>>>,
     old_name: Option<&'a str>,
     new_ty: Option<&'a Ty>,
 
@@ -38,9 +39,9 @@ pub struct GenericsReplacer<'a, 'tctx> {
 }
 
 impl<'a, 'tctx> GenericsReplacer<'a, 'tctx> {
-    pub fn new_struct(
+    pub fn new_adt(
         type_context: &'a mut TypeContext<'tctx>,
-        new_struct: Rc<RefCell<Struct>>,
+        new_adt: Rc<RefCell<Adt>>,
         generics_impl: &'a Generics,
         old_name: &'a str,
         new_ty: &'a Ty,
@@ -49,7 +50,7 @@ impl<'a, 'tctx> GenericsReplacer<'a, 'tctx> {
             type_context,
             modified_variables: HashSet::default(),
             generics_impl,
-            new_struct: Some(new_struct),
+            new_adt: Some(new_adt),
             old_name: Some(old_name),
             new_ty: Some(new_ty),
             errors: Vec::default(),
@@ -61,7 +62,7 @@ impl<'a, 'tctx> GenericsReplacer<'a, 'tctx> {
             type_context,
             modified_variables: HashSet::default(),
             generics_impl,
-            new_struct: None,
+            new_adt: None,
             old_name: None,
             new_ty: None,
             errors: Vec::default(),
@@ -122,25 +123,26 @@ impl<'a, 'tctx> Visitor for GenericsReplacer<'a, 'tctx> {
     }
 
     /// Since this `GenericsReplacer` is called with `deep_copy` set to true,
-    /// this logic inserts a reference from the new structure type to the new method.
+    /// this logic inserts a reference from the new ADT type to the new method.
     fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let Some(new_struct) = &self.new_struct {
-            let new_struct_name = new_struct.borrow().name.clone();
+        if let Some(new_adt) = &self.new_adt {
+            let new_adt_name = new_adt.borrow().name.clone();
 
             if let AstToken::Block(BlockHeader::Function(func), _, old_id, ..) = ast_token {
-                func.borrow_mut().method_structure = self.new_ty.cloned();
+                func.borrow_mut().method_adt = self.new_ty.cloned();
 
-                // Insert a reference from the "new" structure to this new method.
+                // Insert a reference from the "new" ADT to this new method.
                 // The name set will be the "half name" containing the generics
                 // for the function.
-                if let Some(methods) = new_struct.borrow_mut().methods.as_mut() {
-                    methods.insert(func.borrow().half_name(), Rc::clone(&func));
-                }
+                new_adt
+                    .borrow_mut()
+                    .methods
+                    .insert(func.borrow().half_name(), Rc::clone(&func));
 
                 // Inserts a reference to this new method into the `analyze_context`
                 // look-up table.
                 if let Err(err) = self.type_context.analyze_context.insert_method(
-                    &new_struct_name,
+                    &new_adt_name,
                     Rc::clone(&func),
                     *old_id,
                 ) {

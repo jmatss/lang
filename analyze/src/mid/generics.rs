@@ -8,9 +8,9 @@ use common::{
 };
 use std::cell::RefCell;
 
-/// Iterates through "generic" parameters tied to structures and functions (TODO)
-/// and replaces the uses of the generics with "Generic" types instead if the
-/// parsed "UnknownIdent". This is done so that generics can be handled differently
+/// Iterates through "generic" parameters tied to structures and functions and
+/// replaces the uses of the generics with "Generic" types instead of the parsed
+/// "UnknownIdent". This is done so that generics can be handled differently
 /// during the type inference stage.
 pub struct GenericsAnalyzer<'a> {
     analyze_context: &'a RefCell<AnalyzeContext>,
@@ -42,7 +42,7 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
     fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Struct(struct_), ..) = &ast_token {
             let struct_ = struct_.borrow();
-            if let (Some(generics), Some(members)) = (&struct_.generics, &struct_.members) {
+            if let (Some(generics), members) = (&struct_.generics, &struct_.members) {
                 for member in members {
                     if let Some(ty) = member.borrow_mut().ty.as_mut() {
                         ty.replace_generics(&generics)
@@ -64,25 +64,18 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
 
             // TODO: Implement generics for iterfaces and enums (?).
 
-            let structure_generic_names =
-                if let Ok(struct_) = analyze_context.get_struct(ident, block_id) {
-                    struct_
-                        .borrow()
-                        .generics
-                        .clone()
-                        .unwrap_or_else(Vec::default)
-                } else if analyze_context.get_enum(ident, block_id).is_ok()
-                    || analyze_context.get_trait(ident, block_id).is_ok()
-                {
-                    Vec::default()
-                } else {
-                    let err = analyze_context.err(format!(
-                        "Unable to find structure for impl block with name \"{}\" in block {}",
-                        ident, block_id
-                    ));
-                    self.errors.push(err);
-                    return;
-                };
+            let adt_generic_names = if let Ok(adt) = analyze_context.get_adt(ident, block_id) {
+                adt.borrow().generics.clone().unwrap_or_default()
+            } else if analyze_context.get_trait(ident, block_id).is_ok() {
+                Vec::default()
+            } else {
+                let err = analyze_context.err(format!(
+                    "Unable to find ADT/Trait for impl block with name \"{}\" in block {}",
+                    ident, block_id
+                ));
+                self.errors.push(err);
+                return;
+            };
 
             // Iterate through the body of one method at a time and replace all
             // "UnknownIdent"s representing generics to "Generic"s.
@@ -94,8 +87,8 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
                         None
                     };
 
-                // No generics declared on either sturcture or function, early skip.
-                if structure_generic_names.is_empty() && func_generic_names.is_none() {
+                // No generics declared on either ADT/Trait or function, early skip.
+                if adt_generic_names.is_empty() && func_generic_names.is_none() {
                     continue;
                 }
 
@@ -112,11 +105,11 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
                     }
                 }
 
-                // Replaces any generics declared on the structure.
-                if !structure_generic_names.is_empty() {
-                    let mut struct_replacer = FuncGenericsReplacer::new(&structure_generic_names);
+                // Replaces any generics declared on the ADT/Trait.
+                if !adt_generic_names.is_empty() {
+                    let mut adt_replacer = FuncGenericsReplacer::new(&adt_generic_names);
                     if let Err(mut err) = AstTraverser::new()
-                        .add_visitor(&mut struct_replacer)
+                        .add_visitor(&mut adt_replacer)
                         .traverse_token(method)
                         .take_errors()
                     {

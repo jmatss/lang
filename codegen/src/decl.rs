@@ -2,12 +2,16 @@ use crate::generator::CodeGen;
 use analyze::{block::BlockInfo, util::order::dependency_order};
 use common::{
     error::CustomResult,
-    token::{ast::AstToken, block::BlockHeader, stmt::Modifier},
+    token::{
+        ast::AstToken,
+        block::{AdtKind, BlockHeader},
+        stmt::Modifier,
+    },
 };
 use inkwell::module::Linkage;
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    /// Compile all declarations of types: structs, enums and interfaces.
+    /// Compile all declarations of types: structs, enums, unions and interfaces.
     /// This will be done at the start of the code generation so that one
     /// doesn't have do declare prototypes manual in the source before the use
     /// of the type.
@@ -26,18 +30,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .map_err(|e| e.first().cloned().unwrap())?;
 
         for ident in &order {
-            if let Ok(struct_) = self.analyze_context.get_struct(ident, block_id) {
-                self.compile_struct(&struct_.borrow())?;
-            } else if let Ok(enum_) = self.analyze_context.get_enum(ident, block_id) {
-                self.compile_enum(&enum_.borrow())?;
-            } else {
-                return Err(self.err(
-                    format!(
-                        "Unable to find structure with name \"{}\" when compiling type decl.",
-                        ident
-                    ),
-                    None,
-                ));
+            let adt = self.analyze_context.get_adt(ident, block_id)?;
+            let adt = adt.borrow();
+
+            match adt.kind {
+                AdtKind::Struct => {
+                    self.compile_struct(&adt)?;
+                }
+                AdtKind::Enum => {
+                    self.compile_enum(&adt)?;
+                }
+                AdtKind::Union => panic!("TODO: Compile union"),
+                AdtKind::Unknown => unreachable!("Tried to compile AdtKind::Unknown"),
             }
         }
 

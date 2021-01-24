@@ -3,7 +3,7 @@ use common::{
     error::LangError,
     token::{
         ast::AstToken,
-        block::{BlockHeader, Struct},
+        block::{Adt, BlockHeader},
         expr::FuncCall,
     },
     traverser::TraverseContext,
@@ -41,12 +41,12 @@ impl<'a> TraitsFuncAnalyzer<'a> {
         }
     }
 
-    /// Given a struct `struct_`, fetches and stores mappings from the structs
-    /// generic names to the trait method names that they implement.
-    /// This information will be used to verify that any function call on the
-    /// generic type is valid according to the "where" clause.
-    fn store_generic_trait_method_names(&mut self, struct_: Ref<Struct>, block_id: BlockId) {
-        let implements = if let Some(implements) = &struct_.implements {
+    /// Given a ADT `adt`, fetches and stores mappings from the ADTs generic names
+    /// to the trait method names that they implement. This information will be used
+    /// to verify that any function call on the generic type is valid according to
+    /// the "where" clause.
+    fn store_generic_trait_method_names(&mut self, adt: Ref<Adt>, block_id: BlockId) {
+        let implements = if let Some(implements) = &adt.implements {
             implements
         } else {
             self.generic_trait_method_names = None;
@@ -70,20 +70,22 @@ impl<'a> TraitsFuncAnalyzer<'a> {
                     let err = self.analyze_context.err(format!(
                         "Non trait type used in \"where\" clause for struct \"{}\", \
                                 enforced on the generic type \"{}\". Found type: {:#?}",
-                        &struct_.name, gen_name, trait_ty
+                        &adt.name, gen_name, trait_ty
                     ));
                     self.errors.push(err);
                     continue;
                 };
 
-                let trait_method_names =
-                    match self.analyze_context.get_method_names(trait_name, block_id) {
-                        Ok(trait_method_names) => trait_method_names,
-                        Err(err) => {
-                            self.errors.push(err);
-                            continue;
-                        }
-                    };
+                let trait_method_names = match self
+                    .analyze_context
+                    .get_trait_method_names(trait_name, block_id)
+                {
+                    Ok(trait_method_names) => trait_method_names,
+                    Err(err) => {
+                        self.errors.push(err);
+                        continue;
+                    }
+                };
 
                 match generic_trait_method_names.entry(gen_name.clone()) {
                     Entry::Occupied(mut o) => {
@@ -122,21 +124,21 @@ impl<'a> Visitor for TraitsFuncAnalyzer<'a> {
 
     fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Implement(ident, ..), ..) = ast_token {
-            let struct_ = match self.analyze_context.get_struct(ident, ctx.block_id) {
-                Ok(struct_) => struct_,
-
-                // This might be a enum or trait, doesn't have generics, so nothing
-                // to do here.
-                Err(_) => return,
+            let adt = match self.analyze_context.get_adt(ident, ctx.block_id) {
+                Ok(adt) => adt,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
             };
 
-            self.store_generic_trait_method_names(struct_.borrow(), ctx.block_id);
+            self.store_generic_trait_method_names(adt.borrow(), ctx.block_id);
         }
     }
 
     /// Check any function call in which the `method_structure` is a generic.
     fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
-        if let Some(method_structure) = &func_call.method_structure {
+        if let Some(method_structure) = &func_call.method_adt {
             if !method_structure.is_generic() {
                 return;
             }

@@ -4,7 +4,7 @@ use common::{
     token::expr::Var,
     token::{
         ast::AstToken,
-        block::{BlockHeader, Function},
+        block::{AdtKind, BlockHeader, Function},
         stmt::Modifier,
         stmt::Stmt,
     },
@@ -141,37 +141,53 @@ impl<'a> DeclFuncAnalyzer<'a> {
 
     fn analyze_method_header(
         &mut self,
-        structure_name: &str,
+        ident: &str,
         func: &mut Rc<RefCell<Function>>,
         func_id: BlockId,
     ) {
-        // The method will be added in the scope of its wrapping structure, so
-        // fetch the block id for the structure.
-        let (decl_id, inner_ty) = if let Ok(decl_id) = self
-            .analyze_context
-            .borrow()
-            .get_struct_decl_scope(structure_name, func_id)
-        {
-            (decl_id, InnerTy::Struct(structure_name.into()))
-        } else if let Ok(decl_id) = self
-            .analyze_context
-            .borrow()
-            .get_enum_decl_scope(structure_name, func_id)
-        {
-            (decl_id, InnerTy::Enum(structure_name.into()))
-        } else if let Ok(decl_id) = self
-            .analyze_context
-            .borrow()
-            .get_trait_decl_scope(structure_name, func_id)
-        {
-            (decl_id, InnerTy::Trait(structure_name.into()))
+        // The given `ident` might be a ADT or Trait. Therefore the logic below is
+        // duplicated, first checking Tratis and then checking the same for ADTs.
+        let (decl_id, inner_ty) = if self.analyze_context.borrow().is_trait(ident, func_id) {
+            let decl_id = match self
+                .analyze_context
+                .borrow()
+                .get_trait_decl_scope(ident, func_id)
+            {
+                Ok(decl_id) => decl_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            (decl_id, InnerTy::Trait(ident.into()))
         } else {
-            let err = self.analyze_context.borrow().err(format!(
-                "Unable to find structure with name \"{}\" from block ID {}.",
-                structure_name, func_id
-            ));
-            self.errors.push(err);
-            return;
+            let decl_id = match self
+                .analyze_context
+                .borrow()
+                .get_adt_decl_scope(ident, func_id)
+            {
+                Ok(decl_id) => decl_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            let inner_ty = match self.analyze_context.borrow().get_adt(ident, func_id) {
+                Ok(adt) => match adt.borrow().kind {
+                    AdtKind::Struct => InnerTy::Struct(ident.into()),
+                    AdtKind::Union => panic!("TODO: Union inner ty."),
+                    AdtKind::Enum => InnerTy::Enum(ident.into()),
+                    AdtKind::Unknown => unreachable!("AdtKind::Unknown"),
+                },
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            (decl_id, inner_ty)
         };
 
         // TODO: Should probably be changed to something better.
@@ -195,7 +211,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
             } else {
                 let err = self.analyze_context.borrow().err(format!(
                     "Non static function did not contain \"this\" or \"this ptr\" reference. Structure name: {}, func: {:#?}.",
-                    structure_name, func
+                    ident, func
                 ));
                 self.errors.push(err);
                 return;
@@ -218,11 +234,11 @@ impl<'a> DeclFuncAnalyzer<'a> {
         }
 
         // Insert this method into `methods` in the analyze context.
-        if let Err(err) = self.analyze_context.borrow_mut().insert_method(
-            structure_name,
-            Rc::clone(func),
-            decl_id,
-        ) {
+        if let Err(err) =
+            self.analyze_context
+                .borrow_mut()
+                .insert_method(ident, Rc::clone(func), decl_id)
+        {
             self.errors.push(err);
             return;
         }
@@ -255,51 +271,55 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
     }
 
     /// Marks the functions in this implement block with the name of the implement
-    /// block (equivalent to the struct name). This lets one differentiate between
-    /// functions and methods by checking the `method_struct` field in "Function"s.
+    /// block. This lets one differentiate between functions and methods by checking
+    /// the `method_struct` field in "Function"s.
     fn visit_impl(&mut self, mut ast_token: &mut AstToken, ctx: &TraverseContext) {
         let analyze_context = self.analyze_context.borrow();
 
-        if let AstToken::Block(BlockHeader::Implement(ident, _), .., body) = &mut ast_token {
-            // Check if this unknown structure can be found and then
-            // replaced the inner type with the correct structure.
-            let inner_ty = if analyze_context.get_struct(ident, ctx.block_id).is_ok() {
-                InnerTy::Struct(ident.clone())
-            } else if analyze_context.get_enum(ident, ctx.block_id).is_ok() {
-                InnerTy::Enum(ident.clone())
-            } else if analyze_context.get_trait(ident, ctx.block_id).is_ok() {
-                InnerTy::Trait(ident.clone())
+        let (ident, body) =
+            if let AstToken::Block(BlockHeader::Implement(ident, _), .., body) = &mut ast_token {
+                (ident, body)
             } else {
-                let err = analyze_context.err(format!(
-                    "Unable to find structure for impl block: {:#?}",
-                    ast_token
-                ));
-                self.errors.push(err);
                 return;
             };
 
-            // TODO: Will `TypeInfo::None` work? Does this need some sort of type
-            //       info?
-            let ty = Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None);
+        let inner_ty = if analyze_context.is_struct(ident, ctx.block_id) {
+            InnerTy::Struct(ident.clone())
+        } else if analyze_context.is_enum(ident, ctx.block_id) {
+            InnerTy::Enum(ident.clone())
+        } else if analyze_context.is_trait(ident, ctx.block_id) {
+            InnerTy::Trait(ident.clone())
+        } else {
+            let err = analyze_context.err(format!(
+                "Unable to find ADT/Trait for impl block: {:#?}",
+                ast_token
+            ));
+            self.errors.push(err);
+            return;
+        };
 
-            for mut body_token in body {
-                if let AstToken::Block(BlockHeader::Function(func), ..) = &mut body_token {
-                    func.borrow_mut().method_structure = Some(ty.clone());
-                } else if body_token.is_skippable() {
-                } else {
-                    let err = analyze_context.err(format!(
-                        "AST token in impl block with name \"{}\" not a function: {:?}",
-                        ident, body_token
-                    ));
-                    self.errors.push(err);
-                }
+        // TODO: Will `TypeInfo::None` work? Does this need some sort of type
+        //       info?
+        let ty = Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None);
+
+        for mut body_token in body {
+            if body_token.is_skippable() {
+                // skip
+            } else if let AstToken::Block(BlockHeader::Function(func), ..) = &mut body_token {
+                func.borrow_mut().method_adt = Some(ty.clone());
+            } else {
+                let err = analyze_context.err(format!(
+                    "AST token in impl block with name \"{}\" not a function: {:?}",
+                    ident, body_token
+                ));
+                self.errors.push(err);
             }
         }
     }
 
     fn visit_func(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Function(func), _, func_id, ..) = &mut ast_token {
-            let structure_ty = if let Some(structure_ty) = func.borrow().method_structure.clone() {
+            let structure_ty = if let Some(structure_ty) = func.borrow().method_adt.clone() {
                 Some(structure_ty)
             } else {
                 None
@@ -308,9 +328,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
             if let Some(structure_ty) = structure_ty {
                 if let Ty::CompoundType(inner_ty, ..) = structure_ty {
                     match inner_ty {
-                        InnerTy::Struct(ident)
-                        | InnerTy::Enum(ident)
-                        | InnerTy::Trait(ident) => {
+                        InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
                             self.analyze_method_header(&ident, func, *func_id);
                         }
 

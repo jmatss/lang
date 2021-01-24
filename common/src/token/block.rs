@@ -19,8 +19,8 @@ pub enum BlockHeader {
     Default,
 
     Function(Rc<RefCell<Function>>),
-    Struct(Rc<RefCell<Struct>>),
-    Enum(Rc<RefCell<Enum>>),
+    Struct(Rc<RefCell<Adt>>),
+    Enum(Rc<RefCell<Adt>>),
     Trait(Rc<RefCell<Trait>>),
 
     /// The first string is the name of the structure that this impl block
@@ -113,31 +113,98 @@ pub struct Struct {
     pub methods: Option<HashMap<String, Rc<RefCell<Function>>>>,
 }
 
-impl Struct {
-    pub fn new(
+/// Represents a Algebraic Data Type (ADT). Struct, enum or union.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Adt {
+    /* Values set for all Adt types */
+    pub name: String,
+    pub modifiers: Vec<Modifier>,
+    pub members: Vec<Rc<RefCell<Var>>>,
+    /// The key is the name of the method.
+    pub methods: HashMap<String, Rc<RefCell<Function>>>,
+    pub kind: AdtKind,
+
+    /* Values set for Struct and Union */
+    pub generics: Option<Vec<String>>,
+    /// The key is the the name of the generic type and the values are the
+    /// traits that the specific generic type needs to implement.
+    pub implements: Option<HashMap<String, Vec<Ty>>>,
+
+    /* Values set for Enum */
+    /// The type of the enum values. Will most likely be a integer type.
+    pub ty: Option<Ty>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AdtKind {
+    Struct,
+    Union,
+    Enum,
+    Unknown,
+}
+
+impl Adt {
+    pub fn new_struct(
         name: String,
+        modifiers: Vec<Modifier>,
+        members: Vec<Rc<RefCell<Var>>>,
         generics: Option<Vec<String>>,
         implements: Option<HashMap<String, Vec<Ty>>>,
-        members: Option<Vec<Rc<RefCell<Var>>>>,
-        modifiers: Vec<Modifier>,
     ) -> Self {
         Self {
             name,
+            modifiers,
+            members,
+            kind: AdtKind::Struct,
+            methods: HashMap::default(),
             generics,
             implements,
-            members,
-            modifiers,
-            methods: None,
+            ty: None,
         }
     }
 
-    /// Returns the index of the member with name `member_name` in this struct.
+    pub fn new_union(
+        name: String,
+        modifiers: Vec<Modifier>,
+        members: Vec<Rc<RefCell<Var>>>,
+        generics: Option<Vec<String>>,
+        implements: Option<HashMap<String, Vec<Ty>>>,
+    ) -> Self {
+        Self {
+            name,
+            modifiers,
+            members,
+            kind: AdtKind::Union,
+            methods: HashMap::default(),
+            generics,
+            implements,
+            ty: None,
+        }
+    }
+
+    pub fn new_enum(
+        name: String,
+        modifiers: Vec<Modifier>,
+        members: Vec<Rc<RefCell<Var>>>,
+        ty: Option<Ty>,
+    ) -> Self {
+        Self {
+            name,
+            modifiers,
+            members,
+            kind: AdtKind::Enum,
+            methods: HashMap::default(),
+            generics: None,
+            implements: None,
+            ty,
+        }
+    }
+
+    /// Returns the index of the member with name `member_name` of this ADT.
     pub fn member_index(&self, member_name: &str) -> Option<usize> {
-        if let Some(members) = &self.members {
-            for (idx, member) in members.iter().enumerate() {
-                if member.borrow().name == member_name {
-                    return Some(idx);
-                }
+        for (idx, member) in self.members.iter().enumerate() {
+            if member.borrow().name == member_name {
+                return Some(idx);
             }
         }
         None
@@ -193,9 +260,9 @@ pub struct Function {
     pub is_var_arg: bool,
 
     /// Will be set if this is a function in a "impl" block which means that
-    /// this is a function tied to a struct. The type will be the structure
-    /// (or the "ident" of the impl block if other than struct are allowed).
-    pub method_structure: Option<Ty>,
+    /// this is a function tied to a ADt. The type will be the ADT (or the "ident"
+    /// of the impl block if other than ADT are allowed).
+    pub method_adt: Option<Ty>,
 }
 
 impl Function {
@@ -217,7 +284,7 @@ impl Function {
             ret_type,
             is_var_arg,
             modifiers,
-            method_structure: None,
+            method_adt: None,
         }
     }
 
@@ -381,7 +448,7 @@ impl Function {
     /// Returns the "full name" which is the name containing possible structure
     /// and generics as well.
     pub fn full_name(&self) -> CustomResult<String> {
-        if let Some(ty) = &self.method_structure {
+        if let Some(ty) = &self.method_adt {
             let (structure_name, structure_generics) =
                 if let Ty::CompoundType(inner_ty, generics, ..) = ty {
                     match inner_ty {
@@ -450,48 +517,6 @@ impl BuiltIn {
             ret_type,
             is_var_arg,
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Enum {
-    pub name: String,
-    /// The type of the enum values. Will most likely be a integer type.
-    pub ty: Ty,
-    pub members: Option<Vec<Rc<RefCell<Var>>>>,
-
-    pub modifiers: Vec<Modifier>,
-
-    /// The key is the name of the method.
-    pub methods: Option<HashMap<String, Rc<RefCell<Function>>>>,
-}
-
-impl Enum {
-    pub fn new(
-        name: String,
-        ty: Ty,
-        members: Option<Vec<Rc<RefCell<Var>>>>,
-        modifiers: Vec<Modifier>,
-    ) -> Self {
-        Enum {
-            name,
-            ty,
-            members,
-            modifiers,
-            methods: None,
-        }
-    }
-
-    /// Returns the index of the member with name `member_name` in this enum.
-    pub fn member_index(&self, member_name: &str) -> Option<usize> {
-        if let Some(members) = &self.members {
-            for (idx, member) in members.iter().enumerate() {
-                if member.borrow().name == member_name {
-                    return Some(idx);
-                }
-            }
-        }
-        None
     }
 }
 

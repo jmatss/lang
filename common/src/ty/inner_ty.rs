@@ -47,7 +47,7 @@ pub enum InnerTy {
 #[allow(clippy::match_like_matches_macro)]
 impl InnerTy {
     pub fn is_solved(&self) -> bool {
-        self.is_primitive() || self.is_string() || self.is_structure()
+        self.is_primitive() || self.is_string() || self.is_adt() || self.is_trait()
     }
 
     pub fn get_ident(&self) -> Option<String> {
@@ -160,13 +160,17 @@ impl InnerTy {
         }
     }
 
-    /// Checks if this InnerTy is a structure i.e. a struct, enum or interface.
+    /// Checks if this InnerTy is a ADT i.e. a struct, enum or union.
     /// It does NOT check if this is a UnknownIdent.
-    pub fn is_structure(&self) -> bool {
+    pub fn is_adt(&self) -> bool {
         match self {
-            InnerTy::Struct(_) | InnerTy::Enum(_) | InnerTy::Trait(_) => true,
+            InnerTy::Struct(_) | InnerTy::Enum(_) => true,
             _ => false,
         }
+    }
+
+    pub fn is_trait(&self) -> bool {
+        matches!(self, InnerTy::Trait(..))
     }
 
     pub fn is_unknown(&self) -> bool {

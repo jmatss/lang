@@ -123,12 +123,12 @@ pub enum UnOperator {
     /// The expression is the dimension.
     ArrayAccess(Box<Expr>),
 
-    /// The string is the name of the member. The u64 is the index of the struct
+    /// The string is the name of the member. The u64 is the index of the ADT
     /// member being accessed.
-    StructAccess(String, Option<u64>),
+    AdtAccess(String, Option<u64>),
 
     /// The string is the name of the member. The BlockId is the block ID in
-    /// which this enum access was done. This is needed to find the enum structure
+    /// which this enum access was done. This is needed to find the enum ADT
     /// during code generation.
     EnumAccess(String, BlockId),
 

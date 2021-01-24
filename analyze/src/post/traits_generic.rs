@@ -8,7 +8,7 @@ use common::{
     visitor::Visitor,
     BlockId,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// Checks that all generics that have specified "where implements" clauses
 /// actual are instances of types that implements the specified trait and all
@@ -32,27 +32,22 @@ impl<'a> TraitsGenericAnalyzer<'a> {
         }
     }
 
-    fn verify_struct_traits(
-        &mut self,
-        old_struct_name: &str,
-        generics: &Generics,
-        block_id: BlockId,
-    ) {
-        let struct_name = util::to_generic_name(old_struct_name, generics);
+    fn verify_adt_traits(&mut self, old_adt_name: &str, generics: &Generics, block_id: BlockId) {
+        let adt_name = util::to_generic_name(old_adt_name, generics);
 
-        let struct_ = match self.analyze_context.get_struct(&struct_name, block_id) {
-            Ok(struct_) => struct_,
+        let adt = match self.analyze_context.get_adt(&adt_name, block_id) {
+            Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);
                 return;
             }
         };
-        let struct_ = struct_.borrow();
+        let adt = adt.borrow();
 
-        // Iterate through all generics for this struct and make sure that the
+        // Iterate through all generics for this ADT and make sure that the
         // generics implements the traits specified in the "where" clause.
         for (generic_name, generic_ty) in generics.iter_names().zip(generics.iter_types()) {
-            let trait_tys = if let Some(trait_tys) = struct_
+            let trait_tys = if let Some(trait_tys) = adt
                 .implements
                 .as_ref()
                 .map(|impls| impls.get(generic_name))
@@ -60,19 +55,17 @@ impl<'a> TraitsGenericAnalyzer<'a> {
             {
                 trait_tys
             } else {
-                // If there are no "implements" caluse for the specific generic,
+                // If there are no "implements" clause for the specific generic,
                 // nothing to do here, continue looking at the next generic.
                 continue;
             };
 
-            // TODO: Currently only works for structs, should it work for other
-            //       structures as well?
             // The `generic_ty` will be the instance type that has replaced the
             // generic with name `generic_name`. This is the type that should
             // implement the traits in `trait_tys`.
-            let (gen_struct_name, generic_struct) = if let Some(ident) = generic_ty.get_ident() {
-                match self.analyze_context.get_struct(&ident, block_id) {
-                    Ok(gen_struct) => (ident, gen_struct),
+            let (generic_adt_name, generic_adt) = if let Some(ident) = generic_ty.get_ident() {
+                match self.analyze_context.get_adt(&ident, block_id) {
+                    Ok(generic_adt) => (ident, generic_adt),
                     Err(err) => {
                         self.errors.push(err);
                         continue;
@@ -84,32 +77,28 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                     .map(|ty| format!("\n{}", ty.to_string()))
                     .collect::<String>();
                 let err = self.analyze_context.err(format!(
-                    "Struct \"{0}\" has \"where\" clause for type \"{1}\" which isn't a structure. \
+                    "ADT \"{0}\" has \"where\" clause for type \"{1}\" which isn't a ADT. \
                     The type \"{1}\" can therefore not implement the required traits:{2}.",
-                    struct_name,
+                    adt_name,
                     generic_ty.to_string(),
                     trait_names,
                 ));
                 self.errors.push(err);
                 continue;
             };
-            let generic_struct = generic_struct.borrow();
+            let generic_adt = generic_adt.borrow();
 
-            let empty_methods = HashMap::with_capacity(0);
-            let gen_struct_methods = if let Some(methods) = &generic_struct.methods {
-                methods
-            } else {
-                &empty_methods
-            };
+            let gen_struct_methods = &generic_adt.methods;
 
             for trait_ty in trait_tys {
                 let trait_name = if let Ty::CompoundType(InnerTy::Trait(trait_name), ..) = trait_ty
                 {
                     trait_name
                 } else {
-                    let err = self
-                        .analyze_context
-                        .err(format!("Struct implements non trait type: {:#?}", trait_ty));
+                    let err = self.analyze_context.err(format!(
+                        "Generic with name \"{}\" on ADT \"{}\" implements non trait type: {:#?}",
+                        generic_name, adt_name, trait_ty
+                    ));
                     self.errors.push(err);
                     continue;
                 };
@@ -134,7 +123,7 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                             "Struct \"{0}\" requires that its generic type \"{1}\" implements \
                             the trait \"{2}\". The type \"{3}\" is used as generic \"{1}\", \
                             but it does NOT implement the function \"{4}\" from the trait \"{2}\".",
-                            old_struct_name, generic_name, trait_name, gen_struct_name, method_name
+                            old_adt_name, generic_name, trait_name, generic_adt_name, method_name
                         ));
                         self.errors.push(err);
                         return;
@@ -149,7 +138,7 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                     if let Err(cmp_errors) = struct_method_borrow.trait_cmp(trait_method) {
                         let err_msg_start = format!(
                             "Struct \"{}\"s impl of trait \"{}\"s method \"{}\" is incorrect.\n",
-                            old_struct_name, trait_name, method_name,
+                            old_adt_name, trait_name, method_name,
                         );
                         let err_msg_end = format!(
                             "\nstruct_method: {:#?}\ntrait_method: {:#?}",
@@ -243,18 +232,19 @@ impl<'a> TraitsGenericAnalyzer<'a> {
     }
 
     /// Recursively gets the types for the given `ty`. If any of the types are
-    /// a struct with a generic, checks that the generics of that struct actually
+    /// a ADT with a generic, checks that the generics of that ADT actually
     /// implements the specified traits in the "where" clause (if any).
-    fn check_struct_traits(&mut self, ty: &Ty, block_id: BlockId) {
+    fn check_adt_traits(&mut self, ty: &Ty, block_id: BlockId) {
         match ty {
             Ty::CompoundType(inner_ty, generics, ..) => {
                 for ty_i in generics.iter_types() {
-                    self.check_struct_traits(ty_i, block_id);
+                    self.check_adt_traits(ty_i, block_id);
                 }
 
+                // TODO: Implement for unions as well.
                 if let InnerTy::Struct(struct_name) = inner_ty {
                     if !generics.is_empty() {
-                        self.verify_struct_traits(struct_name, generics, block_id);
+                        self.verify_adt_traits(struct_name, generics, block_id);
                     }
                 }
             }
@@ -265,23 +255,23 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                     .map(|expr| expr.get_expr_type().ok())
                     .flatten()
                 {
-                    self.check_struct_traits(&expr_ty, block_id);
+                    self.check_adt_traits(&expr_ty, block_id);
                 }
-                self.check_struct_traits(ty_i, block_id);
+                self.check_adt_traits(ty_i, block_id);
             }
             Ty::Expr(expr, ..) => {
                 if let Ok(expr_ty) = expr.get_expr_type() {
-                    self.check_struct_traits(&expr_ty, block_id);
+                    self.check_adt_traits(&expr_ty, block_id);
                 }
             }
 
             Ty::Pointer(ty_i, _)
-            | Ty::UnknownStructureMember(ty_i, ..)
-            | Ty::UnknownStructureMethod(ty_i, ..)
+            | Ty::UnknownAdtMember(ty_i, ..)
+            | Ty::UnknownAdtMethod(ty_i, ..)
             | Ty::UnknownMethodArgument(ty_i, ..)
             | Ty::UnknownMethodGeneric(ty_i, ..)
             | Ty::UnknownArrayMember(ty_i, ..) => {
-                self.check_struct_traits(ty_i, block_id);
+                self.check_adt_traits(ty_i, block_id);
             }
 
             Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => (),
@@ -302,7 +292,7 @@ impl<'a> Visitor for TraitsGenericAnalyzer<'a> {
     fn visit_type(&mut self, ty: &mut Ty, ctx: &TraverseContext) {
         if !self.seen_types.contains(ty) {
             self.seen_types.insert(ty.clone());
-            self.check_struct_traits(ty, ctx.block_id);
+            self.check_adt_traits(ty, ctx.block_id);
         }
     }
 }

@@ -71,7 +71,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
                     BinOperator::DoubleColon => match bin_op.lhs.as_ref() {
                         Expr::Type(lhs_ty, ..) => {
                             method_call.is_method = true;
-                            method_call.method_structure = Some(lhs_ty.clone());
+                            method_call.method_adt = Some(lhs_ty.clone());
 
                             *expr = Expr::FuncCall(method_call.clone());
                         }

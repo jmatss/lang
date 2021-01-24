@@ -5,7 +5,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{BlockHeader, Function},
-        expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit, Var},
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FuncCall, Var},
         lit::Lit,
         op::{BinOp, BinOperator, UnOp, UnOperator},
         stmt::Modifier,
@@ -211,8 +211,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // Get the "owning" structure type of this method. If it isn't set
             // explicitly, it should be set as a expression in the first argument
             // with the name "this".
-            let mut structure_ty = if let Some(structure_ty) = &func_call.method_structure {
-                structure_ty.clone()
+            let mut adt_ty = if let Some(adt_ty) = &func_call.method_adt {
+                adt_ty.clone()
             } else if let Some(first_arg) = func_call.arguments.first() {
                 if first_arg.name.as_ref().map_or(false, |name| name == "this") {
                     match first_arg.value.get_expr_type() {
@@ -224,106 +224,78 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     }
                 } else {
                     panic!(
-                        "First arg of method with no method_structure set not \"this\": {:#?}",
+                        "First arg of method with no method_adt set not \"this\": {:#?}",
                         func_call
                     );
                 }
             } else {
                 panic!(
-                    "No params for method with no method_structure set: {:#?}",
+                    "No params for method with no method_adt set: {:#?}",
                     func_call
                 );
             };
 
-            // If the structure type is know and contains generics, this logic
-            // will fetch the structure and combine the names for the generics
-            // found in the structure declaration with potential generic impls
-            // in the struct init/func call.
-            if let Ty::CompoundType(inner_ty, generic_types, ..) = &mut structure_ty {
-                match inner_ty {
-                    InnerTy::Struct(ident)
-                    | InnerTy::Enum(ident)
-                    | InnerTy::Trait(ident)
-                    | InnerTy::UnknownIdent(ident, ..) => {
-                        let generic_names = if let Ok(struct_) = self
-                            .type_context
-                            .analyze_context
-                            .get_struct(ident, ctx.block_id)
-                        {
-                            *inner_ty = InnerTy::Struct(ident.clone());
-                            struct_
-                                .borrow()
-                                .generics
-                                .clone()
-                                .unwrap_or_else(Vec::default)
-                        } else if self
-                            .type_context
-                            .analyze_context
-                            .get_enum(ident, ctx.block_id)
-                            .is_ok()
-                        {
-                            *inner_ty = InnerTy::Enum(ident.clone());
-                            Vec::default()
-                        } else if let Ok(interface) = self
-                            .type_context
-                            .analyze_context
-                            .get_trait(ident, ctx.block_id)
-                        {
-                            *inner_ty = InnerTy::Trait(ident.clone());
-                            interface
-                                .borrow()
-                                .generics
-                                .clone()
-                                .unwrap_or_else(Vec::default)
+            // If the ADT type is know and contains generics, this logic will fetch
+            // the ADT and combine the names for the generics found in the ADT
+            // declaration with potential generic impls in the ADT init/func call.
+            if let Ty::CompoundType(inner_ty, generic_types, ..) = &mut adt_ty {
+                let generic_names = if let Some(ident) = inner_ty.get_ident() {
+                    if let Ok(adt) = self
+                        .type_context
+                        .analyze_context
+                        .get_adt(&ident, ctx.block_id)
+                    {
+                        if let Some(generics) = &adt.borrow().generics {
+                            generics.clone()
                         } else {
                             Vec::default()
-                        };
+                        }
+                    } else {
+                        Vec::default()
+                    }
+                } else {
+                    Vec::default()
+                };
 
-                        let mut generics = Generics::new();
+                let mut generics = Generics::new();
 
-                        // If the generics impls have been specified, use those
-                        // to populate the Generics.
-                        // Else if no generic implements have been specified,
-                        // create new "GenericInstance"s.
-                        if generic_types.len_types() > 0 {
-                            if generic_names.len() != generic_types.len_types() {
-                                let err = self.type_context.analyze_context.err(format!(
+                // If the generics impls have been specified, use those
+                // to populate the Generics.
+                // Else if no generic implements have been specified,
+                // create new "GenericInstance"s.
+                if generic_types.len_types() > 0 {
+                    if generic_names.len() != generic_types.len_types() {
+                        let err = self.type_context.analyze_context.err(format!(
                                     "Wrong amount of generics for static call. Func call: {:#?}, generic_names: {:#?}",
                                     func_call, generic_names
                                 ));
-                                self.errors.push(err);
-                                return;
-                            }
-
-                            generic_names
-                                .iter()
-                                .cloned()
-                                .zip(generic_types.iter_types().cloned())
-                                .for_each(|(gen_name, gen_ty)| generics.insert(gen_name, gen_ty));
-                        } else {
-                            for gen_name in generic_names {
-                                let unknown_ident =
-                                    self.new_unknown_ident(&format!("generic_{}", gen_name));
-                                let gen_ty = Ty::GenericInstance(
-                                    gen_name.clone(),
-                                    unknown_ident,
-                                    TypeInfo::None,
-                                );
-
-                                generics.insert(gen_name.clone(), gen_ty);
-                            }
-                        }
-
-                        *generic_types = generics;
+                        self.errors.push(err);
+                        return;
                     }
-                    _ => (),
+
+                    generic_names
+                        .iter()
+                        .cloned()
+                        .zip(generic_types.iter_types().cloned())
+                        .for_each(|(gen_name, gen_ty)| generics.insert(gen_name, gen_ty));
+                } else {
+                    for gen_name in generic_names {
+                        let unknown_ident =
+                            self.new_unknown_ident(&format!("generic_{}", gen_name));
+                        let gen_ty =
+                            Ty::GenericInstance(gen_name.clone(), unknown_ident, TypeInfo::None);
+
+                        generics.insert(gen_name.clone(), gen_ty);
+                    }
                 }
+
+                *generic_types = generics;
             }
 
-            // Set the `method_structure` for the function call now that the
-            // `structure_type` might have been updated. This call might have
-            // no effect if no modifications have been done in the logic above.
-            func_call.method_structure = Some(structure_ty.clone());
+            // Set the `method_adt` for the function call now that the `method_adt`
+            // might have been updated. This call might have no effect if no
+            // modifications have been done in the logic above.
+            func_call.method_adt = Some(adt_ty.clone());
 
             // Insert constraints between the function call argument type and
             // the method parameter types that will be figured out later.
@@ -338,7 +310,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 };
 
                 let arg_ty = Ty::UnknownMethodArgument(
-                    Box::new(structure_ty.clone()),
+                    Box::new(adt_ty.clone()),
                     func_call.name.clone(),
                     position,
                     self.new_unknown_ident(""),
@@ -357,8 +329,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 //       prevent any kind of infinite loops. Should be implemented
                 //       somewhere else.
                 // Don't add a constraint if the argument has the same type as
-                // the structure.
-                if arg_expr_ty != structure_ty {
+                // the ADT.
+                if arg_expr_ty != adt_ty {
                     self.insert_constraint(&arg_ty, &arg_expr_ty, ctx.block_id);
                 }
             }
@@ -368,7 +340,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             if let Some(generics) = &func_call.generics {
                 for (idx, ty) in generics.iter_types().enumerate() {
                     let unknown_ty = Ty::UnknownMethodGeneric(
-                        Box::new(structure_ty.clone()),
+                        Box::new(adt_ty.clone()),
                         func_call.name.clone(),
                         idx,
                         self.new_unknown_ident(""),
@@ -380,8 +352,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
 
             // The expected return type of the function call.
-            Ty::UnknownStructureMethod(
-                Box::new(structure_ty),
+            Ty::UnknownAdtMethod(
+                Box::new(adt_ty),
                 func_call.name.clone(),
                 self.new_unknown_ident(""),
                 TypeInfo::FuncCall(func_call.file_pos.unwrap()),
@@ -606,54 +578,41 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    /// Adds the correct type for the struct init and ties the types of the struct
-    /// members with the type of the struct init arguments.
-    fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
-        let struct_ = match self
+    /// Adds the correct type for the ADT init and ties the types of the ADT
+    /// members with the type of the ADT init arguments.
+    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {
+        let adt = match self
             .type_context
             .analyze_context
-            .get_struct(&struct_init.name, ctx.block_id)
+            .get_adt(&adt_init.name, ctx.block_id)
         {
-            Ok(struct_) => struct_,
+            Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);
                 return;
             }
         };
+        let adt = adt.borrow();
 
-        let struct_ = struct_.borrow();
-
-        let empty_vec = Vec::with_capacity(0);
-        let members = if let Some(members) = &struct_.members {
-            members
-        } else if !struct_init.arguments.is_empty() {
-            let err = self.type_context.analyze_context.err(format!(
-                "Struct \"{}\" has no members, but struct init specified members.",
-                &struct_.name
-            ));
-            self.errors.push(err);
-            return;
-        } else {
-            &empty_vec
-        };
+        adt_init.kind = adt.kind.clone();
 
         // Gets a map if the generics that maps the ident of the generic
         // (ex. "T", "U" etc.) to a new unknown generic type. This is needed
-        // to ensure that two members of a struct with the same ident uses
-        // the same unknown generic type. It is also needed to ensure that
-        // different struct uses different types for the generics.
-        let generics = if let Some(generic_names) = &struct_.generics {
+        // to ensure that two members of a ADT with the same ident uses the same
+        // unknown generic type. It is also needed to ensure that different ADTs
+        // uses different types for the generics.
+        let generics = if let Some(generic_names) = &adt.generics {
             let mut generics = Generics::new();
 
-            // If the struct init call has specified explicitly the implementation
+            // If the ADT init call has specified explicitly the implementation
             // types for the generics, use those instead of unknown generics.
             // Currently these explicit types must be solved types.
-            if let Some(generics_impl) = &struct_init.generics {
+            if let Some(generics_impl) = &adt_init.generics {
                 if generic_names.len() != generics_impl.len() {
                     let err = self.type_context.analyze_context.err(format!(
-                            "Wrong amount of generics for struct init. Struct init: {:#?}, struct: {:#?}",
-                            struct_init, struct_
-                        ));
+                        "Wrong amount of generics for ADT init. ADT init: {:#?}, ADT: {:#?}",
+                        adt_init, adt
+                    ));
                     self.errors.push(err);
                     return;
                 }
@@ -677,40 +636,42 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             Generics::new()
         };
 
-        match &struct_init.ret_type {
+        match &adt_init.ret_type {
             Some(Ty::CompoundType(..)) => {
                 // If the type already is set to a compound, use that
                 // already set type.
             }
             _ => {
-                struct_init.ret_type = Some(Ty::CompoundType(
-                    InnerTy::UnknownIdent(struct_init.name.clone(), ctx.block_id),
+                adt_init.ret_type = Some(Ty::CompoundType(
+                    InnerTy::UnknownIdent(adt_init.name.clone(), ctx.block_id),
                     generics.clone(),
-                    TypeInfo::Default(struct_init.file_pos.unwrap()),
+                    TypeInfo::Default(adt_init.file_pos.unwrap()),
                 ));
             }
         }
 
-        if members.len() != struct_init.arguments.len() {
-            let err = self.type_context.analyze_context.err(
-                    format!(
-                        "Struct \"{}\" and struct init has diff amount of members. Struct#: {:?}, init#: {:?}.",
-                        &struct_.name, members.len(), struct_init.arguments.len()
-                    ),
-                );
+        let members = &adt.members;
+
+        if members.len() != adt_init.arguments.len() {
+            let err = self.type_context.analyze_context.err(format!(
+                "ADT \"{}\" and ADT init has diff amount of members. ADT#: {:?}, init#: {:?}.",
+                &adt.name,
+                members.len(),
+                adt_init.arguments.len()
+            ));
             self.errors.push(err);
             return;
         }
 
         // TODO: Verify that all members are initialized.
 
-        for (i, arg) in struct_init.arguments.iter_mut().enumerate() {
+        for (i, arg) in adt_init.arguments.iter_mut().enumerate() {
             // If a name is set, this is a named member init. Don't use the
             // iterator index, get the corrent index of the struct field with
             // the name `arg.name`.
             let index: usize = if let Some(arg_name) = &arg.name {
-                match self.type_context.analyze_context.get_struct_member_index(
-                    &struct_.name,
+                match self.type_context.analyze_context.get_adt_member_index(
+                    &adt.name,
                     arg_name,
                     ctx.block_id,
                 ) {
@@ -724,12 +685,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 i
             };
 
-            // TODO: Make sure that the struct init argument is compatible
-            //       with the member struct type. Currently this doesn't
+            // TODO: Make sure that the ADT init argument is compatible
+            //       with the member ADT type. Currently this doesn't
             //       get caught until the codegen stage.
 
-            // Add constraints mapping the type of the struct init argument
-            // to the corresponding actual struct member type.
+            // Add constraints mapping the type of the ADT init argument
+            // to the corresponding actual ADT member type.
             match arg.value.get_expr_type() {
                 Ok(arg_ty) => {
                     if let Some(member) = members.get(index) {
@@ -748,7 +709,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             let err = self.type_context.analyze_context.err(format!(
                                 "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
                                 members.get(index),
-                                &struct_.name
+                                &adt.name
                             ));
                             self.errors.push(err);
                             return;
@@ -763,9 +724,9 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         let unknown_id = self.new_unknown_ident("");
                         self.insert_constraint(
                             &arg_ty,
-                            &Ty::UnknownStructureMember(
+                            &Ty::UnknownAdtMember(
                                 Box::new(
-                                    struct_init
+                                    adt_init
                                         .ret_type
                                         .clone()
                                         .expect("Will always be set at this point"),
@@ -779,7 +740,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     } else {
                         let err = self.type_context.analyze_context.err(format!(
                             "Unable to get member at index {} in struct \"{:?}\".",
-                            index, &struct_.name
+                            index, &adt.name
                         ));
                         self.errors.push(err);
                         return;
@@ -1017,11 +978,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     ctx.block_id,
                 );
             }
-            UnOperator::StructAccess(member_name, ..) | UnOperator::EnumAccess(member_name, ..) => {
+            UnOperator::AdtAccess(member_name, ..) | UnOperator::EnumAccess(member_name, ..) => {
                 let unknown_id = self.new_unknown_ident("");
                 self.insert_constraint(
                     &ret_ty,
-                    &Ty::UnknownStructureMember(
+                    &Ty::UnknownAdtMember(
                         Box::new(val_ty),
                         member_name.clone(),
                         unknown_id,
@@ -1038,20 +999,20 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let func_ref = func.borrow_mut();
 
             // If this is a method and the first argument is named "this", set
-            // the type of it to the structure that this method belongs to
-            // (which already is stored in `method_structure`).
+            // the type of it to the ADT that this method belongs to (which already
+            // is stored in `method_adt`).
             if let Some(first_arg) = func_ref.parameters.as_ref().and_then(|args| args.first()) {
                 let mut first_arg = first_arg.borrow_mut();
 
                 if &first_arg.name == "this" {
-                    if let Some(structure) = &func_ref.method_structure {
-                        let structure = structure.clone();
+                    if let Some(adt_ty) = &func_ref.method_adt {
+                        let adt_ty = adt_ty.clone();
 
                         let ty = if func_ref.modifiers.contains(&Modifier::This) {
-                            structure
+                            adt_ty
                         } else if func_ref.modifiers.contains(&Modifier::ThisPointer) {
                             // TODO: What file_pos should this pointer have?
-                            Ty::Pointer(Box::new(structure), TypeInfo::None)
+                            Ty::Pointer(Box::new(adt_ty), TypeInfo::None)
                         } else {
                             // TODO: This should be caught somewhere else earlier.
                             //       Keyword is not allowed to be used as parameter
@@ -1075,13 +1036,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     // TODO: Clean up this logic, can merge stuff from `visit_struct` and `visit_impl`.
 
-    // TODO: Implement for interfaces and enums.
+    // TODO: Implement for unions.
     /// Tie the generics in this specific struct to each other with constraints.
     /// Ties the generics in the struct members, method parameters and method
     /// return types.
     fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Struct(struct_), ..) = &ast_token {
-            let struct_ = struct_.borrow();
+        if let AstToken::Block(BlockHeader::Struct(adt), ..) = &ast_token {
+            let adt = adt.borrow();
 
             // Populate this map with the "Generic(ident)" types where the key
             // is the name of the generic and the value is a list of all the
@@ -1091,92 +1052,87 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // Gather all "Generic" types found in the members types into the
             // `generics` map. All the generic types in every entry will then
             // be tied together so that they all get infered to the same type.
-            if let Some(members) = &struct_.members {
-                for member in members {
-                    let member = member.borrow();
+            for member in &adt.members {
+                let member = member.borrow();
 
-                    if let Some(ty) = &member.ty {
-                        let inner_generics = if let Some(inner_generics) = ty.get_generics() {
-                            inner_generics
+                if let Some(ty) = &member.ty {
+                    let inner_generics = if let Some(inner_generics) = ty.get_generics() {
+                        inner_generics
+                    } else {
+                        continue;
+                    };
+
+                    for gen_ty in inner_generics {
+                        let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                            ident
                         } else {
-                            continue;
+                            unreachable!("gen_ty not generic: {:#?}", gen_ty);
                         };
 
-                        for gen_ty in inner_generics {
-                            let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
-                                ident
-                            } else {
-                                unreachable!("gen_ty not generic: {:#?}", gen_ty);
-                            };
-
-                            match generics.entry(ident.clone()) {
-                                Entry::Occupied(mut o) => {
-                                    o.get_mut().push(gen_ty);
-                                }
-                                Entry::Vacant(v) => {
-                                    v.insert(vec![gen_ty]);
-                                }
+                        match generics.entry(ident.clone()) {
+                            Entry::Occupied(mut o) => {
+                                o.get_mut().push(gen_ty);
+                            }
+                            Entry::Vacant(v) => {
+                                v.insert(vec![gen_ty]);
                             }
                         }
                     }
                 }
             }
 
-            if let Some(methods) = &struct_.methods {
-                for method in methods.values() {
-                    // Gather "Generic" types from method parameters.
-                    if let Some(params) = &method.borrow().parameters {
-                        for param in params {
-                            if let Some(ty) = param.borrow().ty.as_ref() {
-                                let inner_generics = if let Some(inner_generics) = ty.get_generics()
-                                {
-                                    inner_generics
+            for method in adt.methods.values() {
+                // Gather "Generic" types from method parameters.
+                if let Some(params) = &method.borrow().parameters {
+                    for param in params {
+                        if let Some(ty) = param.borrow().ty.as_ref() {
+                            let inner_generics = if let Some(inner_generics) = ty.get_generics() {
+                                inner_generics
+                            } else {
+                                continue;
+                            };
+
+                            for gen_ty in inner_generics {
+                                let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                                    ident
                                 } else {
-                                    continue;
+                                    unreachable!("gen_ty not generic: {:#?}", gen_ty);
                                 };
 
-                                for gen_ty in inner_generics {
-                                    let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
-                                        ident
-                                    } else {
-                                        unreachable!("gen_ty not generic: {:#?}", gen_ty);
-                                    };
-
-                                    match generics.entry(ident.clone()) {
-                                        Entry::Occupied(mut o) => {
-                                            o.get_mut().push(gen_ty);
-                                        }
-                                        Entry::Vacant(v) => {
-                                            v.insert(vec![gen_ty]);
-                                        }
+                                match generics.entry(ident.clone()) {
+                                    Entry::Occupied(mut o) => {
+                                        o.get_mut().push(gen_ty);
+                                    }
+                                    Entry::Vacant(v) => {
+                                        v.insert(vec![gen_ty]);
                                     }
                                 }
                             }
                         }
                     }
+                }
 
-                    // Gather "Generic" types from method return type.
-                    if let Some(ret_ty) = &mut method.borrow().ret_type.as_ref() {
-                        let inner_generics = if let Some(inner_generics) = ret_ty.get_generics() {
-                            inner_generics
+                // Gather "Generic" types from method return type.
+                if let Some(ret_ty) = &mut method.borrow().ret_type.as_ref() {
+                    let inner_generics = if let Some(inner_generics) = ret_ty.get_generics() {
+                        inner_generics
+                    } else {
+                        continue;
+                    };
+
+                    for gen_ty in inner_generics {
+                        let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                            ident
                         } else {
-                            continue;
+                            unreachable!("gen_ty not generic: {:#?}", gen_ty);
                         };
 
-                        for gen_ty in inner_generics {
-                            let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
-                                ident
-                            } else {
-                                unreachable!("gen_ty not generic: {:#?}", gen_ty);
-                            };
-
-                            match generics.entry(ident.clone()) {
-                                Entry::Occupied(mut o) => {
-                                    o.get_mut().push(gen_ty);
-                                }
-                                Entry::Vacant(v) => {
-                                    v.insert(vec![gen_ty]);
-                                }
+                        match generics.entry(ident.clone()) {
+                            Entry::Occupied(mut o) => {
+                                o.get_mut().push(gen_ty);
+                            }
+                            Entry::Vacant(v) => {
+                                v.insert(vec![gen_ty]);
                             }
                         }
                     }

@@ -2,7 +2,7 @@ use crate::{
     error::LangError,
     token::{
         ast::AstToken,
-        expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit, Var},
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FuncCall, Var},
         op::{BinOp, UnOp},
         stmt::Stmt,
     },
@@ -61,7 +61,7 @@ pub trait Visitor {
     fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {}
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {}
     fn visit_built_in_call(&mut self, built_in_call: &mut BuiltInCall, ctx: &TraverseContext) {}
-    fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {}
+    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {}
     fn visit_array_init(&mut self, array_init: &mut ArrayInit, ctx: &TraverseContext) {}
 
     /* OPERATIONS */

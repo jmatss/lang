@@ -242,7 +242,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     ExprTy::RValue => Ok(self.builder.build_load(ptr, "array.gep.rval").into()),
                 }
             }
-            UnOperator::StructAccess(..) => {
+            UnOperator::AdtAccess(..) => {
                 let val = self.compile_un_op_struct_access(un_op, expr_ty)?;
                 match expr_ty {
                     ExprTy::LValue => Ok(val),
@@ -1242,7 +1242,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         un_op: &mut UnOp,
         expr_ty: ExprTy,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        let idx = if let UnOperator::StructAccess(_, idx_opt) = un_op.operator {
+        let idx = if let UnOperator::AdtAccess(_, idx_opt) = un_op.operator {
             if let Some(idx) = idx_opt {
                 idx as u32
             } else {
@@ -1348,7 +1348,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let member = self
             .analyze_context
-            .get_enum_member(&enum_name, &member_name, block_id)?;
+            .get_adt_member(&enum_name, &member_name, block_id)?;
 
         let basic_value = if let Some(mut value) = member.borrow().value.clone() {
             let any_value = self.compile_expr(value.as_mut(), ExprTy::RValue)?;

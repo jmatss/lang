@@ -28,8 +28,8 @@ use post::{
 use pre::{indexing::IndexingAnalyzer, method::MethodAnalyzer};
 use std::{cell::RefCell, collections::HashMap};
 use ty::{
-    context::TypeContext, generic_collector::GenericCollector,
-    generic_func_creator::GenericFuncCreator, generic_struct_creator::GenericStructCreator,
+    context::TypeContext, generic_adt_creator::GenericAdtCreator,
+    generic_collector::GenericCollector, generic_func_creator::GenericFuncCreator,
     inferencer::TypeInferencer, solver::TypeSolver,
 };
 
@@ -158,7 +158,7 @@ pub fn analyze(
         .take_errors()?;
 
     let generic_methods = generic_collector.generic_methods;
-    let generic_structs = generic_collector.generic_structs;
+    let generic_structs = generic_collector.generic_adts;
 
     debug!("Running GenericFuncCreator");
     let mut generic_func_creator = GenericFuncCreator::new(&mut type_context, generic_methods);
@@ -167,10 +167,10 @@ pub fn analyze(
         .traverse_token(ast_root)
         .take_errors()?;
 
-    debug!("Running GenericStructCreator");
-    let mut generic_struct_creator = GenericStructCreator::new(&mut type_context, generic_structs);
+    debug!("Running GenericAdtCreator");
+    let mut generic_adt_creator = GenericAdtCreator::new(&mut type_context, generic_structs);
     AstTraverser::new()
-        .add_visitor(&mut generic_struct_creator)
+        .add_visitor(&mut generic_adt_creator)
         .traverse_token(ast_root)
         .take_errors()?;
 

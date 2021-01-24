@@ -8,7 +8,7 @@ use common::{
     file::FilePosition,
     token::{
         ast::AstToken,
-        block::{BlockHeader, Enum, Function, Struct, Trait},
+        block::{Adt, BlockHeader, Function, Trait},
         expr::Expr,
         lit::Lit,
         stmt::{Modifier, Path, Stmt},
@@ -827,14 +827,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             ));
         }
 
-        let members_opt = if !members.is_empty() {
-            Some(members)
-        } else {
-            None
-        };
-
         let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
-        let struct_ = Struct::new(ident, generic_names, implements, members_opt, modifiers);
+        let struct_ = Adt::new_struct(ident, modifiers, members, generic_names, implements);
         let header = BlockHeader::Struct(Rc::new(RefCell::new(struct_)));
 
         let block_id = self.iter.reserve_block_id();
@@ -919,12 +913,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             members_rc.push(Rc::new(RefCell::new(member.clone())));
         }
 
-        let members_opt = if !members_rc.is_empty() {
-            Some(members_rc)
-        } else {
-            None
-        };
-
         // TODO: How should the type of the enum be decided? Should it be possible
         //       to specify as a generic on the enum declaration? But in that case
         //       it would take a generic impl instead of a generic decl as structs.
@@ -935,7 +923,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             TypeInfo::Enum(file_pos.to_owned()),
         );
 
-        let enum_ = Enum::new(ident, enum_ty, members_opt, modifiers);
+        let enum_ = Adt::new_enum(ident, modifiers, members_rc, Some(enum_ty));
         let header = BlockHeader::Enum(Rc::new(RefCell::new(enum_)));
 
         let block_id = self.iter.reserve_block_id();

@@ -33,14 +33,14 @@ impl<'a> Visitor for FuncGenericsCheck<'a> {
     /// If this is a method call, makes sure that the amount of generics specified
     /// at the method call is the same amount as declared on the actual method.
     fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
-        if let Some(structure_ty) = &func_call.method_structure {
+        if let Some(structure_ty) = &func_call.method_adt {
             if structure_ty.is_generic() {
                 return;
             }
 
             let structure_name = structure_ty.get_ident().unwrap();
 
-            let method = match self.analyze_context.get_method(
+            let method = match self.analyze_context.get_adt_method(
                 &structure_name,
                 &func_call.name,
                 ctx.block_id,

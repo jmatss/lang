@@ -3,7 +3,7 @@ use common::{
     error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
     file::{FileId, FileInfo, FilePosition},
     token::{
-        block::{BuiltIn, Enum, Function, Struct, Trait},
+        block::{Adt, AdtKind, BuiltIn, Function, Trait},
         expr::Var,
         stmt::Path,
     },
@@ -23,10 +23,10 @@ pub struct AnalyzeContext {
     /// part of the code. The BlockId represent the outer scope for a item.
     /// For variables it will be the scope in which they are declared in and for
     /// the rest, the BlockId will be the parent block.
+    /// A `Adt` represents either a struct, union or enum.
     pub(super) variables: HashMap<(String, BlockId), Rc<RefCell<Var>>>,
     pub(super) functions: HashMap<(String, BlockId), Rc<RefCell<Function>>>,
-    pub(super) structs: HashMap<(String, BlockId), Rc<RefCell<Struct>>>,
-    pub(super) enums: HashMap<(String, BlockId), Rc<RefCell<Enum>>>,
+    pub(super) adts: HashMap<(String, BlockId), Rc<RefCell<Adt>>>,
     pub(super) traits: HashMap<(String, BlockId), Rc<RefCell<Trait>>>,
 
     /// Contains all built-in "functions".
@@ -55,8 +55,7 @@ impl AnalyzeContext {
         Self {
             variables: HashMap::default(),
             functions: HashMap::default(),
-            structs: HashMap::default(),
-            enums: HashMap::default(),
+            adts: HashMap::default(),
             traits: HashMap::default(),
 
             built_ins: decl::built_in::init_built_ins(),
@@ -147,16 +146,10 @@ impl AnalyzeContext {
         self.get_decl_scope(ident, id, &self.functions)
     }
 
-    /// Given a name of a struct `ident` and a block scope `id`, returns
-    /// the block in which the sought after struct was declared.
-    pub fn get_struct_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
-        self.get_decl_scope(ident, id, &self.structs)
-    }
-
-    /// Given a name of a enum `ident` and a block scope `id`, returns
-    /// the block in which the sought after enum was declared.
-    pub fn get_enum_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
-        self.get_decl_scope(ident, id, &self.enums)
+    /// Given a name of a ADT `ident` and a block scope `id`, returns the block
+    // in which the sought after ADT was declared.
+    pub fn get_adt_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
+        self.get_decl_scope(ident, id, &self.adts)
     }
 
     /// Given a name of a interface `ident` and a block scope `id`, returns
@@ -207,6 +200,38 @@ impl AnalyzeContext {
         }
     }
 
+    /// Checks if there exists a struct with name `ident` in the scope of `id`.
+    pub fn is_struct(&self, ident: &str, id: BlockId) -> bool {
+        if let Ok(adt) = self.get_adt(ident, id) {
+            matches!(adt.borrow().kind, AdtKind::Struct)
+        } else {
+            false
+        }
+    }
+
+    /// Checks if there exists a union with name `ident` in the scope of `id`.
+    pub fn is_union(&self, ident: &str, id: BlockId) -> bool {
+        if let Ok(adt) = self.get_adt(ident, id) {
+            matches!(adt.borrow().kind, AdtKind::Union)
+        } else {
+            false
+        }
+    }
+
+    /// Checks if there exists a enum with name `ident` in the scope of `id`.
+    pub fn is_enum(&self, ident: &str, id: BlockId) -> bool {
+        if let Ok(adt) = self.get_adt(ident, id) {
+            matches!(adt.borrow().kind, AdtKind::Enum)
+        } else {
+            false
+        }
+    }
+
+    /// Checks if there exists a union with name `ident` in the scope of `id`.
+    pub fn is_trait(&self, ident: &str, id: BlockId) -> bool {
+        self.get_trait(ident, id).is_ok()
+    }
+
     /// Given a name of a variable `ident` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
     pub fn get_var(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Var>>> {
@@ -244,32 +269,18 @@ impl AnalyzeContext {
         })
     }
 
-    /// Given a name of a struct `ident` and a block scope `id`, returns
-    /// a reference to the declaration in the AST.
-    pub fn get_struct(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Struct>>> {
-        let decl_block_id = self.get_struct_decl_scope(ident, id)?;
-        self.get(ident, decl_block_id, &self.structs)
+    /// Given a name of a ADT `ident` and a block scope `id`, returns a reference
+    /// to the declaration in the AST.
+    pub fn get_adt(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Adt>>> {
+        let decl_block_id = self.get_adt_decl_scope(ident, id)?;
+        self.get(ident, decl_block_id, &self.adts)
     }
 
-    /// Given a name of a struct `ident` and a block scope `id`, returns
-    /// a mutable reference to the declaration in the AST.
-    pub fn get_struct_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Struct>> {
-        let decl_block_id = self.get_struct_decl_scope(ident, id)?;
-        self.get_mut(ident, decl_block_id, &self.structs)
-    }
-
-    /// Given a name of a enum `ident` and a block scope `id`, returns
-    /// a reference to the declaration in the AST.
-    pub fn get_enum(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Enum>>> {
-        let decl_block_id = self.get_enum_decl_scope(ident, id)?;
-        self.get(ident, decl_block_id, &self.enums)
-    }
-
-    /// Given a name of a enum `ident` and a block scope `id`, returns
-    /// a mutable reference to the declaration in the AST.
-    pub fn get_enum_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Enum>> {
-        let decl_block_id = self.get_enum_decl_scope(ident, id)?;
-        self.get_mut(ident, decl_block_id, &self.enums)
+    /// Given a name of a ADT `ident` and a block scope `id`, returns a mutable
+    /// reference to the declaration in the AST.
+    pub fn get_adt_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Adt>> {
+        let decl_block_id = self.get_adt_decl_scope(ident, id)?;
+        self.get_mut(ident, decl_block_id, &self.adts)
     }
 
     /// Given a name of a trait `ident` and a block scope `id`, returns
@@ -286,349 +297,121 @@ impl AnalyzeContext {
         self.get_mut(ident, decl_block_id, &self.traits)
     }
 
-    /// Given a name of a structure `structure_name`, a name of a method `func`
-    /// and a block scope `id`, returns a reference to the declaration in the AST.
-    pub fn get_method(
+    /// Given a name of a ADT `adt_name`, a name of a method `method_name` and a
+    /// block scope `id`, returns a reference to the declaration in the AST.
+    pub fn get_adt_method(
         &self,
-        structure_name: &str,
-        func_name: &str,
+        adt_name: &str,
+        method_name: &str,
         id: BlockId,
     ) -> CustomResult<Rc<RefCell<Function>>> {
-        if let Ok(decl_block_id) = self.get_struct_decl_scope(structure_name, id) {
-            let struct_ = self.get_struct(structure_name, decl_block_id)?;
-            let struct_ = struct_.borrow();
+        let adt = self.get_adt(adt_name, id)?;
+        let adt = adt.borrow();
 
-            if let Some(method) = struct_
-                .methods
-                .as_ref()
-                .and_then(|ref map| map.get(func_name))
-            {
-                Ok(Rc::clone(method))
-            } else {
-                Err(self.err(format!(
-                    "Unable to find method named \"{}\" in struct \"{:#?}\".",
-                    &func_name, &struct_,
-                )))
-            }
-        } else if let Ok(decl_block_id) = self.get_enum_decl_scope(structure_name, id) {
-            let enum_ = self.get_enum(structure_name, decl_block_id)?;
-            let enum_ = enum_.borrow();
-
-            if let Some(method) = enum_
-                .methods
-                .as_ref()
-                .and_then(|ref map| map.get(func_name))
-            {
-                Ok(Rc::clone(method))
-            } else {
-                Err(self.err(format!(
-                    "Unable to find method named \"{}\" in enum \"{:#?}\".",
-                    &func_name, &enum_,
-                )))
-            }
-        } else if self.get_trait_decl_scope(structure_name, id).is_ok() {
-            panic!("Not implemented for traits.");
+        if let Some(method) = adt.methods.get(method_name) {
+            Ok(Rc::clone(method))
         } else {
             Err(self.err(format!(
-                "Unable to find structure with name \"{}\" from block ID {}.",
-                structure_name, id
+                "Unable to find method named \"{}\" in ADT \"{:#?}\".",
+                &method_name, &adt,
             )))
         }
     }
 
-    /// Given a name of a structure `structure_name` and a block scope `id`, returns
-    /// references to all methods declared for the structure in the AST.
-    pub fn get_methods(
+    /// Given a name of a trait `trait_name` and a block scope `id`, returns names
+    /// of all methods declared for the trait.
+    pub fn get_trait_method_names(
         &self,
-        structure_name: &str,
+        trait_name: &str,
         id: BlockId,
-    ) -> CustomResult<Vec<Rc<RefCell<Function>>>> {
-        if let Ok(decl_block_id) = self.get_struct_decl_scope(structure_name, id) {
-            let struct_ = self.get_struct(structure_name, decl_block_id)?;
-            let mut methods = Vec::default();
+    ) -> CustomResult<Vec<String>> {
+        let trait_ = self.get_trait(trait_name, id)?;
+        let trait_ = trait_.borrow();
 
-            if let Some(inner_methods) = struct_.borrow().methods.as_ref() {
-                for method in inner_methods.values() {
-                    methods.push(Rc::clone(method));
-                }
-            }
-
-            Ok(methods)
-        } else if let Ok(decl_block_id) = self.get_enum_decl_scope(structure_name, id) {
-            let enum_ = self.get_struct(structure_name, decl_block_id)?;
-            let mut methods = Vec::default();
-
-            if let Some(inner_methods) = enum_.borrow().methods.as_ref() {
-                for method in inner_methods.values() {
-                    methods.push(Rc::clone(method));
-                }
-            }
-
-            Ok(methods)
-        } else if self.get_trait_decl_scope(structure_name, id).is_ok() {
-            panic!("Not implemented for traits.");
-        } else {
-            Err(self.err(format!(
-                "Unable to find structure with name \"{}\" from block ID {}.",
-                structure_name, id
-            )))
-        }
+        Ok(trait_
+            .methods
+            .iter()
+            .map(|func| func.name.clone())
+            .collect())
     }
 
-    /// Given a name of a structure `structure_name` and a block scope `id`, returns
-    /// names of all methods declared for the structure in the AST.
-    pub fn get_method_names(&self, structure_name: &str, id: BlockId) -> CustomResult<Vec<String>> {
-        if let Ok(decl_block_id) = self.get_struct_decl_scope(structure_name, id) {
-            let struct_ = self.get_struct(structure_name, decl_block_id)?;
-            let struct_ = struct_.borrow();
-
-            Ok(struct_
-                .methods
-                .as_ref()
-                .map(|mets| mets.keys().cloned().collect::<Vec<_>>())
-                .unwrap_or_default())
-        } else if let Ok(decl_block_id) = self.get_enum_decl_scope(structure_name, id) {
-            let enum_ = self.get_enum(structure_name, decl_block_id)?;
-            let enum_ = enum_.borrow();
-
-            Ok(enum_
-                .methods
-                .as_ref()
-                .map(|mets| mets.keys().cloned().collect::<Vec<_>>())
-                .unwrap_or_default())
-        } else if let Ok(decl_block_id) = self.get_trait_decl_scope(structure_name, id) {
-            let trait_ = self.get_trait(structure_name, decl_block_id)?;
-            let trait_ = trait_.borrow();
-
-            Ok(trait_
-                .methods
-                .iter()
-                .map(|func| func.name.clone())
-                .collect::<Vec<_>>())
-        } else {
-            Err(self.err(format!(
-                "Unable to find structure with name \"{}\" from block ID {}.",
-                structure_name, id
-            )))
-        }
-    }
-
-    /// Inserts the given method `func` into the structure with name `structure_name`
-    /// that can be found from the block id `id`. This structure can be a
-    /// struct, enum or interface.
+    /// Inserts the given method `method` into the ADT with name `adt_name` that can
+    /// be found from the block id `id`. This ADT can be a struct, enum or union.
     pub fn insert_method(
         &mut self,
-        structure_name: &str,
-        func: Rc<RefCell<Function>>,
+        adt_name: &str,
+        method: Rc<RefCell<Function>>,
         id: BlockId,
     ) -> CustomResult<()> {
-        if let Ok(decl_block_id) = self.get_struct_decl_scope(structure_name, id) {
-            let struct_ = self.get_struct(structure_name, decl_block_id)?;
-            let mut struct_ = struct_.borrow_mut();
+        let method_name = method.borrow().half_name();
 
-            let methods = if let Some(methods) = &mut struct_.methods {
-                methods
-            } else {
-                struct_.methods = Some(HashMap::default());
-                struct_.methods.as_mut().unwrap()
-            };
+        let adt = self.get_adt(adt_name, id)?;
+        let mut adt = adt.borrow_mut();
 
-            let func_name = func.borrow().half_name();
-            methods.insert(func_name, Rc::clone(&func));
+        adt.methods.insert(method_name, Rc::clone(&method));
 
-            Ok(())
-        } else if let Ok(decl_block_id) = self.get_enum_decl_scope(structure_name, id) {
-            let enum_ = self.get_enum(structure_name, decl_block_id)?;
-            let mut enum_ = enum_.borrow_mut();
-
-            let methods = if let Some(methods) = &mut enum_.methods {
-                methods
-            } else {
-                enum_.methods = Some(HashMap::default());
-                enum_.methods.as_mut().unwrap()
-            };
-
-            let func_name = func.borrow().half_name();
-            methods.insert(func_name, Rc::clone(&func));
-
-            Ok(())
-        } else if self.get_trait_decl_scope(structure_name, id).is_ok() {
-            panic!("Not implemented for traits.");
-        } else {
-            Err(self.err(format!(
-                "Unable to find structure with name \"{}\" from block ID {}.",
-                structure_name, id
-            )))
-        }
+        Ok(())
     }
 
-    /// Removes the method with name `method_name` from the structure with name
-    /// `structure_name` that can be found from the block id `id`. This structure
-    /// can be a struct, enum or interface.
+    /// Removes the method with name `method_name` from the ADT with name `adt_name`
+    /// that can be found from the block id `id`.
     /// Returns true if the method was removed, returns false if no method with
-    /// that name exists for the structure. Returns error if the structure can't
-    /// be found.
+    /// that name exists for the ADT. Returns error if the ADT can't be found.
     pub fn remove_method(
         &mut self,
-        structure_name: &str,
+        adt_name: &str,
         method_name: &str,
         id: BlockId,
     ) -> CustomResult<bool> {
-        if let Ok(decl_block_id) = self.get_struct_decl_scope(structure_name, id) {
-            if let Some(methods) = &mut self
-                .get_struct(structure_name, decl_block_id)?
-                .borrow_mut()
-                .methods
-            {
-                Ok(methods.remove(method_name).is_some())
-            } else {
-                Ok(false)
-            }
-        } else if let Ok(decl_block_id) = self.get_enum_decl_scope(structure_name, id) {
-            if let Some(methods) = &mut self
-                .get_enum(structure_name, decl_block_id)?
-                .borrow_mut()
-                .methods
-            {
-                Ok(methods.remove(method_name).is_some())
-            } else {
-                Ok(false)
-            }
-        } else if self.get_trait_decl_scope(structure_name, id).is_ok() {
-            panic!("Not implemented for traits.");
-        } else {
-            Err(self.err(format!(
-                "Unable to find structure with name \"{}\" from block ID {}.",
-                structure_name, id
-            )))
-        }
+        let adt = self.get_adt(adt_name, id)?;
+        let mut adt = adt.borrow_mut();
+
+        Ok(adt.methods.remove(method_name).is_some())
     }
 
-    /// Finds the structure with the name `structure_name` in a scope containing
-    /// the block with ID `id` and returns the member with name `member_name`.
-    pub fn get_member(
-        &self,
-        structure_name: &str,
-        member_name: &str,
-        id: BlockId,
-    ) -> CustomResult<Rc<RefCell<Var>>> {
-        if let Ok(var) = self.get_struct_member(structure_name, member_name, id) {
-            Ok(var)
-        } else if let Ok(var) = self.get_enum_member(structure_name, member_name, id) {
-            Ok(var)
-        } else {
-            Err(self.err(format!(
-                "Unable to find structure with name \"{}\" in scope {}.",
-                &structure_name, &id
-            )))
-        }
-    }
-
-    /// Finds the struct with the name `struct_name` in a scope containing the block
+    /// Finds the ADT with the name `adt_name` in a scope containing the block
     /// with ID `id` and returns the member with name `member_name`.
-    /// The struct can ex. be declared in parent block scope.
-    pub fn get_struct_member(
+    pub fn get_adt_member(
         &self,
-        struct_name: &str,
+        adt_name: &str,
         member_name: &str,
         id: BlockId,
     ) -> CustomResult<Rc<RefCell<Var>>> {
-        let struct_ = self.get_struct(struct_name, id)?;
-        let struct_ = struct_.borrow();
+        let adt = self.get_adt(adt_name, id)?;
+        let adt = adt.borrow();
 
-        if let Some(members) = &struct_.members {
-            if let Some(var) = members
-                .iter()
-                .find(|member| member.borrow().name == member_name)
-            {
-                Ok(Rc::clone(var))
-            } else {
-                Err(self.err(format!(
-                    "Unable to find member with name \"{}\" in struct \"{}\".",
-                    &member_name, &struct_name
-                )))
-            }
+        if let Some(member) = adt
+            .members
+            .iter()
+            .find(|member| member.borrow().name == member_name)
+        {
+            Ok(Rc::clone(member))
         } else {
             Err(self.err(format!(
-                "Struct \"{}\" has no members but tried to access member \"{:?}\".",
-                &struct_name, &member_name
+                "Unable to find member with name \"{}\" in ADT \"{}\".",
+                &member_name, &adt_name
             )))
         }
     }
 
-    /// Finds the struct with the name `struct_name` in a scope containing the block
+    /// Finds the ADT with the name `adt_name` in a scope containing the block
     /// with ID `id` and returns the index of the member with name `member_name`.
-    /// The struct can ex. be declared in parent block scope.
-    pub fn get_struct_member_index(
+    pub fn get_adt_member_index(
         &self,
-        struct_name: &str,
+        adt_name: &str,
         member_name: &str,
         id: BlockId,
     ) -> CustomResult<u64> {
         if let Some(idx) = self
-            .get_struct(struct_name, id)?
+            .get_adt(adt_name, id)?
             .borrow()
             .member_index(member_name)
         {
             Ok(idx as u64)
         } else {
             Err(self.err(format!(
-                "Unable to find member with name \"{}\" in struct \"{}\".",
-                &member_name, &struct_name
-            )))
-        }
-    }
-
-    /// Finds the enum with the name `enum_name` in a scope containing the block
-    /// with ID `id` and returns the member with name `member_name`.
-    /// The enum can ex. be declared in parent block scope.
-    pub fn get_enum_member(
-        &self,
-        enum_name: &str,
-        member_name: &str,
-        id: BlockId,
-    ) -> CustomResult<Rc<RefCell<Var>>> {
-        let enum_ = self.get_enum(enum_name, id)?;
-        let enum_ = enum_.borrow();
-
-        if let Some(members) = &enum_.members {
-            if let Some(var) = members
-                .iter()
-                .find(|member| member.borrow().name == member_name)
-            {
-                Ok(Rc::clone(var))
-            } else {
-                Err(self.err(format!(
-                    "Unable to find member with name \"{}\" in enum \"{}\".",
-                    &member_name, &enum_name
-                )))
-            }
-        } else {
-            Err(self.err(format!(
-                "Enum \"{}\" has no members but tried to access member \"{:?}\".",
-                &enum_name, &member_name
-            )))
-        }
-    }
-
-    /// Finds the enum with the name `enum_name` in a scope containing the block
-    /// with ID `id` and returns the index of the member with name `member_name`.
-    pub fn get_enum_member_index(
-        &self,
-        enum_name: &str,
-        member_name: &str,
-        id: BlockId,
-    ) -> CustomResult<u64> {
-        if let Some(idx) = self
-            .get_enum(enum_name, id)?
-            .borrow()
-            .member_index(member_name)
-        {
-            Ok(idx as u64)
-        } else {
-            Err(self.err(format!(
-                "Unable to find member with name \"{}\" in enum \"{}\".",
-                &member_name, &enum_name
+                "Unable to find member with name \"{}\" in ADT \"{}\".",
+                &member_name, &adt_name
             )))
         }
     }
@@ -640,49 +423,53 @@ impl AnalyzeContext {
         func: Rc<RefCell<Function>>,
         param_name: &str,
     ) -> CustomResult<(usize, Var)> {
-        if let Some(params) = &func.borrow().parameters {
-            for (idx, param) in params.iter().enumerate() {
-                if param_name == param.borrow().name {
-                    return Ok((idx, param.borrow().clone()));
-                }
-            }
+        let func = func.borrow();
 
-            Err(self.err(format!(
-                "Unable to find param with name \"{}\" in function with name \"{}\".",
-                &param_name,
-                &func.borrow().name,
-            )))
+        let params = if let Some(params) = &func.parameters {
+            params
         } else {
-            Err(self.err(format!(
+            return Err(self.err(format!(
                 "Function \"{}\" had no parameters, expected param with name: {}",
-                &func.borrow().name,
-                &param_name
-            )))
+                &func.name, &param_name
+            )));
+        };
+
+        for (idx, param) in params.iter().enumerate() {
+            if param_name == param.borrow().name {
+                return Ok((idx, param.borrow().clone()));
+            }
         }
+
+        Err(self.err(format!(
+            "Unable to find param with name \"{}\" in function with name \"{}\".",
+            &param_name, &func.name,
+        )))
     }
 
     /// Given a function or method `func`, finds the parameter with the name
     /// `param_name` and also its index.
     fn get_param_with_idx(&self, func: Rc<RefCell<Function>>, idx: usize) -> CustomResult<Var> {
-        if let Some(params) = &func.borrow().parameters {
-            for (i, param) in params.iter().enumerate() {
-                if idx == i {
-                    return Ok(param.borrow().clone());
-                }
-            }
+        let func = func.borrow();
 
-            Err(self.err(format!(
-                "Unable to find param with index \"{}\" in function with name \"{}\".",
-                idx,
-                &func.borrow().name,
-            )))
+        let params = if let Some(params) = &func.parameters {
+            params
         } else {
-            Err(self.err(format!(
+            return Err(self.err(format!(
                 "Function \"{}\" had no parameters, expected param with index: {}",
-                &func.borrow().name,
-                idx
-            )))
+                &func.name, idx
+            )));
+        };
+
+        for (i, param) in params.iter().enumerate() {
+            if idx == i {
+                return Ok(param.borrow().clone());
+            }
         }
+
+        Err(self.err(format!(
+            "Unable to find param with index \"{}\" in function with name \"{}\".",
+            idx, &func.name,
+        )))
     }
 
     /// Given a function or method `func`, finds the index of the parameter with
@@ -703,7 +490,7 @@ impl AnalyzeContext {
         param_name: &str,
         id: BlockId,
     ) -> CustomResult<usize> {
-        let method = self.get_method(structure_name, method_name, id)?;
+        let method = self.get_adt_method(structure_name, method_name, id)?;
         self.get_param_idx(method, param_name)
     }
 
@@ -744,7 +531,7 @@ impl AnalyzeContext {
         idx: usize,
         id: BlockId,
     ) -> CustomResult<Ty> {
-        let method = self.get_method(structure_name, method_name, id)?;
+        let method = self.get_adt_method(structure_name, method_name, id)?;
         self.get_param_type(method, idx)
     }
 

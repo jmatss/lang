@@ -2,7 +2,7 @@ use crate::{
     error::LangError,
     token::{
         ast::AstToken,
-        expr::{ArrayInit, BuiltInCall, Expr, FuncCall, StructInit, Var},
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FuncCall, Var},
         op::{BinOp, UnOp},
         stmt::Stmt,
     },
@@ -166,7 +166,7 @@ impl Visitor for DummyVisitor {
         unreachable!()
     }
 
-    fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
+    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {
         unreachable!()
     }
 

@@ -4,7 +4,7 @@ use common::{
     error::LangError,
     token::expr::Argument,
     token::expr::FuncCall,
-    token::expr::{StructInit, Var},
+    token::expr::{AdtInit, Var},
     traverser::TraverseContext,
     ty::{inner_ty::InnerTy, ty::Ty},
     util,
@@ -82,7 +82,7 @@ impl<'a> CallArgs<'a> {
     }
 
     fn reorder(&mut self, args: &mut Vec<Argument>, params: &[Rc<RefCell<Var>>]) {
-        if !self.names_are_unique(args) {
+        if params.is_empty() || !self.names_are_unique(args) {
             return;
         }
 
@@ -169,7 +169,7 @@ impl<'a> Visitor for CallArgs<'a> {
         // If this is a function contained in a structure (method), one needs to
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
-        let func_res = if let Some(ty) = &func_call.method_structure {
+        let func_res = if let Some(ty) = &func_call.method_adt {
             let full_struct_name = match ty {
                 Ty::CompoundType(inner_ty, generics, ..) => match inner_ty {
                     InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
@@ -194,8 +194,11 @@ impl<'a> Visitor for CallArgs<'a> {
                 }
             };
 
-            self.analyze_context
-                .get_method(&full_struct_name, &func_call.half_name(), ctx.block_id)
+            self.analyze_context.get_adt_method(
+                &full_struct_name,
+                &func_call.half_name(),
+                ctx.block_id,
+            )
         } else {
             self.analyze_context
                 .get_func(&func_call.half_name(), ctx.block_id)
@@ -233,9 +236,8 @@ impl<'a> Visitor for CallArgs<'a> {
         }
     }
 
-    fn visit_struct_init(&mut self, struct_init: &mut StructInit, ctx: &TraverseContext) {
-        // TODO: Something similar for enums and interfaces?
-        let full_name = match struct_init.full_name() {
+    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {
+        let full_name = match adt_init.full_name() {
             Ok(full_name) => full_name,
             Err(err) => {
                 self.errors.push(err);
@@ -243,28 +245,15 @@ impl<'a> Visitor for CallArgs<'a> {
             }
         };
 
-        let struct_ = match self.analyze_context.get_struct(&full_name, ctx.block_id) {
-            Ok(struct_) => struct_,
+        let adt = match self.analyze_context.get_adt(&full_name, ctx.block_id) {
+            Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);
                 return;
             }
         };
 
-        // Get the members of the struct. This will be used to reorder the
-        // arguments in the struct init call correctly.
-        let struct_ = struct_.borrow();
-        let members = if let Some(members) = &struct_.members {
-            members
-        } else {
-            // Early return if there are no members of the struct, there
-            // is nothing to do here.
-            return;
-        };
-
-        // Reorder the arguments of the struct init call according to the member
-        // names used for the arguments.
-        self.reorder(&mut struct_init.arguments, members);
+        self.reorder(&mut adt_init.arguments, &adt.borrow().members);
 
         // TODO: Should there be default values for structs (?). Arrange that
         //       here in that case.

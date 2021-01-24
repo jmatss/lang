@@ -1,6 +1,7 @@
 use std::hash::Hash;
 
 use super::{
+    block::AdtKind,
     lit::Lit,
     op::{BinOperator, Op, UnOperator},
     stmt::Modifier,
@@ -26,7 +27,7 @@ pub enum Expr {
     Var(Var),
     FuncCall(FuncCall),
     BuiltInCall(BuiltInCall),
-    StructInit(StructInit),
+    AdtInit(AdtInit),
     ArrayInit(ArrayInit),
     //MacroCall(Option<MacroCall>),
     Op(Op),
@@ -61,8 +62,8 @@ impl Expr {
                     unreachable!("Value already verified to be Some.");
                 }
             }
-            Expr::StructInit(struct_init) if struct_init.ret_type.is_some() => {
-                if let Some(ty) = &struct_init.ret_type {
+            Expr::AdtInit(adt_init) if adt_init.ret_type.is_some() => {
+                if let Some(ty) = &adt_init.ret_type {
                     ty.clone()
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -129,8 +130,8 @@ impl Expr {
                     unreachable!("Value already verified to be Some.");
                 }
             }
-            Expr::StructInit(struct_init) if struct_init.ret_type.is_some() => {
-                if let Some(ty) = &mut struct_init.ret_type {
+            Expr::AdtInit(adt_init) if adt_init.ret_type.is_some() => {
+                if let Some(ty) = &mut adt_init.ret_type {
                     ty
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -173,7 +174,7 @@ impl Expr {
             Expr::Var(var) => var.file_pos.as_ref(),
             Expr::FuncCall(func_call) => func_call.file_pos.as_ref(),
             Expr::BuiltInCall(built_in_call) => Some(&built_in_call.file_pos),
-            Expr::StructInit(struct_init) => struct_init.file_pos.as_ref(),
+            Expr::AdtInit(adt_init) => adt_init.file_pos.as_ref(),
             Expr::ArrayInit(array_init) => Some(&array_init.file_pos),
             Expr::Op(op) => match op {
                 Op::BinOp(bin_op) => bin_op.file_pos.as_ref(),
@@ -246,7 +247,7 @@ impl Expr {
                 bin_op.lhs.contains_struct_access() || bin_op.rhs.contains_struct_access()
             }
             Expr::Op(Op::UnOp(un_op)) => match un_op.operator {
-                UnOperator::StructAccess(..) => true,
+                UnOperator::AdtAccess(..) => true,
                 _ => un_op.value.contains_struct_access(),
             },
             _ => false,
@@ -397,9 +398,9 @@ pub struct FuncCall {
 
     pub file_pos: Option<FilePosition>,
 
-    /// Will be set if this is a method call. It will be set to the structure
+    /// Will be set if this is a method call. It will be set to the ADT
     /// that this method is called on.
-    pub method_structure: Option<Ty>,
+    pub method_adt: Option<Ty>,
     pub is_method: bool,
 }
 
@@ -416,7 +417,7 @@ impl FuncCall {
             ret_type: None,
             generics,
             file_pos,
-            method_structure: None,
+            method_adt: None,
             is_method: false,
         }
     }
@@ -432,32 +433,31 @@ impl FuncCall {
         }
     }
 
-    /// Returns the "full name" which is the name containing possible structure
+    /// Returns the "full name" which is the name containing possible ADT
     /// and generics as well.
     pub fn full_name(&self) -> CustomResult<String> {
-        let (structure_name, structure_generics) =
-            if let Some(structure_ty) = &self.method_structure {
-                if let Ty::CompoundType(inner_ty, structure_generics, ..) = structure_ty {
-                    match inner_ty {
-                        InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
-                            (ident, Some(structure_generics))
-                        }
-                        _ => unreachable!("Method call on non structure type: {:#?}", self),
-                    }
+        let (adt_name, adt_generics) = if let Some(adt_ty) = &self.method_adt {
+            if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
+                if inner_ty.is_adt() {
+                    let ident = inner_ty.get_ident().unwrap();
+                    (ident, Some(adt_generics))
                 } else {
-                    return Err(LangError::new(
-                        format!("Unable to get full name for method call: {:#?}", self),
-                        LangErrorKind::GeneralError,
-                        self.file_pos.to_owned(),
-                    ));
+                    unreachable!("Method call on non ADT type: {:#?}", self)
                 }
             } else {
-                return Ok(self.name.clone());
-            };
+                return Err(LangError::new(
+                    format!("Unable to get full name for method call: {:#?}", self),
+                    LangErrorKind::GeneralError,
+                    self.file_pos.to_owned(),
+                ));
+            }
+        } else {
+            return Ok(self.name.clone());
+        };
 
         Ok(util::to_method_name(
-            structure_name,
-            structure_generics,
+            &adt_name,
+            adt_generics,
             &self.name,
             self.generics.as_ref(),
         ))
@@ -501,26 +501,29 @@ impl BuiltInCall {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StructInit {
+pub struct AdtInit {
     pub name: String,
     pub arguments: Vec<Argument>,
     pub ret_type: Option<Ty>,
     pub generics: Option<Generics>,
+    pub kind: AdtKind,
     pub file_pos: Option<FilePosition>,
 }
 
-impl StructInit {
+impl AdtInit {
     pub fn new(
         name: String,
         arguments: Vec<Argument>,
         generics: Option<Generics>,
         file_pos: Option<FilePosition>,
+        kind: AdtKind,
     ) -> Self {
         Self {
             name,
             arguments,
             ret_type: None,
             generics,
+            kind,
             file_pos,
         }
     }

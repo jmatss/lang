@@ -120,14 +120,8 @@ impl<'a> TypeContext<'a> {
 
             (Ty::Pointer(ty_a_inner, ..), Ty::Pointer(ty_b_inner, ..))
             | (Ty::Array(ty_a_inner, ..), Ty::Array(ty_b_inner, ..))
-            | (
-                Ty::UnknownStructureMember(ty_a_inner, ..),
-                Ty::UnknownStructureMember(ty_b_inner, ..),
-            )
-            | (
-                Ty::UnknownStructureMethod(ty_a_inner, ..),
-                Ty::UnknownStructureMethod(ty_b_inner, ..),
-            )
+            | (Ty::UnknownAdtMember(ty_a_inner, ..), Ty::UnknownAdtMember(ty_b_inner, ..))
+            | (Ty::UnknownAdtMethod(ty_a_inner, ..), Ty::UnknownAdtMethod(ty_b_inner, ..))
             | (
                 Ty::UnknownMethodArgument(ty_a_inner, ..),
                 Ty::UnknownMethodArgument(ty_b_inner, ..),
@@ -158,8 +152,8 @@ impl<'a> TypeContext<'a> {
 
             Ty::Expr(..) => self.solve_expr(ty, root_id),
 
-            Ty::UnknownStructureMember(..) => self.solve_unknown_structure_member(ty, root_id),
-            Ty::UnknownStructureMethod(..) => self.solve_unknown_structure_method(ty, root_id),
+            Ty::UnknownAdtMember(..) => self.solve_unknown_adt_member(ty, root_id),
+            Ty::UnknownAdtMethod(..) => self.solve_unknown_adt_method(ty, root_id),
             Ty::UnknownMethodArgument(..) => self.solve_unknown_method_argument(ty, root_id),
             Ty::UnknownMethodGeneric(..) => self.solve_unknown_method_generic(ty, root_id),
             Ty::UnknownArrayMember(..) => self.solve_unknown_array_member(ty, root_id),
@@ -186,11 +180,11 @@ impl<'a> TypeContext<'a> {
 
         // Solve the inner structure type.
         if let InnerTy::UnknownIdent(ident, id) = inner_ty {
-            if self.analyze_context.get_struct(ident, *id).is_ok() {
+            if self.analyze_context.is_struct(ident, *id) {
                 *inner_ty = InnerTy::Struct(ident.clone());
-            } else if self.analyze_context.get_enum(ident, *id).is_ok() {
+            } else if self.analyze_context.is_enum(ident, *id) {
                 *inner_ty = InnerTy::Enum(ident.clone());
-            } else if self.analyze_context.get_trait(ident, *id).is_ok() {
+            } else if self.analyze_context.is_trait(ident, *id) {
                 *inner_ty = InnerTy::Trait(ident.clone());
             }
         }
@@ -229,26 +223,25 @@ impl<'a> TypeContext<'a> {
         Ok(new_ty)
     }
 
-    fn solve_unknown_structure_member(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
-        debug!("solve_unknown_structure_member: {:#?}", ty);
+    fn solve_unknown_adt_member(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+        debug!("solve_unknown_adt_member: {:#?}", ty);
 
-        let (structure_ty, member_name) =
-            if let Ty::UnknownStructureMember(ty, member_name, ..) = &ty {
-                (ty, member_name)
-            } else {
-                unreachable!()
-            };
-
-        let structure_ty_info = self.solve_structure_type(structure_ty, root_id)?;
-        let (inner_ty, generics) = if let Some(info) = structure_ty_info {
-            info
+        let (structure_ty, member_name) = if let Ty::UnknownAdtMember(ty, member_name, ..) = &ty {
+            (ty, member_name)
         } else {
-            return self.solve_partial_structure_type(ty, structure_ty, root_id);
+            unreachable!()
         };
 
-        let mut new_ty = if let Some(structure_name) = inner_ty.get_ident() {
+        let adt_ty_info = self.solve_adt_type(structure_ty, root_id)?;
+        let (inner_ty, generics) = if let Some(info) = adt_ty_info {
+            info
+        } else {
+            return self.solve_partial_adt_type(ty, structure_ty, root_id);
+        };
+
+        let mut new_ty = if let Some(adt_name) = inner_ty.get_ident() {
             self.analyze_context
-                .get_member(&structure_name, member_name, root_id)?
+                .get_adt_member(&adt_name, member_name, root_id)?
                 .borrow()
                 .ty
                 .clone()
@@ -257,36 +250,35 @@ impl<'a> TypeContext<'a> {
             return Ok(ty.clone());
         };
 
-        // Since this fetched the actual structure "template" that is used
-        // by all, the generics will still be the "Generics". Need to
-        // replace them with the actual type for this specific use of
-        // the structure.
+        // Since this fetched the actual ADt "template" that is used by all, the
+        // generics will still be the "Generics". Need to replace them with the
+        // actual type for this specific use of the AST.
         new_ty.replace_generics_impl(&generics);
 
         self.insert_constraint(&new_ty, ty, root_id)?;
         Ok(new_ty)
     }
 
-    fn solve_unknown_structure_method(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
-        debug!("solve_unknown_structure_method: {:#?}", ty);
+    fn solve_unknown_adt_method(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+        debug!("solve_unknown_adt_method: {:#?}", ty);
 
-        let (structure_ty, method_name, type_info) =
-            if let Ty::UnknownStructureMethod(ty, method_name, _, type_info) = &ty {
+        let (adt_ty, method_name, type_info) =
+            if let Ty::UnknownAdtMethod(ty, method_name, _, type_info) = &ty {
                 (ty, method_name, type_info)
             } else {
                 unreachable!()
             };
 
-        let structure_ty_info = self.solve_structure_type(structure_ty, root_id)?;
-        let (inner_ty, generics) = if let Some(info) = structure_ty_info {
+        let adt_ty_info = self.solve_adt_type(adt_ty, root_id)?;
+        let (inner_ty, generics) = if let Some(info) = adt_ty_info {
             info
         } else {
-            return self.solve_partial_structure_type(ty, structure_ty, root_id);
+            return self.solve_partial_adt_type(ty, adt_ty, root_id);
         };
 
-        let method = if let Some(structure_name) = inner_ty.get_ident() {
+        let method = if let Some(adt_name) = inner_ty.get_ident() {
             self.analyze_context
-                .get_method(&structure_name, method_name, root_id)?
+                .get_adt_method(&adt_name, method_name, root_id)?
         } else {
             return Ok(ty.clone());
         };
@@ -311,28 +303,28 @@ impl<'a> TypeContext<'a> {
     fn solve_unknown_method_argument(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
         debug!("solve_unknown_method_argument: {:#?}", ty);
 
-        let (structure_ty, method_name, name_or_idx, type_info) =
+        let (adt_ty, method_name, name_or_idx, type_info) =
             if let Ty::UnknownMethodArgument(ty, method_name, name_or_idx, _, type_info) = &ty {
                 (ty, method_name, name_or_idx, type_info)
             } else {
                 unreachable!()
             };
 
-        let structure_ty_info = self.solve_structure_type(structure_ty, root_id)?;
-        let (inner_ty, generics) = if let Some(info) = structure_ty_info {
+        let adt_ty_info = self.solve_adt_type(adt_ty, root_id)?;
+        let (inner_ty, generics) = if let Some(info) = adt_ty_info {
             info
         } else {
-            return self.solve_partial_structure_type(ty, structure_ty, root_id);
+            return self.solve_partial_adt_type(ty, adt_ty, root_id);
         };
 
-        let structure_name = inner_ty.get_ident().unwrap();
+        let adt_name = inner_ty.get_ident().unwrap();
 
         // If this is a named argument, use that name to identify the parameter
         // type and then get the index for the parameter. Otherwise use the
         // index of the argument directly.
         let actual_idx = match name_or_idx {
             Either::Left(arg_name) => self.analyze_context.get_method_param_idx(
-                &structure_name,
+                &adt_name,
                 &method_name,
                 &arg_name,
                 root_id,
@@ -341,18 +333,15 @@ impl<'a> TypeContext<'a> {
         };
 
         let mut new_ty = self.analyze_context.get_method_param_type(
-            &structure_name,
+            &adt_name,
             &method_name,
             actual_idx,
             root_id,
         )?;
 
-        let method = if let Some(structure_name) = inner_ty.get_ident() {
-            self.analyze_context
-                .get_method(&structure_name, method_name, root_id)?
-        } else {
-            return Ok(ty.clone());
-        };
+        let method = self
+            .analyze_context
+            .get_adt_method(&adt_name, method_name, root_id)?;
         let method = method.borrow();
 
         new_ty.replace_generics_impl(&generics);
@@ -367,23 +356,23 @@ impl<'a> TypeContext<'a> {
     fn solve_unknown_method_generic(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
         debug!("solve_unknown_method_generic: {:#?}", ty);
 
-        let (structure_ty, method_name, idx, type_info) =
+        let (adt_ty, method_name, idx, type_info) =
             if let Ty::UnknownMethodGeneric(ty, method_name, idx, _, type_info) = &ty {
                 (ty, method_name, idx, type_info)
             } else {
                 unreachable!()
             };
 
-        let structure_ty_info = self.solve_structure_type(structure_ty, root_id)?;
-        let (inner_ty, generics) = if let Some(info) = structure_ty_info {
+        let adt_ty_info = self.solve_adt_type(adt_ty, root_id)?;
+        let (inner_ty, generics) = if let Some(info) = adt_ty_info {
             info
         } else {
-            return self.solve_partial_structure_type(ty, structure_ty, root_id);
+            return self.solve_partial_adt_type(ty, adt_ty, root_id);
         };
 
-        let method = if let Some(structure_name) = inner_ty.get_ident() {
+        let method = if let Some(adt_name) = inner_ty.get_ident() {
             self.analyze_context
-                .get_method(&structure_name, method_name, root_id)?
+                .get_adt_method(&adt_name, method_name, root_id)?
         } else {
             return Ok(ty.clone());
         };
@@ -443,39 +432,38 @@ impl<'a> TypeContext<'a> {
         }
     }
 
-    /// Given a potential structure type `structure_ty`, tries to solve it.
-    /// If any progress is made in solving the structure type, in will be inserted
-    /// as a new constraint.
+    /// Given a potential ADT type `adt_ty`, tries to solve it. If any progress
+    /// is made in solving the ADT type, it will be inserted as a new constraint.
     ///
-    /// If the structure type is completly solvable, copies of the inner type
-    /// and the generics will be returned for the solvable type.
-    fn solve_structure_type(
+    /// If the ADT type is completly solvable, copies of the inner type and the
+    /// generics will be returned for the solvable type.
+    fn solve_adt_type(
         &mut self,
-        structure_ty: &Ty,
+        adt_ty: &Ty,
         root_id: BlockId,
     ) -> CustomResult<Option<(InnerTy, Generics)>> {
-        let mut new_structure_ty = structure_ty.clone();
+        let mut new_adt_ty = adt_ty.clone();
 
-        self.solve(&new_structure_ty, root_id)?;
+        self.solve(&new_adt_ty, root_id)?;
 
-        let inferred_structure_ty = self.inferred_type(&new_structure_ty, root_id)?;
-        if inferred_structure_ty.is_solved() {
-            new_structure_ty = inferred_structure_ty;
+        let inferred_adt_ty = self.inferred_type(&new_adt_ty, root_id)?;
+        if inferred_adt_ty.is_solved() {
+            new_adt_ty = inferred_adt_ty;
         } else {
             return Ok(None);
         }
 
-        self.set_generic_names(&mut new_structure_ty, root_id)?;
-        self.insert_constraint(&new_structure_ty, structure_ty, root_id)?;
+        self.set_generic_names(&mut new_adt_ty, root_id)?;
+        self.insert_constraint(&new_adt_ty, adt_ty, root_id)?;
 
-        match &new_structure_ty {
+        match &new_adt_ty {
             Ty::CompoundType(inner_ty, generics, ..) => {
                 Ok(Some((inner_ty.clone(), generics.clone())))
             }
 
-            // TODO: Fix this edge case. This might be a pointer to structure
-            //       since a "{this}" will cause problems. Fix the problem and
-            //       remove this logic in the future.
+            // TODO: Fix this edge case. This might be a pointer to ADT since a
+            //       "{this}" will cause problems. Fix the problem and remove this
+            //       logic in the future.
             Ty::Pointer(ty_box, ..) => {
                 let opt = if let Ty::CompoundType(inner_ty, generics, ..) = ty_box.as_ref() {
                     Some((inner_ty.clone(), generics.clone()))
@@ -490,30 +478,30 @@ impl<'a> TypeContext<'a> {
         }
     }
 
-    /// A `structure_ty` might have been "half" solved, ex. it might be solved to
-    /// a generic. This function can be use to partially solve the wrapping "Unknown..."
-    /// types that "wraps" the `structure_ty` (ex. function call, args etc.).
-    fn solve_partial_structure_type(
+    /// A `adt_ty` might have been "half" solved, ex. it might be solved to a generic.
+    /// This function can be use to partially solve the wrapping "Unknown..."
+    /// types that "wraps" the `adt_ty` (ex. function call, args etc.).
+    fn solve_partial_adt_type(
         &mut self,
         ty: &Ty,
-        structure_ty: &Ty,
+        adt_ty: &Ty,
         root_id: BlockId,
     ) -> CustomResult<Ty> {
         let mut new_ty = ty.clone();
 
-        let old_structure_ty = match &mut new_ty {
-            Ty::UnknownStructureMember(old_structure_ty, ..)
-            | Ty::UnknownStructureMethod(old_structure_ty, ..)
-            | Ty::UnknownMethodArgument(old_structure_ty, ..)
-            | Ty::UnknownMethodGeneric(old_structure_ty, ..) => old_structure_ty,
+        let old_adt_ty = match &mut new_ty {
+            Ty::UnknownAdtMember(old_adt_ty, ..)
+            | Ty::UnknownAdtMethod(old_adt_ty, ..)
+            | Ty::UnknownMethodArgument(old_adt_ty, ..)
+            | Ty::UnknownMethodGeneric(old_adt_ty, ..) => old_adt_ty,
 
             _ => return Ok(ty.clone()),
         };
 
-        let inferred_structure_ty = self.inferred_type(structure_ty, root_id)?;
+        let inferred_adt_ty = self.inferred_type(adt_ty, root_id)?;
 
-        if *old_structure_ty.as_ref() != inferred_structure_ty {
-            *old_structure_ty = Box::new(inferred_structure_ty);
+        if *old_adt_ty.as_ref() != inferred_adt_ty {
+            *old_adt_ty = Box::new(inferred_adt_ty);
             self.insert_constraint(&new_ty, ty, root_id)?;
 
             Ok(new_ty)
@@ -566,25 +554,20 @@ impl<'a> TypeContext<'a> {
             _ => return Ok(()),
         };
 
-        if !generics.is_empty() && generics.len_names() == 0 {
-            match inner_ty {
-                InnerTy::Struct(ident) => match self.analyze_context.get_struct(ident, block_id) {
-                    Ok(struct_) => {
-                        if let Some(generic_names) = &struct_.borrow().generics {
-                            for (idx, gen_name) in generic_names.iter().enumerate() {
-                                generics.insert_lookup(gen_name.clone(), idx);
-                                generics.insert_name(gen_name.clone());
-                            }
-                        }
-                    }
+        if !generics.is_empty() && generics.len_names() == 0 && inner_ty.is_adt() {
+            let ident = inner_ty.get_ident().unwrap();
 
-                    Err(err) => return Err(err),
-                },
+            let adt = match self.analyze_context.get_adt(&ident, block_id) {
+                Ok(adt) => adt,
+                Err(err) => return Err(err),
+            };
+            let adt = adt.borrow();
 
-                _ => panic!(
-                    "TODO: Implement for more types. generics: {:#?}, inner_ty: {:#?}",
-                    generics, inner_ty
-                ),
+            if let Some(generic_names) = &adt.generics {
+                for (idx, gen_name) in generic_names.iter().enumerate() {
+                    generics.insert_lookup(gen_name.clone(), idx);
+                    generics.insert_name(gen_name.clone());
+                }
             }
         }
 

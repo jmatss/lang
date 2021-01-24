@@ -212,32 +212,28 @@ impl<'a> AstTraverser<'a> {
                     if self.traverse_context.deep_copy {
                         let mut new_struct = struct_.borrow().clone();
 
-                        if let Some(members) = &mut new_struct.members {
-                            for member in members {
-                                let mut new_member = member.borrow().clone();
-                                new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
-                                *member = Rc::new(RefCell::new(new_member));
-                            }
+                        for member in new_struct.members.iter_mut() {
+                            let mut new_member = member.borrow().clone();
+                            new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                            *member = Rc::new(RefCell::new(new_member));
                         }
 
                         *struct_ = Rc::new(RefCell::new(new_struct));
                     }
 
                     // TODO: Visit `implements` and possible generics?
-                    if let Some(members) = &mut struct_.borrow_mut().members {
-                        for member in members {
-                            if self.traverse_context.deep_copy {
-                                let mut new_member = member.borrow().clone();
-                                new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
-                                *member = Rc::new(RefCell::new(new_member));
-                            }
+                    for member in struct_.borrow_mut().members.iter_mut() {
+                        if self.traverse_context.deep_copy {
+                            let mut new_member = member.borrow().clone();
+                            new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                            *member = Rc::new(RefCell::new(new_member));
+                        }
 
-                            if let Some(ty) = &mut member.borrow_mut().ty {
-                                self.traverse_type(ty);
-                            }
-                            if let Some(value) = &mut member.borrow_mut().value {
-                                self.traverse_expr(value);
-                            }
+                        if let Some(ty) = &mut member.borrow_mut().ty {
+                            self.traverse_type(ty);
+                        }
+                        if let Some(value) = &mut member.borrow_mut().value {
+                            self.traverse_expr(value);
                         }
                     }
 
@@ -258,23 +254,19 @@ impl<'a> AstTraverser<'a> {
                     if self.traverse_context.deep_copy {
                         let mut new_enum = enum_.borrow().clone();
 
-                        if let Some(members) = &mut new_enum.members {
-                            for member in members {
-                                let mut new_member = member.borrow().clone();
-                                new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
-                                *member = Rc::new(RefCell::new(new_member));
-                            }
+                        for member in new_enum.members.iter_mut() {
+                            let mut new_member = member.borrow().clone();
+                            new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                            *member = Rc::new(RefCell::new(new_member));
                         }
 
                         *enum_ = Rc::new(RefCell::new(new_enum));
                     }
 
                     // TODO: Visit possible generics?
-                    if let Some(members) = &mut enum_.borrow_mut().members {
-                        for member in members {
-                            if let Some(ty) = &mut member.borrow_mut().ty {
-                                self.traverse_type(ty);
-                            }
+                    for member in enum_.borrow_mut().members.iter_mut() {
+                        if let Some(ty) = &mut member.borrow_mut().ty {
+                            self.traverse_type(ty);
                         }
                     }
 
@@ -441,7 +433,7 @@ impl<'a> AstTraverser<'a> {
                     }
                 }
 
-                if let Some(ty) = &mut func_call.method_structure {
+                if let Some(ty) = &mut func_call.method_adt {
                     self.traverse_type(ty);
                 }
 
@@ -470,20 +462,20 @@ impl<'a> AstTraverser<'a> {
                     v.visit_built_in_call(built_in_call, &self.traverse_context)
                 }
             }
-            Expr::StructInit(struct_init) => {
-                if let Some(gen_tys) = &mut struct_init.generics {
+            Expr::AdtInit(adt_init) => {
+                if let Some(gen_tys) = &mut adt_init.generics {
                     for gen_ty in gen_tys.iter_types_mut() {
                         self.traverse_type(gen_ty)
                     }
                 }
 
-                for arg in &mut struct_init.arguments {
+                for arg in &mut adt_init.arguments {
                     self.traverse_expr(&mut arg.value);
                 }
 
-                debug!("Visiting struct init");
+                debug!("Visiting ADT init");
                 for v in self.visitors.iter_mut() {
-                    v.visit_struct_init(struct_init, &self.traverse_context)
+                    v.visit_adt_init(adt_init, &self.traverse_context)
                 }
             }
             Expr::ArrayInit(array_init) => {

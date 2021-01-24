@@ -6,8 +6,7 @@ use std::{collections::HashMap, hash::Hash, rc::Rc};
 pub fn clean_up(analyze_context: &mut AnalyzeContext) {
     remove_unused(&mut analyze_context.variables);
     remove_unused(&mut analyze_context.functions);
-    remove_unused(&mut analyze_context.structs);
-    remove_unused(&mut analyze_context.enums);
+    remove_unused(&mut analyze_context.adts);
     remove_unused(&mut analyze_context.traits);
 }
 

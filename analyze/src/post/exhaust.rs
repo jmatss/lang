@@ -48,15 +48,13 @@ impl<'a> ExhaustAnalyzer<'a> {
         ctx: &TraverseContext,
     ) -> CustomResult<()> {
         // Gather all names of the members for the enum into a hash set.
-        let enum_ = self.analyze_context.get_enum(ident, block_id)?;
-        let mut member_names = if let Some(members) = &enum_.borrow().members {
-            members
-                .iter()
-                .map(|x| x.borrow().name.clone())
-                .collect::<HashSet<_>>()
-        } else {
-            HashSet::default()
-        };
+        let enum_ = self.analyze_context.get_adt(ident, block_id)?;
+        let mut member_names = enum_
+            .borrow()
+            .members
+            .iter()
+            .map(|x| x.borrow().name.clone())
+            .collect::<HashSet<_>>();
 
         // Go through all case expressions and remove any enum members with the
         // "same" name from the `member_names` set. When all cases have been
