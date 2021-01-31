@@ -84,19 +84,19 @@ pub enum BinOperator {
     // Access static method.
     DoubleColon,
 
-    Equals,
-    NotEquals,
-    LessThan,
-    GreaterThan,
-    LessThanOrEquals,
-    GreaterThanOrEquals,
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Lte,
+    Gte,
 
     /* NUMBERS */
-    Addition,
-    Subtraction,
-    Multiplication,
-    Division,
-    Modulus,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
     /* NUMBERS (BIT) */
     BitAnd,
     BitOr,

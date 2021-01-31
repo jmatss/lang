@@ -983,12 +983,12 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 self.insert_constraint(&lhs_ty, &rhs_ty, ctx.block_id);
             }
 
-            BinOperator::Equals
-            | BinOperator::NotEquals
-            | BinOperator::LessThan
-            | BinOperator::GreaterThan
-            | BinOperator::LessThanOrEquals
-            | BinOperator::GreaterThanOrEquals => {
+            BinOperator::Eq
+            | BinOperator::Neq
+            | BinOperator::Lt
+            | BinOperator::Gt
+            | BinOperator::Lte
+            | BinOperator::Gte => {
                 self.insert_constraint(&ret_ty, &boolean, ctx.block_id);
                 self.insert_constraint(&lhs_ty, &rhs_ty, ctx.block_id);
             }
@@ -999,11 +999,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 self.insert_constraint(&rhs_ty, &boolean, ctx.block_id);
             }
 
-            BinOperator::Addition
-            | BinOperator::Subtraction
-            | BinOperator::Multiplication
-            | BinOperator::Division
-            | BinOperator::Modulus
+            BinOperator::Add
+            | BinOperator::Sub
+            | BinOperator::Mul
+            | BinOperator::Div
+            | BinOperator::Mod
             | BinOperator::BitAnd
             | BinOperator::BitOr
             | BinOperator::BitXor

@@ -123,12 +123,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BinOperator::Dot => unreachable!("Compile bin op Dot"),
             BinOperator::DoubleColon => unreachable!("Compile bin op DoubleColon"),
 
-            BinOperator::Equals
-            | BinOperator::NotEquals
-            | BinOperator::LessThan
-            | BinOperator::GreaterThan
-            | BinOperator::LessThanOrEquals
-            | BinOperator::GreaterThanOrEquals => self.compile_bin_op_compare(
+            BinOperator::Eq
+            | BinOperator::Neq
+            | BinOperator::Lt
+            | BinOperator::Gt
+            | BinOperator::Lte
+            | BinOperator::Gte => self.compile_bin_op_compare(
                 bin_op.ret_type.as_ref().map_or(false, |ty| ty.is_signed()),
                 bin_op.is_const,
                 &bin_op.operator,
@@ -136,23 +136,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 right,
             )?,
 
-            BinOperator::Addition => {
+            BinOperator::Add => {
                 self.compile_bin_op_addition(ret_type, bin_op.is_const, left, right)?
             }
-            BinOperator::Subtraction => {
+            BinOperator::Sub => {
                 self.compile_bin_op_subtraction(ret_type, bin_op.is_const, left, right)?
             }
-            BinOperator::Multiplication => {
+            BinOperator::Mul => {
                 self.compile_bin_op_multiplication(ret_type, bin_op.is_const, left, right)?
             }
-            BinOperator::Division => self.compile_bin_op_division(
+            BinOperator::Div => self.compile_bin_op_division(
                 ret_type,
                 bin_op.ret_type.as_ref().map_or(false, |ty| ty.is_signed()),
                 bin_op.is_const,
                 left,
                 right,
             )?,
-            BinOperator::Modulus => self.compile_bin_op_modulus(
+            BinOperator::Mod => self.compile_bin_op_modulus(
                 ret_type,
                 bin_op.ret_type.as_ref().map_or(false, |ty| ty.is_signed()),
                 bin_op.is_const,
@@ -482,12 +482,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(match lhs.get_type() {
             BasicTypeEnum::FloatType(_) => {
                 let predicate = match op {
-                    BinOperator::Equals => FloatPredicate::OEQ,
-                    BinOperator::NotEquals => FloatPredicate::ONE,
-                    BinOperator::LessThan => FloatPredicate::OLT,
-                    BinOperator::GreaterThan => FloatPredicate::OGT,
-                    BinOperator::LessThanOrEquals => FloatPredicate::OLE,
-                    BinOperator::GreaterThanOrEquals => FloatPredicate::OGE,
+                    BinOperator::Eq => FloatPredicate::OEQ,
+                    BinOperator::Neq => FloatPredicate::ONE,
+                    BinOperator::Lt => FloatPredicate::OLT,
+                    BinOperator::Gt => FloatPredicate::OGT,
+                    BinOperator::Lte => FloatPredicate::OLE,
+                    BinOperator::Gte => FloatPredicate::OGE,
                     _ => {
                         return Err(
                             self.err(format!("Invalid operator in float compare: {:?}", op), None)
@@ -514,16 +514,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // TODO: Signness
             BasicTypeEnum::IntType(_) => {
                 let predicate = match op {
-                    BinOperator::Equals => IntPredicate::EQ,
-                    BinOperator::NotEquals => IntPredicate::NE,
-                    BinOperator::LessThan if is_signed => IntPredicate::SLT,
-                    BinOperator::LessThan if !is_signed => IntPredicate::ULT,
-                    BinOperator::GreaterThan if is_signed => IntPredicate::SGT,
-                    BinOperator::GreaterThan if !is_signed => IntPredicate::UGT,
-                    BinOperator::LessThanOrEquals if is_signed => IntPredicate::SLE,
-                    BinOperator::LessThanOrEquals if !is_signed => IntPredicate::ULE,
-                    BinOperator::GreaterThanOrEquals if is_signed => IntPredicate::SGE,
-                    BinOperator::GreaterThanOrEquals if !is_signed => IntPredicate::UGE,
+                    BinOperator::Eq => IntPredicate::EQ,
+                    BinOperator::Neq => IntPredicate::NE,
+                    BinOperator::Lt if is_signed => IntPredicate::SLT,
+                    BinOperator::Lt if !is_signed => IntPredicate::ULT,
+                    BinOperator::Gt if is_signed => IntPredicate::SGT,
+                    BinOperator::Gt if !is_signed => IntPredicate::UGT,
+                    BinOperator::Lte if is_signed => IntPredicate::SLE,
+                    BinOperator::Lte if !is_signed => IntPredicate::ULE,
+                    BinOperator::Gte if is_signed => IntPredicate::SGE,
+                    BinOperator::Gte if !is_signed => IntPredicate::UGE,
                     _ => {
                         return Err(
                             self.err(format!("Invalid operator in int compare: {:?}", op), None)
@@ -549,16 +549,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             BasicTypeEnum::PointerType(_) => {
                 let predicate = match op {
-                    BinOperator::Equals => IntPredicate::EQ,
-                    BinOperator::NotEquals => IntPredicate::NE,
-                    BinOperator::LessThan if is_signed => IntPredicate::SLT,
-                    BinOperator::LessThan if !is_signed => IntPredicate::ULT,
-                    BinOperator::GreaterThan if is_signed => IntPredicate::SGT,
-                    BinOperator::GreaterThan if !is_signed => IntPredicate::UGT,
-                    BinOperator::LessThanOrEquals if is_signed => IntPredicate::SLE,
-                    BinOperator::LessThanOrEquals if !is_signed => IntPredicate::ULE,
-                    BinOperator::GreaterThanOrEquals if is_signed => IntPredicate::SGE,
-                    BinOperator::GreaterThanOrEquals if !is_signed => IntPredicate::UGE,
+                    BinOperator::Eq => IntPredicate::EQ,
+                    BinOperator::Neq => IntPredicate::NE,
+                    BinOperator::Lt if is_signed => IntPredicate::SLT,
+                    BinOperator::Lt if !is_signed => IntPredicate::ULT,
+                    BinOperator::Gt if is_signed => IntPredicate::SGT,
+                    BinOperator::Gt if !is_signed => IntPredicate::UGT,
+                    BinOperator::Lte if is_signed => IntPredicate::SLE,
+                    BinOperator::Lte if !is_signed => IntPredicate::ULE,
+                    BinOperator::Gte if is_signed => IntPredicate::SGE,
+                    BinOperator::Gte if !is_signed => IntPredicate::UGE,
                     _ => {
                         return Err(
                             self.err(format!("Invalid operator in ptr compare: {:?}", op), None)

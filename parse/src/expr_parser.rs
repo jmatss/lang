@@ -390,7 +390,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             // binary and unary operators (x + +y).
             Operator::Plus => {
                 let plus_op = if self.prev_was_operand {
-                    Operator::BinaryOperator(BinOperator::Addition)
+                    Operator::BinaryOperator(BinOperator::Add)
                 } else {
                     Operator::UnaryOperator(UnOperator::Positive)
                 };
@@ -401,7 +401,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             // binary and unary operators (x - -y).
             Operator::Minus => {
                 let minus_op = if self.prev_was_operand {
-                    Operator::BinaryOperator(BinOperator::Subtraction)
+                    Operator::BinaryOperator(BinOperator::Sub)
                 } else {
                     Operator::UnaryOperator(UnOperator::Negative)
                 };
