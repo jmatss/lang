@@ -21,8 +21,7 @@ impl<'a> CharIter<'a> {
     }
 
     /// Gets the next char from the iterator.
-    #[allow(clippy::should_implement_trait)]
-    pub(crate) fn next(&mut self) -> Option<char> {
+    pub(crate) fn next_char(&mut self) -> Option<char> {
         let width = utf8_char_width(self.iter.peek()?);
         if width == 0 {
             return None;
@@ -43,10 +42,10 @@ impl<'a> CharIter<'a> {
             .flatten()
     }
 
-    /// Peeks and clones the next upcoming items in the iterator.
+    /// Peeks and clones the next upcoming item in the iterator.
     pub(crate) fn peek(&mut self) -> Option<char> {
         let mark = self.iter.mark();
-        if let Some(res) = self.next() {
+        if let Some(res) = self.next_char() {
             self.iter.rewind_to_mark(mark);
             Some(res)
         } else {
@@ -57,8 +56,8 @@ impl<'a> CharIter<'a> {
     /// Peeks and clones the two upcoming items in the iterator.
     pub(crate) fn peek_two(&mut self) -> Option<(char, Option<char>)> {
         let mark = self.iter.mark();
-        if let Some(c1) = self.next() {
-            let c2 = self.next();
+        if let Some(c1) = self.next_char() {
+            let c2 = self.next_char();
             self.iter.rewind_to_mark(mark);
             Some((c1, c2))
         } else {
@@ -69,9 +68,9 @@ impl<'a> CharIter<'a> {
     /// Peeks and clones the three upcoming items in the iterator.
     pub(crate) fn peek_three(&mut self) -> Option<(char, Option<char>, Option<char>)> {
         let mark = self.iter.mark();
-        if let Some(c1) = self.next() {
-            let c2 = self.next();
-            let c3 = self.next();
+        if let Some(c1) = self.next_char() {
+            let c2 = self.next_char();
+            let c3 = self.next_char();
             self.iter.rewind_to_mark(mark);
             Some((c1, c2, c3))
         } else {
@@ -82,7 +81,7 @@ impl<'a> CharIter<'a> {
     /// Skips the next `n` characters.
     pub(crate) fn skip(&mut self, n: usize) {
         for _ in 0..n {
-            self.next();
+            self.next_char();
         }
     }
 
@@ -127,7 +126,7 @@ mod tests {
             expected_char.encode_utf8(&mut buf);
 
             // ACT
-            let actual_char = CharIter::new(&mut buf).next().unwrap();
+            let actual_char = CharIter::new(&mut buf).next_char().unwrap();
 
             // ASSERT
             assert_eq!(*expected_char, actual_char);
@@ -142,10 +141,10 @@ mod tests {
         let mut three_byte = [0xf0, 0xcc, 0xcc];
         let mut four_byte = [0xf5, 0xff, 0xff, 0xff];
 
-        assert!(CharIter::new(&mut one_byte).next().is_none());
-        assert!(CharIter::new(&mut two_byte).next().is_none());
-        assert!(CharIter::new(&mut three_byte).next().is_none());
-        assert!(CharIter::new(&mut four_byte).next().is_none());
+        assert!(CharIter::new(&mut one_byte).next_char().is_none());
+        assert!(CharIter::new(&mut two_byte).next_char().is_none());
+        assert!(CharIter::new(&mut three_byte).next_char().is_none());
+        assert!(CharIter::new(&mut four_byte).next_char().is_none());
     }
 
     #[test]
@@ -157,8 +156,8 @@ mod tests {
 
         // ACT
         let mut iter = CharIter::new(unsafe { chars.as_bytes_mut() });
-        let actual_first = iter.next();
-        let actual_second = iter.next();
+        let actual_first = iter.next_char();
+        let actual_second = iter.next_char();
 
         // ASSERT
         assert_eq!(expected_first, actual_first);
@@ -174,7 +173,7 @@ mod tests {
         // ACT
         let mut iter = CharIter::new(unsafe { chars.as_bytes_mut() });
         let actual_peek = iter.peek();
-        let actual_next = iter.next();
+        let actual_next = iter.next_char();
 
         // ASSERT
         assert_eq!(expected, actual_peek);
@@ -220,7 +219,7 @@ mod tests {
 
             // ACT
             iter.skip(*skip_n);
-            let actual = iter.next();
+            let actual = iter.next_char();
 
             // ASSERT
             assert_eq!(expected, &actual);
@@ -237,11 +236,11 @@ mod tests {
             expected_char.encode_utf8(&mut buf);
 
             let mut iter = CharIter::new(&mut buf);
-            iter.next();
+            iter.next_char();
 
             // ACT
             let rewind_success = iter.rewind();
-            let actual_char = iter.next().unwrap();
+            let actual_char = iter.next_char().unwrap();
 
             // ASSERT
             assert!(rewind_success);
@@ -259,7 +258,7 @@ mod tests {
             expected_char.encode_utf8(&mut buf);
 
             let mut iter = CharIter::new(&mut buf);
-            iter.next();
+            iter.next_char();
 
             // ACT
             let is_valid = iter.is_valid_char_of_size(*expected_size);
@@ -279,7 +278,7 @@ mod tests {
             expected_char.encode_utf8(&mut buf);
 
             let mut iter = CharIter::new(&mut buf);
-            iter.next();
+            iter.next_char();
 
             // ACT
             // Increment the size sent to `is_valid_char_of_size()` which should

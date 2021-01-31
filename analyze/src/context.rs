@@ -1,6 +1,6 @@
 use crate::{block::BlockInfo, decl};
 use common::{
-    error::{CustomResult, LangError, LangErrorKind::AnalyzeError},
+    error::{LangError, LangErrorKind::AnalyzeError, LangResult},
     file::{FileId, FileInfo, FilePosition},
     token::{
         block::{Adt, AdtKind, BuiltIn, Function, Trait},
@@ -73,7 +73,7 @@ impl AnalyzeContext {
     }
 
     /// Returns the parent block ID for the block with ID `id`.
-    pub fn get_parent_id(&self, id: BlockId) -> CustomResult<BlockId> {
+    pub fn get_parent_id(&self, id: BlockId) -> LangResult<BlockId> {
         if let Some(block_info) = self.block_info.get(&id) {
             Ok(block_info.parent_id)
         } else {
@@ -85,7 +85,7 @@ impl AnalyzeContext {
     }
 
     /// Returns the root block ID for the block with ID `id`.
-    pub fn get_root_id(&self, id: BlockId) -> CustomResult<BlockId> {
+    pub fn get_root_id(&self, id: BlockId) -> LangResult<BlockId> {
         if let Some(block_info) = self.block_info.get(&id) {
             if block_info.is_root_block {
                 Ok(block_info.block_id)
@@ -107,7 +107,7 @@ impl AnalyzeContext {
         ident: &str,
         id: BlockId,
         map: &HashMap<(String, BlockId), T>,
-    ) -> CustomResult<BlockId>
+    ) -> LangResult<BlockId>
     where
         T: std::fmt::Debug,
     {
@@ -136,25 +136,25 @@ impl AnalyzeContext {
 
     /// Given a name of a variable `ident` and a block scope `id`, returns
     /// the block in which the sought after variable was declared.
-    pub fn get_var_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
+    pub fn get_var_decl_scope(&self, ident: &str, id: BlockId) -> LangResult<BlockId> {
         self.get_decl_scope(ident, id, &self.variables)
     }
 
     /// Given a name of a function `ident` and a block scope `id`, returns
     /// the block in which the sought after function was declared.
-    pub fn get_func_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
+    pub fn get_func_decl_scope(&self, ident: &str, id: BlockId) -> LangResult<BlockId> {
         self.get_decl_scope(ident, id, &self.functions)
     }
 
     /// Given a name of a ADT `ident` and a block scope `id`, returns the block
     // in which the sought after ADT was declared.
-    pub fn get_adt_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
+    pub fn get_adt_decl_scope(&self, ident: &str, id: BlockId) -> LangResult<BlockId> {
         self.get_decl_scope(ident, id, &self.adts)
     }
 
     /// Given a name of a interface `ident` and a block scope `id`, returns
     /// the block in which the sought after interface was declared.
-    pub fn get_trait_decl_scope(&self, ident: &str, id: BlockId) -> CustomResult<BlockId> {
+    pub fn get_trait_decl_scope(&self, ident: &str, id: BlockId) -> LangResult<BlockId> {
         self.get_decl_scope(ident, id, &self.traits)
     }
 
@@ -166,7 +166,7 @@ impl AnalyzeContext {
         ident: &str,
         decl_block_id: BlockId,
         map: &'a HashMap<(String, BlockId), Rc<RefCell<T>>>,
-    ) -> CustomResult<Rc<RefCell<T>>> {
+    ) -> LangResult<Rc<RefCell<T>>> {
         let key = (ident.into(), decl_block_id);
 
         if let Some(item) = map.get(&key) {
@@ -187,7 +187,7 @@ impl AnalyzeContext {
         ident: &str,
         decl_block_id: BlockId,
         map: &'a HashMap<(String, BlockId), Rc<RefCell<T>>>,
-    ) -> CustomResult<RefMut<'a, T>> {
+    ) -> LangResult<RefMut<'a, T>> {
         let key = (ident.into(), decl_block_id);
 
         if let Some(item) = map.get(&key) {
@@ -234,33 +234,33 @@ impl AnalyzeContext {
 
     /// Given a name of a variable `ident` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
-    pub fn get_var(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Var>>> {
+    pub fn get_var(&self, ident: &str, id: BlockId) -> LangResult<Rc<RefCell<Var>>> {
         let decl_block_id = self.get_var_decl_scope(ident, id)?;
         self.get(ident, decl_block_id, &self.variables)
     }
 
     /// Given a name of a variable `ident` and a block scope `id`, returns
     /// a mutable reference to the declaration in the AST.
-    pub fn get_var_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Var>> {
+    pub fn get_var_mut(&self, ident: &str, id: BlockId) -> LangResult<RefMut<Var>> {
         let decl_block_id = self.get_var_decl_scope(ident, id)?;
         self.get_mut(ident, decl_block_id, &self.variables)
     }
 
     /// Given a name of a function `ident` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
-    pub fn get_func(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Function>>> {
+    pub fn get_func(&self, ident: &str, id: BlockId) -> LangResult<Rc<RefCell<Function>>> {
         let decl_block_id = self.get_func_decl_scope(ident, id)?;
         self.get(ident, decl_block_id, &self.functions)
     }
 
     /// Given a name of a function `ident` and a block scope `id`, returns
     /// a mutable reference to the declaration in the AST.
-    pub fn get_func_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Function>> {
+    pub fn get_func_mut(&self, ident: &str, id: BlockId) -> LangResult<RefMut<Function>> {
         let decl_block_id = self.get_func_decl_scope(ident, id)?;
         self.get_mut(ident, decl_block_id, &self.functions)
     }
 
-    pub fn get_built_in(&self, ident: &str) -> CustomResult<&BuiltIn> {
+    pub fn get_built_in(&self, ident: &str) -> LangResult<&BuiltIn> {
         self.built_ins.get(ident).ok_or_else(|| {
             self.err(format!(
                 "Unable to find built-in function with name \"{}\".",
@@ -271,28 +271,28 @@ impl AnalyzeContext {
 
     /// Given a name of a ADT `ident` and a block scope `id`, returns a reference
     /// to the declaration in the AST.
-    pub fn get_adt(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Adt>>> {
+    pub fn get_adt(&self, ident: &str, id: BlockId) -> LangResult<Rc<RefCell<Adt>>> {
         let decl_block_id = self.get_adt_decl_scope(ident, id)?;
         self.get(ident, decl_block_id, &self.adts)
     }
 
     /// Given a name of a ADT `ident` and a block scope `id`, returns a mutable
     /// reference to the declaration in the AST.
-    pub fn get_adt_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Adt>> {
+    pub fn get_adt_mut(&self, ident: &str, id: BlockId) -> LangResult<RefMut<Adt>> {
         let decl_block_id = self.get_adt_decl_scope(ident, id)?;
         self.get_mut(ident, decl_block_id, &self.adts)
     }
 
     /// Given a name of a trait `ident` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
-    pub fn get_trait(&self, ident: &str, id: BlockId) -> CustomResult<Rc<RefCell<Trait>>> {
+    pub fn get_trait(&self, ident: &str, id: BlockId) -> LangResult<Rc<RefCell<Trait>>> {
         let decl_block_id = self.get_trait_decl_scope(ident, id)?;
         self.get(ident, decl_block_id, &self.traits)
     }
 
     /// Given a name of a trait `ident` and a block scope `id`, returns
     /// a mutable reference to the declaration in the AST.
-    pub fn get_trait_mut(&self, ident: &str, id: BlockId) -> CustomResult<RefMut<Trait>> {
+    pub fn get_trait_mut(&self, ident: &str, id: BlockId) -> LangResult<RefMut<Trait>> {
         let decl_block_id = self.get_trait_decl_scope(ident, id)?;
         self.get_mut(ident, decl_block_id, &self.traits)
     }
@@ -304,7 +304,7 @@ impl AnalyzeContext {
         adt_name: &str,
         method_name: &str,
         id: BlockId,
-    ) -> CustomResult<Rc<RefCell<Function>>> {
+    ) -> LangResult<Rc<RefCell<Function>>> {
         let adt = self.get_adt(adt_name, id)?;
         let adt = adt.borrow();
 
@@ -320,11 +320,7 @@ impl AnalyzeContext {
 
     /// Given a name of a trait `trait_name` and a block scope `id`, returns names
     /// of all methods declared for the trait.
-    pub fn get_trait_method_names(
-        &self,
-        trait_name: &str,
-        id: BlockId,
-    ) -> CustomResult<Vec<String>> {
+    pub fn get_trait_method_names(&self, trait_name: &str, id: BlockId) -> LangResult<Vec<String>> {
         let trait_ = self.get_trait(trait_name, id)?;
         let trait_ = trait_.borrow();
 
@@ -342,7 +338,7 @@ impl AnalyzeContext {
         adt_name: &str,
         method: Rc<RefCell<Function>>,
         id: BlockId,
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         let method_name = method.borrow().half_name();
 
         let adt = self.get_adt(adt_name, id)?;
@@ -362,7 +358,7 @@ impl AnalyzeContext {
         adt_name: &str,
         method_name: &str,
         id: BlockId,
-    ) -> CustomResult<bool> {
+    ) -> LangResult<bool> {
         let adt = self.get_adt(adt_name, id)?;
         let mut adt = adt.borrow_mut();
 
@@ -376,7 +372,7 @@ impl AnalyzeContext {
         adt_name: &str,
         member_name: &str,
         id: BlockId,
-    ) -> CustomResult<Rc<RefCell<Var>>> {
+    ) -> LangResult<Rc<RefCell<Var>>> {
         let adt = self.get_adt(adt_name, id)?;
         let adt = adt.borrow();
 
@@ -401,7 +397,7 @@ impl AnalyzeContext {
         adt_name: &str,
         member_name: &str,
         id: BlockId,
-    ) -> CustomResult<u64> {
+    ) -> LangResult<u64> {
         if let Some(idx) = self
             .get_adt(adt_name, id)?
             .borrow()
@@ -418,11 +414,7 @@ impl AnalyzeContext {
 
     /// Given a function or method `func`, finds the parameter with the name
     // `param_name` and also its index.
-    fn get_param(
-        &self,
-        func: Rc<RefCell<Function>>,
-        param_name: &str,
-    ) -> CustomResult<(usize, Var)> {
+    fn get_param(&self, func: Rc<RefCell<Function>>, param_name: &str) -> LangResult<(usize, Var)> {
         let func = func.borrow();
 
         let params = if let Some(params) = &func.parameters {
@@ -448,7 +440,7 @@ impl AnalyzeContext {
 
     /// Given a function or method `func`, finds the parameter with the name
     /// `param_name` and also its index.
-    fn get_param_with_idx(&self, func: Rc<RefCell<Function>>, idx: usize) -> CustomResult<Var> {
+    fn get_param_with_idx(&self, func: Rc<RefCell<Function>>, idx: usize) -> LangResult<Var> {
         let func = func.borrow();
 
         let params = if let Some(params) = &func.parameters {
@@ -475,7 +467,7 @@ impl AnalyzeContext {
     /// Given a function or method `func`, finds the index of the parameter with
     /// the name `param_name`. The index indicates the position of the parameter
     /// in the struct parameter list.
-    fn get_param_idx(&self, func: Rc<RefCell<Function>>, param_name: &str) -> CustomResult<usize> {
+    fn get_param_idx(&self, func: Rc<RefCell<Function>>, param_name: &str) -> LangResult<usize> {
         Ok(self.get_param(func, param_name)?.0)
     }
 
@@ -489,7 +481,7 @@ impl AnalyzeContext {
         method_name: &str,
         param_name: &str,
         id: BlockId,
-    ) -> CustomResult<usize> {
+    ) -> LangResult<usize> {
         let method = self.get_adt_method(structure_name, method_name, id)?;
         self.get_param_idx(method, param_name)
     }
@@ -501,14 +493,14 @@ impl AnalyzeContext {
         func_name: &str,
         param_name: &str,
         id: BlockId,
-    ) -> CustomResult<usize> {
+    ) -> LangResult<usize> {
         let func = self.get_func(func_name, id)?;
         self.get_param_idx(func, param_name)
     }
 
     /// Given a function or method `func`, finds the type of the parameter with
     /// the name `param_name`.
-    fn get_param_type(&self, func: Rc<RefCell<Function>>, idx: usize) -> CustomResult<Ty> {
+    fn get_param_type(&self, func: Rc<RefCell<Function>>, idx: usize) -> LangResult<Ty> {
         if let Some(ty) = &self.get_param_with_idx(Rc::clone(&func), idx)?.ty {
             Ok(ty.clone())
         } else {
@@ -530,19 +522,14 @@ impl AnalyzeContext {
         method_name: &str,
         idx: usize,
         id: BlockId,
-    ) -> CustomResult<Ty> {
+    ) -> LangResult<Ty> {
         let method = self.get_adt_method(structure_name, method_name, id)?;
         self.get_param_type(method, idx)
     }
 
     /// Finds the function with the name `func_name` in a scope containing the block
     /// with ID `id` and returns the type of the parameter with name `param_name`.
-    pub fn get_func_param_type(
-        &self,
-        func_name: &str,
-        idx: usize,
-        id: BlockId,
-    ) -> CustomResult<Ty> {
+    pub fn get_func_param_type(&self, func_name: &str, idx: usize, id: BlockId) -> LangResult<Ty> {
         let func = self.get_func(func_name, id)?;
         self.get_param_type(func, idx)
     }

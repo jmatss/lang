@@ -11,13 +11,8 @@ impl LexToken {
         Self { kind, file_pos }
     }
 
-    #[allow(clippy::match_like_matches_macro)]
     pub fn is_eof(&self) -> bool {
-        if let LexTokenKind::EOF = self.kind {
-            true
-        } else {
-            false
-        }
+        matches!(self.kind, LexTokenKind::EOF)
     }
 }
 
@@ -119,18 +114,18 @@ pub enum Sym {
     Address,         // .&
     ArrayIndexBegin, // .[
 
-    EqualsOperator,
+    DoubleEquals,
     NotEquals,
     //LessThan, == PointyBracketBegin
     //GreaterThan, == PointyBracketEnd
-    LessThanOrEquals,
-    GreaterThanOrEquals,
+    Lte,
+    Gte,
 
     Plus,
     Minus,
-    Multiplication,
-    Division,
-    Modulus,
+    Mul,
+    Div,
+    Mod,
 
     BitAnd,
     BitOr,
@@ -139,11 +134,11 @@ pub enum Sym {
     ShiftRight,
     BitCompliment,
 
-    AssignAddition,
-    AssignSubtraction,
-    AssignMultiplication,
-    AssignDivision,
-    AssignModulus,
+    AssignAdd,
+    AssignSub,
+    AssignMul,
+    AssignDiv,
+    AssignMod,
 
     AssignBitAnd,
     AssignBitOr,
@@ -172,12 +167,11 @@ pub enum Sym {
 }
 
 impl LexToken {
-    #[allow(clippy::match_like_matches_macro)]
     pub fn is_break_symbol(&self) -> bool {
-        match self.kind {
-            LexTokenKind::Sym(Sym::LineBreak) | LexTokenKind::Sym(Sym::SemiColon) => true,
-            _ => false,
-        }
+        matches!(
+            self.kind,
+            LexTokenKind::Sym(Sym::LineBreak) | LexTokenKind::Sym(Sym::SemiColon)
+        )
     }
 
     /// Sees if the given `ident` is a valid bool literal. If it is, returns
@@ -312,10 +306,9 @@ impl LexToken {
                 vec![(":", Sym::Colon), ("::", Sym::DoubleColon)],
             ),
 
-            '%' => LexToken::match_symbol(
-                &real_string,
-                vec![("%", Sym::Modulus), ("%=", Sym::AssignModulus)],
-            ),
+            '%' => {
+                LexToken::match_symbol(&real_string, vec![("%", Sym::Mod), ("%=", Sym::AssignMod)])
+            }
 
             '&' => LexToken::match_symbol(
                 &real_string,
@@ -358,7 +351,7 @@ impl LexToken {
                 &real_string,
                 vec![
                     ("=", Sym::Equals),
-                    ("==", Sym::EqualsOperator),
+                    ("==", Sym::DoubleEquals),
                     ("=>", Sym::FatArrow),
                 ],
             ),
@@ -368,7 +361,7 @@ impl LexToken {
                 vec![
                     ("+", Sym::Plus),
                     ("++", Sym::Increment),
-                    ("+=", Sym::AssignAddition),
+                    ("+=", Sym::AssignAdd),
                 ],
             ),
 
@@ -376,7 +369,7 @@ impl LexToken {
                 &real_string,
                 vec![
                     ("<", Sym::PointyBracketBegin),
-                    ("<=", Sym::LessThanOrEquals),
+                    ("<=", Sym::Lte),
                     ("<<", Sym::ShiftLeft),
                     ("<<=", Sym::AssignShiftLeft),
                 ],
@@ -386,7 +379,7 @@ impl LexToken {
                 &real_string,
                 vec![
                     (">", Sym::PointyBracketEnd),
-                    (">=", Sym::GreaterThanOrEquals),
+                    (">=", Sym::Gte),
                     (">>", Sym::ShiftRight),
                     (">>=", Sym::AssignShiftRight),
                 ],
@@ -398,26 +391,26 @@ impl LexToken {
                     ("-", Sym::Minus),
                     ("--", Sym::Decrement),
                     ("->", Sym::Arrow),
-                    ("-=", Sym::AssignSubtraction),
+                    ("-=", Sym::AssignSub),
                 ],
             ),
 
             '*' => LexToken::match_symbol(
                 &real_string,
                 vec![
-                    ("*", Sym::Multiplication),
+                    ("*", Sym::Mul),
                     ("*/", Sym::CommentMultiLineEnd),
-                    ("*=", Sym::AssignMultiplication),
+                    ("*=", Sym::AssignMul),
                 ],
             ),
 
             '/' => LexToken::match_symbol(
                 &real_string,
                 vec![
-                    ("/", Sym::Division),
+                    ("/", Sym::Div),
                     ("//", Sym::CommentSingleLine),
                     ("/*", Sym::CommentMultiLineBegin),
-                    ("/=", Sym::AssignDivision),
+                    ("/=", Sym::AssignDiv),
                 ],
             ),
 

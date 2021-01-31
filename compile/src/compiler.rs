@@ -1,4 +1,4 @@
-use crate::CustomResult;
+use crate::LangResult;
 use common::error::{LangError, LangErrorKind::CompileError};
 use inkwell::{
     module::Module,
@@ -8,7 +8,7 @@ use inkwell::{
     OptimizationLevel,
 };
 
-pub fn setup_target() -> CustomResult<TargetMachine> {
+pub fn setup_target() -> LangResult<TargetMachine> {
     Target::initialize_all(&InitializationConfig::default());
 
     // TODO: Allow the user to specify target from command line.
@@ -38,7 +38,7 @@ pub fn compile(
     module: &Module,
     output_path: &str,
     optimize: bool,
-) -> CustomResult<()> {
+) -> LangResult<()> {
     if optimize {
         let func_pass_manager: PassManager<FunctionValue> = PassManager::create(module);
         func_pass_manager.add_instruction_combining_pass();

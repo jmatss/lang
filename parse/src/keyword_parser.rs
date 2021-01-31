@@ -4,7 +4,7 @@ use crate::{
     type_parser::TypeParser,
 };
 use common::{
-    error::CustomResult,
+    error::LangResult,
     file::FilePosition,
     token::{
         ast::AstToken,
@@ -32,7 +32,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         iter: &'a mut ParseTokenIter<'b>,
         keyword: Kw,
         kw_file_pos: FilePosition,
-    ) -> CustomResult<AstToken> {
+    ) -> LangResult<AstToken> {
         let mut keyword_parser = Self { iter };
         let modifiers = Vec::default();
         keyword_parser.parse_keyword(keyword, modifiers, kw_file_pos)
@@ -43,7 +43,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         keyword: Kw,
         modifiers: Vec<Modifier>,
         kw_file_pos: FilePosition,
-    ) -> CustomResult<AstToken> {
+    ) -> LangResult<AstToken> {
         match keyword {
             // Parses all the else(x)/else blocks after aswell.
             Kw::If => self.parse_if(kw_file_pos),
@@ -105,7 +105,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         modifier_kw: Kw,
         mut modifiers: Vec<Modifier>,
         kw_file_pos: FilePosition,
-    ) -> CustomResult<AstToken> {
+    ) -> LangResult<AstToken> {
         let modifier = match modifier_kw {
             Kw::Private => Modifier::Private,
             Kw::Public => Modifier::Public,
@@ -140,7 +140,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// blocks aswell.
     ///   "if <expr> { ... } [ [ else <expr> { ... } ] else { ... } ]"
     /// The "if" keyword has already been consumed when this function is called.
-    fn parse_if(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_if(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let mut if_cases = Vec::new();
         let block_id = self.iter.reserve_block_id();
 
@@ -188,7 +188,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a `Match` block and all its cases.
     ///   "match <expr> { <expr> { ... } [...] }"
     /// The "match" keyword has already been consumed when this function is called.
-    fn parse_match(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_match(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let mut match_cases = Vec::new();
         let block_id = self.iter.reserve_block_id();
 
@@ -274,7 +274,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a for loop block.
     ///   "for <var> in <expr> { ... }"
     /// The "for" keyword has already been consumed when this function is called.
-    fn parse_for(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_for(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let lex_token = self.iter.next_skip_space_line();
         let ident =
             if let Some(LexTokenKind::Ident(ident)) = lex_token.as_ref().map(|token| &token.kind) {
@@ -327,7 +327,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     ///   "while <expr> { ... }"
     ///   "while { ... }"
     /// The "while" keyword has already been consumed when this function is called.
-    fn parse_while(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_while(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
         // TODO: Should the `file_pos` be used it here or can the param be removed?
 
         // If the next lex token is a "CurlyBracketBegin", no expression is
@@ -354,7 +354,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     ///   "return <expr>"
     ///   "return"
     /// The "return" keyword has already been consumed when this function is called.
-    fn parse_return(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_return(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         // If the next lex token is a "LineBreak", no expression is given after
         // this "return" keyword. Assume it is a return for a function with no
         // return value.
@@ -378,7 +378,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a yield statement.
     ///   "yield <expr>"
     /// The "yield" keyword has already been consumed when this function is called.
-    fn parse_yield(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_yield(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
 
         if let Some(expr_file_pos) = expr.file_pos() {
@@ -393,21 +393,21 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a break statement.
     ///   "break"
     /// The "break" keyword has already been consumed when this function is called.
-    fn parse_break(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_break(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
         Ok(AstToken::Stmt(Stmt::Break(Some(file_pos))))
     }
 
     /// Parses a continue statement.
     ///   "continue"
     /// The "continue" keyword has already been consumed when this function is called.
-    fn parse_continue(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_continue(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
         Ok(AstToken::Stmt(Stmt::Continue(Some(file_pos))))
     }
 
     /// Parses a use statement.
     ///   "use <path>"  (where path is a dot separated list of idents)
     /// The "use" keyword has already been consumed when this function is called.
-    fn parse_use(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_use(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let mut path_parts = Vec::new();
 
         loop {
@@ -458,7 +458,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a package statement.
     ///   "package <path>"  (where path is a dot separated list of idents)
     /// The "package" keyword has already been consumed when this function is called.
-    fn parse_package(&mut self, mut file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_package(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let mut path_parts = Vec::new();
 
         loop {
@@ -516,7 +516,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         &mut self,
         modifiers: Vec<Modifier>,
         file_pos: FilePosition,
-    ) -> CustomResult<AstToken> {
+    ) -> LangResult<AstToken> {
         if let Some(lex_token) = self.iter.next_skip_space_line() {
             let func = match lex_token.kind {
                 LexTokenKind::Kw(Kw::Function) => {
@@ -554,7 +554,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         &mut self,
         is_const: bool,
         mut file_pos: FilePosition,
-    ) -> CustomResult<AstToken> {
+    ) -> LangResult<AstToken> {
         // Start by parsing the identifier.
         let lex_token = self.iter.next_skip_space_line();
         let (ident, var_file_pos) = if let Some((LexTokenKind::Ident(ident), var_file_pos)) =
@@ -600,7 +600,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         &mut self,
         modifiers: Vec<Modifier>,
         file_pos: FilePosition,
-    ) -> CustomResult<AstToken> {
+    ) -> LangResult<AstToken> {
         let func = self.parse_func_proto(modifiers, file_pos)?;
         let func_header = BlockHeader::Function(Rc::new(RefCell::new(func)));
         self.iter.next_block(func_header)
@@ -613,7 +613,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         &mut self,
         mut modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
-    ) -> CustomResult<Function> {
+    ) -> LangResult<Function> {
         // TODO: Handle FilePosition.
 
         static THIS: &str = "this";
@@ -773,7 +773,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         &mut self,
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
-    ) -> CustomResult<AstToken> {
+    ) -> LangResult<AstToken> {
         // Start by parsing the identifier.
         let lex_token = self.iter.next_skip_space_line();
         let ident =
@@ -847,7 +847,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         &mut self,
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
-    ) -> CustomResult<AstToken> {
+    ) -> LangResult<AstToken> {
         // Start by parsing the identifier.
         let lex_token = self.iter.next_skip_space_line();
         let ident =
@@ -940,7 +940,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         &mut self,
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
-    ) -> CustomResult<AstToken> {
+    ) -> LangResult<AstToken> {
         // Start by parsing the identifier.
         let lex_token = self.iter.next_skip_space_line();
         let ident =
@@ -1013,7 +1013,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         &mut self,
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
-    ) -> CustomResult<AstToken> {
+    ) -> LangResult<AstToken> {
         // Start by parsing the identifier.
         let lex_token = self.iter.next_skip_space_line();
         let ident =
@@ -1100,7 +1100,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// a structure or it can also be a impl of a trait for a structure.
     ///   "implement <ident> [for <ident>] { [<func> ...] }"
     /// The "implement" keyword has already been consumed when this function is called.
-    fn parse_impl(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_impl(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
         // Start by parsing the identifier.
         let lex_token = self.iter.next_skip_space_line();
         let ident =
@@ -1182,7 +1182,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// stored in a vector. If at least on generic was found and was parsed
     /// correctly, the FilePosition will point to the PointyBracketEnd that ends
     /// the generic parameter list.
-    fn parse_generics(&mut self) -> CustomResult<(Option<Vec<String>>, Option<FilePosition>)> {
+    fn parse_generics(&mut self) -> LangResult<(Option<Vec<String>>, Option<FilePosition>)> {
         let mut type_parse = TypeParser::new(self.iter, None);
         match type_parse.parse_type_generics(GenericsKind::Decl) {
             Ok((generics, file_pos_opt)) => Ok((
@@ -1204,7 +1204,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     fn parse_where(
         &mut self,
         generics: Option<&Generics>,
-    ) -> CustomResult<Option<HashMap<String, Vec<Ty>>>> {
+    ) -> LangResult<Option<HashMap<String, Vec<Ty>>>> {
         // Next token isn't a "where" keyword => early None return.
         if let Some(LexTokenKind::Kw(Kw::Where)) = self.iter.peek_skip_space_line().map(|t| t.kind)
         {
@@ -1297,7 +1297,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// Parses a defer statement.
     ///   "defer <expr>"
     /// The "defer" keyword has already been consumed when this function is called.
-    fn parse_defer(&mut self, file_pos: FilePosition) -> CustomResult<AstToken> {
+    fn parse_defer(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
         Ok(AstToken::Stmt(Stmt::Defer(expr, Some(file_pos))))
     }

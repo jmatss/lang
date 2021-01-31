@@ -1,5 +1,5 @@
 use common::{
-    error::{CustomResult, LangError, LangErrorKind},
+    error::{LangError, LangErrorKind, LangResult},
     ty::ty::Ty,
 };
 use log::debug;
@@ -67,7 +67,7 @@ impl SubstitutionSets {
     /// type `ty`. This will be the type with the highest precedence in the set.
     ///
     /// If the given `ty` doesn't exist in any set, returns the given `ty` itself.
-    pub fn inferred_type(&self, ty: &Ty) -> CustomResult<Ty> {
+    pub fn inferred_type(&self, ty: &Ty) -> LangResult<Ty> {
         if let Some(id) = self.ty_to_id.get(ty) {
             let root_id = self.find_root(*id).unwrap();
             let root_node = self.id_to_node.get(&root_id).unwrap();
@@ -89,7 +89,7 @@ impl SubstitutionSets {
     ///
     /// Returns the type of the new root node of the unioned sets. This will be
     /// the type with the highest precedence in the set.
-    pub fn union(&mut self, ty_a: &Ty, ty_b: &Ty) -> CustomResult<Ty> {
+    pub fn union(&mut self, ty_a: &Ty, ty_b: &Ty) -> LangResult<Ty> {
         compatible(ty_a, ty_b)?;
 
         let id_a = if let Some(id) = self.ty_to_id.get(ty_a) {
@@ -130,7 +130,7 @@ impl SubstitutionSets {
     }
 
     /// See `infer_root_with_start()`.
-    fn infer_root(&mut self, id_a: NodeId, id_b: NodeId) -> CustomResult<NodeId> {
+    fn infer_root(&mut self, id_a: NodeId, id_b: NodeId) -> LangResult<NodeId> {
         let ty_a = self.id_to_node.get(&id_a).unwrap().ty.clone();
         let ty_b = self.id_to_node.get(&id_b).unwrap().ty.clone();
         self.infer_root_with_start(id_a, id_b, &ty_a, &ty_b)
@@ -154,7 +154,7 @@ impl SubstitutionSets {
         id_b: NodeId,
         start_ty_a: &Ty,
         start_ty_b: &Ty,
-    ) -> CustomResult<NodeId> {
+    ) -> LangResult<NodeId> {
         let ty_a = self.id_to_node.get(&id_a).unwrap().ty.clone();
         let ty_b = self.id_to_node.get(&id_b).unwrap().ty.clone();
 
@@ -242,19 +242,14 @@ impl Debug for SubstitutionSets {
 }
 
 /// See `compatible_with_start()`.
-fn compatible(ty_a: &Ty, ty_b: &Ty) -> CustomResult<()> {
+fn compatible(ty_a: &Ty, ty_b: &Ty) -> LangResult<()> {
     compatible_with_start(ty_a, ty_b, ty_a, ty_b)
 }
 
 /// Checks if the types `ty_a` and `ty_b` are compatible and tries to put together
 /// a decent error message. `start_ty_a` and `start_ty_b` are only used in the
 /// case where a error happens to add some context to the error.
-fn compatible_with_start(
-    ty_a: &Ty,
-    ty_b: &Ty,
-    start_ty_a: &Ty,
-    start_ty_b: &Ty,
-) -> CustomResult<()> {
+fn compatible_with_start(ty_a: &Ty, ty_b: &Ty, start_ty_a: &Ty, start_ty_b: &Ty) -> LangResult<()> {
     if ty_a.is_compatible(ty_b) {
         Ok(())
     } else {

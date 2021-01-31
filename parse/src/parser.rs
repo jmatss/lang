@@ -3,7 +3,7 @@ use crate::{
     type_parser::TypeParser,
 };
 use common::{
-    error::{CustomResult, LangError, LangErrorKind::ParseError},
+    error::{LangError, LangErrorKind::ParseError, LangResult},
     file::FilePosition,
     iter::TokenIter,
     token::{
@@ -47,11 +47,11 @@ pub const DEFAULT_ASSIGN_STOP_CONDS: [Sym; 16] = [
     Sym::CurlyBracketEnd,
     Sym::Colon,
     Sym::Equals,
-    Sym::AssignAddition,
-    Sym::AssignSubtraction,
-    Sym::AssignMultiplication,
-    Sym::AssignDivision,
-    Sym::AssignModulus,
+    Sym::AssignAdd,
+    Sym::AssignSub,
+    Sym::AssignMul,
+    Sym::AssignDiv,
+    Sym::AssignMod,
     Sym::AssignBitAnd,
     Sym::AssignBitOr,
     Sym::AssignBitXor,
@@ -189,7 +189,7 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     /// Returns the next ParseToken from the iterator.
-    pub fn next_token(&mut self) -> CustomResult<AstToken> {
+    pub fn next_token(&mut self) -> LangResult<AstToken> {
         if let Some(lex_token) = self.next_skip_space_line() {
             // TODO: Clean up this mess with a mix of ParseToken/ParseTokenKind
             //       (some arms returns ParseTokens, others cascades ParseTokenKinds).
@@ -301,7 +301,7 @@ impl<'a> ParseTokenIter<'a> {
 
     /// Returns the next block containing all its ParseTokens. A block is always
     /// started with "CurlyBracketBegin" and ended with "CurlyBracketEnd".
-    pub fn next_block(&mut self, header: BlockHeader) -> CustomResult<AstToken> {
+    pub fn next_block(&mut self, header: BlockHeader) -> LangResult<AstToken> {
         let mut block_tokens = Vec::new();
         let block_id = self.reserve_block_id();
 
@@ -340,7 +340,7 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     /// Peeks at the next token in the iterator and returns its FilePosition.
-    pub fn peek_file_pos(&mut self) -> CustomResult<FilePosition> {
+    pub fn peek_file_pos(&mut self) -> LangResult<FilePosition> {
         if let Some(lex_token) = self.peek_skip_space() {
             Ok(lex_token.file_pos)
         } else {
@@ -352,11 +352,11 @@ impl<'a> ParseTokenIter<'a> {
         &mut self,
         keyword: Kw,
         kw_file_pos: FilePosition,
-    ) -> CustomResult<AstToken> {
+    ) -> LangResult<AstToken> {
         KeyworkParser::parse(self, keyword, kw_file_pos)
     }
 
-    pub fn parse_expr(&mut self, stop_conds: &[Sym]) -> CustomResult<Expr> {
+    pub fn parse_expr(&mut self, stop_conds: &[Sym]) -> LangResult<Expr> {
         if let Some(expr) = ExprParser::parse(self, stop_conds)? {
             Ok(expr)
         } else {
@@ -366,11 +366,11 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     /// Parse the next expression. The next expression is allowed to be empty.
-    pub fn parse_expr_allow_empty(&mut self, stop_conds: &[Sym]) -> CustomResult<Option<Expr>> {
+    pub fn parse_expr_allow_empty(&mut self, stop_conds: &[Sym]) -> LangResult<Option<Expr>> {
         ExprParser::parse(self, stop_conds)
     }
 
-    pub fn parse_type(&mut self, generics: Option<&Generics>) -> CustomResult<Ty> {
+    pub fn parse_type(&mut self, generics: Option<&Generics>) -> LangResult<Ty> {
         TypeParser::parse(self, generics)
     }
 
@@ -388,7 +388,7 @@ impl<'a> ParseTokenIter<'a> {
         is_const: bool,
         generics: Option<&Generics>,
         mut file_pos: FilePosition,
-    ) -> CustomResult<Var> {
+    ) -> LangResult<Var> {
         // TODO: Handle file_pos.
 
         let (ty, ty_file_pos) = if let Some(next_token) = self.peek_skip_space() {
@@ -445,7 +445,7 @@ impl<'a> ParseTokenIter<'a> {
         &mut self,
         start_symbol: Sym,
         end_symbol: Sym,
-    ) -> CustomResult<(Vec<Argument>, FilePosition)> {
+    ) -> LangResult<(Vec<Argument>, FilePosition)> {
         let mut arguments = Vec::new();
 
         let mut file_pos = self.peek_file_pos()?;
@@ -595,7 +595,7 @@ impl<'a> ParseTokenIter<'a> {
         start_symbol: Sym,
         end_symbol: Sym,
         generics: Option<&Generics>,
-    ) -> CustomResult<(Vec<Var>, bool, FilePosition)> {
+    ) -> LangResult<(Vec<Var>, bool, FilePosition)> {
         let mut parameters = Vec::new();
         let mut is_var_arg = false;
 
@@ -738,7 +738,7 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     #[inline]
-    pub fn rewind(&mut self) -> CustomResult<()> {
+    pub fn rewind(&mut self) -> LangResult<()> {
         if self.iter.rewind() {
             if let Some(cur_token) = self.iter.peek() {
                 self.file_pos = cur_token.file_pos;
@@ -758,7 +758,7 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     #[inline]
-    pub fn rewind_skip_space(&mut self) -> CustomResult<()> {
+    pub fn rewind_skip_space(&mut self) -> LangResult<()> {
         loop {
             self.rewind()?;
 

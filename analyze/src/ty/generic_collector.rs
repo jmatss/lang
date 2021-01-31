@@ -4,7 +4,7 @@ use crate::{
     util::order::{dependency_order, order_step2},
 };
 use common::{
-    error::{CustomResult, LangError, LangErrorKind},
+    error::{LangError, LangErrorKind, LangResult},
     token::{ast::AstToken, block::BlockHeader, expr::FuncCall},
     traverser::{AstTraverser, TraverseContext},
     ty::{generics::Generics, ty::Ty},
@@ -699,7 +699,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
     /// Figures out the order in which the nested methods needs to be "handled"/
     /// "expanded". The returned vector will contain the names of the methods in
     /// the order in which they should be converted to "regular" generic methods.
-    fn order<I>(adt_name: &str, nested_method_infos: I) -> CustomResult<Vec<String>>
+    fn order<I>(adt_name: &str, nested_method_infos: I) -> LangResult<Vec<String>>
     where
         I: IntoIterator<Item = &'a NestedMethodInfo>,
     {

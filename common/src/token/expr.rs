@@ -7,7 +7,7 @@ use super::{
     stmt::Modifier,
 };
 use crate::{
-    error::{CustomResult, LangError, LangErrorKind},
+    error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     util, BlockId,
@@ -34,7 +34,7 @@ pub enum Expr {
 }
 
 impl Expr {
-    pub fn get_expr_type(&self) -> CustomResult<Ty> {
+    pub fn get_expr_type(&self) -> LangResult<Ty> {
         Ok(match self {
             Expr::Lit(_, Some(ty), _) | Expr::Type(ty, _) => ty.clone(),
             Expr::Var(var) => {
@@ -100,7 +100,7 @@ impl Expr {
         })
     }
 
-    pub fn get_expr_type_mut(&mut self) -> CustomResult<&mut Ty> {
+    pub fn get_expr_type_mut(&mut self) -> LangResult<&mut Ty> {
         let file_pos = self.file_pos().cloned();
 
         Ok(match self {
@@ -435,7 +435,7 @@ impl FuncCall {
 
     /// Returns the "full name" which is the name containing possible ADT
     /// and generics as well.
-    pub fn full_name(&self) -> CustomResult<String> {
+    pub fn full_name(&self) -> LangResult<String> {
         let (adt_name, adt_generics) = if let Some(adt_ty) = &self.method_adt {
             if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
                 if inner_ty.is_adt() {
@@ -552,7 +552,7 @@ impl AdtInit {
 
     /// Returns the "full name" which is the name containing possible generics
     /// as well.
-    pub fn full_name(&mut self) -> CustomResult<String> {
+    pub fn full_name(&mut self) -> LangResult<String> {
         let adt_init_generics = if let Some(generics) = self.generics() {
             Some(generics.clone())
         } else {

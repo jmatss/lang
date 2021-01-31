@@ -1,8 +1,9 @@
 use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::{
-        CustomResult, LangError,
+        LangError,
         LangErrorKind::{self, CodeGenError},
+        LangResult,
     },
     file::FilePosition,
     token::{
@@ -46,7 +47,7 @@ impl<'ctx> BranchInfo<'ctx> {
         &self,
         index: usize,
         file_pos: &FilePosition,
-    ) -> CustomResult<BasicBlock<'ctx>> {
+    ) -> LangResult<BasicBlock<'ctx>> {
         if let Some(basic_block) = self.if_cases.get(index) {
             Ok(*basic_block)
         } else {
@@ -63,7 +64,7 @@ impl<'ctx> BranchInfo<'ctx> {
         &self,
         index: usize,
         file_pos: &FilePosition,
-    ) -> CustomResult<BasicBlock<'ctx>> {
+    ) -> LangResult<BasicBlock<'ctx>> {
         if let Some(basic_block) = self.if_branches.get(index) {
             Ok(*basic_block)
         } else {
@@ -85,7 +86,7 @@ enum CodeGenTy {
 }
 
 impl CodeGenTy {
-    fn new(ty: &Ty, file_pos: Option<FilePosition>) -> CustomResult<Self> {
+    fn new(ty: &Ty, file_pos: Option<FilePosition>) -> LangResult<Self> {
         // TODO: Add more types.
         match ty {
             Ty::CompoundType(inner_ty, ..) => match inner_ty {
@@ -113,7 +114,7 @@ impl CodeGenTy {
     }
 
     /// Helper function to get the given `value` as a integer const.
-    fn as_int_const<'ctx>(&self, value: AnyValueEnum<'ctx>) -> CustomResult<IntValue<'ctx>> {
+    fn as_int_const<'ctx>(&self, value: AnyValueEnum<'ctx>) -> LangResult<IntValue<'ctx>> {
         let value = match self {
             CodeGenTy::Int(_) => value,
 
@@ -146,7 +147,7 @@ impl CodeGenTy {
         &self,
         builder: &Builder<'ctx>,
         value: AnyValueEnum<'ctx>,
-    ) -> CustomResult<IntValue<'ctx>> {
+    ) -> LangResult<IntValue<'ctx>> {
         let value = match self {
             CodeGenTy::Int(_) => value,
 
@@ -191,7 +192,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         file_pos: &FilePosition,
         id: BlockId,
         body: &mut [AstToken],
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         self.cur_block_id = id;
 
         match header {
@@ -257,7 +258,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    fn alloc_param(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
+    fn alloc_param(&self, var: &Var) -> LangResult<PointerValue<'ctx>> {
         if let Some(func) = self.cur_func {
             let entry = func
                 .get_first_basic_block()
@@ -282,7 +283,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         file_pos: &FilePosition,
         func_id: BlockId,
         body: &mut [AstToken],
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         let fn_val = if let Some(fn_val) = self.module.get_function(&func.full_name()?) {
             fn_val
         } else {
@@ -370,7 +371,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         func: &Function,
         file_pos: Option<FilePosition>,
         linkage_opt: Option<Linkage>,
-    ) -> CustomResult<FunctionValue<'ctx>> {
+    ) -> LangResult<FunctionValue<'ctx>> {
         let param_types = if let Some(params) = &func.parameters {
             let mut inner_types = Vec::with_capacity(params.len());
             for param in params {
@@ -427,7 +428,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         file_pos: &FilePosition,
         id: BlockId,
         body: &mut [AstToken],
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         let cur_func = self.cur_func.ok_or_else(|| {
             self.err(
                 "cur_func is None for \"Anon\".".into(),
@@ -488,7 +489,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         file_pos: &FilePosition,
         id: BlockId,
         body: &mut [AstToken],
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         let cur_block = self.cur_basic_block.ok_or_else(|| {
             self.err(
                 "cur_block is None for \"If\".".into(),
@@ -589,7 +590,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         index: usize,
         body: &mut [AstToken],
         branch_info: &BranchInfo<'ctx>,
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         self.cur_block_id = id;
 
         let if_case_block = branch_info.get_if_case(index, file_pos)?;
@@ -649,7 +650,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         expr: &mut Expr,
         id: BlockId,
         body: &mut [AstToken],
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         let file_pos = expr.file_pos().cloned();
         let start_block = self.cur_basic_block.ok_or_else(|| {
             self.err(
@@ -804,7 +805,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn compile_struct(&mut self, struct_: &Adt) -> CustomResult<()> {
+    pub(super) fn compile_struct(&mut self, struct_: &Adt) -> LangResult<()> {
         debug!("Compiling struct -- {:#?}", struct_);
 
         let members = &struct_.members;
@@ -838,7 +839,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn compile_enum(&mut self, enum_: &Adt) -> CustomResult<()> {
+    pub(super) fn compile_enum(&mut self, enum_: &Adt) -> LangResult<()> {
         debug!("Compiling enum -- {:#?}", enum_);
 
         // Create a new struct type containing a single member that has the type
@@ -882,7 +883,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// The union will be represented with a "struct" contain a i8 `tag` member
     /// indicating which variant it is followed by an array of i8s with the size
     /// of the largest member.
-    pub(super) fn compile_union(&mut self, union: &Adt) -> CustomResult<()> {
+    pub(super) fn compile_union(&mut self, union: &Adt) -> LangResult<()> {
         debug!("Compiling union -- {:#?}", union);
 
         let mut largest_size = 0;
@@ -933,7 +934,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         file_pos: &FilePosition,
         id: BlockId,
         body: &mut [AstToken],
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         let mut cur_block = self.cur_basic_block.ok_or_else(|| {
             self.err(
                 "cur_block is None for \"While\".".into(),

@@ -1,7 +1,7 @@
 use crate::generator::CodeGen;
 use analyze::{block::BlockInfo, util::order::dependency_order};
 use common::{
-    error::CustomResult,
+    error::LangResult,
     token::{
         ast::AstToken,
         block::{AdtKind, BlockHeader},
@@ -17,7 +17,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// of the type.
     /// This function shall be ran before the function/method prototypes
     /// are compiled since they might contains references to types.
-    pub(super) fn compile_type_decl(&mut self, ast_token: &mut AstToken) -> CustomResult<()> {
+    pub(super) fn compile_type_decl(&mut self, ast_token: &mut AstToken) -> LangResult<()> {
         self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
         // TODO:
@@ -54,7 +54,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// This will be done at the start of the code generation so that one doesn't
     /// have do declare prototypes manual in the source before the use of the
     /// function/method.
-    pub(super) fn compile_func_decl(&mut self, mut ast_token: &mut AstToken) -> CustomResult<()> {
+    pub(super) fn compile_func_decl(&mut self, mut ast_token: &mut AstToken) -> LangResult<()> {
         self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
         if let AstToken::Block(header, file_pos, id, ref mut body) = &mut ast_token {

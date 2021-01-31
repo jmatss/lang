@@ -75,7 +75,10 @@ function main() -> i32
     assert(correct)
     if val is jkl.b { correct = true } else { correct = false }
     assert(correct)
-    
+
+    jkl.b = 78.90
+    assert(jkl.b == 78.90)
+
     // Should result in a compile error since `T` isn't known.
     //var mno = TestGenericUnion { a = 78 }
 

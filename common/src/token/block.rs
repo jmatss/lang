@@ -6,7 +6,7 @@ use super::{
 };
 
 use crate::{
-    error::{CustomResult, LangError, LangErrorKind},
+    error::{LangError, LangErrorKind, LangResult},
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     util,
 };
@@ -448,7 +448,7 @@ impl Function {
 
     /// Returns the "full name" which is the name containing possible structure
     /// and generics as well.
-    pub fn full_name(&self) -> CustomResult<String> {
+    pub fn full_name(&self) -> LangResult<String> {
         if let Some(ty) = &self.method_adt {
             let (structure_name, structure_generics) =
                 if let Ty::CompoundType(inner_ty, generics, ..) = ty {

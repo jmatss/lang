@@ -1,6 +1,6 @@
 use super::{generics::Generics, inner_ty::InnerTy};
 use crate::{
-    error::{CustomResult, LangError, LangErrorKind},
+    error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
     token::expr::Expr,
     type_info::TypeInfo,
@@ -1013,7 +1013,7 @@ impl Ty {
         ))
     }
 
-    pub fn assert_compatible(&self, other: &Ty) -> CustomResult<()> {
+    pub fn assert_compatible(&self, other: &Ty) -> LangResult<()> {
         if self.is_compatible(other) {
             Ok(())
         } else {

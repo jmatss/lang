@@ -1,7 +1,7 @@
 use crate::{expr::ExprTy, generator::CodeGen};
 use analyze::block::BlockInfo;
 use common::{
-    error::CustomResult,
+    error::LangResult,
     file::FilePosition,
     token::{
         block::Adt,
@@ -29,7 +29,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         op: &mut Op,
         expr_ty: ExprTy,
         file_pos: Option<FilePosition>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         match op {
             Op::BinOp(ref mut bin_op) => match expr_ty {
                 ExprTy::LValue => {
@@ -45,7 +45,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         bin_op: &mut BinOp,
         file_pos: Option<FilePosition>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let ret_type = if let Some(ref ret_type) = bin_op.ret_type {
             self.compile_type(&ret_type, file_pos)?
         } else {
@@ -192,7 +192,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         un_op: &mut UnOp,
         expr_ty: ExprTy,
         file_pos: Option<FilePosition>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let ret_type = if let Some(ref ret_type) = un_op.ret_type {
             self.compile_type(&ret_type, file_pos)?
         } else {
@@ -363,7 +363,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         // TODO: Will probably need to check both sides before doing a
         //       cast. For example now, if the ret_type is float,
         //       the left will be casted into a float. But it assumes
@@ -457,7 +457,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         op: &BinOperator,
         lhs: BasicValueEnum<'ctx>,
         rhs: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         // Ensure that lhs and rhs has the same type.
         match (lhs.get_type(), rhs.get_type()) {
             (BasicTypeEnum::ArrayType(_), BasicTypeEnum::ArrayType(_))
@@ -608,7 +608,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::FloatType(_) => {
                 if is_const {
@@ -656,7 +656,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::FloatType(_) => {
                 if is_const {
@@ -707,7 +707,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::FloatType(_) => {
                 if is_const {
@@ -759,7 +759,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::FloatType(_) => {
                 if is_const {
@@ -824,7 +824,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::FloatType(_) => {
                 if is_const {
@@ -888,7 +888,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
                 if is_const {
@@ -922,7 +922,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
                 if is_const {
@@ -956,7 +956,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
                 if is_const {
@@ -990,7 +990,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
                 if is_const {
@@ -1025,7 +1025,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         is_const: bool,
         left: BasicValueEnum<'ctx>,
         right: BasicValueEnum<'ctx>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
                 // TODO: Sign extension.
@@ -1068,7 +1068,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ret_type: AnyTypeEnum<'ctx>,
         left: BasicValueEnum<'ctx>,
         right_expr: &mut Expr,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         // TODO: Const.
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
@@ -1136,7 +1136,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ret_type: AnyTypeEnum<'ctx>,
         left: BasicValueEnum<'ctx>,
         right_expr: &mut Expr,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         // TODO: Const.
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
@@ -1202,7 +1202,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// Dereferences the given expression. This function will return a pointer
     /// to a allocation containing the actual value. If one wants the pointer
     /// to the value or the value itself is up to the caller.
-    fn compile_un_op_deref(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_un_op_deref(&mut self, un_op: &mut UnOp) -> LangResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
         un_op.is_const = CodeGen::is_const(&[any_value]);
 
@@ -1226,7 +1226,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_un_op_address(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_un_op_address(&mut self, un_op: &mut UnOp) -> LangResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
         un_op.is_const = CodeGen::is_const(&[any_value]);
 
@@ -1257,7 +1257,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// Access a member of an array. This function will return a pointer
     /// to a allocation containing the actual value. If one wants the pointer
     /// to the value or the value itself is up to the caller.
-    fn compile_un_op_array_access(&mut self, un_op: &mut UnOp) -> CustomResult<PointerValue<'ctx>> {
+    fn compile_un_op_array_access(&mut self, un_op: &mut UnOp) -> LangResult<PointerValue<'ctx>> {
         let dim = if let UnOperator::ArrayAccess(dim) = &mut un_op.operator {
             dim
         } else {
@@ -1323,7 +1323,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         un_op: &mut UnOp,
         expr_ty: ExprTy,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let idx = if let UnOperator::AdtAccess(_, idx) = &un_op.operator {
             idx.unwrap()
         } else {
@@ -1365,7 +1365,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         un_op: &mut UnOp,
         expr_ty: ExprTy,
         idx: u32,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let mut any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
         un_op.is_const = CodeGen::is_const(&[any_value]);
 
@@ -1430,7 +1430,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         expr_ty: ExprTy,
         idx: u32,
         union_: Rc<RefCell<Adt>>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let address_space = AddressSpace::Generic;
 
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
@@ -1505,7 +1505,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     /// This function "creates" a instance of a member of a specific enum.
     /// This instance will be a const value.
-    fn compile_un_op_enum_access(&mut self, un_op: &mut UnOp) -> CustomResult<AnyValueEnum<'ctx>> {
+    fn compile_un_op_enum_access(&mut self, un_op: &mut UnOp) -> LangResult<AnyValueEnum<'ctx>> {
         let (member_name, block_id) =
             if let UnOperator::EnumAccess(member_name, block_id) = &un_op.operator {
                 (member_name.clone(), *block_id)
@@ -1572,7 +1572,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
         un_op: &mut UnOp,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
         un_op.is_const = CodeGen::is_const(&[any_value]);
 
@@ -1613,7 +1613,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         ret_type: AnyTypeEnum<'ctx>,
         un_op: &mut UnOp,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
         un_op.is_const = CodeGen::is_const(&[any_value]);
 

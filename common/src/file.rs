@@ -1,6 +1,6 @@
 use std::{fmt::Debug, write};
 
-use crate::error::{CustomResult, LangError, LangErrorKind};
+use crate::error::{LangError, LangErrorKind, LangResult};
 
 pub type FileId = u64;
 
@@ -59,7 +59,7 @@ impl FilePosition {
     /// Sets the information about the end of the current `self` FilePosition
     /// from the given `file_pos_last`. This includes the end line/column number
     /// and the length of this `self` FilePosition.
-    pub fn set_end(&mut self, file_pos_last: &FilePosition) -> CustomResult<&mut Self> {
+    pub fn set_end(&mut self, file_pos_last: &FilePosition) -> LangResult<&mut Self> {
         self.set_end_pos(file_pos_last.line_end, file_pos_last.column_end)
             .set_end_offset(file_pos_last.offset + file_pos_last.length)
     }
@@ -78,7 +78,7 @@ impl FilePosition {
     /// The `end_offset` should point to the index to the first byte AFTER the
     /// current token. This means that if the token is one byte long, `end_offset`
     /// will be 1 greater that `start_offset`.
-    pub fn set_end_offset(&mut self, offset_end: u64) -> CustomResult<&mut Self> {
+    pub fn set_end_offset(&mut self, offset_end: u64) -> LangResult<&mut Self> {
         if offset_end >= self.offset {
             self.length = offset_end - self.offset;
             Ok(self)

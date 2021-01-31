@@ -1,7 +1,7 @@
 use super::generator::CodeGen;
 use analyze::block::BlockInfo;
 use common::{
-    error::{CustomResult, LangError, LangErrorKind::CodeGenError},
+    error::{LangError, LangErrorKind::CodeGenError, LangResult},
     BlockId,
 };
 use inkwell::{
@@ -12,7 +12,7 @@ use inkwell::{
 use std::convert::TryFrom;
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    pub(super) fn any_into_basic_value(any_value: AnyValueEnum) -> CustomResult<BasicValueEnum> {
+    pub(super) fn any_into_basic_value(any_value: AnyValueEnum) -> LangResult<BasicValueEnum> {
         BasicValueEnum::try_from(any_value).map_err(|_| {
             LangError::new(
                 format!(
@@ -25,7 +25,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
-    pub(super) fn any_into_basic_type(any_type: AnyTypeEnum) -> CustomResult<BasicTypeEnum> {
+    pub(super) fn any_into_basic_type(any_type: AnyTypeEnum) -> LangResult<BasicTypeEnum> {
         BasicTypeEnum::try_from(any_type).map_err(|_| {
             LangError::new(
                 format!(
@@ -72,7 +72,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// Returns the BasicBlock representing the "closest" merge block from the
     /// current block. Merge blocks will be created for ex. if-statements
     /// and while-loops.
-    pub(super) fn get_merge_block(&self, id: BlockId) -> CustomResult<BasicBlock<'ctx>> {
+    pub(super) fn get_merge_block(&self, id: BlockId) -> LangResult<BasicBlock<'ctx>> {
         let mut cur_id = id;
         loop {
             if let Some(merge_block) = self.merge_blocks.get(&cur_id) {
@@ -87,7 +87,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// Returns the BasicBlock representing the "closest" merge block from the
     /// current block that is "branchable". This is merge blocks that can contain
     /// ex. "break"-statements like while-loops.
-    pub(super) fn get_branchable_merge_block(&self, id: BlockId) -> CustomResult<BasicBlock<'ctx>> {
+    pub(super) fn get_branchable_merge_block(&self, id: BlockId) -> LangResult<BasicBlock<'ctx>> {
         let mut cur_id = id;
         loop {
             let merge_block = self.get_merge_block(cur_id)?;
@@ -102,7 +102,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn get_block_info(&self, id: BlockId) -> CustomResult<&BlockInfo> {
+    fn get_block_info(&self, id: BlockId) -> LangResult<&BlockInfo> {
         self.analyze_context.block_info.get(&id).ok_or_else(|| {
             self.err(
                 format!("Unable to find block info for block with id {}", id),

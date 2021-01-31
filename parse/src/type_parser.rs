@@ -1,6 +1,6 @@
 use crate::parser::{ParseTokenIter, DEFAULT_ASSIGN_STOP_CONDS};
 use common::{
-    error::CustomResult,
+    error::LangResult,
     file::FilePosition,
     token::expr::Expr,
     ty::{
@@ -25,7 +25,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     pub fn parse(
         iter: &'a mut ParseTokenIter<'b>,
         generics: Option<&'a Generics>,
-    ) -> CustomResult<Ty> {
+    ) -> LangResult<Ty> {
         Self::new(iter, generics).parse_type()
     }
 
@@ -42,7 +42,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     ///   C                     Lang
     ///   uint32_t *(*x)[]      x: {[{u32}]}
     ///   char *x               x: {char}
-    fn parse_type(&mut self) -> CustomResult<Ty> {
+    fn parse_type(&mut self) -> LangResult<Ty> {
         let mut file_pos = self.iter.peek_file_pos()?;
 
         if let Some(lex_token) = self.iter.next_skip_space() {
@@ -150,7 +150,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     pub(crate) fn parse_type_generics(
         &mut self,
         kind: GenericsKind,
-    ) -> CustomResult<(Option<Generics>, Option<FilePosition>)> {
+    ) -> LangResult<(Option<Generics>, Option<FilePosition>)> {
         let mut generics = Generics::new();
 
         let mut file_pos = self.iter.peek_file_pos()?;
@@ -253,7 +253,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
 
     /// Gets the next lex token and assumes that it is a identifier. If it isn't,
     /// a error will be returned.
-    fn next_ident(&mut self) -> CustomResult<(String, FilePosition)> {
+    fn next_ident(&mut self) -> LangResult<(String, FilePosition)> {
         if let Some(lex_token) = self.iter.next_skip_space_line() {
             if let LexTokenKind::Ident(ident) = lex_token.kind {
                 Ok((ident, lex_token.file_pos))
@@ -276,7 +276,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
 
     /// Parses a pointer type.
     ///   {X}       // Pointer to type (is the {X} syntax be weird/ambiguous?)
-    fn parse_type_pointer(&mut self) -> CustomResult<Ty> {
+    fn parse_type_pointer(&mut self) -> LangResult<Ty> {
         let mut file_pos = self.iter.peek_file_pos()?;
 
         self.iter.next_skip_space(); // Consume the CurlyBracketBegin.
@@ -310,7 +310,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     ///   [X]       // Array of type X with unknown size (slice).
     ///   [X: 3]    // Array of type X with size 3.
     ///   [X: _]    // Array of type X with infered size.
-    fn parse_type_array(&mut self) -> CustomResult<Ty> {
+    fn parse_type_array(&mut self) -> LangResult<Ty> {
         let mut file_pos = self.iter.peek_file_pos()?;
 
         self.iter.next_skip_space(); // Consume the SquareBracketBegin.

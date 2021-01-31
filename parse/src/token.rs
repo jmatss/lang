@@ -1,5 +1,5 @@
 use common::{
-    error::{CustomResult, LangError, LangErrorKind::ParseError},
+    error::{LangError, LangErrorKind::ParseError, LangResult},
     token::stmt::Modifier,
     token::{
         expr::Expr,
@@ -58,16 +58,16 @@ pub fn get_if_expr_op(symbol: &Sym) -> Option<Operator> {
         Sym::Deref => Operator::UnaryOperator(UnOperator::Deref),
         Sym::Address => Operator::UnaryOperator(UnOperator::Address),
 
-        Sym::EqualsOperator => Operator::BinaryOperator(BinOperator::Eq),
+        Sym::DoubleEquals => Operator::BinaryOperator(BinOperator::Eq),
         Sym::NotEquals => Operator::BinaryOperator(BinOperator::Neq),
         Sym::SquareBracketBegin => Operator::BinaryOperator(BinOperator::Lt),
         Sym::SquareBracketEnd => Operator::BinaryOperator(BinOperator::Gt),
-        Sym::LessThanOrEquals => Operator::BinaryOperator(BinOperator::Lte),
-        Sym::GreaterThanOrEquals => Operator::BinaryOperator(BinOperator::Gte),
+        Sym::Lte => Operator::BinaryOperator(BinOperator::Lte),
+        Sym::Gte => Operator::BinaryOperator(BinOperator::Gte),
 
-        Sym::Multiplication => Operator::BinaryOperator(BinOperator::Mul),
-        Sym::Division => Operator::BinaryOperator(BinOperator::Div),
-        Sym::Modulus => Operator::BinaryOperator(BinOperator::Mod),
+        Sym::Mul => Operator::BinaryOperator(BinOperator::Mul),
+        Sym::Div => Operator::BinaryOperator(BinOperator::Div),
+        Sym::Mod => Operator::BinaryOperator(BinOperator::Mod),
 
         Sym::BitAnd => Operator::BinaryOperator(BinOperator::BitAnd),
         Sym::BitOr => Operator::BinaryOperator(BinOperator::BitOr),
@@ -100,11 +100,11 @@ pub fn get_if_stmt_op(lex_token: &LexToken) -> Option<AssignOperator> {
     if let LexTokenKind::Sym(ref symbol) = lex_token.kind {
         Some(match symbol {
             Sym::Equals => AssignOperator::Assignment,
-            Sym::AssignAddition => AssignOperator::AssignAdd,
-            Sym::AssignSubtraction => AssignOperator::AssignSub,
-            Sym::AssignMultiplication => AssignOperator::AssignMul,
-            Sym::AssignDivision => AssignOperator::AssignDiv,
-            Sym::AssignModulus => AssignOperator::AssignMod,
+            Sym::AssignAdd => AssignOperator::AssignAdd,
+            Sym::AssignSub => AssignOperator::AssignSub,
+            Sym::AssignMul => AssignOperator::AssignMul,
+            Sym::AssignDiv => AssignOperator::AssignDiv,
+            Sym::AssignMod => AssignOperator::AssignMod,
             Sym::AssignBitAnd => AssignOperator::AssignBitAnd,
             Sym::AssignBitOr => AssignOperator::AssignBitOr,
             Sym::AssignBitXor => AssignOperator::AssignBitXor,
@@ -249,7 +249,7 @@ impl Operator {
     }
 
     // TODO: FilePosition.
-    pub fn info(&self) -> CustomResult<OperatorInfo> {
+    pub fn info(&self) -> LangResult<OperatorInfo> {
         if let Some(info) = self.lookup() {
             Ok(OperatorInfo {
                 eval_ltor: info.0,

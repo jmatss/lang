@@ -4,7 +4,7 @@ use crate::{
     type_parser::TypeParser,
 };
 use common::{
-    error::CustomResult,
+    error::LangResult,
     file::FilePosition,
     token::{
         block::AdtKind,
@@ -60,7 +60,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     pub fn parse(
         iter: &'a mut ParseTokenIter<'b>,
         stop_conds: &'a [Sym],
-    ) -> CustomResult<Option<Expr>> {
+    ) -> LangResult<Option<Expr>> {
         // Take the file pos of the first symbol of the expression if possible.
         // This will be used if a more accurate/precise file_pos can't be used.
         let file_pos = iter.peek_file_pos()?;
@@ -94,7 +94,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     /// See https://www.andr.mu/logs/the-shunting-yard-algorithm/ for a good
     /// explanation of the algorithm.
     /// Return `true` if the expression was empty.
-    fn shunting_yard(&mut self) -> CustomResult<(bool, Option<FilePosition>)> {
+    fn shunting_yard(&mut self) -> LangResult<(bool, Option<FilePosition>)> {
         let mark = self.iter.mark();
 
         let mut file_pos = self.iter.peek_file_pos()?;
@@ -331,7 +331,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     }
 
     /// Adds a operand into the "shunting".
-    fn shunt_operand(&mut self, expr: Expr) -> CustomResult<()> {
+    fn shunt_operand(&mut self, expr: Expr) -> LangResult<()> {
         if !self.prev_was_operand {
             self.outputs.push(Output::Operand(expr));
             self.prev_was_operand = true;
@@ -360,7 +360,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     }
 
     /// Adds a orpeator into the "shunting".
-    fn shunt_operator(&mut self, op: Operator) -> CustomResult<()> {
+    fn shunt_operator(&mut self, op: Operator) -> LangResult<()> {
         match op {
             Operator::ParenthesisBegin => {
                 self.parenthesis_count += 1;
@@ -417,7 +417,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     }
 
     /// Run logic for adding a Operator into the "shunting".
-    fn add_operator(&mut self, op: Operator) -> CustomResult<()> {
+    fn add_operator(&mut self, op: Operator) -> LangResult<()> {
         let op_info = op.info()?;
 
         self.prev_was_operand = false;
@@ -462,7 +462,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
     // TODO: Should empty expression be allowed?
     /// Converts the given "outputs" in reverse polsih notation to an expression.
-    fn rev_polish_to_expr(&mut self, full_expr_file_pos: &FilePosition) -> CustomResult<Expr> {
+    fn rev_polish_to_expr(&mut self, full_expr_file_pos: &FilePosition) -> LangResult<Expr> {
         let mut expr_stack = Vec::new();
         let outputs = std::mem::take(&mut self.outputs);
 
@@ -558,7 +558,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         Ok(expr_stack.remove(0))
     }
 
-    fn parse_expr_ident(&mut self, ident: &str, mut file_pos: FilePosition) -> CustomResult<Expr> {
+    fn parse_expr_ident(&mut self, ident: &str, mut file_pos: FilePosition) -> LangResult<Expr> {
         // If the identifier is followed by a "PointyBracketBegin" it can either
         // be a start of a generic list for structures/function, or it can also
         // be a "LessThan" compare operation. Try to parse it as a generic list,

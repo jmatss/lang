@@ -9,7 +9,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-pub type CustomResult<T> = Result<T, LangError>;
+pub type LangResult<T> = Result<T, LangError>;
 
 /// Returned from function that checks cyclic dependencies. The two Strings will
 /// be the names/idents of the "things" that causes the cyclic dependency.

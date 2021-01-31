@@ -1,44 +1,43 @@
-use super::token::LexTokenKind;
-use crate::token::Sym;
-use crate::{char_iter::CharIter, token::LexToken};
 use common::{
-    error::LangError,
+    error::{LangError, LangErrorKind, LangResult},
     file::{FileId, FileInfo, FilePosition},
-};
-use common::{
-    error::{CustomResult, LangErrorKind::LexError},
     token::lit::Lit,
 };
 use log::debug;
+
+use crate::{
+    char_iter::CharIter,
+    token::{LexToken, LexTokenKind, Sym},
+};
 
 /// Lexes the characters in the source code to LexToken's and returns a vector
 /// containing all lex tokens.
 pub fn lex(file_nr: FileId, file_info: &FileInfo) -> Result<Vec<LexToken>, Vec<LangError>> {
     let mut content = std::fs::read(&file_info.full_path()).map_err(|e| vec![e.into()])?;
-
     let mut iter = LexTokenIter::new(&mut content, file_nr);
-    let mut lex_token_vec = Vec::new();
+
+    let mut lex_tokens = Vec::new();
     let mut errors = Vec::new();
 
     loop {
         match iter.next_token() {
             Ok(lex_token) if lex_token.is_eof() => {
-                lex_token_vec.push(lex_token);
+                lex_tokens.push(lex_token);
                 break;
             }
-            Ok(lex_token) => lex_token_vec.push(lex_token),
+            Ok(lex_token) => lex_tokens.push(lex_token),
             Err(e) => errors.push(e),
         }
     }
 
     if errors.is_empty() {
-        Ok(lex_token_vec)
+        Ok(lex_tokens)
     } else {
         Err(errors)
     }
 }
 
-pub struct LexTokenIter<'a> {
+struct LexTokenIter<'a> {
     /// Use to iterate over the character tokens.
     iter: CharIter<'a>,
 
@@ -64,7 +63,7 @@ pub struct LexTokenIter<'a> {
 }
 
 impl<'a> LexTokenIter<'a> {
-    pub fn new(content: &'a mut [u8], file_nr: u64) -> Self {
+    fn new(content: &'a mut [u8], file_nr: u64) -> Self {
         Self {
             iter: CharIter::new(content),
             file_nr,
@@ -76,7 +75,7 @@ impl<'a> LexTokenIter<'a> {
     }
 
     /// Gets the next LexToken from the iterator.
-    fn next_token(&mut self) -> CustomResult<LexToken> {
+    fn next_token(&mut self) -> LangResult<LexToken> {
         // A radix of 10 will match all type of numbers since non decimal numbers
         // are prefixed with "0x", "0b" or "0o" (which starts with valid
         // radix 10 numbers).
@@ -88,13 +87,13 @@ impl<'a> LexTokenIter<'a> {
         self.file_pos = FilePosition::new(self.file_nr, self.offset, self.line, self.column);
 
         let kind = if let Some((c1, c2, c3)) = self.iter.peek_three() {
-            if LexTokenIter::valid_linebreak(c1, c2) {
+            if LexTokenIter::is_valid_linebreak(c1, c2) {
                 self.get_linebreak()?
-            } else if LexTokenIter::valid_whitespace(c1) {
+            } else if LexTokenIter::is_valid_whitespace(c1) {
                 self.get_whitespaces()
-            } else if LexTokenIter::valid_number(c1, RADIX) {
+            } else if LexTokenIter::is_valid_number(c1, RADIX) {
                 self.get_number()
-            } else if LexTokenIter::valid_identifier_start(c1) {
+            } else if LexTokenIter::is_valid_identifier_start(c1) {
                 let ident: String = self.get_ident()?;
 
                 // Check if this identifier is a valid:
@@ -131,7 +130,7 @@ impl<'a> LexTokenIter<'a> {
                     c1, c2, c3
                 );
                 // Consume a token to move the iterator forward.
-                self.iter.next();
+                self.iter.next_char();
                 return Err(self.err(msg));
             }
         } else {
@@ -166,54 +165,46 @@ impl<'a> LexTokenIter<'a> {
     /// This function can NOT be used when parsing characters that might be UTF-8
     /// characters which are greater than one byte. This is because `self.column`
     /// counts in UTF-8 characters while `self.offset` counts bytes.
-    #[inline]
     fn inc_column_and_offset(&mut self, n: u64) {
         self.column += n;
         self.offset += n;
     }
 
-    #[inline]
-    fn valid_identifier_start(c: char) -> bool {
+    fn is_valid_identifier_start(c: char) -> bool {
         c.is_alphabetic() || c == '_'
     }
 
-    #[inline]
-    fn valid_identifier(c: char) -> bool {
-        LexTokenIter::valid_identifier_start(c) || LexTokenIter::valid_number(c, 10)
+    fn is_valid_identifier(c: char) -> bool {
+        LexTokenIter::is_valid_identifier_start(c) || LexTokenIter::is_valid_number(c, 10)
     }
 
-    #[inline]
-    fn valid_number(c: char, radix: u32) -> bool {
+    fn is_valid_number(c: char, radix: u32) -> bool {
         c.is_digit(radix)
     }
 
-    #[inline]
-    fn valid_linebreak(c: char, c_next: Option<char>) -> bool {
-        LexTokenIter::valid_linebreak_n(c) || LexTokenIter::valid_linebreak_rn(c, c_next)
+    fn is_valid_linebreak(c: char, c_next: Option<char>) -> bool {
+        LexTokenIter::is_valid_linebreak_n(c) || LexTokenIter::is_valid_linebreak_rn(c, c_next)
     }
 
-    #[inline]
-    fn valid_linebreak_n(c: char) -> bool {
+    fn is_valid_linebreak_n(c: char) -> bool {
         c == '\n'
     }
 
-    #[inline]
-    fn valid_linebreak_rn(c: char, c_next: Option<char>) -> bool {
+    fn is_valid_linebreak_rn(c: char, c_next: Option<char>) -> bool {
         c == '\r' && c_next.map_or(false, |x| x == '\n')
     }
 
     // char.is_whitespace() includes linebreaks, so need to check valid_linebreak first.
-    #[inline]
-    fn valid_whitespace(c: char) -> bool {
+    fn is_valid_whitespace(c: char) -> bool {
         c.is_whitespace()
     }
 
     /// Returns the identifier at the current position of the iterator.
-    fn get_ident(&mut self) -> CustomResult<String> {
+    fn get_ident(&mut self) -> LangResult<String> {
         let mut result = String::new();
 
-        while let Some(c) = self.iter.next() {
-            if LexTokenIter::valid_identifier(c) {
+        while let Some(c) = self.iter.next_char() {
+            if LexTokenIter::is_valid_identifier(c) {
                 result.push(c);
             } else {
                 self.iter.rewind();
@@ -252,9 +243,8 @@ impl<'a> LexTokenIter<'a> {
             self.inc_column_and_offset(2);
         }
 
-        // Parse the number. If the this is a integer, the whole number will
-        // be parsed. If this is a float, the number after the dot will be parsed
-        // in the logic below.
+        // Only parses a whole number, so if the number that is being lexed is a
+        // float, the part after the dot will be parsed in later logic below.
         let mut number = self.get_integer(radix);
 
         // Will be set to true if the column number should be decrement with one.
@@ -267,7 +257,7 @@ impl<'a> LexTokenIter<'a> {
         let is_float = if let Some(('.', Some(next))) = self.iter.peek_two() {
             self.iter.skip(1); // Skip over the "dot" in the iterator.
 
-            if LexTokenIter::valid_number(next, radix) {
+            if LexTokenIter::is_valid_number(next, radix) {
                 number = [number, self.get_integer(radix)].join(".");
                 zero_char_appended = false;
             } else {
@@ -300,8 +290,8 @@ impl<'a> LexTokenIter<'a> {
     fn get_integer(&mut self, radix: u32) -> String {
         let mut numbers = Vec::new();
 
-        while let Some(c) = self.iter.next() {
-            if LexTokenIter::valid_number(c, radix) {
+        while let Some(c) = self.iter.next_char() {
+            if LexTokenIter::is_valid_number(c, radix) {
                 numbers.push(c);
             } else {
                 self.iter.rewind();
@@ -326,12 +316,11 @@ impl<'a> LexTokenIter<'a> {
     //
     // TODO: Formatting string. Example "num x: {x}"  (== format!("num x: {}", x))
     /// Returns the string or char literal at the current position of the iterator.
-    /// Will also escape any escape characters in the process.
-    fn get_lit(&mut self, literal_symbol: Sym) -> CustomResult<String> {
+    /// Will also escape any "escapable" characters in the process.
+    fn get_lit(&mut self, literal_symbol: Sym) -> LangResult<String> {
         let mut chars = Vec::new();
 
         // Remove the start "symbol" (single or double-quote).
-        // Starts at 1 since they includes the start symbol.
         self.iter.skip(1);
         let mut column_count = 1;
         let mut column_count_bytes = 1;
@@ -341,7 +330,7 @@ impl<'a> LexTokenIter<'a> {
         // In this loop all escaped characters will be substituted with the
         // corresponding "raw" escape symbols.
         let mut prev_slash = false;
-        while let Some(ch) = self.iter.next() {
+        while let Some(ch) = self.iter.next_char() {
             column_count += 1;
             column_count_bytes += ch.len_utf8() as u64;
 
@@ -399,9 +388,6 @@ impl<'a> LexTokenIter<'a> {
                     prev_slash = false;
                 }
 
-                // For every char that isn't escaped, if it is the `literal_symbol`,
-                // this is the end of the literal, break out of the loop.
-                // For all other characters, just add them to the literal result.
                 _ => {
                     if let Some((LexTokenKind::Sym(s), _)) = LexToken::get_if_symbol_char(ch) {
                         if s == literal_symbol {
@@ -423,16 +409,16 @@ impl<'a> LexTokenIter<'a> {
     /// Escapes a character sequence in the format: "\xAA" inside a string or
     /// char literal into a single character. The two digits are hex.
     /// Returns the amount of characters that have been parsed (2).
-    fn escape_hex(&mut self) -> CustomResult<(char, usize)> {
+    fn escape_hex(&mut self) -> LangResult<(char, usize)> {
         let radix = 16;
         let first = self
             .iter
-            .next()
+            .next_char()
             .and_then(|ch| ch.to_digit(radix))
             .ok_or_else(|| self.err("None when parsing first digit \"raw byte\".".into()))?;
         let second = self
             .iter
-            .next()
+            .next_char()
             .and_then(|ch| ch.to_digit(radix))
             .ok_or_else(|| self.err("None when parsing second digit \"raw byte\".".into()))?;
 
@@ -453,12 +439,12 @@ impl<'a> LexTokenIter<'a> {
     ///
     /// The amount of lexed characters will be returned in the tuple as `usize`.
     /// This count includes the braces as well.
-    fn escape_unicode(&mut self) -> CustomResult<(char, usize)> {
-        let next_char = self.iter.next();
+    fn escape_unicode(&mut self) -> LangResult<(char, usize)> {
+        let next_char = self.iter.next_char();
         if let Some('{') = next_char {
         } else {
             return Err(self.err(format!(
-                "Expected `{{`character after `\\x` in unicode escape, got: {:?}",
+                "Expected `{{`character after `\\u` in unicode escape, got: {:?}",
                 next_char
             )));
         }
@@ -469,7 +455,7 @@ impl<'a> LexTokenIter<'a> {
 
         let mut i = 0;
         loop {
-            let next_char = self.iter.next();
+            let next_char = self.iter.next_char();
             match next_char {
                 Some('}') => {
                     break;
@@ -482,7 +468,7 @@ impl<'a> LexTokenIter<'a> {
                     )));
                 }
 
-                Some(c) if LexTokenIter::valid_number(c, RADIX) => {
+                Some(c) if LexTokenIter::is_valid_number(c, RADIX) => {
                     chars.push(c);
                 }
 
@@ -513,14 +499,14 @@ impl<'a> LexTokenIter<'a> {
     }
 
     /// Returns the string literal at the current position of the iterator.
-    fn get_lit_string(&mut self) -> CustomResult<LexTokenKind> {
+    fn get_lit_string(&mut self) -> LangResult<LexTokenKind> {
         Ok(LexTokenKind::Lit(Lit::String(
             self.get_lit(Sym::DoubleQuote)?,
         )))
     }
 
     /// Returns the char literal at the current position of the iterator.
-    fn get_lit_char(&mut self) -> CustomResult<LexTokenKind> {
+    fn get_lit_char(&mut self) -> LangResult<LexTokenKind> {
         // Since this is a char literal, need to make sure that the given
         // literal has the character length "1".
         let char_lit = self.get_lit(Sym::SingleQuote)?;
@@ -536,7 +522,7 @@ impl<'a> LexTokenIter<'a> {
     }
 
     /// Returns the line break at the current position of the iterator.
-    fn get_linebreak(&mut self) -> CustomResult<LexTokenKind> {
+    fn get_linebreak(&mut self) -> LangResult<LexTokenKind> {
         match self.iter.peek_two() {
             Some(('\n', _)) => {
                 self.iter.skip(1);
@@ -562,12 +548,11 @@ impl<'a> LexTokenIter<'a> {
     fn get_whitespaces(&mut self) -> LexTokenKind {
         let mut count = 0;
 
-        while let Some(c) = self.iter.next() {
-            let c_next = self.iter.peek();
-
+        while let Some(c1) = self.iter.next_char() {
             // Since line breaks counts as whitespaces in rust, need to manually make
             // sure that the current char(s) isn't a linebreak in the if-statement.
-            if LexTokenIter::valid_whitespace(c) && !LexTokenIter::valid_linebreak(c, c_next) {
+            let c2 = self.iter.peek();
+            if LexTokenIter::is_valid_whitespace(c1) && !LexTokenIter::is_valid_linebreak(c1, c2) {
                 count += 1;
             } else {
                 self.iter.rewind();
@@ -586,13 +571,10 @@ impl<'a> LexTokenIter<'a> {
     fn get_comment_single(&mut self, n: usize) -> LexTokenKind {
         let mut comment = Vec::new();
 
-        // Consume the "CommentSingleLine" symbol.
-        for _ in 0..n {
-            self.iter.next();
-        }
+        self.iter.skip(n); // Consume the "CommentSingleLine" symbol.
 
-        while let Some(c) = self.iter.next() {
-            if LexTokenIter::valid_linebreak(c, self.iter.peek()) {
+        while let Some(c) = self.iter.next_char() {
+            if LexTokenIter::is_valid_linebreak(c, self.iter.peek()) {
                 self.iter.rewind();
                 break;
             }
@@ -607,15 +589,12 @@ impl<'a> LexTokenIter<'a> {
     }
 
     /// Lexes a multi line comment until the matching "CommentMultiLineEnd" is
-    /// found. Comment can be "recursive". This function returns the comment contents.
+    /// found. Comments can be nested. This function returns the comment contents.
     /// The n is the size of the "CommentMultiLineBegin" symbol.
     fn get_comment_multi(&mut self, n: usize) -> LexTokenKind {
         let mut comment = Vec::new();
 
-        // Consume the "CommentMultiLineBegin" symbol.
-        for _ in 0..n {
-            self.iter.next();
-        }
+        self.iter.skip(n); // Consume the "CommentMultiLineBegin" symbol.
 
         // Keep a count of all "CommentMultiLineBegin" seen. This variable is
         // incremented for every "CommentMultiLineBegin" and decrement for every
@@ -637,15 +616,14 @@ impl<'a> LexTokenIter<'a> {
         // length of the "CommentMultiLineBegin".
         let mut byte_count = n;
 
-        while let Some(c1) = self.iter.next() {
+        while let Some(c1) = self.iter.next_char() {
             column_count_line += 1;
             byte_count += c1.len_utf8();
 
-            let (c2, c3) = if let Some(chars) = self.iter.peek_two() {
-                let (c2, c3) = chars;
-                (Some(c2), c3)
+            let (c2, c3) = if let Some((c2, c3_opt)) = self.iter.peek_two() {
+                (Some(c2), c3_opt)
             } else {
-                panic!("None when peeking in multi line comment.")
+                break;
             };
 
             if let Some((kind, sym_len)) = LexToken::get_if_symbol_three_chars(c1, c2, c3) {
@@ -659,8 +637,7 @@ impl<'a> LexTokenIter<'a> {
                         }
 
                         // `c1` has already has been consumed from the iterator,
-                        // so consume (`sym_len` - 1) to account for `c1`s length,
-                        // which is 1 because all symbol chars have 1 byte UTF-8 len.
+                        // so decrement `sym_len` with 1 to account for `c1`s length.
                         let skip_count = sym_len - 1;
                         self.iter.skip(skip_count);
 
@@ -681,14 +658,14 @@ impl<'a> LexTokenIter<'a> {
             // Increment line number if a linebreak is found. Make sure to not
             // count any "\n" after a "\r\n" was seen to prevent counting those
             // linebreaks twice.
-            if LexTokenIter::valid_linebreak_rn(c1, c2)
-                || (!prev_was_linebreak_rn && LexTokenIter::valid_linebreak_n(c1))
+            if LexTokenIter::is_valid_linebreak_rn(c1, c2)
+                || (!prev_was_linebreak_rn && LexTokenIter::is_valid_linebreak_n(c1))
             {
                 self.line += 1;
                 column_count_line = 0;
             }
 
-            prev_was_linebreak_rn = LexTokenIter::valid_linebreak_rn(c1, c2);
+            prev_was_linebreak_rn = LexTokenIter::is_valid_linebreak_rn(c1, c2);
 
             comment.push(c1);
         }
@@ -701,7 +678,7 @@ impl<'a> LexTokenIter<'a> {
 
     /// Used when returing errors to include current line/column number.
     fn err(&self, msg: String) -> LangError {
-        LangError::new(msg, LexError, Some(self.file_pos.to_owned()))
+        LangError::new(msg, LangErrorKind::LexError, Some(self.file_pos.to_owned()))
     }
 }
 
@@ -714,10 +691,10 @@ mod tests {
         let valid_chars = ['a', 'x', '_'];
         let invalid_chars = ['0', '-', '.', '/', '#'];
         for ch in valid_chars.iter() {
-            assert!(LexTokenIter::valid_identifier_start(*ch));
+            assert!(LexTokenIter::is_valid_identifier_start(*ch));
         }
         for ch in invalid_chars.iter() {
-            assert!(!LexTokenIter::valid_identifier_start(*ch));
+            assert!(!LexTokenIter::is_valid_identifier_start(*ch));
         }
     }
 
@@ -726,10 +703,10 @@ mod tests {
         let valid_chars = ['a', 'x', '_', '0'];
         let invalid_chars = ['-', '.', '/', '#'];
         for ch in valid_chars.iter() {
-            assert!(LexTokenIter::valid_identifier(*ch));
+            assert!(LexTokenIter::is_valid_identifier(*ch));
         }
         for ch in invalid_chars.iter() {
-            assert!(!LexTokenIter::valid_identifier(*ch));
+            assert!(!LexTokenIter::is_valid_identifier(*ch));
         }
     }
 
@@ -741,23 +718,23 @@ mod tests {
         let invalid_hex = ['g', 'x', '-', '.', '/', '#'];
 
         for ch in '0'..='9' {
-            assert!(LexTokenIter::valid_number(ch, DEC_RADIX));
+            assert!(LexTokenIter::is_valid_number(ch, DEC_RADIX));
         }
         for ch in '0'..='9' {
-            assert!(LexTokenIter::valid_number(ch, HEX_RADIX));
+            assert!(LexTokenIter::is_valid_number(ch, HEX_RADIX));
         }
         for ch in 'a'..='f' {
-            assert!(LexTokenIter::valid_number(ch, HEX_RADIX));
+            assert!(LexTokenIter::is_valid_number(ch, HEX_RADIX));
         }
         for ch in 'A'..='F' {
-            assert!(LexTokenIter::valid_number(ch, HEX_RADIX));
+            assert!(LexTokenIter::is_valid_number(ch, HEX_RADIX));
         }
 
         for ch in invalid_dec.iter() {
-            assert!(!LexTokenIter::valid_number(*ch, DEC_RADIX));
+            assert!(!LexTokenIter::is_valid_number(*ch, DEC_RADIX));
         }
         for ch in invalid_hex.iter() {
-            assert!(!LexTokenIter::valid_number(*ch, HEX_RADIX));
+            assert!(!LexTokenIter::is_valid_number(*ch, HEX_RADIX));
         }
     }
 
@@ -767,10 +744,10 @@ mod tests {
         let invalid_break = [('a', None), ('\r', None), ('\r', Some('a'))];
 
         for (ch1, ch2) in valid_break.iter() {
-            assert!(LexTokenIter::valid_linebreak(*ch1, *ch2));
+            assert!(LexTokenIter::is_valid_linebreak(*ch1, *ch2));
         }
         for (ch1, ch2) in invalid_break.iter() {
-            assert!(!LexTokenIter::valid_linebreak(*ch1, *ch2));
+            assert!(!LexTokenIter::is_valid_linebreak(*ch1, *ch2));
         }
     }
 
@@ -780,10 +757,10 @@ mod tests {
         let invalid_space = ['a', '#', '_'];
 
         for ch in valid_space.iter() {
-            assert!(LexTokenIter::valid_whitespace(*ch));
+            assert!(LexTokenIter::is_valid_whitespace(*ch));
         }
         for ch in invalid_space.iter() {
-            assert!(!LexTokenIter::valid_whitespace(*ch));
+            assert!(!LexTokenIter::is_valid_whitespace(*ch));
         }
     }
 

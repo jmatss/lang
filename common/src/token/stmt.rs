@@ -4,7 +4,7 @@ use super::{
     op::AssignOperator,
 };
 use crate::{
-    error::{CustomResult, LangError, LangErrorKind::GeneralError},
+    error::{LangError, LangErrorKind::GeneralError, LangResult},
     file::FilePosition,
     ENV_VAR,
 };
@@ -173,7 +173,7 @@ impl Path {
     /// Returns the path to a file. First looks for the file in the env var
     /// "LANG_HOME". If it isn't found, assume the file is located relative
     /// to the current working directory.
-    pub fn to_file_path(&self) -> CustomResult<String> {
+    pub fn to_file_path(&self) -> LangResult<String> {
         let lang_path = std::env::var(ENV_VAR)?;
         let relative_path = self.idents.join("/");
 

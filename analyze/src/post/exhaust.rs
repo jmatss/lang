@@ -1,7 +1,7 @@
 use crate::AnalyzeContext;
 use common::{
-    error::CustomResult,
     error::LangError,
+    error::LangResult,
     token::{
         ast::AstToken,
         block::BlockHeader,
@@ -46,7 +46,7 @@ impl<'a> ExhaustAnalyzer<'a> {
         block_id: BlockId,
         match_cases: &mut Vec<AstToken>,
         ctx: &TraverseContext,
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         // Gather all names of the members for the enum into a hash set.
         let enum_ = self.analyze_context.get_adt(ident, block_id)?;
         let mut member_names = enum_
@@ -97,7 +97,7 @@ impl<'a> ExhaustAnalyzer<'a> {
         }
     }
 
-    fn exhaust_int(&mut self, inner_ty: &InnerTy, ctx: &TraverseContext) -> CustomResult<()> {
+    fn exhaust_int(&mut self, inner_ty: &InnerTy, ctx: &TraverseContext) -> LangResult<()> {
         // TODO: Implement, currently unable to do it unless every case expr is
         //       hardcoded, but then they would need to cover all possible ints
         //       for a specific bit size, which is unfeasible.

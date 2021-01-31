@@ -1,6 +1,6 @@
 use crate::generator::CodeGen;
 use common::{
-    error::CustomResult,
+    error::LangResult,
     file::FilePosition,
     token::{
         block::AdtKind,
@@ -41,7 +41,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         expr: &mut Expr,
         expr_ty: ExprTy,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let file_pos = expr.file_pos().cloned();
 
         let any_value = match expr {
@@ -88,7 +88,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         lit: &Lit,
         ty_opt: &Option<Ty>,
         file_pos: Option<FilePosition>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         match lit {
             Lit::String(str_lit) => {
                 // Returns a pointer to the newly created string literal.
@@ -147,7 +147,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         gen_ty_opt: &Option<Ty>,
         radix: u32,
         file_pos: Option<FilePosition>,
-    ) -> CustomResult<IntValue<'ctx>> {
+    ) -> LangResult<IntValue<'ctx>> {
         // TODO: Where should the integer literal conversion be made?
 
         let inner_ty = match gen_ty_opt {
@@ -217,7 +217,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         lit: &str,
         gen_ty_opt: &Option<Ty>,
         file_pos: Option<FilePosition>,
-    ) -> CustomResult<FloatValue<'ctx>> {
+    ) -> LangResult<FloatValue<'ctx>> {
         let inner_ty = match gen_ty_opt {
             Some(Ty::CompoundType(inner_ty, ..)) => inner_ty.clone(),
             None => InnerTy::default_float(),
@@ -248,7 +248,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub fn compile_func_call(
         &mut self,
         func_call: &mut FuncCall,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         if let Some(func_ptr) = self.module.get_function(&func_call.full_name()?) {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
@@ -316,7 +316,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub fn compile_built_in_call(
         &mut self,
         built_in_call: &mut BuiltInCall,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let file_pos = built_in_call.file_pos.to_owned();
 
         match built_in_call.name.as_ref() {
@@ -412,7 +412,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub fn compile_struct_init(
         &mut self,
         struct_init: &mut AdtInit,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let full_name = struct_init.full_name()?;
 
         let struct_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
@@ -504,7 +504,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub fn compile_union_init(
         &mut self,
         union_init: &mut AdtInit,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let full_name = union_init.full_name()?;
 
         let union_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
@@ -616,7 +616,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub fn compile_array_init(
         &mut self,
         array_init: &mut ArrayInit,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         let args = &mut array_init.arguments;
 
         if args.is_empty() {
@@ -686,7 +686,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         ty: AnyTypeEnum<'ctx>,
         file_pos: Option<FilePosition>,
-    ) -> CustomResult<AnyValueEnum<'ctx>> {
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ty {
             AnyTypeEnum::ArrayType(ty) => ty.const_zero().into(),
             AnyTypeEnum::FloatType(ty) => ty.const_zero().into(),
@@ -710,7 +710,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         func_name: &str,
         param_type: &BasicTypeEnum,
         arg_type: &BasicTypeEnum,
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         if arg_type != param_type {
             // TODO: Should be able to convert a {[u8: N]} to a {u8}. This is
             //       useful when working with for example string literals.

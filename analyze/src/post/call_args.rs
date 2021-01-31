@@ -1,7 +1,7 @@
 use crate::AnalyzeContext;
 use common::{
-    error::CustomResult,
     error::LangError,
+    error::LangResult,
     token::expr::Argument,
     token::expr::FuncCall,
     token::{
@@ -131,7 +131,7 @@ impl<'a> CallArgs<'a> {
         func_call: &mut FuncCall,
         params: &[Rc<RefCell<Var>>],
         is_variadic: bool,
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         // If here are more parameters in the function that there are arguments
         // to the current function call, assume that "missing" arguments
         // are supposed to be filled in with the default parameters. If there are

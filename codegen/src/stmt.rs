@@ -1,6 +1,6 @@
 use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
-    error::CustomResult,
+    error::LangResult,
     file::FilePosition,
     token::{
         expr::Expr,
@@ -14,7 +14,7 @@ use inkwell::{
 use log::debug;
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
-    pub(super) fn compile_stmt(&mut self, stmt: &mut Stmt) -> CustomResult<()> {
+    pub(super) fn compile_stmt(&mut self, stmt: &mut Stmt) -> LangResult<()> {
         match stmt {
             Stmt::Return(expr_opt, ..) => self.compile_return(expr_opt),
             Stmt::Yield(expr, file_pos) => self.compile_yield(expr, file_pos),
@@ -62,7 +62,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_return(&mut self, expr_opt: &mut Option<Expr>) -> CustomResult<()> {
+    fn compile_return(&mut self, expr_opt: &mut Option<Expr>) -> LangResult<()> {
         if let Some(expr) = expr_opt {
             let any_value = self.compile_expr(expr, ExprTy::RValue)?;
             let basic_value = CodeGen::any_into_basic_value(any_value)?;
@@ -73,21 +73,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    fn compile_yield(&mut self, expr: &Expr, file_pos: &Option<FilePosition>) -> CustomResult<()> {
+    fn compile_yield(&mut self, expr: &Expr, file_pos: &Option<FilePosition>) -> LangResult<()> {
         Err(self.err(
             "TODO: Implement \"yield\" statement.".into(),
             file_pos.to_owned(),
         ))
     }
 
-    fn compile_break(&mut self, file_pos: &Option<FilePosition>) -> CustomResult<()> {
+    fn compile_break(&mut self, file_pos: &Option<FilePosition>) -> LangResult<()> {
         let id = self.cur_block_id;
         let merge_block = self.get_branchable_merge_block(id)?;
         self.builder.build_unconditional_branch(merge_block);
         Ok(())
     }
 
-    fn compile_continue(&mut self, file_pos: &Option<FilePosition>) -> CustomResult<()> {
+    fn compile_continue(&mut self, file_pos: &Option<FilePosition>) -> LangResult<()> {
         if let Some(branch_block) = self.cur_branch_block {
             self.builder.build_unconditional_branch(branch_block);
             Ok(())
@@ -99,23 +99,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_use(&mut self, path: &Path) -> CustomResult<()> {
+    fn compile_use(&mut self, path: &Path) -> LangResult<()> {
         // Do nothing, "use"s are done during lexing/parsing for now.
         Ok(())
     }
 
-    fn compile_package(&mut self, path: &Path) -> CustomResult<()> {
+    fn compile_package(&mut self, path: &Path) -> LangResult<()> {
         Err(self.err(
             "TODO: Implement \"package\" statement.".into(),
             Some(path.file_pos.to_owned()),
         ))
     }
 
-    fn compile_inc(
-        &mut self,
-        expr: &mut Expr,
-        file_pos: &Option<FilePosition>,
-    ) -> CustomResult<()> {
+    fn compile_inc(&mut self, expr: &mut Expr, file_pos: &Option<FilePosition>) -> LangResult<()> {
         let any_value = self.compile_expr(expr, ExprTy::LValue)?;
 
         let ptr = if let AnyTypeEnum::PointerType(_) = any_value.get_type() {
@@ -153,11 +149,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    fn compile_dec(
-        &mut self,
-        expr: &mut Expr,
-        file_pos: &Option<FilePosition>,
-    ) -> CustomResult<()> {
+    fn compile_dec(&mut self, expr: &mut Expr, file_pos: &Option<FilePosition>) -> LangResult<()> {
         let any_value = self.compile_expr(expr, ExprTy::LValue)?;
 
         let ptr = if let AnyTypeEnum::PointerType(_) = any_value.get_type() {
@@ -202,7 +194,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         lhs: &mut Expr,
         rhs: &mut Expr,
         file_pos: &Option<FilePosition>,
-    ) -> CustomResult<InstructionValue<'ctx>> {
+    ) -> LangResult<InstructionValue<'ctx>> {
         let lhs_ptr = {
             let lhs_any = self.compile_expr(lhs, ExprTy::LValue)?;
             if lhs_any.is_pointer_value() {

@@ -1,6 +1,6 @@
 use analyze::context::AnalyzeContext;
 use common::{
-    error::{CustomResult, LangError, LangErrorKind::CodeGenError},
+    error::{LangError, LangErrorKind::CodeGenError, LangResult},
     file::FilePosition,
     token::{
         ast::AstToken,
@@ -90,7 +90,7 @@ pub fn generate<'a, 'ctx>(
     builder: &'a Builder<'ctx>,
     module: &'a Module<'ctx>,
     target_machine: &'a TargetMachine,
-) -> CustomResult<()> {
+) -> LangResult<()> {
     let mut code_gen = CodeGen::new(context, analyze_context, builder, module, target_machine);
     // Start by first compiling all types (structs/enums/inferfaces) and after
     // that all functions/methods. This makes it so that one doesn't have to
@@ -169,7 +169,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile(&mut self, mut ast_token: &mut AstToken) -> CustomResult<()> {
+    pub(super) fn compile(&mut self, mut ast_token: &mut AstToken) -> LangResult<()> {
         self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
         match &mut ast_token {
@@ -187,7 +187,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn alloc_var(&self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
+    pub(super) fn alloc_var(&self, var: &Var) -> LangResult<PointerValue<'ctx>> {
         if let Some(var_type) = &var.ty {
             Ok(
                 match self.compile_type(&var_type, var.file_pos.to_owned())? {
@@ -224,7 +224,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile_var_decl(&mut self, var: &Var) -> CustomResult<()> {
+    pub(super) fn compile_var_decl(&mut self, var: &Var) -> LangResult<()> {
         debug!("Compiling var var_decl: {:#?}", &var);
 
         // Constants are never "compiled" into instructions, they are handled
@@ -246,7 +246,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         var: &Var,
         basic_value: BasicValueEnum<'ctx>,
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         debug!(
             "Compile var_store, var: {:#?}\nbasic_value: {:#?}.",
             &var, &basic_value
@@ -268,7 +268,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn compile_var_load(&mut self, var: &Var) -> CustomResult<BasicValueEnum<'ctx>> {
+    pub(super) fn compile_var_load(&mut self, var: &Var) -> LangResult<BasicValueEnum<'ctx>> {
         // If unable to find variable pointer, assume it is a const variable
         // that is stored in another place.
         Ok(match self.get_var_ptr(var) {
@@ -279,7 +279,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     // TODO: Implement logic to load both regular variables and struct members
     //       if they are const.
-    fn get_const_value(&mut self, var: &Var) -> CustomResult<BasicValueEnum<'ctx>> {
+    fn get_const_value(&mut self, var: &Var) -> LangResult<BasicValueEnum<'ctx>> {
         let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
@@ -301,7 +301,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(crate) fn get_var_ptr(&mut self, var: &Var) -> CustomResult<PointerValue<'ctx>> {
+    pub(crate) fn get_var_ptr(&mut self, var: &Var) -> LangResult<PointerValue<'ctx>> {
         let block_id = self.cur_block_id;
         let decl_block_id = self
             .analyze_context
@@ -330,7 +330,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &self,
         ty: &Ty,
         file_pos: Option<FilePosition>,
-    ) -> CustomResult<AnyTypeEnum<'ctx>> {
+    ) -> LangResult<AnyTypeEnum<'ctx>> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Generic;
 

@@ -4,7 +4,7 @@ use analyze::analyze;
 use clap::{App, Arg};
 use codegen::generator;
 use common::{
-    error::{CustomResult, LangError, LangErrorKind},
+    error::{LangError, LangErrorKind, LangResult},
     file::{FileId, FileInfo},
 };
 use inkwell::context::Context;
@@ -16,7 +16,7 @@ use std::{collections::HashMap, time::Instant};
 #[macro_use]
 extern crate log;
 
-fn main() -> CustomResult<()> {
+fn main() -> LangResult<()> {
     let matches = App::new("lang")
         .arg(
             Arg::with_name("input")

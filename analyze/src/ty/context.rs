@@ -1,7 +1,7 @@
 use super::substitution_sets::SubstitutionSets;
 use crate::context::AnalyzeContext;
 use common::{
-    error::{CustomResult, LangError, LangErrorKind},
+    error::{LangError, LangErrorKind, LangResult},
     token::{block::Function, expr::Expr},
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     type_info::TypeInfo,
@@ -41,7 +41,7 @@ impl<'a> TypeContext<'a> {
     ///
     /// If the given type doesn't belong to a set, returns the type itself as the
     /// inferred type.
-    pub fn inferred_type(&mut self, ty: &Ty, block_id: BlockId) -> CustomResult<Ty> {
+    pub fn inferred_type(&mut self, ty: &Ty, block_id: BlockId) -> LangResult<Ty> {
         let root_id = self.analyze_context.get_root_id(block_id)?;
         if let Some(sub_sets) = self.substitutions.get(&root_id) {
             let inferred_ty = sub_sets.inferred_type(ty)?;
@@ -57,12 +57,7 @@ impl<'a> TypeContext<'a> {
     /// The `block_id` is used to decide which scope this contraint should be
     /// added to. It will be inseted into the "first" root block which contains
     /// the given `block_id` (this might be the `block_id` itself).
-    pub fn insert_constraint(
-        &mut self,
-        ty_a: &Ty,
-        ty_b: &Ty,
-        block_id: BlockId,
-    ) -> CustomResult<()> {
+    pub fn insert_constraint(&mut self, ty_a: &Ty, ty_b: &Ty, block_id: BlockId) -> LangResult<()> {
         if ty_a == ty_b {
             return Ok(());
         }
@@ -85,7 +80,7 @@ impl<'a> TypeContext<'a> {
     /// If the resulting unified type is unsolved, a `solve` is applied to try
     /// and solved it if possible.
     /// This function also inserts new constraints for any inner types.
-    fn unify(&mut self, ty_a: &Ty, ty_b: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+    fn unify(&mut self, ty_a: &Ty, ty_b: &Ty, root_id: BlockId) -> LangResult<Ty> {
         let inferred_ty = self
             .substitutions
             .entry(root_id)
@@ -109,7 +104,7 @@ impl<'a> TypeContext<'a> {
         ty_a: &Ty,
         ty_b: &Ty,
         root_id: BlockId,
-    ) -> CustomResult<()> {
+    ) -> LangResult<()> {
         match (ty_a, ty_b) {
             (Ty::CompoundType(_, ty_a_gens, ..), Ty::CompoundType(_, ty_b_gens, ..)) => {
                 for (ty_a_gen, ty_b_gen) in ty_a_gens.iter_types().zip(ty_b_gens.iter_types()) {
@@ -141,7 +136,7 @@ impl<'a> TypeContext<'a> {
     ///
     /// If the given type `ty` is solved when this function is call, a early
     /// Ok is returned.
-    pub fn solve(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+    pub fn solve(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         if ty.is_solved() {
             return Ok(ty.clone());
         }
@@ -163,7 +158,7 @@ impl<'a> TypeContext<'a> {
     }
 
     /// Solves compound types (i.e. types that might contain generics).
-    fn solve_compound(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+    fn solve_compound(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         let mut new_ty = ty.clone();
 
         let (inner_ty, generics) = if let Ty::CompoundType(inner_ty, generics, ..) = &mut new_ty {
@@ -196,7 +191,7 @@ impl<'a> TypeContext<'a> {
     }
 
     /// Solves aggregate types (array or pointer).
-    fn solve_aggregate(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+    fn solve_aggregate(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         let mut new_ty = ty.clone();
 
         // TODO: Probably need to implement solving of the array dimension expr.
@@ -212,7 +207,7 @@ impl<'a> TypeContext<'a> {
         Ok(new_ty)
     }
 
-    fn solve_expr(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+    fn solve_expr(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         let mut new_ty = ty.clone();
 
         if let Ty::Expr(expr, ..) = &mut new_ty {
@@ -225,7 +220,7 @@ impl<'a> TypeContext<'a> {
         Ok(new_ty)
     }
 
-    fn solve_unknown_adt_member(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+    fn solve_unknown_adt_member(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         debug!("solve_unknown_adt_member: {:#?}", ty);
 
         let (structure_ty, member_name) = if let Ty::UnknownAdtMember(ty, member_name, ..) = &ty {
@@ -261,7 +256,7 @@ impl<'a> TypeContext<'a> {
         Ok(new_ty)
     }
 
-    fn solve_unknown_adt_method(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+    fn solve_unknown_adt_method(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         debug!("solve_unknown_adt_method: {:#?}", ty);
 
         let (adt_ty, method_name, type_info) =
@@ -302,7 +297,7 @@ impl<'a> TypeContext<'a> {
         Ok(new_ty)
     }
 
-    fn solve_unknown_method_argument(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+    fn solve_unknown_method_argument(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         debug!("solve_unknown_method_argument: {:#?}", ty);
 
         let (adt_ty, method_name, name_or_idx, type_info) =
@@ -355,7 +350,7 @@ impl<'a> TypeContext<'a> {
         Ok(new_ty)
     }
 
-    fn solve_unknown_method_generic(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+    fn solve_unknown_method_generic(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         debug!("solve_unknown_method_generic: {:#?}", ty);
 
         let (adt_ty, method_name, idx, type_info) =
@@ -412,7 +407,7 @@ impl<'a> TypeContext<'a> {
         Ok(new_ty)
     }
 
-    fn solve_unknown_array_member(&mut self, ty: &Ty, root_id: BlockId) -> CustomResult<Ty> {
+    fn solve_unknown_array_member(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         debug!("solve_unknown_array_member: {:#?}", ty);
 
         let array_ty = if let Ty::UnknownArrayMember(array_ty, ..) = &ty {
@@ -443,7 +438,7 @@ impl<'a> TypeContext<'a> {
         &mut self,
         adt_ty: &Ty,
         root_id: BlockId,
-    ) -> CustomResult<Option<(InnerTy, Generics)>> {
+    ) -> LangResult<Option<(InnerTy, Generics)>> {
         let mut new_adt_ty = adt_ty.clone();
 
         self.solve(&new_adt_ty, root_id)?;
@@ -483,12 +478,7 @@ impl<'a> TypeContext<'a> {
     /// A `adt_ty` might have been "half" solved, ex. it might be solved to a generic.
     /// This function can be use to partially solve the wrapping "Unknown..."
     /// types that "wraps" the `adt_ty` (ex. function call, args etc.).
-    fn solve_partial_adt_type(
-        &mut self,
-        ty: &Ty,
-        adt_ty: &Ty,
-        root_id: BlockId,
-    ) -> CustomResult<Ty> {
+    fn solve_partial_adt_type(&mut self, ty: &Ty, adt_ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         let mut new_ty = ty.clone();
 
         let old_adt_ty = match &mut new_ty {
@@ -545,7 +535,7 @@ impl<'a> TypeContext<'a> {
 
     /// If the given type `ty` contains generics that don't have their "names"
     /// set, this function will fetch the structure and set the names if possible.
-    pub fn set_generic_names(&self, ty: &mut Ty, block_id: BlockId) -> CustomResult<()> {
+    pub fn set_generic_names(&self, ty: &mut Ty, block_id: BlockId) -> LangResult<()> {
         let (inner_ty, generics) = match ty {
             Ty::CompoundType(inner_ty, generics, ..) => (inner_ty, generics),
 
@@ -577,7 +567,7 @@ impl<'a> TypeContext<'a> {
     }
 
     // TODO: Is it possible to move this function to "Expr" in some way?
-    pub fn get_expr_type(&self, expr_opt: Option<&Expr>) -> CustomResult<Ty> {
+    pub fn get_expr_type(&self, expr_opt: Option<&Expr>) -> LangResult<Ty> {
         if let Some(expr) = expr_opt {
             expr.get_expr_type()
         } else {
