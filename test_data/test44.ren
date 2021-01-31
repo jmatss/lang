@@ -1,12 +1,12 @@
 struct TestStruct;
-implement TestStruct
+impl TestStruct
 {
-    function method<T, V>(value: T, other: V)
+    fn method<T, V>(value: T, other: V)
     {
     }
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var i: u8 = 123
     var o: i64 = 456

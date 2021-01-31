@@ -1,6 +1,6 @@
-external function printf(format: {u8}, ...) -> i32
+extern fn printf(format: {u8}, ...) -> i32
 
-function fac(n: i32) -> i32
+fn fac(n: i32) -> i32
 {
     if n <= 1
     {
@@ -12,7 +12,7 @@ function fac(n: i32) -> i32
     }
 }
 
-function main() -> i32
+fn main() -> i32
 {   
     var n: i32 = 7
     printf("n: %d, result: %d", n, fac(n))

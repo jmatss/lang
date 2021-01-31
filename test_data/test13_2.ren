@@ -1,4 +1,4 @@
-function double(n: {i32})
+fn double(n: {i32})
 {
     n.* *= 2
 }

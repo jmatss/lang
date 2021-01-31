@@ -1,4 +1,4 @@
-function main() -> i32
+fn main() -> i32
 {
     var x = 0
     if x == 3

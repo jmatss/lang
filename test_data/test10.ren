@@ -1,5 +1,5 @@
-external function printf(format: {u8}, ...) -> i32
-external function malloc(size: i32) -> {u8}
+extern fn printf(format: {u8}, ...) -> i32
+extern fn malloc(size: i32) -> {u8}
 
 struct TestStruct
 {
@@ -7,7 +7,7 @@ struct TestStruct
     msg: {u8},
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var test_struct = TestStruct { 0 , malloc(6) }
     

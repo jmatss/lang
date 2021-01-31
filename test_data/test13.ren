@@ -1,8 +1,8 @@
 use test_data.test13_2
 
-external function printf(format: {u8}, ...) -> i32
+extern fn printf(format: {u8}, ...) -> i32
 
-function main() -> i32
+fn main() -> i32
 {
     var i = 3
 

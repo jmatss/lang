@@ -1,22 +1,22 @@
 use std.assert
 use std.nullable
 
-external function printf(format: {u8}, ...) -> i32
+extern fn printf(format: {u8}, ...) -> i32
 
 struct TypeStruct
 {
     len: u64,
 }
 
-implement TypeStruct
+impl TypeStruct
 {
-    function this len() -> u64
+    fn this len() -> u64
     {
         return this.len
     }
 }
 
-function main() -> i32
+fn main() -> i32
 {
     // var y = x.?.len()
     // var y = (x != null) ? x.len() : null

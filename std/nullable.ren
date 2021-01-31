@@ -4,21 +4,21 @@ struct Nullable<T>
     is_null: bool,
 }
 
-implement Nullable
+impl Nullable
 {
-    function this get() -> T
+    fn this get() -> T
     {
         return this.value
     }
 
-    function this is_null() -> bool
+    fn this is_null() -> bool
     {
         return this.is_null
     }
 
     // Creates a new `Nullable` containing the value `value`.
     // If `value` isn't set, the default value will be null.
-    function init(value: T = @null<T>()) -> Nullable<T>
+    fn init(value: T = @null<T>()) -> Nullable<T>
     {
         // TODO: Make this compare work. Ex. implement "Comparable" trait on `T`.
         if value == @null<T>()
@@ -33,8 +33,8 @@ implement Nullable
 }
 
 /*
-    class T { a: u32 }
-    implement T
+    struct T { a: u32 }
+    impl T
     {
         function this do_this() -> u32
         {

@@ -5,7 +5,7 @@ struct TestStruct<T>
     inner: T,
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var i1 = 1
     var i2 = 2

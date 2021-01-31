@@ -1,4 +1,4 @@
-function test_func() -> i32
+fn test_func() -> i32
 {
     var res: i32
     
@@ -15,7 +15,7 @@ function test_func() -> i32
     return res
 }
 
-function main() -> i32
+fn main() -> i32
 {
     return test_func()
 }

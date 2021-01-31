@@ -1,9 +1,9 @@
-external function printf(format: {u8}, ...) -> i32
-external function malloc(size: i32) -> {u8}
-external function free(ptr: {u8})
-//external function itoa(value: i32, s: {u8}, radix: i32) -> {u8}
+extern fn printf(format: {u8}, ...) -> i32
+extern fn malloc(size: i32) -> {u8}
+extern fn free(ptr: {u8})
+//extern fn itoa(value: i32, s: {u8}, radix: i32) -> {u8}
 
-function fac(n: i32) -> i32
+fn fac(n: i32) -> i32
 {
     var res: i32
     if n <= 1
@@ -23,7 +23,7 @@ function fac(n: i32) -> i32
     }
 }
 
-function main() -> i32
+fn main() -> i32
 {   
     var n: i32 = 7
     printf("n: %d, result: %d", n, fac(n))

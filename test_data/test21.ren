@@ -6,7 +6,7 @@ struct TestStruct
     b: f64,
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var test_struct = TestStruct { 123, 456.789 }
     var x = test_struct.a

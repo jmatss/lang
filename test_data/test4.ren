@@ -1,6 +1,6 @@
 use std.assert
 
-function main() -> i32
+fn main() -> i32
 {
     const a: i32 = 5
     const b: i32 = 123
@@ -37,12 +37,12 @@ function main() -> i32
 
 // TODO: Test const stuff.
 /*
-function test_func(a: i32, b: i32) -> i32
+fn test_func(a: i32, b: i32) -> i32
 {
     return a + b
 }
 
-function main() -> i32
+fn main() -> i32
 {
     const a: i32 = 5
     const b: i32 = 123

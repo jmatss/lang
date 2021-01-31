@@ -5,7 +5,7 @@ struct TestStruct
     x: i64,
 }
 
-function main() -> i32
+fn main() -> i32
 {
     // TODO: Maybe do inc/dec postfix instead of prefix.
     //       Postfix feels more natural, but might be best

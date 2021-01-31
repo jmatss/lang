@@ -1,12 +1,12 @@
 use std.math
 
-external function printf(format: {u8}, ...) -> i32
-external function exit(exit_code: i32)
+extern fn printf(format: {u8}, ...) -> i32
+extern fn exit(exit_code: i32)
 
 struct Assert2<T> {}
-implement Assert2
+impl Assert2
 {
-    function equals(expected: T, actual: T)
+    fn equals(expected: T, actual: T)
     {
         if expected != actual
         {
@@ -17,9 +17,9 @@ implement Assert2
 }
 
 struct Assert {}
-implement Assert
+impl Assert
 {
-    function is_true(expr: bool, msg: {u8} = "")
+    fn is_true(expr: bool, msg: {u8} = "")
     {
         if not expr
         {
@@ -28,7 +28,7 @@ implement Assert
         }
     }
 
-    function equals_i32(expected: i32, actual: i32, msg: {u8} = "")
+    fn equals_i32(expected: i32, actual: i32, msg: {u8} = "")
     {
         if expected != actual
         {
@@ -37,7 +37,7 @@ implement Assert
         }
     }
 
-    function equals_f64(expected: f64, actual: f64, epsilon: f64, msg: {u8} = "")
+    fn equals_f64(expected: f64, actual: f64, epsilon: f64, msg: {u8} = "")
     {
         var diff = abs_f64(expected - actual)
         if diff > epsilon
@@ -48,7 +48,7 @@ implement Assert
     }
 }
 
-function assert(expr: bool)
+fn assert(expr: bool)
 {
     if not expr
     {
@@ -57,7 +57,7 @@ function assert(expr: bool)
     }
 }
 
-function assert_equals_f64(expected: f64, actual: f64, epsilon: f64)
+fn assert_equals_f64(expected: f64, actual: f64, epsilon: f64)
 {
     var diff = abs_f64(expected - actual)
     if diff > epsilon
@@ -67,7 +67,7 @@ function assert_equals_f64(expected: f64, actual: f64, epsilon: f64)
     }
 }
 
-function assert_msg(expr: bool, msg: {u8})
+fn assert_msg(expr: bool, msg: {u8})
 {
     if not expr
     {

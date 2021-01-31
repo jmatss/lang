@@ -1,6 +1,6 @@
-external function printf(format: {u8}, ...) -> i32
+extern fn printf(format: {u8}, ...) -> i32
 
-function main() -> i32
+fn main() -> i32
 {
     /*
         Mutli-line comment.

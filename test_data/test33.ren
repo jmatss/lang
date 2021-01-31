@@ -3,20 +3,20 @@ struct TestStruct<T>
     inner: T,
 }
 
-implement TestStruct
+impl TestStruct
 {
-    function this instance_method(value: T) -> T
+    fn this instance_method(value: T) -> T
     {
         return this.inner
     }
 
-    function static_method(value: T) -> T
+    fn static_method(value: T) -> T
     {
         return value
     }
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var i: i64 = 123
     var f: f64 = 456.

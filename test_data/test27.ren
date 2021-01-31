@@ -1,21 +1,21 @@
 use std.assert
 
-function two2(a: i32, b: i32)
+fn two2(a: i32, b: i32)
 {
 
 }
 
-function two(a: i32, b: f32)
+fn two(a: i32, b: f32)
 {
 
 }
 
-function three(a: i32, b: f32, c: bool)
+fn three(a: i32, b: f32, c: bool)
 {
 
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var x: i32 = 123
     var y: f32 = 123.456

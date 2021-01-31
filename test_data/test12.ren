@@ -1,9 +1,9 @@
 use std.assert
 
-//external function printf(format: {u8}, ...) -> i32
-external function malloc(size: i32) -> {u8}
+//extern fn printf(format: {u8}, ...) -> i32
+extern fn malloc(size: i32) -> {u8}
 
-function double(n: {i32})
+fn double(n: {i32})
 {
    n.* *= 2
 }
@@ -20,7 +20,7 @@ struct TestArrayStruct
     b: {[i32: 2]},
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var x1 = [[1.1, 2.2], [3.3, 4.4]]
     x1.[1].[0] = 5.5

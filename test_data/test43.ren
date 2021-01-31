@@ -1,13 +1,13 @@
 trait TestTrait
 {
-    function static_method()
-    function this instance_method()
+    fn static_method()
+    fn this instance_method()
 }
 
-struct TestStruct<T> where T implements TestTrait;
-implement TestStruct
+struct TestStruct<T> where T impls TestTrait;
+impl TestStruct
 {
-    function abc(value: T)
+    fn abc(value: T)
     {
         // Should fail to compile since `T` only implements `TestTrait` which
         // means that `value`/`T` only have "access" to `TestTrait`s functions.
@@ -19,7 +19,7 @@ implement TestStruct
     }
 }
 
-function main() -> i32
+fn main() -> i32
 {
     return 0
 }

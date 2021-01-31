@@ -1,6 +1,6 @@
 use std.assert
 
-function main() -> i32
+fn main() -> i32
 {
     var int_1 = 123
     var int_2 = 456

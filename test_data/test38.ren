@@ -1,6 +1,6 @@
 use std.assert
 
-function main() -> i32
+fn main() -> i32
 {
     test_normal()
     test_default()
@@ -9,7 +9,7 @@ function main() -> i32
     return 0
 }
 
-function test_normal()
+fn test_normal()
 {
     var correct
     var value = 1
@@ -30,7 +30,7 @@ function test_normal()
     assert(correct)
 }
 
-function test_default()
+fn test_default()
 {
     var correct
     var value = 99
@@ -57,7 +57,7 @@ enum TestEnum
     SECOND,
 }
 
-function test_enum()
+fn test_enum()
 {
     var correct
     var value = TestEnum::SECOND

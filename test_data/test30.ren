@@ -16,7 +16,7 @@ struct UnImplemented<U>
     unimplemented: U,
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var i: u64 = 1
     var f: f32 = 123.

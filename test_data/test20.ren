@@ -1,13 +1,13 @@
 use std.assert
 use std.mem
 
-function test_func(a: i32, b: i32) -> i64
+fn test_func(a: i32, b: i32) -> i64
 {
     var tmp: i32 = a + b
     return (a + b) as i64
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var a = 3
     var b = 5

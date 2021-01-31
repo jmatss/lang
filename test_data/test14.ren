@@ -1,15 +1,15 @@
 use std.assert
 
-external function printf(format: {u8}, ...) -> i32
+extern fn printf(format: {u8}, ...) -> i32
 
-function double(n: {i32}) -> bool
+fn double(n: {i32}) -> bool
 {
     n.* *= 2
 
     return true
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var num = 3
     

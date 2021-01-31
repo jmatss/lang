@@ -1,6 +1,6 @@
 use std.assert
 
-function main() -> i32
+fn main() -> i32
 {
     var i = 0
     while i < 10

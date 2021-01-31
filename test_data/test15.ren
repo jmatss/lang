@@ -1,17 +1,17 @@
 use std.assert
 
-function return_short_circuit(a: i32, b: i32) -> bool
+fn return_short_circuit(a: i32, b: i32) -> bool
 {
     return a == 3 and b == 4
 }
 
-function inc(ten: {i32}) -> i32
+fn inc(ten: {i32}) -> i32
 {
     ten.* += 1
     return ten.*
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var ten = 3
     var one = 0

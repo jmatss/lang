@@ -3,7 +3,7 @@ use std.mem_new
 // TODO: std.mem already includes std.traits. Should rework import logic.
 //use std.traits
 
-external function strlen(str: {u8}) -> i32
+extern fn strlen(str: {u8}) -> i32
 
 enum ErrorKind
 {
@@ -21,9 +21,9 @@ struct Error
     msg_needs_deinit: bool,
 }
 
-implement Disposable for Error
+impl Disposable for Error
 {
-    function {this} deinit()
+    fn {this} deinit()
     {
         if this.*.msg_needs_deinit
         {
@@ -33,7 +33,7 @@ implement Disposable for Error
     }
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var kind
     var msg

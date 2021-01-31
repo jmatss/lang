@@ -8,19 +8,19 @@
 
 trait TestTrait
 {
-    function this trait_func(i: i8) -> u64;
+    fn this trait_func(i: i8) -> u64;
 }
 
 struct TestStruct<T>
-where T implements TestTrait
+where T impls TestTrait
 {
     inner: T,
 }
 
 struct InnerStructWithTrait;
-implement TestTrait for InnerStructWithTrait
+impl TestTrait for InnerStructWithTrait
 {
-    function this trait_func(i: i8) -> u64
+    fn this trait_func(i: i8) -> u64
     {
         return 123
     }
@@ -28,7 +28,7 @@ implement TestTrait for InnerStructWithTrait
     // TODO: Create error for methods in trait impl
     //       that doesn't exist in the trait.
     /*
-    function abc() -> i32
+    fn abc() -> i32
     {
         return 1
     }
@@ -37,7 +37,7 @@ implement TestTrait for InnerStructWithTrait
 
 struct InnerStructWithoutTrait;
 
-function main() -> i32
+fn main() -> i32
 {
     // Should produce a error since u64 doesn't implement TestTrait
     //var ts = TestStruct<u64> { 34 }
@@ -53,8 +53,8 @@ function main() -> i32
 
 struct UnimplementedStruct<K, V>
 where
-    K implements TestTrait
-    V implements TestTrait
+    K impls TestTrait
+    V impls TestTrait
 {
     key: K,
     val: V,

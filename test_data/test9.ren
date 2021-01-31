@@ -12,12 +12,12 @@ struct TestStruct
     y: {NestedStruct},
 }
 
-function double(n: {u32})
+fn double(n: {u32})
 {
     n.* *= 2
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var i = 3
     var s = NestedStruct { 123.321, i.& }

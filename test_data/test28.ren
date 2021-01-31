@@ -11,7 +11,7 @@ struct OuterTestStruct<U>
     inner_test_struct: U,
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var x: u64 = 123
     var y = [x, x]  // var y: [u64: 2] = [1, 2]

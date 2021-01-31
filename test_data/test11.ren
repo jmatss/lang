@@ -6,7 +6,7 @@ struct TestStruct
     msg: i32,
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var integer = 123
     var ptr = integer.&

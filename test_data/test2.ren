@@ -1,15 +1,15 @@
-function priv_func() {}
-public function pub_func() {}
-hidden function hid_func() {}
+fn priv_func() {}
+pub fn pub_func() {}
+hid fn hid_func() {}
 
-function main() -> i32
+fn main() -> i32
 {
     return 0
 }
 
 // TODO: Test const stuff.
 /*
-function test_func()
+fn test_func()
 {
     var x: i32 = 123
     const y: i32 = x + 456

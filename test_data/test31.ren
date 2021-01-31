@@ -5,15 +5,15 @@ struct TestStruct<T>
     inner: T,
 }
 
-implement TestStruct
+impl TestStruct
 {
-    function {this} test_func() -> i32
+    fn {this} test_func() -> i32
     {
         return 123
     }
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var i: u64 = 1
     var f: f32 = 123.

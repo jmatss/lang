@@ -6,7 +6,7 @@ struct TestStruct
     inner_b: u8,
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var i_u64: u64 = 123
     var a = Allocator::init(i_u64)

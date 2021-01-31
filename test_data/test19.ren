@@ -6,9 +6,9 @@ struct InnerStruct
     y: f64,
 }
 
-implement InnerStruct
+impl InnerStruct
 {
-    function this sum() -> f64
+    fn this sum() -> f64
     {
         return this.x as f64 + this.y
     }
@@ -20,15 +20,15 @@ struct OuterStruct
     b: i64,
 }
 
-implement OuterStruct
+impl OuterStruct
 {
-    function new() -> InnerStruct
+    fn new() -> InnerStruct
     {
         return InnerStruct { 1.0, 2.0 }
     }
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var inner_y1 = InnerStruct { 3.0, 4.0 }.y
     var inner_y2 = OuterStruct::new().y

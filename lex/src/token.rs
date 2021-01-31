@@ -219,27 +219,27 @@ impl LexToken {
 
             "use" => LexTokenKind::Kw(Kw::Use),
             "package" => LexTokenKind::Kw(Kw::Package),
-            "external" => LexTokenKind::Kw(Kw::External),
+            "extern" => LexTokenKind::Kw(Kw::External),
 
             "var" => LexTokenKind::Kw(Kw::Var),
             "const" => LexTokenKind::Kw(Kw::Const),
             "static" => LexTokenKind::Kw(Kw::Static),
-            "private" => LexTokenKind::Kw(Kw::Private),
-            "public" => LexTokenKind::Kw(Kw::Public),
-            "hidden" => LexTokenKind::Kw(Kw::Hidden),
+            "priv" => LexTokenKind::Kw(Kw::Private),
+            "pub" => LexTokenKind::Kw(Kw::Public),
+            "hid" => LexTokenKind::Kw(Kw::Hidden),
 
             "struct" => LexTokenKind::Kw(Kw::Struct),
             "enum" => LexTokenKind::Kw(Kw::Enum),
             "union" => LexTokenKind::Kw(Kw::Union),
 
             "trait" => LexTokenKind::Kw(Kw::Trait),
-            "implement" => LexTokenKind::Kw(Kw::Implement),
-            "implements" => LexTokenKind::Kw(Kw::Implements),
+            "impl" => LexTokenKind::Kw(Kw::Implement),
+            "impls" => LexTokenKind::Kw(Kw::Implements),
 
             "where" => LexTokenKind::Kw(Kw::Where),
             "defer" => LexTokenKind::Kw(Kw::Defer),
 
-            "function" => LexTokenKind::Kw(Kw::Function),
+            "fn" => LexTokenKind::Kw(Kw::Function),
             "test" => LexTokenKind::Kw(Kw::Test),
 
             _ => return None,

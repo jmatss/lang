@@ -5,9 +5,9 @@ enum TestEnum
     THIRD,
 }
 
-implement TestEnum
+impl TestEnum
 {
-    function new(n: i32) -> TestEnum
+    fn new(n: i32) -> TestEnum
     {
         if n == 1
         {
@@ -24,7 +24,7 @@ implement TestEnum
     }
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var e1: TestEnum = TestEnum::SECOND
     var e2 = TestEnum::new(3)

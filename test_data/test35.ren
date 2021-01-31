@@ -1,6 +1,6 @@
 use std.assert
 
-external function strcmp(s1: {u8}, s2: {u8}) -> i32
+extern fn strcmp(s1: {u8}, s2: {u8}) -> i32
 
 struct TestStruct<T>
 {
@@ -8,16 +8,16 @@ struct TestStruct<T>
     b: T,
 }
 
-implement TestStruct
+impl TestStruct
 {
-    function this generic_size() -> u32
+    fn this generic_size() -> u32
     {
         return @size<T>()
     }
 }
 
 
-function main() -> i32
+fn main() -> i32
 {
     var ts = TestStruct<f64> { 123, 456. }
     var size_inner = ts.generic_size()

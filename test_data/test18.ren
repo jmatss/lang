@@ -7,9 +7,9 @@ struct TestStruct
     c: i32,
 }
 
-implement TestStruct
+impl TestStruct
 {
-    function {this} add(input: i32) -> i32
+    fn {this} add(input: i32) -> i32
     {
         this.*.a = 20
         this.*.b.* = 2.0
@@ -17,7 +17,7 @@ implement TestStruct
     }
 }
 
-function main() -> i32
+fn main() -> i32
 {
     var b = 1.0
     var test_struct = TestStruct { 10, b.&, 2 }
