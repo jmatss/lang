@@ -20,7 +20,15 @@ implement Nullable
     // If `value` isn't set, the default value will be null.
     function init(value: T = @null<T>()) -> Nullable<T>
     {
-        return Nullable<T> { value, false }
+        // TODO: Make this compare work. Ex. implement "Comparable" trait on `T`.
+        if value == @null<T>()
+        {
+            return Nullable<T> { value, true }
+        }
+        else
+        {
+            return Nullable<T> { value, false }
+        }
     }
 }
 

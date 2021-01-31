@@ -21,6 +21,7 @@ pub enum BlockHeader {
     Function(Rc<RefCell<Function>>),
     Struct(Rc<RefCell<Adt>>),
     Enum(Rc<RefCell<Adt>>),
+    Union(Rc<RefCell<Adt>>),
     Trait(Rc<RefCell<Trait>>),
 
     /// The first string is the name of the structure that this impl block
@@ -452,9 +453,10 @@ impl Function {
             let (structure_name, structure_generics) =
                 if let Ty::CompoundType(inner_ty, generics, ..) = ty {
                     match inner_ty {
-                        InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
-                            (ident, generics)
-                        }
+                        InnerTy::Struct(ident)
+                        | InnerTy::Enum(ident)
+                        | InnerTy::Union(ident)
+                        | InnerTy::Trait(ident) => (ident, generics),
                         _ => unreachable!("Method on non structure type: {:#?}", self),
                     }
                 } else {

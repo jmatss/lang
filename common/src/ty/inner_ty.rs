@@ -5,6 +5,7 @@ use std::fmt::Display;
 pub enum InnerTy {
     Struct(String),
     Enum(String),
+    Union(String),
     Trait(String),
 
     Void,
@@ -54,6 +55,7 @@ impl InnerTy {
         match self {
             InnerTy::Struct(ident)
             | InnerTy::Enum(ident)
+            | InnerTy::Union(ident)
             | InnerTy::Trait(ident)
             | InnerTy::UnknownIdent(ident, ..) => Some(ident.clone()),
             _ => None,
@@ -164,7 +166,7 @@ impl InnerTy {
     /// It does NOT check if this is a UnknownIdent.
     pub fn is_adt(&self) -> bool {
         match self {
-            InnerTy::Struct(_) | InnerTy::Enum(_) => true,
+            InnerTy::Struct(_) | InnerTy::Enum(_) | InnerTy::Union(_) => true,
             _ => false,
         }
     }
@@ -209,6 +211,7 @@ impl InnerTy {
         match (self, inner_ty) {
             (InnerTy::Struct(_), InnerTy::Struct(_))
             | (InnerTy::Enum(_), InnerTy::Enum(_))
+            | (InnerTy::Union(_), InnerTy::Union(_))
             | (InnerTy::Trait(_), InnerTy::Trait(_))
             | (InnerTy::Void, InnerTy::Void)
             | (InnerTy::Character, InnerTy::Character)
@@ -238,7 +241,10 @@ impl InnerTy {
 impl Display for InnerTy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let result = match self {
-            InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => ident,
+            InnerTy::Struct(ident)
+            | InnerTy::Enum(ident)
+            | InnerTy::Union(ident)
+            | InnerTy::Trait(ident) => ident,
             InnerTy::Void => "void",
             InnerTy::Character => "char",
             InnerTy::String => "String",

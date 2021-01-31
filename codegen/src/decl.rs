@@ -40,7 +40,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 AdtKind::Enum => {
                     self.compile_enum(&adt)?;
                 }
-                AdtKind::Union => panic!("TODO: Compile union"),
+                AdtKind::Union => {
+                    self.compile_union(&adt)?;
+                }
                 AdtKind::Unknown => unreachable!("Tried to compile AdtKind::Unknown"),
             }
         }

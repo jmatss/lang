@@ -1,19 +1,24 @@
 use crate::{expr::ExprTy, generator::CodeGen};
+use analyze::block::BlockInfo;
 use common::{
     error::CustomResult,
     file::FilePosition,
     token::{
+        block::Adt,
         expr::Expr,
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
+        stmt::Stmt,
     },
     ty::ty::Ty,
+    util, BlockId,
 };
 use inkwell::{
-    types::{AnyTypeEnum, BasicTypeEnum},
-    values::{AggregateValue, AnyValueEnum, BasicValueEnum, PointerValue},
-    FloatPredicate, IntPredicate,
+    types::{AnyTypeEnum, BasicType, BasicTypeEnum},
+    values::{AggregateValue, AnyValue, AnyValueEnum, BasicValue, BasicValueEnum, PointerValue},
+    AddressSpace, FloatPredicate, IntPredicate,
 };
 use log::debug;
+use std::{cell::RefCell, rc::Rc};
 
 // TODO: Check constness for operators. Ex. adding two consts should use a
 //       const add instruction so that the result also is const.
@@ -243,7 +248,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
             UnOperator::AdtAccess(..) => {
-                let val = self.compile_un_op_struct_access(un_op, expr_ty)?;
+                let val = self.compile_un_op_adt_access(un_op, expr_ty)?;
                 match expr_ty {
                     ExprTy::LValue => Ok(val),
                     ExprTy::RValue => Ok(if val.is_pointer_value() {
@@ -262,6 +267,83 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 )),
                 ExprTy::RValue => self.compile_un_op_enum_access(un_op),
             },
+            UnOperator::UnionIs(member_name, var_decl) => {
+                let var = if let Stmt::VariableDecl(var, ..) = var_decl.as_ref() {
+                    var
+                } else {
+                    unreachable!("{:#?}", un_op);
+                };
+
+                // TODO: The value will be stored into the new var decl here.
+                //       This is compiled in the if-case expr which means that the
+                //       variable is declared and then stored even though the expr
+                //       might not evaluate to true. Change this so that the var
+                //       is declared and initialized ONLY if the expr evals to true.
+                let union_access = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
+                self.compile_var_decl(&var.borrow())?;
+                self.compile_var_store(
+                    &var.borrow(),
+                    CodeGen::any_into_basic_value(union_access)?,
+                )?;
+
+                // TODO: Do in cleaner way.
+                // Get the type of the union and get the tag idx for the member
+                // that is being accessed. This will be compared to the actual
+                // tag idx of the variable in the code to see if this is a match
+                // or not.
+                let union_var = if let Expr::Op(Op::UnOp(inner_un_op)) = un_op.value.as_ref() {
+                    if let Expr::Var(union_var) = inner_un_op.value.as_ref() {
+                        union_var
+                    } else {
+                        unreachable!("inner_un_op.value not a var: {:#?}", un_op);
+                    }
+                } else {
+                    unreachable!("un_op.value not union access: {:#?}", un_op);
+                };
+
+                let tag_cmp = if let Ty::CompoundType(inner_ty, generics, ..) =
+                    union_var.ty.as_ref().unwrap()
+                {
+                    let adt_name = util::to_generic_name(&inner_ty.get_ident().unwrap(), generics);
+
+                    let expected_tag = self.analyze_context.get_adt_member_index(
+                        &adt_name,
+                        member_name,
+                        self.cur_block_id,
+                    )?;
+                    let expected_tag = self.context.i8_type().const_int(expected_tag, false);
+
+                    let union_var_ptr = self.get_var_ptr(union_var)?;
+                    let tag_ptr = self
+                        .builder
+                        .build_struct_gep(union_var_ptr, 0, "union.is.tag.gep")
+                        .map_err(|_| {
+                            self.err(
+                                format!("Unable to GEP union \"{}\" tag.", &adt_name),
+                                union_var.file_pos,
+                            )
+                        })?;
+
+                    let actual_tag = self.builder.build_load(tag_ptr, "union.is.tag.load");
+                    if !actual_tag.is_int_value() {
+                        unreachable!(
+                            "Union tag isn't IntValue. actual_tag: {:#?}, un_op: {:#?}",
+                            actual_tag, un_op
+                        );
+                    }
+
+                    self.builder.build_int_compare(
+                        IntPredicate::EQ,
+                        expected_tag,
+                        actual_tag.into_int_value(),
+                        "union.is.tag.cmp",
+                    )
+                } else {
+                    unreachable!("inner_un_op.value type not compound: {:#?}", un_op);
+                };
+
+                Ok(tag_cmp.into())
+            }
             UnOperator::Positive => {
                 let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
                 un_op.is_const = CodeGen::is_const(&[any_value]);
@@ -1234,38 +1316,61 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })
     }
 
-    /// This function accessed the member at index `idx_opt` for the struct in
+    /// This function accessed the member at index `idx_opt` for the ADT in
     /// expression `expr`. The returned value will be a pointer to the allocated
     /// member, so the caller would have to do a load if they want the actual value.
-    fn compile_un_op_struct_access(
+    fn compile_un_op_adt_access(
         &mut self,
         un_op: &mut UnOp,
         expr_ty: ExprTy,
     ) -> CustomResult<AnyValueEnum<'ctx>> {
-        let idx = if let UnOperator::AdtAccess(_, idx_opt) = un_op.operator {
-            if let Some(idx) = idx_opt {
-                idx as u32
-            } else {
-                return Err(self.err(
-                    format!("No index set when compiling struct access: {:?}", un_op),
-                    None,
-                ));
-            }
+        let idx = if let UnOperator::AdtAccess(_, idx) = &un_op.operator {
+            idx.unwrap()
         } else {
-            return Err(self.err(
-                format!(
-                    "Un op not struct access when compilig struct access: {:?}",
-                    un_op
-                ),
-                None,
-            ));
+            unreachable!();
         };
 
+        let adt_ty = un_op.value.get_expr_type()?;
+        let adt_name = if let Ty::CompoundType(inner_ty, generics, ..) = &adt_ty {
+            if inner_ty.is_adt() {
+                util::to_generic_name(&inner_ty.get_ident().unwrap(), generics)
+            } else {
+                return Err(self.analyze_context.err(format!(
+                    "Expression that was ADT accessed wasn't ADT, was: {:#?}",
+                    un_op.value
+                )));
+            }
+        } else {
+            return Err(self.analyze_context.err(format!(
+                "Expression that was ADT accessed wasn't Compound, was: {:#?}",
+                un_op.value
+            )));
+        };
+
+        // TODO: Don't hardcode default id.
+        let id = BlockInfo::DEFAULT_BLOCK_ID;
+
+        if self.analyze_context.is_struct(&adt_name, id) {
+            self.compile_un_op_struct_access(un_op, expr_ty, idx as u32)
+        } else if self.analyze_context.is_union(&adt_name, id) {
+            let union_ = self.analyze_context.get_adt(&adt_name, id)?;
+            self.compile_un_op_union_access(un_op, expr_ty, idx as u32, Rc::clone(&union_))
+        } else {
+            unreachable!("{:#?}", un_op);
+        }
+    }
+
+    fn compile_un_op_struct_access(
+        &mut self,
+        un_op: &mut UnOp,
+        expr_ty: ExprTy,
+        idx: u32,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
         let mut any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
         un_op.is_const = CodeGen::is_const(&[any_value]);
 
         debug!(
-            "Compilng struct access, idx: {} -- un_op: {:#?}\nany_value: {:#?}",
+            "Compiling struct access, idx: {} -- un_op: {:#?}\nany_value: {:#?}",
             idx, un_op, any_value
         );
 
@@ -1311,6 +1416,86 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Err(self.err(
                 format!(
                     "Expr in struct access not a pointer or struct. Un up: {:#?}\ncompiled expr: {:#?}",
+                    un_op, any_value
+                ),
+                None,
+            ))
+        }
+    }
+
+    // TODO: const logic.
+    fn compile_un_op_union_access(
+        &mut self,
+        un_op: &mut UnOp,
+        expr_ty: ExprTy,
+        idx: u32,
+        union_: Rc<RefCell<Adt>>,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
+        let address_space = AddressSpace::Generic;
+
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
+        un_op.is_const = CodeGen::is_const(&[any_value]);
+
+        debug!(
+            "Compiling union access, idx: {} -- un_op: {:#?}\nany_value: {:#?}",
+            idx, un_op, any_value
+        );
+
+        let ty = union_
+            .borrow()
+            .members
+            .get(idx as usize)
+            .unwrap()
+            .borrow()
+            .ty
+            .clone()
+            .unwrap();
+        let member_ty = self.compile_type(&ty, ty.file_pos().cloned())?;
+        let basic_member_ty = CodeGen::any_into_basic_type(member_ty)?;
+
+        let data_idx = 1;
+        if any_value.is_pointer_value() {
+            let ptr = any_value.into_pointer_value();
+            let member_ptr = self
+                .builder
+                .build_struct_gep(ptr, data_idx, "union.gep")
+                .map_err(|_| {
+                    self.err(
+                        format!("Unable to gep for union member index: {:?}.", un_op),
+                        None,
+                    )
+                })?;
+
+            Ok(self
+                .builder
+                .build_pointer_cast(
+                    member_ptr,
+                    basic_member_ty.ptr_type(address_space),
+                    "union.ptr.cast",
+                )
+                .into())
+        } else if any_value.is_struct_value() {
+            // Known to be const at this point, so safe to "const extract".
+            if let ExprTy::RValue = expr_ty {
+                let member_value = any_value
+                    .into_struct_value()
+                    .const_extract_value(&mut [idx]);
+
+                // TODO: Does this work?
+                Ok(self
+                    .builder
+                    .build_bitcast(member_value, basic_member_ty, "union.bitcast")
+                    .into())
+            } else {
+                Err(self.err(
+                    format!("StructValue not allowed in lvalue: {:#?}", un_op),
+                    None,
+                ))
+            }
+        } else {
+            Err(self.err(
+                format!(
+                    "Expr in union access not a pointer or struct. Un up: {:#?}\ncompiled expr: {:#?}",
                     un_op, any_value
                 ),
                 None,

@@ -242,11 +242,14 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                 }
 
                 // TODO: Implement for unions as well.
-                if let InnerTy::Struct(struct_name) = inner_ty {
-                    if !generics.is_empty() {
-                        self.verify_adt_traits(struct_name, generics, block_id);
+                match inner_ty {
+                    InnerTy::Struct(ident) | InnerTy::Union(ident) => {
+                        if !generics.is_empty() {
+                            self.verify_adt_traits(ident, generics, block_id);
+                        }
                     }
-                }
+                    _ => (),
+                };
             }
 
             Ty::Array(ty_i, expr_opt, ..) => {

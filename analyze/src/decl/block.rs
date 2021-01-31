@@ -127,6 +127,7 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
                     AstToken::Block(BlockHeader::Default, ..)
                     | AstToken::Block(BlockHeader::Struct(_), ..)
                     | AstToken::Block(BlockHeader::Enum(_), ..)
+                    | AstToken::Block(BlockHeader::Union(_), ..)
                     | AstToken::Block(BlockHeader::Trait(_), ..)
                     | AstToken::Block(BlockHeader::Implement(..), ..) => {
                         self.analyze_block(child_token, analyze_context, *id);

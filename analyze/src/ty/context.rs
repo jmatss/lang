@@ -184,6 +184,8 @@ impl<'a> TypeContext<'a> {
                 *inner_ty = InnerTy::Struct(ident.clone());
             } else if self.analyze_context.is_enum(ident, *id) {
                 *inner_ty = InnerTy::Enum(ident.clone());
+            } else if self.analyze_context.is_union(ident, *id) {
+                *inner_ty = InnerTy::Union(ident.clone());
             } else if self.analyze_context.is_trait(ident, *id) {
                 *inner_ty = InnerTy::Trait(ident.clone());
             }

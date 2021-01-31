@@ -8,9 +8,9 @@ use crate::{
     file::FilePosition,
     ENV_VAR,
 };
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, hash::Hash, path::PathBuf, rc::Rc};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Eq)]
 pub enum Stmt {
     Return(Option<Expr>, Option<FilePosition>),
     /// Yield ~= Break with a value
@@ -53,6 +53,75 @@ pub enum Stmt {
     // TODO: Implement extern for variables as well.
     /// Declaration of extern functions.
     ExternalDecl(Rc<RefCell<Function>>, Option<FilePosition>),
+}
+
+impl PartialEq for Stmt {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Stmt::Return(a, b), Stmt::Return(c, d)) => a == c && b == d,
+            (Stmt::Break(a), Stmt::Break(b)) | (Stmt::Continue(a), Stmt::Continue(b)) => a == b,
+            (Stmt::Use(a), Stmt::Use(b)) | (Stmt::Package(a), Stmt::Package(b)) => a == b,
+            (Stmt::Yield(a, b), Stmt::Yield(c, d))
+            | (Stmt::Increment(a, b), Stmt::Increment(c, d))
+            | (Stmt::Decrement(a, b), Stmt::Decrement(c, d))
+            | (Stmt::Defer(a, b), Stmt::Defer(c, d)) => a == c && b == d,
+            (Stmt::DeferExec(a), Stmt::DeferExec(b)) => a == b,
+            (Stmt::Assignment(a1, b1, c1, d1), Stmt::Assignment(e2, f2, g2, h2)) => {
+                a1 == e2 && b1 == f2 && c1 == g2 && d1 == h2
+            }
+            (Stmt::VariableDecl(a, b), Stmt::VariableDecl(c, d)) => a == c && b == d,
+            (Stmt::ExternalDecl(a, b), Stmt::ExternalDecl(c, d)) => a == c && b == d,
+            _ => false,
+        }
+    }
+}
+
+impl Hash for Stmt {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Stmt::Return(a, b) => {
+                a.hash(state);
+                b.hash(state);
+            }
+            Stmt::Break(a) | Stmt::Continue(a) => {
+                a.hash(state);
+            }
+            Stmt::Use(a) | Stmt::Package(a) => {
+                a.hash(state);
+            }
+            Stmt::Yield(a, b)
+            | Stmt::Increment(a, b)
+            | Stmt::Decrement(a, b)
+            | Stmt::Defer(a, b) => {
+                a.hash(state);
+                b.hash(state);
+            }
+            Stmt::DeferExec(a) => {
+                a.hash(state);
+            }
+            Stmt::Assignment(a, b, c, d) => {
+                a.hash(state);
+                b.hash(state);
+                c.hash(state);
+                d.hash(state);
+            }
+            Stmt::VariableDecl(a, b) => {
+                a.borrow().hash(state);
+                b.hash(state);
+            }
+            Stmt::ExternalDecl(a, b) => {
+                let func = a.borrow();
+                func.name.hash(state);
+                func.generic_names.hash(state);
+                func.generic_impls.hash(state);
+                func.ret_type.hash(state);
+                func.modifiers.hash(state);
+                func.is_var_arg.hash(state);
+                func.method_adt.hash(state);
+                b.hash(state);
+            }
+        }
+    }
 }
 
 impl Stmt {

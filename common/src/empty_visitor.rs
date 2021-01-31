@@ -58,6 +58,10 @@ impl Visitor for DummyVisitor {
         unreachable!()
     }
 
+    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+        unreachable!()
+    }
+
     fn visit_trait(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         unreachable!()
     }

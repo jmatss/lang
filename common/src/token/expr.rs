@@ -553,30 +553,33 @@ impl AdtInit {
     /// Returns the "full name" which is the name containing possible generics
     /// as well.
     pub fn full_name(&mut self) -> CustomResult<String> {
-        let struct_init_generics = if let Some(generics) = self.generics() {
+        let adt_init_generics = if let Some(generics) = self.generics() {
             Some(generics.clone())
         } else {
             None
         };
 
         if let Some(ty) = &self.ret_type {
-            if let Ty::CompoundType(InnerTy::Struct(ident), struct_generics, ..) = ty {
-                let generics = if let Some(struct_init_generics) = struct_init_generics {
-                    struct_init_generics
+            if let Ty::CompoundType(inner_ty, adt_generics, ..) = ty {
+                let generics = if let Some(adt_init_generics) = adt_init_generics {
+                    adt_init_generics
                 } else {
-                    struct_generics.clone()
+                    adt_generics.clone()
                 };
 
-                Ok(util::to_generic_name(ident, &generics))
+                Ok(util::to_generic_name(
+                    &inner_ty.get_ident().unwrap(),
+                    &generics,
+                ))
             } else {
                 Err(LangError::new(
-                    format!("Unable to get full name for struct init: {:#?}", self),
+                    format!("Unable to get full name for ADT init: {:#?}", self),
                     LangErrorKind::GeneralError,
                     self.file_pos.to_owned(),
                 ))
             }
         } else {
-            unreachable!("Struct init has no type: {:#?}", self);
+            unreachable!("ADT init has no type: {:#?}", self);
         }
     }
 }

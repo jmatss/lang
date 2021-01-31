@@ -80,6 +80,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
             Kw::Struct => self.parse_struct(modifiers, kw_file_pos),
             Kw::Enum => self.parse_enum(modifiers, kw_file_pos),
+            Kw::Union => self.parse_union(modifiers, kw_file_pos),
             Kw::Trait => self.parse_trait(modifiers, kw_file_pos),
 
             Kw::Defer => self.parse_defer(kw_file_pos),
@@ -925,6 +926,78 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let enum_ = Adt::new_enum(ident, modifiers, members_rc, Some(enum_ty));
         let header = BlockHeader::Enum(Rc::new(RefCell::new(enum_)));
+
+        let block_id = self.iter.reserve_block_id();
+        let body = Vec::with_capacity(0);
+
+        Ok(AstToken::Block(header, file_pos, block_id, body))
+    }
+
+    /// Parses a union header.
+    ///   "union <ident> [ < <generic>, ... > ] [{ [<ident>: <type>] [[,] ...] }]"
+    /// The "union" keyword has already been consumed when this function is called.
+    fn parse_union(
+        &mut self,
+        modifiers: Vec<Modifier>,
+        mut file_pos: FilePosition,
+    ) -> CustomResult<AstToken> {
+        // Start by parsing the identifier.
+        let lex_token = self.iter.next_skip_space_line();
+        let ident =
+            if let Some(LexTokenKind::Ident(ident)) = lex_token.as_ref().map(|token| &token.kind) {
+                ident.clone()
+            } else {
+                return Err(self.iter.err(
+                    format!("Not ident after parsing \"union\": {:?}", lex_token),
+                    lex_token.map(|t| t.file_pos),
+                ));
+            };
+
+        let mut type_parse = TypeParser::new(self.iter, None);
+        let (generics, gens_file_pos) = type_parse.parse_type_generics(GenericsKind::Decl)?;
+
+        if let Some(gens_file_pos) = gens_file_pos {
+            file_pos.set_end(&gens_file_pos)?;
+        }
+
+        let implements = self.parse_where(generics.as_ref())?;
+
+        // Parse the members of the union. If the next token isn't a
+        // "CurlyBracketBegin" symbol, assume this is a enum with no members.
+        let (members, is_var_arg) = if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
+            self.iter.peek_skip_space_line().map(|t| t.kind)
+        {
+            let start_symbol = Sym::CurlyBracketBegin;
+            let end_symbol = Sym::CurlyBracketEnd;
+            let (members, is_var_arg, par_file_pos) =
+                self.iter
+                    .parse_par_list(start_symbol, end_symbol, generics.as_ref())?;
+
+            file_pos.set_end(&par_file_pos)?;
+
+            (members, is_var_arg)
+        } else {
+            (Vec::default(), false)
+        };
+
+        let members = members
+            .iter()
+            .map(|m| Rc::new(RefCell::new(m.clone())))
+            .collect::<Vec<_>>();
+
+        if is_var_arg {
+            return Err(self.iter.err(
+                format!(
+                    "Found invalid var_arg symbol in union with name: {}",
+                    &ident
+                ),
+                Some(file_pos),
+            ));
+        }
+
+        let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
+        let union = Adt::new_union(ident, modifiers, members, generic_names, implements);
+        let header = BlockHeader::Union(Rc::new(RefCell::new(union)));
 
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);

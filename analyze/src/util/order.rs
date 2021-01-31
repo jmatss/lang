@@ -219,6 +219,13 @@ impl Visitor for ReferenceCollector {
         }
     }
 
+    fn visit_union(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Union(adt), ..) = ast_token {
+            let adt_name = adt.borrow().name.clone();
+            self.collect_member_references(&adt_name, &adt.borrow().members);
+        }
+    }
+
     fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Implement(ident, ..), ..) = ast_token {
             self.cur_adt_name = ident.clone();

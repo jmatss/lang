@@ -10,7 +10,7 @@ use common::{
     ty::{inner_ty::InnerTy, ty::Ty},
 };
 use inkwell::{
-    types::{AnyTypeEnum, BasicTypeEnum},
+    types::{AnyTypeEnum, BasicType, BasicTypeEnum},
     values::{AnyValueEnum, FloatValue, IntValue},
     AddressSpace,
 };
@@ -51,6 +51,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Expr::Op(op) => self.compile_op(op, expr_ty, file_pos),
             Expr::AdtInit(adt_init) => match adt_init.kind {
                 AdtKind::Struct => self.compile_struct_init(adt_init),
+                AdtKind::Union => self.compile_union_init(adt_init),
                 _ => panic!("Tried to compile AdtInit for kind: {:?}", adt_init.kind),
             },
             Expr::ArrayInit(array_init) => self.compile_array_init(array_init),
@@ -497,6 +498,118 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .build_load(struct_ptr, "struct.init.load")
                 .into())
         }
+    }
+
+    /// Generates a union creation/initialization.
+    pub fn compile_union_init(
+        &mut self,
+        union_init: &mut AdtInit,
+    ) -> CustomResult<AnyValueEnum<'ctx>> {
+        let full_name = union_init.full_name()?;
+
+        let union_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
+            inner
+        } else {
+            return Err(self.err(
+                format!(
+                    "Unable to get union with name \"{}\". Union init: {:#?}",
+                    full_name, union_init
+                ),
+                union_init.file_pos,
+            ));
+        };
+
+        let arg = union_init.arguments.first_mut().unwrap();
+        let any_value = self.compile_expr(&mut arg.value, ExprTy::RValue)?;
+        let basic_value = CodeGen::any_into_basic_value(any_value)?;
+
+        let tag_idx = self.analyze_context.get_adt_member_index(
+            &full_name,
+            &arg.name.as_ref().unwrap(),
+            self.cur_block_id,
+        )?;
+        let tag = self.context.i8_type().const_int(tag_idx, false);
+
+        let val_ptr = self
+            .builder
+            .build_alloca(basic_value.get_type(), "union.init.val");
+        self.builder.build_store(val_ptr, basic_value);
+
+        // TODO: const.
+
+        let union_ptr = self.builder.build_alloca(union_type, "union.init");
+        let tag_ptr = self
+            .builder
+            .build_struct_gep(union_ptr, 0, "union.init.tag.gep")
+            .map_err(|_| {
+                self.err(
+                    format!("Unable to GEP union \"{}\" tag.", &union_init.name),
+                    union_init.file_pos,
+                )
+            })?;
+        let data_ptr = self
+            .builder
+            .build_struct_gep(union_ptr, 1, "union.init.data.gep")
+            .map_err(|_| {
+                self.err(
+                    format!("Unable to GEP union \"{}\" data.", &union_init.name),
+                    union_init.file_pos,
+                )
+            })?;
+
+        let inner_any_type = data_ptr.get_type().get_element_type();
+        let inner_basic_type = CodeGen::any_into_basic_type(inner_any_type)?;
+
+        // Zero out the memory of the new union.
+        match inner_basic_type {
+            BasicTypeEnum::ArrayType(ty) => {
+                let zero_mem = ty.const_zero();
+                self.builder.build_store(data_ptr, zero_mem);
+            }
+            BasicTypeEnum::FloatType(ty) => {
+                let zero_mem = ty.const_zero();
+                self.builder.build_store(data_ptr, zero_mem);
+            }
+            BasicTypeEnum::IntType(ty) => {
+                let zero_mem = ty.const_zero();
+                self.builder.build_store(data_ptr, zero_mem);
+            }
+            BasicTypeEnum::PointerType(ty) => {
+                let zero_mem = ty.const_zero();
+                self.builder.build_store(data_ptr, zero_mem);
+            }
+            BasicTypeEnum::StructType(ty) => {
+                let zero_mem = ty.const_zero();
+                self.builder.build_store(data_ptr, zero_mem);
+            }
+            BasicTypeEnum::VectorType(ty) => {
+                let zero_mem = ty.const_zero();
+                self.builder.build_store(data_ptr, zero_mem);
+            }
+        };
+
+        let address_space = Some(AddressSpace::Generic);
+        let alignment = self.target_machine.get_target_data().get_abi_alignment(
+            &self
+                .context
+                .ptr_sized_int_type(&self.target_machine.get_target_data(), address_space),
+        );
+
+        // Store the correct tag for the union.
+        self.builder.build_store(tag_ptr, tag);
+
+        // Copy the init value into an array of the correct size of the inner union type.
+        self.builder
+            .build_memcpy(
+                data_ptr,
+                alignment,
+                val_ptr,
+                alignment,
+                basic_value.get_type().size_of().unwrap(),
+            )
+            .map_err(|msg| self.err(msg.into(), union_init.file_pos))?;
+
+        Ok(self.builder.build_load(union_ptr, "union.init.load").into())
     }
 
     /// Generates a array creation/initialization.

@@ -8,8 +8,8 @@ use common::{
 };
 use std::cell::RefCell;
 
-/// Iterates through "generic" parameters tied to structures and functions and
-/// replaces the uses of the generics with "Generic" types instead of the parsed
+/// Iterates through "generic" parameters tied to ADTs and functions, and replaces
+/// the uses of the generics with "Generic" types instead of the parsed
 /// "UnknownIdent". This is done so that generics can be handled differently
 /// during the type inference stage.
 pub struct GenericsAnalyzer<'a> {
@@ -36,13 +36,25 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
         }
     }
 
-    // TODO: Implement for interfaces & enums.
     /// "Rewrites" the types of the generic member types to "Generic"s for
     /// the structure members.
     fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Struct(struct_), ..) = &ast_token {
             let struct_ = struct_.borrow();
             if let (Some(generics), members) = (&struct_.generics, &struct_.members) {
+                for member in members {
+                    if let Some(ty) = member.borrow_mut().ty.as_mut() {
+                        ty.replace_generics(&generics)
+                    }
+                }
+            }
+        }
+    }
+
+    fn visit_union(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Union(union), ..) = &ast_token {
+            let union = union.borrow();
+            if let (Some(generics), members) = (&union.generics, &union.members) {
                 for member in members {
                     if let Some(ty) = member.borrow_mut().ty.as_mut() {
                         ty.replace_generics(&generics)

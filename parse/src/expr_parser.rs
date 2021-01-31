@@ -272,9 +272,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 }
 
                 // Special case for operators that takes a "type" as rhs.
-                LexTokenKind::Sym(symbol @ Sym::Is)
-                | LexTokenKind::Sym(symbol @ Sym::As)
-                | LexTokenKind::Sym(symbol @ Sym::Of) => {
+                LexTokenKind::Sym(symbol @ Sym::As) | LexTokenKind::Sym(symbol @ Sym::Of) => {
                     if let Some(op) = get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
                         let ty_expr = self.iter.parse_type(None)?;
@@ -655,7 +653,6 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     if let Some(last_op) = self.operators.last() {
                         match last_op {
                             Operator::BinaryOperator(BinOperator::As)
-                            | Operator::BinaryOperator(BinOperator::Is)
                             | Operator::BinaryOperator(BinOperator::Of) => {
                                 // Put back the old `lex_token` contaning this
                                 // identifier and parse as type.

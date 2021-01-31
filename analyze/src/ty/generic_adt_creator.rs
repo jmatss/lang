@@ -145,7 +145,7 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
                 // into the AST.
                 let header = match adt.borrow().kind {
                     AdtKind::Struct => BlockHeader::Struct(Rc::clone(&new_adt_rc)),
-                    AdtKind::Union => panic!("TODO: Union"),
+                    AdtKind::Union => BlockHeader::Union(Rc::clone(&new_adt_rc)),
                     AdtKind::Enum | AdtKind::Unknown => {
                         panic!("Bad adt kind: {:?}", adt.borrow().kind)
                     }
@@ -312,31 +312,41 @@ impl<'a, 'tctx> Visitor for GenericAdtCreator<'a, 'tctx> {
 
                 // TODO: Implemement for other types other than struct as well.
                 // Modify and create the new ADTs. The old ADT will also be removed.
-                if let AstToken::Block(BlockHeader::Struct(adt), file_pos, old_id, ..) = &body_token
-                {
-                    if self.generic_adts.contains_key(&adt.borrow().name) {
-                        if let Some(skip) = self.create_adt_instance(
-                            &adt.borrow().name.clone(),
-                            body,
-                            file_pos,
-                            i,
-                            *old_id,
-                            *parent_id,
-                        ) {
-                            // Skip the newly created ADT blocks (if any).
-                            i += skip;
+                if let AstToken::Block(header, file_pos, old_id, ..) = &body_token {
+                    match header {
+                        BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
+                            if self.generic_adts.contains_key(&adt.borrow().name) {
+                                if let Some(skip) = self.create_adt_instance(
+                                    &adt.borrow().name.clone(),
+                                    body,
+                                    file_pos,
+                                    i,
+                                    *old_id,
+                                    *parent_id,
+                                ) {
+                                    // Skip the newly created ADT blocks (if any).
+                                    i += skip;
+                                }
+                            } else if adt
+                                .borrow()
+                                .generics
+                                .as_ref()
+                                .map(|gens| !gens.is_empty())
+                                .unwrap_or(false)
+                            {
+                                // If the ADT contains generics but isn't in `self.generic_adts`,
+                                // it means that the ADT isn't used anywhere and contains generics.
+                                // Need to remove if from the AST.
+                                self.remove_adt_instance(
+                                    &adt.borrow().name.clone(),
+                                    body,
+                                    i,
+                                    *parent_id,
+                                );
+                            }
                         }
-                    } else if adt
-                        .borrow()
-                        .generics
-                        .as_ref()
-                        .map(|gens| !gens.is_empty())
-                        .unwrap_or(false)
-                    {
-                        // If the ADT contains generics but isn't in `self.generic_adts`,
-                        // it means that the ADT isn't used anywhere and contains generics.
-                        // Need to remove if from the AST.
-                        self.remove_adt_instance(&adt.borrow().name.clone(), body, i, *parent_id);
+
+                        _ => (),
                     }
                 }
 

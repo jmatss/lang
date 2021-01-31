@@ -169,7 +169,7 @@ impl Operator {
     /*
         Precedence:
             0   ( )          (precedence for parenthesis always highest)
-            1   . :: .* .& .[]  (func/method calls, deref, address, indexing etc.)
+            1   . :: .* .& .[] (func/method calls, deref, address, indexing etc.)
             2   +x -x        (negative/positive)
             3   ~
             4   as
@@ -206,6 +206,7 @@ impl Operator {
                 UnOperator::Deref => (true, 1, Fix::Postfix),
                 UnOperator::Address => (true, 1, Fix::Postfix),
                 UnOperator::ArrayAccess(_) => (true, 1, Fix::Postfix),
+                UnOperator::UnionIs(..) => unreachable!("UnionIs"),
                 UnOperator::AdtAccess(..) => (true, 1, Fix::Postfix),
                 UnOperator::EnumAccess(..) => (true, 1, Fix::Postfix),
             })

@@ -4,7 +4,10 @@ use common::{
     error::LangError,
     token::expr::Argument,
     token::expr::FuncCall,
-    token::expr::{AdtInit, Var},
+    token::{
+        block::AdtKind,
+        expr::{AdtInit, Var},
+    },
     traverser::TraverseContext,
     ty::{inner_ty::InnerTy, ty::Ty},
     util,
@@ -172,9 +175,10 @@ impl<'a> Visitor for CallArgs<'a> {
         let func_res = if let Some(ty) = &func_call.method_adt {
             let full_struct_name = match ty {
                 Ty::CompoundType(inner_ty, generics, ..) => match inner_ty {
-                    InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
-                        util::to_generic_name(ident, generics)
-                    }
+                    InnerTy::Struct(ident)
+                    | InnerTy::Enum(ident)
+                    | InnerTy::Union(ident)
+                    | InnerTy::Trait(ident) => util::to_generic_name(ident, generics),
                     _ => {
                         let err = self.analyze_context.err(format!(
                             "Bad inner type for func call method_structure: {:#?}",
@@ -237,6 +241,12 @@ impl<'a> Visitor for CallArgs<'a> {
     }
 
     fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {
+        match adt_init.kind {
+            AdtKind::Struct => (),
+            AdtKind::Union => return,
+            AdtKind::Enum | AdtKind::Unknown => unreachable!("{:#?}", adt_init.kind),
+        }
+
         let full_name = match adt_init.full_name() {
             Ok(full_name) => full_name,
             Err(err) => {

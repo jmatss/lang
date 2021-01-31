@@ -177,7 +177,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
             let inner_ty = match self.analyze_context.borrow().get_adt(ident, func_id) {
                 Ok(adt) => match adt.borrow().kind {
                     AdtKind::Struct => InnerTy::Struct(ident.into()),
-                    AdtKind::Union => panic!("TODO: Union inner ty."),
+                    AdtKind::Union => InnerTy::Union(ident.into()),
                     AdtKind::Enum => InnerTy::Enum(ident.into()),
                     AdtKind::Unknown => unreachable!("AdtKind::Unknown"),
                 },
@@ -287,6 +287,8 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
             InnerTy::Struct(ident.clone())
         } else if analyze_context.is_enum(ident, ctx.block_id) {
             InnerTy::Enum(ident.clone())
+        } else if analyze_context.is_union(ident, ctx.block_id) {
+            InnerTy::Union(ident.clone())
         } else if analyze_context.is_trait(ident, ctx.block_id) {
             InnerTy::Trait(ident.clone())
         } else {
@@ -328,7 +330,10 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
             if let Some(structure_ty) = structure_ty {
                 if let Ty::CompoundType(inner_ty, ..) = structure_ty {
                     match inner_ty {
-                        InnerTy::Struct(ident) | InnerTy::Enum(ident) | InnerTy::Trait(ident) => {
+                        InnerTy::Struct(ident)
+                        | InnerTy::Enum(ident)
+                        | InnerTy::Union(ident)
+                        | InnerTy::Trait(ident) => {
                             self.analyze_method_header(&ident, func, *func_id);
                         }
 

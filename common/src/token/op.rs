@@ -1,4 +1,4 @@
-use super::expr::Expr;
+use super::{expr::Expr, stmt::Stmt};
 use crate::{file::FilePosition, ty::ty::Ty, BlockId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -122,6 +122,11 @@ pub enum UnOperator {
     // TODO: Slice/slicing.
     /// The expression is the dimension.
     ArrayAccess(Box<Expr>),
+
+    /// Will represent a re-written "is" bin op for a union member. The String is
+    /// the name of the member that is being accessed. The statement represents
+    /// the lhs variable declaration.
+    UnionIs(String, Box<Stmt>),
 
     /// The string is the name of the member. The u64 is the index of the ADT
     /// member being accessed.

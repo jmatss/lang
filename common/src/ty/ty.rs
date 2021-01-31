@@ -620,6 +620,7 @@ impl Ty {
                 match inner_ty {
                     InnerTy::Struct(ident)
                     | InnerTy::Enum(ident)
+                    | InnerTy::Union(ident)
                     | InnerTy::Trait(ident)
                     | InnerTy::UnknownIdent(ident, ..) => {
                         let name = if full_names {
@@ -671,6 +672,7 @@ impl Ty {
             Ty::CompoundType(inner_ty, ..) => match inner_ty {
                 InnerTy::Struct(ident)
                 | InnerTy::Enum(ident)
+                | InnerTy::Union(ident)
                 | InnerTy::Trait(ident)
                 | InnerTy::UnknownIdent(ident, ..) => {
                     if ident == old_name {

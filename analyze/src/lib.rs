@@ -23,7 +23,7 @@ use mid::{defer::DeferAnalyzer, generics::GenericsAnalyzer};
 use post::{
     call_args::CallArgs, clean_up::clean_up, exhaust::ExhaustAnalyzer,
     func_generics_check::FuncGenericsCheck, traits_func::TraitsFuncAnalyzer,
-    traits_generic::TraitsGenericAnalyzer,
+    traits_generic::TraitsGenericAnalyzer, union_init_arg::UnionInitArg,
 };
 use pre::{indexing::IndexingAnalyzer, method::MethodAnalyzer};
 use std::{cell::RefCell, collections::HashMap};
@@ -174,7 +174,12 @@ pub fn analyze(
         .traverse_token(ast_root)
         .take_errors()?;
 
-    debug!("\nAST after generic stuff:\n{:#?}", ast_root);
+    debug!("Running UnionInitArg");
+    let mut union_init_args = UnionInitArg::new(&analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut union_init_args)
+        .traverse_token(ast_root)
+        .take_errors()?;
 
     debug!("Running CallArgs");
     let mut call_args = CallArgs::new(&analyze_context);

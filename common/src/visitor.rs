@@ -28,6 +28,7 @@ pub trait Visitor {
     fn visit_func(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
     fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
     fn visit_enum(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
+    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
     fn visit_trait(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
     fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
     fn visit_anon(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}

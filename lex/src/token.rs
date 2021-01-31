@@ -59,16 +59,19 @@ pub enum Kw {
     /// Only accessable from the current module (not exposed as a symbol).
     Hidden,
 
-    Function,
     Struct,
     Enum,
+    Union,
+
     Trait,
     Implement,
     Implements,
+
     Where,
     //Macro,
     Defer,
 
+    Function,
     Test,
 }
 
@@ -231,16 +234,18 @@ impl LexToken {
             "public" => LexTokenKind::Kw(Kw::Public),
             "hidden" => LexTokenKind::Kw(Kw::Hidden),
 
-            "function" => LexTokenKind::Kw(Kw::Function),
             "struct" => LexTokenKind::Kw(Kw::Struct),
             "enum" => LexTokenKind::Kw(Kw::Enum),
+            "union" => LexTokenKind::Kw(Kw::Union),
+
+            "trait" => LexTokenKind::Kw(Kw::Trait),
             "implement" => LexTokenKind::Kw(Kw::Implement),
             "implements" => LexTokenKind::Kw(Kw::Implements),
-            "trait" => LexTokenKind::Kw(Kw::Trait),
-            "where" => LexTokenKind::Kw(Kw::Where),
 
+            "where" => LexTokenKind::Kw(Kw::Where),
             "defer" => LexTokenKind::Kw(Kw::Defer),
 
+            "function" => LexTokenKind::Kw(Kw::Function),
             "test" => LexTokenKind::Kw(Kw::Test),
 
             _ => return None,

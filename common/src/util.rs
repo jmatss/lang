@@ -41,3 +41,10 @@ pub fn to_generic_name(old_name: &str, generics: &Generics) -> String {
         format!("{}{}", old_name, generics.to_string())
     }
 }
+
+/// Formats the name of a union variant.
+/// Concatenates the name of the union with the name of the member that is being
+/// accessed/used.
+pub fn to_union_variant_name(union_name: &str, member_name: &str) -> String {
+    format!("{}${}", union_name, member_name)
+}

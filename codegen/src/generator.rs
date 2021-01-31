@@ -396,10 +396,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
 
-            // TODO: Implement for other types (enum/interface) as well.
             Ty::CompoundType(inner_ty, generics, ..) => {
                 match inner_ty {
-                    InnerTy::Struct(ident) => {
+                    InnerTy::Struct(ident) | InnerTy::Union(ident) => {
                         let ident = if !generics.is_empty() {
                             util::to_generic_name(ident, generics)
                         } else {

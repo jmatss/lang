@@ -275,6 +275,48 @@ impl<'a> AstTraverser<'a> {
                         v.visit_enum(ast_token, &self.traverse_context);
                     }
                 }
+                BlockHeader::Union(union) => {
+                    if self.traverse_context.deep_copy {
+                        let mut new_union = union.borrow().clone();
+
+                        for member in new_union.members.iter_mut() {
+                            let mut new_member = member.borrow().clone();
+                            new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                            *member = Rc::new(RefCell::new(new_member));
+                        }
+
+                        *union = Rc::new(RefCell::new(new_union));
+                    }
+
+                    // TODO: Visit `implements` and possible generics?
+                    for member in union.borrow_mut().members.iter_mut() {
+                        if self.traverse_context.deep_copy {
+                            let mut new_member = member.borrow().clone();
+                            new_member.set_copy_nr(self.traverse_context.copy_nr.unwrap());
+                            *member = Rc::new(RefCell::new(new_member));
+                        }
+
+                        if let Some(ty) = &mut member.borrow_mut().ty {
+                            self.traverse_type(ty);
+                        }
+                        if let Some(value) = &mut member.borrow_mut().value {
+                            self.traverse_expr(value);
+                        }
+                    }
+
+                    if let Some(impls) = &mut union.borrow_mut().implements {
+                        for tys in impls.values_mut() {
+                            for ty in tys {
+                                self.traverse_type(ty);
+                            }
+                        }
+                    }
+
+                    debug!("Visiting union");
+                    for v in self.visitors.iter_mut() {
+                        v.visit_union(ast_token, &self.traverse_context);
+                    }
+                }
                 BlockHeader::Trait(_) => {
                     // TODO: Visit containing methods?
 
@@ -400,15 +442,6 @@ impl<'a> AstTraverser<'a> {
             self.traverse_context.file_pos = file_pos.to_owned();
         }
 
-        if let Ok(ty) = expr.get_expr_type_mut() {
-            self.traverse_type(ty)
-        }
-
-        debug!("Visiting expr -- {:#?}", expr);
-        for v in self.visitors.iter_mut() {
-            v.visit_expr(expr, &self.traverse_context)
-        }
-
         match expr {
             Expr::Lit(..) => {
                 debug!("Visiting lit");
@@ -490,6 +523,7 @@ impl<'a> AstTraverser<'a> {
             Expr::Op(Op::BinOp(bin_op)) => {
                 self.traverse_expr(&mut bin_op.lhs);
                 self.traverse_expr(&mut bin_op.rhs);
+
                 debug!("Visiting bin op");
                 for v in self.visitors.iter_mut() {
                     v.visit_bin_op(bin_op, &self.traverse_context)
@@ -497,10 +531,12 @@ impl<'a> AstTraverser<'a> {
             }
             Expr::Op(Op::UnOp(un_op)) => {
                 self.traverse_expr(&mut un_op.value);
-                // Edge case to traverse expr in ArrayAccess, the only Op that
-                // contains a expression.
+
+                // Edge case to traverse expr in ArrayAccess and stmt in UnionIs.
                 if let UnOperator::ArrayAccess(expr) = &mut un_op.operator {
                     self.traverse_expr(expr);
+                } else if let UnOperator::UnionIs(_, stmt) = &mut un_op.operator {
+                    self.traverse_stmt(stmt);
                 }
 
                 debug!("Visiting un op");
@@ -512,17 +548,23 @@ impl<'a> AstTraverser<'a> {
         }
 
         self.traverse_context.file_pos = old_pos;
+
+        if let Ok(ty) = expr.get_expr_type_mut() {
+            self.traverse_type(ty)
+        }
+
+        debug!("Visiting expr -- {:#?}", expr);
+        for v in self.visitors.iter_mut() {
+            v.visit_expr(expr, &self.traverse_context)
+        }
+
+        self.traverse_context.file_pos = old_pos;
     }
 
     pub fn traverse_stmt(&mut self, stmt: &mut Stmt) {
         let old_pos = self.traverse_context.file_pos.to_owned();
         if let Some(file_pos) = stmt.file_pos() {
             self.traverse_context.file_pos = file_pos.to_owned();
-        }
-
-        debug!("Visiting stmt -- {:#?}", stmt);
-        for v in self.visitors.iter_mut() {
-            v.visit_stmt(stmt, &self.traverse_context)
         }
 
         match stmt {
@@ -628,6 +670,13 @@ impl<'a> AstTraverser<'a> {
                     v.visit_extern_decl(stmt, &self.traverse_context)
                 }
             }
+        }
+
+        self.traverse_context.file_pos = old_pos;
+
+        debug!("Visiting stmt -- {:#?}", stmt);
+        for v in self.visitors.iter_mut() {
+            v.visit_stmt(stmt, &self.traverse_context)
         }
 
         self.traverse_context.file_pos = old_pos;

@@ -1,72 +1,137 @@
+use std::{cell::RefCell, rc::Rc};
+
 use common::{
-    error::LangError,
+    error::{LangError, LangErrorKind},
     token::{
         expr::Expr,
         op::{BinOperator, Op, UnOp, UnOperator},
+        stmt::Stmt,
     },
     traverser::TraverseContext,
     visitor::Visitor,
 };
 use log::debug;
 
-/// Gathers information about indexing on variables. This includes struct member
-/// indexing and enum member indexing. Those kind of expression will be rewritten
-/// in the AST so that it is easier to work with them.
-pub struct IndexingAnalyzer {}
+/// Rewrites "access" operations to make them "easier" to work with.
+/// Binary ADT/enum member indexing and union "is" matches will be written into
+/// un ops.
+pub struct IndexingAnalyzer {
+    errors: Vec<LangError>,
+}
 
 impl IndexingAnalyzer {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            errors: Vec::default(),
+        }
+    }
+
+    /// A struct/union access will have been rewritten to a un op instead of the
+    /// original before this function is called (see the `visit_expr()`) function.
+    /// This is true since the expressions are traversed in order.
+    fn extract_member_name(&mut self, expr: &Expr) -> Option<String> {
+        if let Expr::Op(Op::UnOp(un_op)) = expr {
+            if let UnOperator::AdtAccess(member_name, ..) = &un_op.operator {
+                return Some(member_name.clone());
+            }
+        }
+
+        let err = LangError::new(
+            format!("UnionIs on expr that wasn't a ADT access: {:#?}", expr),
+            LangErrorKind::AnalyzeError,
+            expr.file_pos().cloned(),
+        );
+        self.errors.push(err);
+        None
     }
 }
 
 impl Visitor for IndexingAnalyzer {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
-        None
+        if self.errors.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.errors))
+        }
     }
 
-    /// Wraps struct accesses into a new un op that replaces the old binary
-    /// Dot operation. The index and the type of the member will be parsed in
-    /// a later stage of the analyzing (after "type analyzing" have been ran).
     fn visit_expr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {
         if let Expr::Op(Op::BinOp(bin_op)) = expr {
-            if let Some(var) = bin_op.rhs.eval_to_var() {
-                match bin_op.operator {
-                    // Struct access.
-                    BinOperator::Dot => {
-                        debug!(
-                            "Rewriting struct access -- lhs var: {:?}, rhs var: {:?}",
-                            bin_op.lhs, &var
-                        );
+            match bin_op.operator {
+                // Struct or union access.
+                BinOperator::Dot => {
+                    let var = if let Some(var) = bin_op.rhs.eval_to_var() {
+                        var
+                    } else {
+                        return;
+                    };
 
-                        let struct_access = UnOperator::AdtAccess(var.name.clone(), None);
-                        let un_op =
-                            UnOp::new(struct_access, bin_op.lhs.clone(), expr.file_pos().cloned());
-                        *expr = Expr::Op(Op::UnOp(un_op));
+                    debug!(
+                        "Rewriting adt access -- lhs: {:#?}, rhs: {:#?}",
+                        bin_op.lhs, &var
+                    );
 
-                        debug!("expr after rewrite: {:?}", expr);
-                    }
-
-                    // TODO: Will this double colon access always be for enums only?
-                    //       Is there a possibility that this might be used for
-                    //       static/const as well access in the future?
-                    // Enum access.
-                    BinOperator::DoubleColon => {
-                        debug!(
-                            "Rewriting enum access -- lhs var: {:?}, rhs var: {:?}",
-                            bin_op.lhs, &var
-                        );
-
-                        let enum_access = UnOperator::EnumAccess(var.name.clone(), ctx.block_id);
-                        let un_op =
-                            UnOp::new(enum_access, bin_op.lhs.clone(), expr.file_pos().cloned());
-                        *expr = Expr::Op(Op::UnOp(un_op));
-
-                        debug!("expr after rewrite: {:?}", expr);
-                    }
-
-                    _ => (),
+                    let adt_access = UnOperator::AdtAccess(var.name.clone(), None);
+                    let un_op = UnOp::new(adt_access, bin_op.lhs.clone(), expr.file_pos().cloned());
+                    *expr = Expr::Op(Op::UnOp(un_op));
                 }
+
+                // TODO: Will this double colon access always be for enums only?
+                //       Is there a possibility that this might be used for
+                //       static/const as well access in the future?
+                // Enum access.
+                BinOperator::DoubleColon => {
+                    let var = if let Some(var) = bin_op.rhs.eval_to_var() {
+                        var
+                    } else {
+                        return;
+                    };
+
+                    debug!(
+                        "Rewriting enum access -- lhs: {:#?}, rhs: {:#?}",
+                        bin_op.lhs, &var
+                    );
+
+                    let enum_access = UnOperator::EnumAccess(var.name.clone(), ctx.block_id);
+                    let un_op =
+                        UnOp::new(enum_access, bin_op.lhs.clone(), expr.file_pos().cloned());
+                    *expr = Expr::Op(Op::UnOp(un_op));
+                }
+
+                // A "is" match. Currently only works for unions where the lhs
+                // is a single variable that it binds to.
+                BinOperator::Is => {
+                    let var = if let Some(var) = bin_op.lhs.eval_to_var() {
+                        var
+                    } else {
+                        panic!("lhs of \"is\" isn't variable: {:#?}", bin_op.lhs);
+                    };
+
+                    debug!(
+                        "Rewriting is union match -- lhs: {:#?}, rhs: {:#?}",
+                        &var, bin_op.rhs
+                    );
+
+                    let member_name =
+                        if let Some(member_name) = self.extract_member_name(&bin_op.rhs) {
+                            member_name
+                        } else {
+                            // The error is already reported in the
+                            // `extract_member_name` function.
+                            return;
+                        };
+
+                    let var_decl = Box::new(Stmt::VariableDecl(
+                        Rc::new(RefCell::new(var.clone())),
+                        var.file_pos,
+                    ));
+
+                    let union_is = UnOperator::UnionIs(member_name, var_decl);
+                    let un_op = UnOp::new(union_is, bin_op.rhs.clone(), expr.file_pos().cloned());
+                    *expr = Expr::Op(Op::UnOp(un_op));
+                }
+
+                _ => (),
             }
         }
     }

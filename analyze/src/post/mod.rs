@@ -4,3 +4,4 @@ pub(super) mod exhaust;
 pub(super) mod func_generics_check;
 pub(super) mod traits_func;
 pub(super) mod traits_generic;
+pub(super) mod union_init_arg;

@@ -238,8 +238,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 ));
             }
 
-            BlockHeader::Struct(_) | BlockHeader::Enum(_) | BlockHeader::Trait(_) => {
-                // All structs, enums and traits already compiled at this stage.
+            BlockHeader::Struct(_)
+            | BlockHeader::Enum(_)
+            | BlockHeader::Union(_)
+            | BlockHeader::Trait(_) => {
+                // All ADTs and traits already compiled at this stage.
             }
 
             //BlockHeader::For(var, expr) => self.compile_for(var, expr),
@@ -587,6 +590,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         body: &mut [AstToken],
         branch_info: &BranchInfo<'ctx>,
     ) -> CustomResult<()> {
+        self.cur_block_id = id;
+
         let if_case_block = branch_info.get_if_case(index, file_pos)?;
 
         // If this is a if case with a expression, the branch condition should
@@ -870,6 +875,53 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let packed = false;
         let enum_ty = self.context.opaque_struct_type(&enum_.name);
         enum_ty.set_body(&[basic_ty], packed);
+
+        Ok(())
+    }
+
+    /// The union will be represented with a "struct" contain a i8 `tag` member
+    /// indicating which variant it is followed by an array of i8s with the size
+    /// of the largest member.
+    pub(super) fn compile_union(&mut self, union: &Adt) -> CustomResult<()> {
+        debug!("Compiling union -- {:#?}", union);
+
+        let mut largest_size = 0;
+
+        // Go through all members of the union and find the largest member.
+        // The union will contain also be created that contains an array with
+        // the size of the largest member.
+        for member in &union.members {
+            let member = member.borrow();
+            let member_file_pos = member.file_pos.to_owned();
+
+            if let Some(member_type_struct) = &member.ty {
+                let any_type = self.compile_type(&member_type_struct, member_file_pos)?;
+
+                let size = self
+                    .target_machine
+                    .get_target_data()
+                    .get_abi_size(&any_type);
+
+                if size > largest_size {
+                    largest_size = size;
+                }
+            } else {
+                return Err(self.err(
+                    format!(
+                        "Bad type for union \"{}\" member \"{}\".",
+                        &union.name, &member.name
+                    ),
+                    member_file_pos,
+                ));
+            }
+        }
+
+        let tag_ty = self.context.i8_type();
+        let member_ty = self.context.i8_type().array_type(largest_size as u32);
+
+        let packed = false;
+        let union_ty = self.context.opaque_struct_type(&union.name);
+        union_ty.set_body(&[tag_ty.into(), member_ty.into()], packed);
 
         Ok(())
     }

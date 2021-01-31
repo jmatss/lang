@@ -86,6 +86,12 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
         }
     }
 
+    fn visit_union(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Union(union), _, id, ..) = &mut ast_token {
+            self.decl_new_adt(union, *id);
+        }
+    }
+
     // TODO: Merge logic with ADTs.
     fn visit_trait(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Trait(trait_), _, trait_id, ..) = &mut ast_token {

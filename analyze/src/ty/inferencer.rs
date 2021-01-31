@@ -4,10 +4,10 @@ use common::{
     file::FilePosition,
     token::{
         ast::AstToken,
-        block::{BlockHeader, Function},
+        block::{AdtKind, BlockHeader, Function},
         expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FuncCall, Var},
         lit::Lit,
-        op::{BinOp, BinOperator, UnOp, UnOperator},
+        op::{BinOp, BinOperator, Op, UnOp, UnOperator},
         stmt::Modifier,
         stmt::Stmt,
     },
@@ -652,75 +652,176 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
         let members = &adt.members;
 
-        if members.len() != adt_init.arguments.len() {
-            let err = self.type_context.analyze_context.err(format!(
-                "ADT \"{}\" and ADT init has diff amount of members. ADT#: {:?}, init#: {:?}.",
-                &adt.name,
-                members.len(),
-                adt_init.arguments.len()
-            ));
-            self.errors.push(err);
-            return;
-        }
+        // TODO: Move out logic to new function.
+        match adt.kind {
+            AdtKind::Struct => {
+                if members.len() != adt_init.arguments.len() {
+                    let err = self.type_context.analyze_context.err(format!(
+                        "ADT \"{}\" and ADT init has diff amount of members. ADT#: {:?}, init#: {:?}.",
+                        &adt.name,
+                        members.len(),
+                        adt_init.arguments.len()
+                    ));
+                    self.errors.push(err);
+                    return;
+                }
 
-        // TODO: Verify that all members are initialized.
+                // TODO: Verify that all members are initialized.
 
-        for (i, arg) in adt_init.arguments.iter_mut().enumerate() {
-            // If a name is set, this is a named member init. Don't use the
-            // iterator index, get the corrent index of the struct field with
-            // the name `arg.name`.
-            let index: usize = if let Some(arg_name) = &arg.name {
-                match self.type_context.analyze_context.get_adt_member_index(
+                for (i, arg) in adt_init.arguments.iter_mut().enumerate() {
+                    // If a name is set, this is a named member init. Don't use the
+                    // iterator index, get the corrent index of the struct field with
+                    // the name `arg.name`.
+                    let index: usize = if let Some(arg_name) = &arg.name {
+                        match self.type_context.analyze_context.get_adt_member_index(
+                            &adt.name,
+                            arg_name,
+                            ctx.block_id,
+                        ) {
+                            Ok(idx) => idx as usize,
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        }
+                    } else {
+                        i
+                    };
+
+                    // TODO: Make sure that the ADT init argument is compatible
+                    //       with the member ADT type. Currently this doesn't
+                    //       get caught until the codegen stage.
+
+                    // Add constraints mapping the type of the ADT init argument
+                    // to the corresponding actual ADT member type.
+                    match arg.value.get_expr_type() {
+                        Ok(arg_ty) => {
+                            if let Some(member) = members.get(index) {
+                                // Make a copy of the type to allow for multiple
+                                // struct inits with different types for the generics.
+                                let mut new_member = member.borrow().clone();
+
+                                // Get the "actual" type of the member. If it contains
+                                // a generic, it needs to get the actual unknown
+                                // generic type from the `unknown_generics` map.
+                                // Otherwise reuse the already set type.
+                                let member_type = if let Some(ty) = &mut new_member.ty {
+                                    ty.replace_generics_impl(&generics);
+                                    ty.clone()
+                                } else {
+                                    let err = self.type_context.analyze_context.err(format!(
+                                        "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
+                                        members.get(index),
+                                        &adt.name
+                                    ));
+                                    self.errors.push(err);
+                                    return;
+                                };
+
+                                // Bind init member to actual type in struct definition.
+                                self.insert_constraint(&arg_ty, &member_type, ctx.block_id);
+
+                                let arg_file_pos = arg_ty.file_pos().cloned();
+
+                                // Bind type of member to the struct.
+                                let unknown_id = self.new_unknown_ident("");
+                                self.insert_constraint(
+                                    &arg_ty,
+                                    &Ty::UnknownAdtMember(
+                                        Box::new(
+                                            adt_init
+                                                .ret_type
+                                                .clone()
+                                                .expect("Will always be set at this point"),
+                                        ),
+                                        new_member.name.clone(),
+                                        unknown_id,
+                                        TypeInfo::DefaultOpt(arg_file_pos),
+                                    ),
+                                    ctx.block_id,
+                                );
+                            } else {
+                                let err = self.type_context.analyze_context.err(format!(
+                                    "Unable to get member at index {} in struct \"{:?}\".",
+                                    index, &adt.name
+                                ));
+                                self.errors.push(err);
+                                return;
+                            }
+                        }
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    }
+                }
+            }
+
+            AdtKind::Union => {
+                if adt_init.arguments.len() > 1 {
+                    let err = self.type_context.analyze_context.err(format!(
+                        "ADT init of union \"{}\" has more than one argument, has#: {}.",
+                        &adt.name,
+                        adt_init.arguments.len()
+                    ));
+                    self.errors.push(err);
+                    return;
+                } else if adt_init.arguments.is_empty() {
+                    let err = self.type_context.analyze_context.err(format!(
+                        "ADT init of union \"{}\" has no argument, expected one.",
+                        &adt.name,
+                    ));
+                    self.errors.push(err);
+                    return;
+                }
+
+                let arg_init = adt_init.arguments.first().unwrap();
+
+                let member_name = if let Some(member_name) = &arg_init.name {
+                    member_name
+                } else {
+                    let err = self.type_context.analyze_context.err(format!(
+                        "ADT init of union \"{}\" doesn't have NAMED argument as expected.",
+                        &adt.name,
+                    ));
+                    self.errors.push(err);
+                    return;
+                };
+
+                let member = match self.type_context.analyze_context.get_adt_member(
                     &adt.name,
-                    arg_name,
+                    member_name,
                     ctx.block_id,
                 ) {
-                    Ok(idx) => idx as usize,
+                    Ok(member) => member,
                     Err(err) => {
                         self.errors.push(err);
                         return;
                     }
-                }
-            } else {
-                i
-            };
+                };
 
-            // TODO: Make sure that the ADT init argument is compatible
-            //       with the member ADT type. Currently this doesn't
-            //       get caught until the codegen stage.
-
-            // Add constraints mapping the type of the ADT init argument
-            // to the corresponding actual ADT member type.
-            match arg.value.get_expr_type() {
-                Ok(arg_ty) => {
-                    if let Some(member) = members.get(index) {
+                match arg_init.value.get_expr_type() {
+                    Ok(arg_ty) => {
                         // Make a copy of the type to allow for multiple
                         // struct inits with different types for the generics.
                         let mut new_member = member.borrow().clone();
 
-                        // Get the "actual" type of the member. If it contains
-                        // a generic, it needs to get the actual unknown
-                        // generic type from the `unknown_generics` map.
-                        // Otherwise reuse the already set type.
                         let member_type = if let Some(ty) = &mut new_member.ty {
                             ty.replace_generics_impl(&generics);
                             ty.clone()
                         } else {
                             let err = self.type_context.analyze_context.err(format!(
-                                "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
-                                members.get(index),
+                                "Member \"{:?}\" in union \"{:?}\" doesn't have a type set.",
+                                member.borrow(),
                                 &adt.name
                             ));
                             self.errors.push(err);
                             return;
                         };
 
-                        // Bind init member to actual type in struct definition.
                         self.insert_constraint(&arg_ty, &member_type, ctx.block_id);
 
-                        let arg_file_pos = arg_ty.file_pos().cloned();
-
-                        // Bind type of member to the struct.
+                        // Bind type of member arg to the union.
                         let unknown_id = self.new_unknown_ident("");
                         self.insert_constraint(
                             &arg_ty,
@@ -731,27 +832,21 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                         .clone()
                                         .expect("Will always be set at this point"),
                                 ),
-                                new_member.name.clone(),
+                                new_member.name,
                                 unknown_id,
-                                TypeInfo::DefaultOpt(arg_file_pos),
+                                TypeInfo::DefaultOpt(arg_ty.file_pos().cloned()),
                             ),
                             ctx.block_id,
                         );
-                    } else {
-                        let err = self.type_context.analyze_context.err(format!(
-                            "Unable to get member at index {} in struct \"{:?}\".",
-                            index, &adt.name
-                        ));
+                    }
+                    Err(err) => {
                         self.errors.push(err);
-                        return;
                     }
                 }
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
             }
-        }
+
+            _ => unreachable!("ADT init kind: {:?}", adt.kind),
+        };
     }
 
     fn visit_array_init(&mut self, array_init: &mut ArrayInit, ctx: &TraverseContext) {
@@ -978,6 +1073,55 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     ctx.block_id,
                 );
             }
+            UnOperator::UnionIs(member_name, var_decl) => {
+                let var_decl_ty = if let Stmt::VariableDecl(var, ..) = var_decl.as_ref() {
+                    var.borrow().ty.as_ref().unwrap().clone()
+                } else {
+                    let err = self
+                        .type_context
+                        .analyze_context
+                        .err(format!("lhs of \"UnionIs\" not a var decl: {:#?}", un_op));
+                    self.errors.push(err);
+                    return;
+                };
+
+                // TODO: Do in cleaner way.
+                // The `val_ty` will be the return type of the union member,
+                // so need to get the type for the "inner_un_op" which should be
+                // a ADT access where the `value` will reference the ADT that is
+                // being accessed. That will be inferred to the type of the union.
+                let union_ty = if let Expr::Op(Op::UnOp(inner_un_op)) = un_op.value.as_ref() {
+                    match inner_un_op.value.get_expr_type() {
+                        Ok(union_ty) => union_ty,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    }
+                } else {
+                    unreachable!("un_op.value not union access: {:#?}", un_op);
+                };
+
+                // Link the type of the new var decl to the type of the member.
+                let unknown_id = self.new_unknown_ident("");
+                self.insert_constraint(
+                    &var_decl_ty,
+                    &Ty::UnknownAdtMember(
+                        Box::new(union_ty),
+                        member_name.clone(),
+                        unknown_id,
+                        type_info.clone(),
+                    ),
+                    ctx.block_id,
+                );
+
+                // Link the type of the whole expression to a boolean.
+                self.insert_constraint(
+                    &ret_ty,
+                    &Ty::CompoundType(InnerTy::Boolean, Generics::empty(), type_info),
+                    ctx.block_id,
+                );
+            }
             UnOperator::AdtAccess(member_name, ..) | UnOperator::EnumAccess(member_name, ..) => {
                 let unknown_id = self.new_unknown_ident("");
                 self.insert_constraint(
@@ -1042,6 +1186,119 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// return types.
     fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Struct(adt), ..) = &ast_token {
+            let adt = adt.borrow();
+
+            // Populate this map with the "Generic(ident)" types where the key
+            // is the name of the generic and the value is a list of all the
+            // Generics that should have constraints between each other.
+            let mut generics: HashMap<_, Vec<_>> = HashMap::default();
+
+            // Gather all "Generic" types found in the members types into the
+            // `generics` map. All the generic types in every entry will then
+            // be tied together so that they all get infered to the same type.
+            for member in &adt.members {
+                let member = member.borrow();
+
+                if let Some(ty) = &member.ty {
+                    let inner_generics = if let Some(inner_generics) = ty.get_generics() {
+                        inner_generics
+                    } else {
+                        continue;
+                    };
+
+                    for gen_ty in inner_generics {
+                        let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                            ident
+                        } else {
+                            unreachable!("gen_ty not generic: {:#?}", gen_ty);
+                        };
+
+                        match generics.entry(ident.clone()) {
+                            Entry::Occupied(mut o) => {
+                                o.get_mut().push(gen_ty);
+                            }
+                            Entry::Vacant(v) => {
+                                v.insert(vec![gen_ty]);
+                            }
+                        }
+                    }
+                }
+            }
+
+            for method in adt.methods.values() {
+                // Gather "Generic" types from method parameters.
+                if let Some(params) = &method.borrow().parameters {
+                    for param in params {
+                        if let Some(ty) = param.borrow().ty.as_ref() {
+                            let inner_generics = if let Some(inner_generics) = ty.get_generics() {
+                                inner_generics
+                            } else {
+                                continue;
+                            };
+
+                            for gen_ty in inner_generics {
+                                let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                                    ident
+                                } else {
+                                    unreachable!("gen_ty not generic: {:#?}", gen_ty);
+                                };
+
+                                match generics.entry(ident.clone()) {
+                                    Entry::Occupied(mut o) => {
+                                        o.get_mut().push(gen_ty);
+                                    }
+                                    Entry::Vacant(v) => {
+                                        v.insert(vec![gen_ty]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Gather "Generic" types from method return type.
+                if let Some(ret_ty) = &mut method.borrow().ret_type.as_ref() {
+                    let inner_generics = if let Some(inner_generics) = ret_ty.get_generics() {
+                        inner_generics
+                    } else {
+                        continue;
+                    };
+
+                    for gen_ty in inner_generics {
+                        let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                            ident
+                        } else {
+                            unreachable!("gen_ty not generic: {:#?}", gen_ty);
+                        };
+
+                        match generics.entry(ident.clone()) {
+                            Entry::Occupied(mut o) => {
+                                o.get_mut().push(gen_ty);
+                            }
+                            Entry::Vacant(v) => {
+                                v.insert(vec![gen_ty]);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Tie the types of the generics with the same ident to each other.
+            for ident_generics in generics.values() {
+                for i in 0..ident_generics.len() {
+                    let left = ident_generics.get(i).cloned().unwrap();
+
+                    for j in i + 1..ident_generics.len() {
+                        let right = ident_generics.get(j).cloned().unwrap();
+                        self.insert_constraint(&left, &right, ctx.block_id);
+                    }
+                }
+            }
+        }
+    }
+
+    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Union(adt), ..) = &ast_token {
             let adt = adt.borrow();
 
             // Populate this map with the "Generic(ident)" types where the key
