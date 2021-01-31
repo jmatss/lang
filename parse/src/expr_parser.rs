@@ -1,8 +1,3 @@
-use crate::{
-    parser::ParseTokenIter,
-    token::{get_if_expr_op, Fix, Operator, Output},
-    type_parser::TypeParser,
-};
 use common::{
     error::LangResult,
     file::FilePosition,
@@ -20,6 +15,12 @@ use common::{
 };
 use lex::token::{LexTokenKind, Sym};
 use log::debug;
+
+use crate::{
+    parser::ParseTokenIter,
+    token::{Fix, Operator, Output},
+    type_parser::TypeParser,
+};
 
 pub struct ExprParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
@@ -166,51 +167,50 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
                 // "Built-in" function call.
                 LexTokenKind::Sym(Sym::At) => {
-                    // `next_token` should contain the ident.
-                    let next_token = self.iter.next_skip_space();
-
-                    // TODO: Most of the logic below is taken from `self.parse_expr_ident`.
-                    //       Merge the logic.
-                    let generics = if let Some(lex_token) = self.iter.peek_skip_space() {
-                        if let LexTokenKind::Sym(Sym::PointyBracketBegin) = lex_token.kind {
-                            match TypeParser::new(self.iter, None)
-                                .parse_type_generics(GenericsKind::Impl)
-                            {
-                                Ok((generics, _)) => generics,
-                                Err(_) => {
-                                    self.iter.rewind_to_mark(mark);
-                                    None
-                                }
-                            }
-                        } else {
-                            None
-                        }
+                    let next_token = if let Some(next_token) = self.iter.next_skip_space() {
+                        next_token
                     } else {
-                        None
+                        return Err(self.iter.err(
+                            "Got None after '@' (built-in call)".into(),
+                            Some(lex_token.file_pos),
+                        ));
                     };
 
-                    if let Some(LexTokenKind::Ident(ident)) = next_token.clone().map(|t| t.kind) {
-                        let start_symbol = Sym::ParenthesisBegin;
-                        let end_symbol = Sym::ParenthesisEnd;
-                        let (arguments, args_file_pos) =
-                            self.iter.parse_arg_list(start_symbol, end_symbol)?;
-
-                        let mut built_in_file_pos = lex_token.file_pos;
-                        built_in_file_pos.set_end(&args_file_pos)?;
-                        file_pos.set_end(&args_file_pos)?;
-
-                        let built_in_call =
-                            BuiltInCall::new(ident, arguments, generics, lex_token.file_pos);
-                        self.shunt_operand(Expr::BuiltInCall(built_in_call))?;
+                    let expr = if let LexTokenKind::Ident(ident) = next_token.kind {
+                        self.parse_expr_ident(&ident, next_token.file_pos)?
                     } else {
                         return Err(self.iter.err(
                             format!(
                                 "Expected ident after '@' (built-in call), got: {:?}",
                                 next_token
                             ),
-                            Some(lex_token.file_pos),
+                            Some(next_token.file_pos),
                         ));
-                    }
+                    };
+
+                    // "Convert" the parsed function call into a built in call.
+                    let built_in_expr = if let Expr::FuncCall(func_call) = expr {
+                        let mut built_in_file_pos = lex_token.file_pos;
+                        built_in_file_pos.set_end(&func_call.file_pos.unwrap())?;
+
+                        let built_in_call = BuiltInCall::new(
+                            func_call.name,
+                            func_call.arguments,
+                            func_call.generics,
+                            built_in_file_pos,
+                        );
+                        Expr::BuiltInCall(built_in_call)
+                    } else {
+                        return Err(self.iter.err(
+                            format!(
+                                "Expected to parse func call after '@' (built-in call), got: {:?}",
+                                expr
+                            ),
+                            expr.file_pos().cloned(),
+                        ));
+                    };
+
+                    self.shunt_operand(built_in_expr)?;
                 }
 
                 // Array access.
@@ -273,7 +273,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
                 // Special case for operators that takes a "type" as rhs.
                 LexTokenKind::Sym(symbol @ Sym::As) | LexTokenKind::Sym(symbol @ Sym::Of) => {
-                    if let Some(op) = get_if_expr_op(&symbol) {
+                    if let Some(op) = crate::token::get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
                         let ty_expr = self.iter.parse_type(None)?;
                         let ty_expr_file_pos = ty_expr.file_pos().cloned();
@@ -298,7 +298,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 }
 
                 LexTokenKind::Sym(symbol) => {
-                    if let Some(op) = get_if_expr_op(&symbol) {
+                    if let Some(op) = crate::token::get_if_expr_op(&symbol) {
                         file_pos.set_end(&lex_token.file_pos)?;
                         self.shunt_operator(op)?;
                     } else {
@@ -559,12 +559,12 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     }
 
     fn parse_expr_ident(&mut self, ident: &str, mut file_pos: FilePosition) -> LangResult<Expr> {
+        let mut mark = self.iter.mark();
+
         // If the identifier is followed by a "PointyBracketBegin" it can either
         // be a start of a generic list for structures/function, or it can also
         // be a "LessThan" compare operation. Try to parse it as a generic list,
-        // if it fails assume that it is a lt compare.
-        let mut mark = self.iter.mark();
-
+        // if it fails assume that it is a Lt compare.
         let generics = if let Some(lex_token) = self.iter.peek_skip_space() {
             if let LexTokenKind::Sym(Sym::PointyBracketBegin) = lex_token.kind {
                 match TypeParser::new(self.iter, None).parse_type_generics(GenericsKind::Impl) {
