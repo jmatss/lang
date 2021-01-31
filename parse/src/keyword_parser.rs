@@ -1,8 +1,5 @@
-use crate::{
-    parser::{ParseTokenIter, DEFAULT_STOP_CONDS, KEYWORD_STOP_CONDS},
-    token::get_modifier_token,
-    type_parser::TypeParser,
-};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
 use common::{
     error::LangResult,
     file::FilePosition,
@@ -21,14 +18,18 @@ use common::{
     type_info::TypeInfo,
 };
 use lex::token::{Kw, LexTokenKind, Sym};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-pub struct KeyworkParser<'a, 'b> {
+use crate::{
+    parser::{ParseTokenIter, DEFAULT_STOP_CONDS, KEYWORD_STOP_CONDS},
+    type_parser::TypeParser,
+};
+
+pub(crate) struct KeyworkParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
 }
 
 impl<'a, 'b> KeyworkParser<'a, 'b> {
-    pub fn parse(
+    pub(crate) fn parse(
         iter: &'a mut ParseTokenIter<'b>,
         keyword: Kw,
         kw_file_pos: FilePosition,
@@ -45,14 +46,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         kw_file_pos: FilePosition,
     ) -> LangResult<AstToken> {
         match keyword {
-            // Parses all the else(x)/else blocks after aswell.
             Kw::If => self.parse_if(kw_file_pos),
-            Kw::Else => Err(self
-                .iter
-                .err("Else keyword in keyword parser.".into(), Some(kw_file_pos))),
             Kw::Match => self.parse_match(kw_file_pos),
 
-            // Blocks returns AstTokens instead of Token, so need to do early return.
             Kw::For => self.parse_for(kw_file_pos),
             Kw::While => self.parse_while(kw_file_pos),
             Kw::Implement => self.parse_impl(kw_file_pos),
@@ -90,7 +86,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 Some(kw_file_pos),
             )),
 
-            Kw::Implements | Kw::Where => Err(self.iter.err(
+            Kw::Implements | Kw::Where | Kw::Else => Err(self.iter.err(
                 format!(
                     "Unexpected keyword when parsing keyword start: {:#?}",
                     keyword
@@ -110,7 +106,15 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             Kw::Private => Modifier::Private,
             Kw::Public => Modifier::Public,
             Kw::Hidden => Modifier::Hidden,
-            _ => panic!("TODO: Modifier \"{:?}\"", modifier_kw),
+            _ => {
+                return Err(self.iter.err(
+                    format!(
+                        "Unexpected keyword when parsing modifier: {:#?}",
+                        modifier_kw
+                    ),
+                    Some(kw_file_pos),
+                ))
+            }
         };
         modifiers.push(modifier);
 
@@ -137,8 +141,22 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     }
 
     /// Parses the matching `IfCase`s into a `If` block. This includes all "else"
-    /// blocks aswell.
-    ///   "if <expr> { ... } [ [ else <expr> { ... } ] else { ... } ]"
+    /// blocks aswell. The keyword "else" is used for both "else" and "else if".
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// if <expr> { ... }
+    /// ```
+    ///
+    /// ```no_run
+    /// if <expr> { ... } else { ... }
+    /// ```
+    ///
+    /// ```no_run
+    /// if <expr> { ... } else <expr> { ... }
+    /// ```
+    ///
     /// The "if" keyword has already been consumed when this function is called.
     fn parse_if(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let mut if_cases = Vec::new();
@@ -186,7 +204,16 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     }
 
     /// Parses a `Match` block and all its cases.
-    ///   "match <expr> { <expr> { ... } [...] }"
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// match <expr> {
+    ///     <case_expr> { ... }
+    ///     <case_expr> { ... }
+    /// }
+    /// ```
+    ///
     /// The "match" keyword has already been consumed when this function is called.
     fn parse_match(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let mut match_cases = Vec::new();
@@ -271,8 +298,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
     }
 
-    /// Parses a for loop block.
-    ///   "for <var> in <expr> { ... }"
+    /// Parses a `for` loop block.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// for <var> in <expr> { ... }
+    /// ```
+    ///
     /// The "for" keyword has already been consumed when this function is called.
     fn parse_for(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let lex_token = self.iter.next_skip_space_line();
@@ -323,13 +356,21 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         self.iter.next_block(header)
     }
 
-    /// Parses a while loop block.
-    ///   "while <expr> { ... }"
-    ///   "while { ... }"
+    /// Parses a `while` loop block. A empty while-expression indicates a
+    /// inifite loop.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// while <expr> { ... }
+    /// ```
+    ///
+    /// ```no_run
+    /// while { ... }
+    /// ```
+    ///
     /// The "while" keyword has already been consumed when this function is called.
     fn parse_while(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
-        // TODO: Should the `file_pos` be used it here or can the param be removed?
-
         // If the next lex token is a "CurlyBracketBegin", no expression is
         // given after this "while" keyword. Assume that it means a infinite
         // loop (equivalent to "while(true)").
@@ -350,9 +391,18 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         self.iter.next_block(header)
     }
 
-    /// Parses a return statement.
-    ///   "return <expr>"
-    ///   "return"
+    /// Parses a `return` statement.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// return <expr>
+    /// ```
+    ///
+    /// ```no_run
+    /// return
+    /// ```
+    ///
     /// The "return" keyword has already been consumed when this function is called.
     fn parse_return(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         // If the next lex token is a "LineBreak", no expression is given after
@@ -375,8 +425,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         Ok(AstToken::Stmt(Stmt::Return(expr, Some(file_pos))))
     }
 
-    /// Parses a yield statement.
-    ///   "yield <expr>"
+    /// Parses a `yield` statement.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// yield <expr>
+    /// ```
+    ///
     /// The "yield" keyword has already been consumed when this function is called.
     fn parse_yield(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
@@ -390,22 +446,41 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         Ok(AstToken::Stmt(Stmt::Yield(expr, Some(file_pos))))
     }
 
-    /// Parses a break statement.
-    ///   "break"
+    /// Parses a `break` statement.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// break
+    /// ```
+    ///
     /// The "break" keyword has already been consumed when this function is called.
     fn parse_break(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
         Ok(AstToken::Stmt(Stmt::Break(Some(file_pos))))
     }
 
-    /// Parses a continue statement.
-    ///   "continue"
+    /// Parses a `continue` statement.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// continue
+    /// ```
+    ///
     /// The "continue" keyword has already been consumed when this function is called.
     fn parse_continue(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
         Ok(AstToken::Stmt(Stmt::Continue(Some(file_pos))))
     }
 
-    /// Parses a use statement.
-    ///   "use <path>"  (where path is a dot separated list of idents)
+    /// Parses a `use` statement.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use <path>
+    /// ```
+    /// (where path is a dot separated list of idents)
+    ///
     /// The "use" keyword has already been consumed when this function is called.
     fn parse_use(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let mut path_parts = Vec::new();
@@ -455,8 +530,15 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         Ok(AstToken::Stmt(Stmt::Use(Path::new(path_parts, file_pos))))
     }
 
-    /// Parses a package statement.
-    ///   "package <path>"  (where path is a dot separated list of idents)
+    /// Parses a `package` statement.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// package <path>
+    /// ```
+    /// (where path is a dot separated list of idents)
+    ///
     /// The "package" keyword has already been consumed when this function is called.
     fn parse_package(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let mut path_parts = Vec::new();
@@ -509,8 +591,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     }
 
     // TODO: External only valid for functions atm, add for variables.
-    /// Parses a external statement.
-    ///   "external <function_prototype>"
+    /// Parses a external declaration statement.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// external <fn_prototype>
+    /// ```
+    ///
     /// The "external" keyword has already been consumed when this function is called.
     fn parse_external(
         &mut self,
@@ -547,8 +635,22 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
     }
 
-    /// Parses a var statement.
-    ///   "var <ident> [: <type>] [= <expr>]"
+    /// Parses a `var` declaration statement: "var <ident> [: <type>] [= <expr>]"
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// var x
+    /// ```
+    ///
+    /// ```no_run
+    /// var x = 3
+    /// ```
+    ///
+    /// ```no_run
+    /// var x: i32 = 3
+    /// ```
+    ///
     /// The "var" keyword has already been consumed when this function is called.
     fn parse_var_decl(
         &mut self,
@@ -675,7 +777,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                     }
 
                     LexTokenKind::Kw(lex_kw) => {
-                        if let Some(modifier) = get_modifier_token(&lex_kw) {
+                        if let Some(modifier) = crate::token::get_modifier_token(&lex_kw) {
                             modifiers.push(modifier);
                         } else {
                             return Err(self.iter.err(
