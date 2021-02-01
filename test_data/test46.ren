@@ -1,0 +1,10 @@
+fn test_fn1(func: fn()) {}
+fn test_fn2(func: fn(i8)) {}
+fn test_fn3(func: fn() -> i8) {}
+fn test_fn4(func: fn(i32) -> f32) {}
+fn test_fn5(func: fn<u16>()) {}
+
+fn main() -> i32
+{
+    return 0
+}

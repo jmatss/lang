@@ -16,7 +16,7 @@ use inkwell::{
     context::Context,
     module::Module,
     targets::TargetMachine,
-    types::{AnyTypeEnum, BasicTypeEnum},
+    types::{AnyTypeEnum, BasicType, BasicTypeEnum},
     values::{AnyValueEnum, BasicValueEnum, FunctionValue, PointerValue},
     AddressSpace,
 };
@@ -393,6 +393,34 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             self.err("Tried to array index into void type.".into(), file_pos)
                         );
                     }
+                }
+            }
+
+            // Need to wrap `FunctionType`s inside `PointerType`s since they
+            // aren't sized, and can't be used as args/params etc otherwise.
+            Ty::Fn(_, arg_tys, ret_ty, type_info) => {
+                let mut param_types = Vec::with_capacity(arg_tys.len());
+                for arg_ty in arg_tys {
+                    let compiled_ty = self.compile_type(arg_ty, arg_ty.file_pos().cloned())?;
+                    param_types.push(CodeGen::any_into_basic_type(compiled_ty)?);
+                }
+
+                let address_space = AddressSpace::Generic;
+                if let Some(ret_ty) = ret_ty {
+                    let compiled_ret_ty =
+                        self.compile_type(ret_ty, type_info.file_pos().cloned())?;
+                    let basic_ty = CodeGen::any_into_basic_type(compiled_ret_ty)?;
+
+                    basic_ty
+                        .fn_type(&param_types, false)
+                        .ptr_type(address_space)
+                        .into()
+                } else {
+                    self.context
+                        .void_type()
+                        .fn_type(&param_types, false)
+                        .ptr_type(address_space)
+                        .into()
                 }
             }
 

@@ -25,6 +25,10 @@ pub enum Ty {
     /// size is unknown (probably slice).
     Array(Box<Ty>, Option<Box<Expr>>, TypeInfo),
 
+    /// A pointer to a function. The first vec are the generics, the second vec
+    /// are the arguments and the last Ty is the return type.
+    Fn(Vec<Ty>, Vec<Ty>, Option<Box<Ty>>, TypeInfo),
+
     /// Represents a type that can be of any type. This will ex. be used for
     /// functions that takes a Type as a parameter, then the parameter type
     /// would be "Any".
@@ -94,50 +98,56 @@ impl Hash for Ty {
                 a.hash(state);
                 b.hash(state);
             }
-            Ty::Any(_) => {
+            Ty::Fn(a, b, c, ..) => {
                 3.hash(state);
-            }
-            Ty::Generic(a, ..) => {
-                4.hash(state);
-                a.hash(state);
-            }
-            Ty::GenericInstance(a, b, ..) => {
-                5.hash(state);
-                a.hash(state);
-                b.hash(state);
-            }
-            Ty::Expr(a, ..) => {
-                6.hash(state);
-                a.hash(state);
-            }
-            Ty::UnknownAdtMember(a, b, c, ..) => {
-                7.hash(state);
                 a.hash(state);
                 b.hash(state);
                 c.hash(state);
             }
-            Ty::UnknownAdtMethod(a, b, c, ..) => {
+            Ty::Any(_) => {
+                4.hash(state);
+            }
+            Ty::Generic(a, ..) => {
+                5.hash(state);
+                a.hash(state);
+            }
+            Ty::GenericInstance(a, b, ..) => {
+                6.hash(state);
+                a.hash(state);
+                b.hash(state);
+            }
+            Ty::Expr(a, ..) => {
+                7.hash(state);
+                a.hash(state);
+            }
+            Ty::UnknownAdtMember(a, b, c, ..) => {
                 8.hash(state);
                 a.hash(state);
                 b.hash(state);
                 c.hash(state);
             }
-            Ty::UnknownMethodArgument(a, b, c, d, ..) => {
+            Ty::UnknownAdtMethod(a, b, c, ..) => {
                 9.hash(state);
                 a.hash(state);
                 b.hash(state);
                 c.hash(state);
-                d.hash(state);
             }
-            Ty::UnknownMethodGeneric(a, b, c, d, ..) => {
+            Ty::UnknownMethodArgument(a, b, c, d, ..) => {
                 10.hash(state);
                 a.hash(state);
                 b.hash(state);
                 c.hash(state);
                 d.hash(state);
             }
-            Ty::UnknownArrayMember(a, b, ..) => {
+            Ty::UnknownMethodGeneric(a, b, c, d, ..) => {
                 11.hash(state);
+                a.hash(state);
+                b.hash(state);
+                c.hash(state);
+                d.hash(state);
+            }
+            Ty::UnknownArrayMember(a, b, ..) => {
+                12.hash(state);
                 a.hash(state);
                 b.hash(state);
             }
@@ -160,6 +170,11 @@ impl PartialEq for Ty {
             (Ty::Array(self_ty, self_dim, ..), Ty::Array(other_ty, other_dim, ..)) => {
                 self_ty == other_ty && self_dim == other_dim
             }
+
+            (
+                Ty::Fn(self_gens, self_args, self_ret, ..),
+                Ty::Fn(other_gens, other_args, other_ret, ..),
+            ) => self_gens == other_gens && self_args == other_args && self_ret == other_ret,
 
             (Ty::Any(..), Ty::Any(..)) => true,
 
@@ -239,6 +254,17 @@ impl Ty {
                 ty_solved && expr_ty_solved
             }
 
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                let mut ty_solved = ret_ty.as_ref().map_or(true, |ty| ty.is_solved());
+                if gens.iter().any(|ty| !ty.is_solved()) {
+                    ty_solved = false;
+                }
+                if args.iter().any(|ty| !ty.is_solved()) {
+                    ty_solved = false;
+                }
+                ty_solved
+            }
+
             Ty::Expr(expr, ..) => {
                 if let Ok(ty) = expr.get_expr_type() {
                     ty.is_solved()
@@ -270,8 +296,8 @@ impl Ty {
             Ty::Pointer(ty, ..) => ty.is_known(),
 
             Ty::Array(ty, expr_opt, ..) => {
-                let ty_solved = ty.is_known();
-                let expr_ty_solved = if let Some(ty) = expr_opt
+                let ty_known = ty.is_known();
+                let expr_ty_known = if let Some(ty) = expr_opt
                     .as_ref()
                     .map(|expr| expr.get_expr_type().ok())
                     .flatten()
@@ -280,7 +306,18 @@ impl Ty {
                 } else {
                     true
                 };
-                ty_solved && expr_ty_solved
+                ty_known && expr_ty_known
+            }
+
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                let mut ty_known = ret_ty.as_ref().map_or(true, |ty| ty.is_known());
+                if gens.iter().any(|ty| !ty.is_known()) {
+                    ty_known = false;
+                }
+                if args.iter().any(|ty| !ty.is_known()) {
+                    ty_known = false;
+                }
+                ty_known
             }
 
             Ty::Expr(expr, ..) => {
@@ -314,9 +351,9 @@ impl Ty {
                     *inner_ty = InnerTy::default_float();
                 }
 
-                for gen_ty in generics.iter_types_mut() {
-                    gen_ty.convert_defaults();
-                }
+                generics
+                    .iter_types_mut()
+                    .for_each(|ty| ty.convert_defaults());
             }
 
             Ty::Array(ty, expr_opt, ..) => {
@@ -327,6 +364,14 @@ impl Ty {
                         expr_ty.convert_defaults();
                     }
                 }
+            }
+
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                if let Some(ret_ty) = ret_ty {
+                    ret_ty.convert_defaults();
+                }
+                gens.iter_mut().for_each(|ty| ty.convert_defaults());
+                args.iter_mut().for_each(|ty| ty.convert_defaults());
             }
 
             Ty::Expr(expr, _) => {
@@ -409,6 +454,7 @@ impl Ty {
             Ty::CompoundType(.., type_info)
             | Ty::Pointer(.., type_info)
             | Ty::Array(.., type_info)
+            | Ty::Fn(.., type_info)
             | Ty::Any(.., type_info)
             | Ty::Generic(.., type_info)
             | Ty::GenericInstance(.., type_info)
@@ -426,6 +472,7 @@ impl Ty {
             Ty::CompoundType(.., type_info)
             | Ty::Pointer(.., type_info)
             | Ty::Array(.., type_info)
+            | Ty::Fn(.., type_info)
             | Ty::Any(.., type_info)
             | Ty::Generic(.., type_info)
             | Ty::GenericInstance(.., type_info)
@@ -470,6 +517,29 @@ impl Ty {
                 }
             }
 
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                if let Some(inner_exprs) = ret_ty.as_mut().map(|ty| ty.get_exprs_mut()).flatten() {
+                    for inner_expr in inner_exprs {
+                        exprs.push(unsafe { (inner_expr as *mut Expr).as_mut().unwrap() });
+                    }
+                }
+
+                gens.iter_mut().for_each(|ty| {
+                    if let Some(inner_exprs) = ty.get_exprs_mut() {
+                        inner_exprs.into_iter().for_each(|inner_expr| {
+                            exprs.push(unsafe { (inner_expr as *mut Expr).as_mut().unwrap() });
+                        });
+                    }
+                });
+                args.iter_mut().for_each(|ty| {
+                    if let Some(inner_exprs) = ty.get_exprs_mut() {
+                        inner_exprs.into_iter().for_each(|inner_expr| {
+                            exprs.push(unsafe { (inner_expr as *mut Expr).as_mut().unwrap() });
+                        });
+                    }
+                });
+            }
+
             Ty::Expr(expr, _) => {
                 exprs.push(unsafe { (expr.as_mut() as *mut Expr).as_mut().unwrap() });
             }
@@ -505,6 +575,16 @@ impl Ty {
             | Ty::UnknownMethodArgument(ty, ..)
             | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => ty.replace_generics(generic_names),
+
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                if let Some(ty) = ret_ty.as_mut() {
+                    ty.replace_generics(generic_names)
+                }
+                gens.iter_mut()
+                    .for_each(|ty| ty.replace_generics(generic_names));
+                args.iter_mut()
+                    .for_each(|ty| ty.replace_generics(generic_names));
+            }
 
             Ty::Expr(expr, ..) => {
                 if let Ok(ty) = expr.get_expr_type_mut() {
@@ -547,6 +627,16 @@ impl Ty {
             | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => ty.replace_generics_impl(generics_impl),
 
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                if let Some(ty) = ret_ty.as_mut() {
+                    ty.replace_generics_impl(generics_impl)
+                }
+                gens.iter_mut()
+                    .for_each(|ty| ty.replace_generics_impl(generics_impl));
+                args.iter_mut()
+                    .for_each(|ty| ty.replace_generics_impl(generics_impl));
+            }
+
             Ty::Expr(expr, ..) => {
                 if let Ok(ty) = expr.get_expr_type_mut() {
                     ty.replace_generics_impl(generics_impl);
@@ -582,6 +672,24 @@ impl Ty {
             | Ty::UnknownArrayMember(ty, ..) => {
                 if let Some(mut inner_generics) = ty.get_generics() {
                     generics.append(&mut inner_generics);
+                }
+            }
+
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                if let Some(mut inner_generics) =
+                    ret_ty.as_ref().map(|ty| ty.get_generics()).flatten()
+                {
+                    generics.append(&mut inner_generics);
+                }
+                for gen in gens {
+                    if let Some(mut inner_generics) = gen.get_generics() {
+                        generics.append(&mut inner_generics);
+                    }
+                }
+                for arg in args {
+                    if let Some(mut inner_generics) = arg.get_generics() {
+                        generics.append(&mut inner_generics);
+                    }
                 }
             }
 
@@ -646,6 +754,26 @@ impl Ty {
                 }
             }
 
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                if let Some(inner_names) = ret_ty
+                    .as_ref()
+                    .map(|ty| ty.get_adt_and_trait_names(full_names))
+                    .flatten()
+                {
+                    names.extend(inner_names);
+                }
+                for gen in gens {
+                    if let Some(inner_names) = gen.get_adt_and_trait_names(full_names) {
+                        names.extend(inner_names);
+                    }
+                }
+                for arg in args {
+                    if let Some(inner_names) = arg.get_adt_and_trait_names(full_names) {
+                        names.extend(inner_names);
+                    }
+                }
+            }
+
             Ty::Expr(expr, ..) => {
                 if let Ok(ty) = expr.get_expr_type() {
                     if let Some(inner_names) = ty.get_adt_and_trait_names(full_names) {
@@ -689,6 +817,16 @@ impl Ty {
             | Ty::UnknownMethodArgument(ty, ..)
             | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => ty.replace_self(old_name, new_self_ty),
+
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                if let Some(ty) = ret_ty.as_mut() {
+                    ty.replace_self(old_name, new_self_ty)
+                }
+                gens.iter_mut()
+                    .for_each(|ty| ty.replace_self(old_name, new_self_ty));
+                args.iter_mut()
+                    .for_each(|ty| ty.replace_self(old_name, new_self_ty));
+            }
 
             Ty::Expr(expr, ..) => {
                 if let Ok(ty) = expr.get_expr_type_mut() {
@@ -758,6 +896,14 @@ impl Ty {
 
     pub fn is_array(&self) -> bool {
         if let Ty::Array(..) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn is_fn(&self) -> bool {
+        if let Ty::Fn(..) = self {
             true
         } else {
             false
@@ -862,6 +1008,7 @@ impl Ty {
             (Ty::CompoundType(..), Ty::CompoundType(..))
             | (Ty::Pointer(..), Ty::Pointer(..))
             | (Ty::Array(..), Ty::Array(..))
+            | (Ty::Fn(..), Ty::Fn(..))
             | (Ty::Expr(..), Ty::Expr(..))
             | (Ty::Generic(..), Ty::Generic(..))
             | (Ty::Any(..), Ty::Any(..))
@@ -929,6 +1076,22 @@ impl Ty {
             | Ty::UnknownMethodArgument(ty, ..)
             | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => ty.contains_inner_ty(inner_ty),
+
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                if ret_ty
+                    .as_ref()
+                    .map_or(false, |ty| ty.contains_inner_ty(inner_ty))
+                {
+                    return true;
+                }
+                if gens.iter().any(|ty| ty.contains_inner_ty(inner_ty)) {
+                    return true;
+                }
+                if args.iter().any(|ty| ty.contains_inner_ty(inner_ty)) {
+                    return true;
+                }
+                false
+            }
 
             Ty::Expr(expr, ..) => {
                 if let Ok(ty) = expr.get_expr_type() {
@@ -1084,6 +1247,28 @@ impl Ty {
                 comp_a == comp_b && gens_a.len() == gens_b.len()
             }
 
+            (Ty::Fn(gens_a, args_a, ret_ty_a, ..), Ty::Fn(gens_b, args_b, ret_ty_b, ..)) => {
+                if ret_ty_a != ret_ty_b {
+                    return false;
+                }
+
+                if gens_a.len() != gens_b.len() {
+                    return false;
+                }
+                if gens_a.iter().zip(gens_b).any(|(a, b)| a != b) {
+                    return false;
+                }
+
+                if args_a.len() != args_b.len() {
+                    return false;
+                }
+                if args_a.iter().zip(args_b).any(|(a, b)| a != b) {
+                    return false;
+                }
+
+                true
+            }
+
             (Ty::Expr(expr, ..), other_ty) | (other_ty, Ty::Expr(expr, ..)) => {
                 if let Ok(ty) = expr.get_expr_type() {
                     ty.is_compatible(other_ty)
@@ -1158,6 +1343,7 @@ impl Ty {
     ///       contains unknown ADT method generic (UnknownMethodGeneric)
     ///   6   contains pointer
     ///       contains array
+    ///       contains fn
     ///   8   contains unknown array member (UnknownArrayMember)
     ///   10  contains generic (Generic)
     ///   12  contains unknown int (UnknownInt)
@@ -1207,6 +1393,21 @@ impl Ty {
                 ty.precedence_priv(highest, next_depth, is_generic_param)
             }
 
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                highest = usize::max(highest, 6 + extra);
+                highest = gens.iter().fold(highest, |acc, ty| {
+                    usize::max(acc, ty.precedence_priv(acc, next_depth, is_generic_param))
+                });
+                highest = args.iter().fold(highest, |acc, ty| {
+                    usize::max(acc, ty.precedence_priv(acc, next_depth, is_generic_param))
+                });
+                if let Some(ret_ty) = ret_ty {
+                    ret_ty.precedence_priv(highest, next_depth, is_generic_param)
+                } else {
+                    highest
+                }
+            }
+
             Ty::Expr(expr, ..) => {
                 if let Ok(ty) = expr.get_expr_type() {
                     // Use the same depth.
@@ -1253,6 +1454,37 @@ impl Display for Ty {
                 result.push('{');
                 result.push_str(&inner_ty.to_string());
                 result.push('}');
+            }
+
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                result.push_str("fn");
+
+                if !gens.is_empty() {
+                    result.push('<');
+                    let gens_str = gens
+                        .iter()
+                        .map(|ty| ty.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    result.push_str(&gens_str);
+                    result.push('>');
+                }
+
+                result.push('(');
+                if !args.is_empty() {
+                    let args_str = args
+                        .iter()
+                        .map(|ty| ty.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    result.push_str(&args_str);
+                }
+                result.push(')');
+
+                if let Some(ret_ty) = ret_ty {
+                    result.push_str("->");
+                    result.push_str(&ret_ty.to_string());
+                }
             }
 
             Ty::Expr(expr, ..) => {

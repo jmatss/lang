@@ -146,6 +146,7 @@ impl<'a> TypeContext<'a> {
             Ty::Pointer(..) | Ty::Array(..) => self.solve_aggregate(ty, root_id),
 
             Ty::Expr(..) => self.solve_expr(ty, root_id),
+            Ty::Fn(..) => self.solve_fn(ty, root_id),
 
             Ty::UnknownAdtMember(..) => self.solve_unknown_adt_member(ty, root_id),
             Ty::UnknownAdtMethod(..) => self.solve_unknown_adt_method(ty, root_id),
@@ -218,6 +219,49 @@ impl<'a> TypeContext<'a> {
 
         self.insert_constraint(&new_ty, ty, root_id)?;
         Ok(new_ty)
+    }
+
+    /// Since this function should return something, the return type of the
+    /// fn that is being solved will be returned. If the return type is None,
+    /// a new void type will be returned.
+    fn solve_fn(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
+        debug!("solve_fn: {:#?}", ty);
+
+        if let Ty::Fn(gens, args, ret_ty, ..) = ty {
+            for gen_ty in gens {
+                let mut new_gen_ty = gen_ty.clone();
+
+                self.solve(&new_gen_ty, root_id)?;
+                new_gen_ty = self.inferred_type(&new_gen_ty, root_id)?;
+
+                self.insert_constraint(&new_gen_ty, gen_ty, root_id)?;
+            }
+
+            for arg_ty in args {
+                let mut new_arg_ty = arg_ty.clone();
+
+                self.solve(&new_arg_ty, root_id)?;
+                new_arg_ty = self.inferred_type(&new_arg_ty, root_id)?;
+
+                self.insert_constraint(&new_arg_ty, arg_ty, root_id)?;
+            }
+
+            let new_ret_ty = if let Some(ret_ty) = ret_ty {
+                let mut new_ret_ty = *ret_ty.clone();
+
+                self.solve(&new_ret_ty, root_id)?;
+                new_ret_ty = self.inferred_type(&new_ret_ty, root_id)?;
+                self.insert_constraint(&new_ret_ty, ret_ty, root_id)?;
+
+                new_ret_ty
+            } else {
+                Ty::CompoundType(InnerTy::Void, Generics::empty(), TypeInfo::None)
+            };
+
+            Ok(new_ret_ty)
+        } else {
+            unreachable!();
+        }
     }
 
     fn solve_unknown_adt_member(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {

@@ -10,7 +10,7 @@ use common::{
     },
     type_info::TypeInfo,
 };
-use lex::token::{LexToken, LexTokenKind, Sym};
+use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 
 pub struct TypeParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
@@ -30,13 +30,15 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     }
 
     /// Valid type formats:
-    ///   X         // Basic type.
-    ///   {X}       // Pointer to type (is the {X} syntax weird/ambiguous (?))
-    ///   X<T>      // Type with generic argument.
-    ///   X<T, V>   // Type with multiple generic arguments.
-    ///   [X]       // Array of type X with unknown size (slice).
-    ///   [X: 3]    // Array of type X with size 3.
-    ///   [X: _]    // Array of type X with infered size.
+    ///   X            // Basic type.
+    ///   {X}          // Pointer to type (is the {X} syntax weird/ambiguous (?))
+    ///   X<T>         // Type with generic argument.
+    ///   X<T, V>      // Type with multiple generic arguments.
+    ///   [X]          // Array of type X with unknown size (slice).
+    ///   [X: 3]       // Array of type X with size 3.
+    ///   [X: _]       // Array of type X with infered size.
+    ///   @f<G>(T)     // Built in func with name f, generic G and arg type T.
+    ///   fn(T) -> R   // Function ptr with arg type T and return type R.
     ///
     /// Test examples:
     ///   C                     Lang
@@ -49,9 +51,6 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             match lex_token.kind {
                 // Ident.
                 LexTokenKind::Ident(ref ident) => {
-                    // Parse generics. If this type has generics specified, add
-                    // them as the "end" to the `file_pos`. Otherwise, the `ident`
-                    // of the type will be the "end" file pos.
                     let generics = match self.parse_type_generics(GenericsKind::Impl)? {
                         (generics, Some(file_pos_last)) => {
                             file_pos.set_end(&file_pos_last)?;
@@ -101,6 +100,57 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     file_pos.set_end(&ty.file_pos().unwrap())?;
 
                     Ok(ty)
+                }
+
+                // Function pointer.
+                LexTokenKind::Kw(Kw::Function) => {
+                    // The generics will be used when using the function to make
+                    // a call inside the body. It will be appended to the name of
+                    // the function call as usual.
+                    let generics = match self.parse_type_generics(GenericsKind::Impl)? {
+                        (generics, Some(file_pos_last)) => {
+                            file_pos.set_end(&file_pos_last)?;
+                            generics
+                        }
+                        (generics, None) => {
+                            file_pos.set_end(&lex_token.file_pos)?;
+                            generics
+                        }
+                    };
+                    let gens = generics.unwrap().iter_types().cloned().collect::<Vec<_>>();
+
+                    let start_symbol = Sym::ParenthesisBegin;
+                    let end_symbol = Sym::ParenthesisEnd;
+                    let (args, args_file_pos) = self.parse_type_list(start_symbol, end_symbol)?;
+                    file_pos.set_end(&args_file_pos)?;
+
+                    // If the next token is a "Arrow" ("->"), assume that the return type
+                    // of the function is specified afterwards. If there are no arrow,
+                    // assume that the function returns void.
+                    let (ret_ty, ret_ty_file_pos) =
+                        if let Some(lex_token) = self.iter.peek_skip_space_line() {
+                            if let LexTokenKind::Sym(Sym::Arrow) = lex_token.kind {
+                                self.iter.next_skip_space_line(); // Consume the arrow.
+
+                                let return_ty = Box::new(self.iter.parse_type(None)?);
+                                let return_ty_file_pos = return_ty.file_pos().cloned();
+                                (Some(return_ty), return_ty_file_pos)
+                            } else {
+                                (None, None)
+                            }
+                        } else {
+                            return Err(self.iter.err(
+                                "Received None when looking for ret ty for function pointer token."
+                                    .into(),
+                                Some(file_pos),
+                            ));
+                        };
+
+                    if let Some(ret_ty_file_pos) = ret_ty_file_pos {
+                        file_pos.set_end(&ret_ty_file_pos)?;
+                    }
+
+                    Ok(Ty::Fn(gens, args, ret_ty, TypeInfo::Default(file_pos)))
                 }
 
                 // Built in call.
@@ -242,10 +292,95 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     }
                 }
             } else {
-                // TODO: Where to fetch file_pos from?
                 return Err(self.iter.err(
                     "Received None after argument in generic list.".into(),
                     Some(cur_file_pos),
+                ));
+            }
+        }
+    }
+
+    // TODO: Merge this logic with the parsing of generic lists.
+    /// Parses a list of types between a `start_symbol` and `end_symbol`.
+    /// This can for example be point bracket when parsing a generic list or
+    /// parethesis when parsing a function pointer argument list.
+    pub(crate) fn parse_type_list(
+        &mut self,
+        start_symbol: Sym,
+        end_symbol: Sym,
+    ) -> LangResult<(Vec<Ty>, FilePosition)> {
+        let mut tys = Vec::default();
+
+        let mut file_pos = self.iter.peek_file_pos()?;
+
+        // If the next token isn't a `start_symbol` there are no type list,
+        // something has gone wrong.
+        if let Some(lex_token) = self.iter.next_skip_space() {
+            match lex_token.kind {
+                LexTokenKind::Sym(sym) if sym == start_symbol => {
+                    // Do nothing, parse type list in logic underneath.
+                }
+                _ => {
+                    return Err(self.iter.err(format!("Expected start_symbol \"{:#?}\" when parsing start of type list, got: {:#?}", start_symbol, lex_token), Some(file_pos)));
+                }
+            }
+        }
+
+        // If this is a empty type list, do early return with empty list.
+        if let Some(lex_token) = self.iter.peek_skip_space() {
+            match lex_token.kind {
+                LexTokenKind::Sym(sym) if sym == end_symbol => {
+                    self.iter.next_skip_space();
+
+                    file_pos.set_end(&lex_token.file_pos)?;
+                    return Ok((Vec::with_capacity(0), file_pos));
+                }
+                _ => (),
+            }
+        }
+
+        loop {
+            let ty = self.parse_type()?;
+            tys.push(ty.clone());
+
+            let ty_file_pos = ty.file_pos().unwrap();
+            file_pos.set_end(ty_file_pos)?;
+
+            if let Some(lex_token) = self.iter.next_skip_space() {
+                match lex_token.kind {
+                    LexTokenKind::Sym(Sym::Comma) => {
+                        // Makes a extra check to allow for trailing commas.
+                        if let Some(next) = self.iter.peek_skip_space_line() {
+                            match next.kind {
+                                LexTokenKind::Sym(sym) if sym == end_symbol => {
+                                    self.iter.next_skip_space_line();
+
+                                    file_pos.set_end(&next.file_pos)?;
+                                    return Ok((tys, file_pos));
+                                }
+                                _ => (),
+                            }
+                        }
+                        continue;
+                    }
+                    LexTokenKind::Sym(sym) if sym == end_symbol => {
+                        file_pos.set_end(&lex_token.file_pos)?;
+                        return Ok((tys, file_pos));
+                    }
+                    _ => {
+                        return Err(self.iter.err(
+                            format!(
+                                "Received unexpected token after argument in type list: {:?}",
+                                lex_token
+                            ),
+                            Some(lex_token.file_pos),
+                        ));
+                    }
+                }
+            } else {
+                return Err(self.iter.err(
+                    "Received None after argument in type list.".into(),
+                    Some(*ty_file_pos),
                 ));
             }
         }

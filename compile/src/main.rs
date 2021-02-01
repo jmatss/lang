@@ -44,6 +44,14 @@ fn main() -> LangResult<()> {
                 .takes_value(false)
                 .required(false),
         )
+        .arg(
+            Arg::with_name("dump")
+                .short("d")
+                .long("dump")
+                .help("Set to dump/print the generated LLVM IR code.")
+                .takes_value(false)
+                .required(false),
+        )
         .get_matches();
 
     let mut input_file = matches.value_of("input").unwrap().to_owned();
@@ -57,6 +65,7 @@ fn main() -> LangResult<()> {
     let default_output_file = input_file_name.replace(".ren", ".o");
     let output_file = matches.value_of("output").unwrap_or(&default_output_file);
     let optimize = matches.is_present("optimize");
+    let dump = matches.is_present("dump");
     let module_name = input_file_name.split('.').next().unwrap();
 
     env_logger::init();
@@ -190,8 +199,8 @@ fn main() -> LangResult<()> {
     }
 
     println!("Generating complete ({:?}).", generate_timer.elapsed());
-    if log_enabled!(Level::Debug) {
-        println!("Before optimizing:");
+    if dump {
+        println!("\n## LLVM IR before optimization ##");
         module.print_to_stderr();
     }
 
@@ -200,8 +209,8 @@ fn main() -> LangResult<()> {
     compiler::compile(target_machine, &module, output_file, optimize)?;
     println!("Compiling complete ({:?}).", compile_timer.elapsed());
 
-    if log_enabled!(Level::Debug) && optimize {
-        println!("After optimizing:");
+    if dump && optimize {
+        println!("\n## LLVM IR after optimization ##");
         module.print_to_stderr();
     }
 

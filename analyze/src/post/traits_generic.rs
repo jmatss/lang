@@ -268,6 +268,16 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                 }
             }
 
+            Ty::Fn(gens, args, ret_ty, ..) => {
+                if let Some(ret_ty) = ret_ty {
+                    self.check_adt_traits(ret_ty, block_id);
+                }
+                gens.iter()
+                    .for_each(|ty| self.check_adt_traits(ty, block_id));
+                args.iter()
+                    .for_each(|ty| self.check_adt_traits(ty, block_id));
+            }
+
             Ty::Pointer(ty_i, _)
             | Ty::UnknownAdtMember(ty_i, ..)
             | Ty::UnknownAdtMethod(ty_i, ..)
