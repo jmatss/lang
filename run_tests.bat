@@ -23,13 +23,13 @@ set TEST_FAILURE=
 for /l %%x in (%RANGE_START%, 1, %RANGE_END%) do (
     echo | set /p="Running test %%x..."
     %~dp0\target\debug\lang.exe -i test_data\test%%x.ren -o a.o >nul 2>&1
-    if errorlevel 1 (
+    if !ERRORLEVEL! NEQ 0 (
         echo compiling failed.
         set TEST_FAILURE=!TEST_FAILURE! %%x
     ) else (
         echo | set /p=" compiled..."
         clang a.o -o a.exe && a.exe >nul 2>&1
-        if errorlevel 1 (
+        if !ERRORLEVEL! NEQ 0 (
             echo running failed.
             set TEST_FAILURE=!TEST_FAILURE! %%x
         ) else (
@@ -38,10 +38,10 @@ for /l %%x in (%RANGE_START%, 1, %RANGE_END%) do (
     )
 )
 
-if "%TEST_FAILURE%" == "" (
+if "!TEST_FAILURE!" == "" (
     echo. && echo All tests passed.
     exit /b 0
 ) else (
-    echo. && echo Test failures: %TEST_FAILURE%
+    echo. && echo Test failures: !TEST_FAILURE!
     exit /b 1
 )
