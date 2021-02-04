@@ -12,7 +12,7 @@ use common::{
 use inkwell::{
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
     values::{AnyValueEnum, FloatValue, IntValue},
-    AddressSpace,
+    AddressSpace, IntPredicate,
 };
 
 #[derive(Debug, Copy, Clone)]
@@ -369,6 +369,43 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
             }
 
+            // Checks if the given argument is null/0.
+            "is_null" => {
+                if let Some(expr) = built_in_call
+                    .arguments
+                    .first_mut()
+                    .map(|arg| &mut arg.value)
+                {
+                    // TODO: How should this logic work? Can already existing
+                    //       pointers be converted to null pointers? Currently
+                    //       there will never exist any null pointers.
+                    let value = self.compile_expr(expr, ExprTy::RValue)?;
+
+                    // TODO: Which types should be allowed?
+                    if value.is_pointer_value() {
+                        let ptr = value.into_pointer_value();
+                        Ok(self.builder.build_is_null(ptr, "is.null.ptr").into())
+                    } else if value.is_int_value() {
+                        let int_value = value.into_int_value();
+                        let zero = int_value.get_type().const_zero();
+                        Ok(self
+                            .builder
+                            .build_int_compare(IntPredicate::EQ, int_value, zero, "is.null.int")
+                            .into())
+                    } else {
+                        Err(self.err(
+                            format!(
+                                "Invalid type of argument given to @is_null(): {:#?}",
+                                built_in_call
+                            ),
+                            Some(file_pos),
+                        ))
+                    }
+                } else {
+                    unreachable!("Argument count check in Analyze.");
+                }
+            }
+
             // Gets the filename of the file that this built-in call is in.
             "file" => {
                 if let Some(file_info) = self.analyze_context.file_info.get(&file_pos.file_nr) {
@@ -688,10 +725,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         file_pos: Option<FilePosition>,
     ) -> LangResult<AnyValueEnum<'ctx>> {
         Ok(match ty {
+            AnyTypeEnum::PointerType(ty) => ty.const_null().into(),
+
             AnyTypeEnum::ArrayType(ty) => ty.const_zero().into(),
             AnyTypeEnum::FloatType(ty) => ty.const_zero().into(),
             AnyTypeEnum::IntType(ty) => ty.const_zero().into(),
-            AnyTypeEnum::PointerType(ty) => ty.const_zero().into(),
             AnyTypeEnum::StructType(ty) => ty.const_zero().into(),
             AnyTypeEnum::VectorType(ty) => ty.const_zero().into(),
 
