@@ -198,7 +198,6 @@ impl Expr {
         }
     }
 
-    #[allow(clippy::match_like_matches_macro)]
     pub fn is_var(&self) -> bool {
         match self {
             Expr::Var(_) => true,
@@ -207,10 +206,9 @@ impl Expr {
                     BinOperator::Dot => bin_op.lhs.is_var() && bin_op.rhs.is_var(),
                     _ => false,
                 },
-                Op::UnOp(un_op) => match un_op.operator {
-                    UnOperator::Deref | UnOperator::Address | UnOperator::ArrayAccess(_) => true,
-                    _ => false,
-                },
+                Op::UnOp(un_op) => {
+                    matches!(un_op.operator, UnOperator::Deref | UnOperator::Address | UnOperator::ArrayAccess(_))
+                }
             },
             _ => false,
         }

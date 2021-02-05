@@ -19,7 +19,7 @@ pub enum GenericsKind {
     Empty,
 }
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone, Eq, Default)]
 pub struct Generics {
     names: Vec<String>,
     types: Vec<Ty>,
@@ -30,7 +30,6 @@ pub struct Generics {
 }
 
 impl Generics {
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             names: Vec::default(),

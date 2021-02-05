@@ -28,27 +28,19 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
     /// Returns true if the given header is a "root" i.e. a block that creates
     /// a new scope where every block created inside them only has access to
     /// this block + globals.
-    #[allow(clippy::match_like_matches_macro)]
     fn is_root(&self, header: &BlockHeader) -> bool {
-        match header {
-            BlockHeader::Function(_)
+        matches!(header, BlockHeader::Function(_)
             | BlockHeader::Struct(_)
             | BlockHeader::Enum(_)
             | BlockHeader::Trait(_)
             | BlockHeader::Implement(..)
-            | BlockHeader::Default => true,
-            _ => false,
-        }
+            | BlockHeader::Default)
     }
 
     /// Returns true if the given header is a "branchable" block i.e. a block
     /// that can contain branch instructions like "break".
-    #[allow(clippy::match_like_matches_macro)]
     fn is_branchable(&self, header: &BlockHeader) -> bool {
-        match header {
-            BlockHeader::Match(_) | BlockHeader::For(_, _) | BlockHeader::While(_) => true,
-            _ => false,
-        }
+        matches!(header, BlockHeader::Match(_) | BlockHeader::For(_, _) | BlockHeader::While(_))
     }
 
     /// Sets the information about if a statement exists in `block_info`.
