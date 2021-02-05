@@ -230,6 +230,9 @@ impl PartialEq for Ty {
 
 #[allow(clippy::match_like_matches_macro)]
 impl Ty {
+    /// Checks if the given type contains only known types. These are primitives
+    /// and structures, pointers or arrays that contains solved types.
+    /// Unknown ints and floats also counts as solved.
     pub fn is_solved(&self) -> bool {
         match self {
             Ty::CompoundType(inner_ty, generics, ..) => {
@@ -276,62 +279,6 @@ impl Ty {
             Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => true,
 
             Ty::UnknownAdtMember(_, _, _, _)
-            | Ty::UnknownAdtMethod(_, _, _, _)
-            | Ty::UnknownMethodArgument(_, _, _, _, _)
-            | Ty::UnknownMethodGeneric(_, _, _, _, _)
-            | Ty::UnknownArrayMember(_, _, _) => false,
-        }
-    }
-
-    /// Checks if the given type contains only known types.
-    /// These are primitives, structures, pointers or arrays.
-    pub fn is_known(&self) -> bool {
-        match self {
-            Ty::CompoundType(inner_ty, generics, ..) => {
-                let inner_solved = inner_ty.is_solved();
-                let gens_solved = generics.iter_types().all(|ty| ty.is_known());
-                inner_solved && gens_solved
-            }
-
-            Ty::Pointer(ty, ..) => ty.is_known(),
-
-            Ty::Array(ty, expr_opt, ..) => {
-                let ty_known = ty.is_known();
-                let expr_ty_known = if let Some(ty) = expr_opt
-                    .as_ref()
-                    .map(|expr| expr.get_expr_type().ok())
-                    .flatten()
-                {
-                    ty.is_known()
-                } else {
-                    true
-                };
-                ty_known && expr_ty_known
-            }
-
-            Ty::Fn(gens, args, ret_ty, ..) => {
-                let mut ty_known = ret_ty.as_ref().map_or(true, |ty| ty.is_known());
-                if gens.iter().any(|ty| !ty.is_known()) {
-                    ty_known = false;
-                }
-                if args.iter().any(|ty| !ty.is_known()) {
-                    ty_known = false;
-                }
-                ty_known
-            }
-
-            Ty::Expr(expr, ..) => {
-                if let Ok(ty) = expr.get_expr_type() {
-                    ty.is_known()
-                } else {
-                    true
-                }
-            }
-
-            Ty::Any(..)
-            | Ty::Generic(..)
-            | Ty::GenericInstance(..)
-            | Ty::UnknownAdtMember(_, _, _, _)
             | Ty::UnknownAdtMethod(_, _, _, _)
             | Ty::UnknownMethodArgument(_, _, _, _, _)
             | Ty::UnknownMethodGeneric(_, _, _, _, _)
@@ -1291,9 +1238,9 @@ impl Ty {
         // highest precedence number.
         static MAX_DEPTH: usize = 10;
 
-        if self.is_known() && !other.is_known() {
+        if self.is_solved() && !other.is_solved() {
             return true;
-        } else if !self.is_known() && other.is_known() {
+        } else if !self.is_solved() && other.is_solved() {
             return false;
         }
 

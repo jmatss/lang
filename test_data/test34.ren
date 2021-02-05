@@ -32,7 +32,7 @@ fn main() -> i32
     }
     else
     {
-        y = Nullable<@type(x.get().len())>::init()
+        y = Nullable<@type(x.get().len())>::null()
         printf("NULL")
     }
     assert(not y.is_null())

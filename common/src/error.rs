@@ -24,7 +24,7 @@ pub struct LangError {
     pub backtrace: Option<Backtrace>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LangErrorKind {
     GeneralError,
     LexError,
@@ -32,6 +32,12 @@ pub enum LangErrorKind {
     AnalyzeError,
     CodeGenError,
     CompileError,
+}
+
+impl PartialEq for LangError {
+    fn eq(&self, other: &Self) -> bool {
+        self.msg == other.msg && self.kind == other.kind && self.file_pos == other.file_pos
+    }
 }
 
 impl LangError {

@@ -372,6 +372,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         file_pos: Option<FilePosition>,
         linkage_opt: Option<Linkage>,
     ) -> LangResult<FunctionValue<'ctx>> {
+        debug!("compile_func_proto: {:#?}", func);
+
         let param_types = if let Some(params) = &func.parameters {
             let mut inner_types = Vec::with_capacity(params.len());
             for param in params {

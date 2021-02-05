@@ -792,10 +792,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     &adt.name,
                     member_name,
                     ctx.block_id,
+                    adt_init.file_pos,
                 ) {
                     Ok(member) => member,
                     Err(err) => {
-                        self.errors.push(err);
+                        if !self.errors.contains(&err) {
+                            self.errors.push(err);
+                        }
                         return;
                     }
                 };

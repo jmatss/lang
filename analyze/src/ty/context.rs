@@ -95,19 +95,20 @@ impl<'a> TypeContext<'a> {
         self.insert_constraint_inner(ty_a, &inferred_ty, root_id)?;
         self.insert_constraint_inner(ty_b, &inferred_ty, root_id)?;
 
-        self.solve(&inferred_ty, root_id)
+        Ok(inferred_ty)
     }
 
-    /// Inserts constraints for potential "inner types" of types `ty_a` and `ty_b`.
+    /// Inserts constraints for potential "inner types" of types `ty` and `inferred_ty`.
     fn insert_constraint_inner(
         &mut self,
-        ty_a: &Ty,
-        ty_b: &Ty,
+        ty: &Ty,
+        inferred_ty: &Ty,
         root_id: BlockId,
     ) -> LangResult<()> {
-        match (ty_a, ty_b) {
+        match (ty, inferred_ty) {
             (Ty::CompoundType(_, ty_a_gens, ..), Ty::CompoundType(_, ty_b_gens, ..)) => {
                 for (ty_a_gen, ty_b_gen) in ty_a_gens.iter_types().zip(ty_b_gens.iter_types()) {
+                    self.insert_constraint_inner(ty_a_gen, ty_b_gen, root_id)?;
                     self.insert_constraint(ty_a_gen, ty_b_gen, root_id)?;
                 }
                 Ok(())
@@ -115,13 +116,36 @@ impl<'a> TypeContext<'a> {
 
             (Ty::Pointer(ty_a_inner, ..), Ty::Pointer(ty_b_inner, ..))
             | (Ty::Array(ty_a_inner, ..), Ty::Array(ty_b_inner, ..))
-            | (Ty::UnknownAdtMember(ty_a_inner, ..), Ty::UnknownAdtMember(ty_b_inner, ..))
-            | (Ty::UnknownAdtMethod(ty_a_inner, ..), Ty::UnknownAdtMethod(ty_b_inner, ..))
-            | (
-                Ty::UnknownMethodArgument(ty_a_inner, ..),
-                Ty::UnknownMethodArgument(ty_b_inner, ..),
-            )
             | (Ty::UnknownArrayMember(ty_a_inner, ..), Ty::UnknownArrayMember(ty_b_inner, ..)) => {
+                self.insert_constraint_inner(ty_a_inner, ty_b_inner, root_id)?;
+                self.insert_constraint(ty_a_inner, ty_b_inner, root_id)
+            }
+
+            (
+                Ty::UnknownAdtMethod(ty_a_inner, a_name, ..),
+                Ty::UnknownAdtMethod(ty_b_inner, b_name, ..),
+            )
+            | (
+                Ty::UnknownAdtMember(ty_a_inner, a_name, ..),
+                Ty::UnknownAdtMember(ty_b_inner, b_name, ..),
+            ) if a_name == b_name => {
+                self.insert_constraint_inner(ty_a_inner, ty_b_inner, root_id)?;
+                self.insert_constraint(ty_a_inner, ty_b_inner, root_id)
+            }
+
+            (
+                Ty::UnknownMethodArgument(ty_a_inner, a_name, a_idx_or_name, ..),
+                Ty::UnknownMethodArgument(ty_b_inner, b_name, b_idx_or_name, ..),
+            ) if a_name == b_name && a_idx_or_name == b_idx_or_name => {
+                self.insert_constraint_inner(ty_a_inner, ty_b_inner, root_id)?;
+                self.insert_constraint(ty_a_inner, ty_b_inner, root_id)
+            }
+
+            (
+                Ty::UnknownMethodGeneric(ty_a_inner, a_name, a_idx, ..),
+                Ty::UnknownMethodGeneric(ty_b_inner, b_name, b_idx, ..),
+            ) if a_name == b_name && a_idx == b_idx => {
+                self.insert_constraint_inner(ty_a_inner, ty_b_inner, root_id)?;
                 self.insert_constraint(ty_a_inner, ty_b_inner, root_id)
             }
 
@@ -129,17 +153,49 @@ impl<'a> TypeContext<'a> {
         }
     }
 
+    /// Iterates through all types in the substitution sets and solves them.
+    /// Also tries to solve any nested types and map them to the correct types.
+    pub fn deep_solve(&mut self) -> LangResult<()> {
+        for (root_id, sets) in self.substitutions.clone() {
+            for ty in sets.iter_types() {
+                self.solve(&ty, root_id)?;
+                let inferred_ty = self.inferred_type(&ty, root_id)?;
+                self.insert_constraint_inner(&ty, &inferred_ty, root_id)?;
+            }
+        }
+        Ok(())
+    }
+
+    // TODO: This is slow but currently needed in some cases. Find a better way.
+    pub fn final_solve(&mut self, ty: &Ty, block_id: BlockId) -> LangResult<Ty> {
+        let root_id = self.analyze_context.get_root_id(block_id)?;
+        if let Some(sets) = self.substitutions.get_mut(&root_id) {
+            for ty in sets.iter_types() {
+                self.solve(&ty, root_id)?;
+            }
+        }
+        self.solve(ty, root_id)
+    }
+
     /// Given a type `ty`, tries to solve it recursively by looking at structure/
     /// function declarations. This is needed for types that can't be figured out
     /// directly from looking at the "use site" in the source code, some information
     /// needs to be fetched from somewhere else to deduce the correct type.
-    ///
-    /// If the given type `ty` is solved when this function is call, a early
-    /// Ok is returned.
     pub fn solve(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
+        /*
+        if let Some(sets) = self.substitutions.get_mut(&root_id) {
+            let inferred_ty = sets.inferred_type(ty)?;
+            if sets.contains_type(ty) && inferred_ty.is_solved() {
+                return Ok(inferred_ty);
+            }
+        }
+        */
+
+        /*
         if ty.is_solved() {
             return Ok(ty.clone());
         }
+        */
 
         match ty {
             Ty::CompoundType(..) => self.solve_compound(ty, root_id),
@@ -199,7 +255,11 @@ impl<'a> TypeContext<'a> {
         match &mut new_ty {
             Ty::Pointer(ty_aggr, ..) | Ty::Array(ty_aggr, ..) => {
                 self.solve(ty_aggr, root_id)?;
-                *ty_aggr = Box::new(self.inferred_type(ty_aggr, root_id)?);
+
+                let inferred_ty_aggr = self.inferred_type(ty_aggr, root_id)?;
+                self.insert_constraint(&inferred_ty_aggr, ty_aggr, root_id)?;
+
+                *ty_aggr = Box::new(inferred_ty_aggr);
             }
             _ => unreachable!(),
         }
@@ -221,47 +281,35 @@ impl<'a> TypeContext<'a> {
         Ok(new_ty)
     }
 
-    /// Since this function should return something, the return type of the
-    /// fn that is being solved will be returned. If the return type is None,
-    /// a new void type will be returned.
     fn solve_fn(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         debug!("solve_fn: {:#?}", ty);
 
-        if let Ty::Fn(gens, args, ret_ty, ..) = ty {
-            for gen_ty in gens {
-                let mut new_gen_ty = gen_ty.clone();
+        let mut new_ty = ty.clone();
 
-                self.solve(&new_gen_ty, root_id)?;
-                new_gen_ty = self.inferred_type(&new_gen_ty, root_id)?;
+        if let Ty::Fn(gens, args, ret_ty, ..) = &mut new_ty {
+            for ty in gens.iter_mut().chain(args.iter_mut()) {
+                let old_gen_ty = ty.clone();
 
-                self.insert_constraint(&new_gen_ty, gen_ty, root_id)?;
+                self.solve(ty, root_id)?;
+                *ty = self.inferred_type(ty, root_id)?;
+
+                self.insert_constraint(ty, &old_gen_ty, root_id)?;
             }
 
-            for arg_ty in args {
-                let mut new_arg_ty = arg_ty.clone();
+            if let Some(ret_ty) = ret_ty {
+                let old_ret_ty = ret_ty.clone();
 
-                self.solve(&new_arg_ty, root_id)?;
-                new_arg_ty = self.inferred_type(&new_arg_ty, root_id)?;
+                self.solve(ret_ty, root_id)?;
+                *ret_ty = Box::new(self.inferred_type(ret_ty, root_id)?);
 
-                self.insert_constraint(&new_arg_ty, arg_ty, root_id)?;
+                self.insert_constraint(ret_ty, &old_ret_ty, root_id)?;
             }
-
-            let new_ret_ty = if let Some(ret_ty) = ret_ty {
-                let mut new_ret_ty = *ret_ty.clone();
-
-                self.solve(&new_ret_ty, root_id)?;
-                new_ret_ty = self.inferred_type(&new_ret_ty, root_id)?;
-                self.insert_constraint(&new_ret_ty, ret_ty, root_id)?;
-
-                new_ret_ty
-            } else {
-                Ty::CompoundType(InnerTy::Void, Generics::empty(), TypeInfo::None)
-            };
-
-            Ok(new_ret_ty)
         } else {
             unreachable!();
         }
+
+        self.insert_constraint(&new_ty, ty, root_id)?;
+        Ok(new_ty)
     }
 
     fn solve_unknown_adt_member(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
@@ -282,7 +330,12 @@ impl<'a> TypeContext<'a> {
 
         let mut new_ty = if let Some(adt_name) = inner_ty.get_ident() {
             self.analyze_context
-                .get_adt_member(&adt_name, member_name, root_id)?
+                .get_adt_member(
+                    &adt_name,
+                    member_name,
+                    root_id,
+                    structure_ty.file_pos().cloned(),
+                )?
                 .borrow()
                 .ty
                 .clone()

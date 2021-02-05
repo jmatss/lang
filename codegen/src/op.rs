@@ -10,11 +10,11 @@ use common::{
         stmt::Stmt,
     },
     ty::ty::Ty,
-    util, BlockId,
+    util,
 };
 use inkwell::{
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
-    values::{AggregateValue, AnyValue, AnyValueEnum, BasicValue, BasicValueEnum, PointerValue},
+    values::{AggregateValue, AnyValueEnum, BasicValueEnum, PointerValue},
     AddressSpace, FloatPredicate, IntPredicate,
 };
 use log::debug;
@@ -1531,9 +1531,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             ));
         };
 
-        let member = self
-            .analyze_context
-            .get_adt_member(&enum_name, &member_name, block_id)?;
+        let member = self.analyze_context.get_adt_member(
+            &enum_name,
+            &member_name,
+            block_id,
+            un_op.file_pos,
+        )?;
 
         let basic_value = if let Some(mut value) = member.borrow().value.clone() {
             let any_value = self.compile_expr(value.as_mut(), ExprTy::RValue)?;

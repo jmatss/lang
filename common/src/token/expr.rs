@@ -9,7 +9,7 @@ use super::{
 use crate::{
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
-    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
+    ty::{generics::Generics, ty::Ty},
     util, BlockId,
 };
 
@@ -179,6 +179,21 @@ impl Expr {
             Expr::Op(op) => match op {
                 Op::BinOp(bin_op) => bin_op.file_pos.as_ref(),
                 Op::UnOp(un_op) => un_op.file_pos.as_ref(),
+            },
+        }
+    }
+
+    pub fn file_pos_mut(&mut self) -> Option<&mut FilePosition> {
+        match self {
+            Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) => file_pos.as_mut(),
+            Expr::Var(var) => var.file_pos.as_mut(),
+            Expr::FuncCall(func_call) => func_call.file_pos.as_mut(),
+            Expr::BuiltInCall(built_in_call) => Some(&mut built_in_call.file_pos),
+            Expr::AdtInit(adt_init) => adt_init.file_pos.as_mut(),
+            Expr::ArrayInit(array_init) => Some(&mut array_init.file_pos),
+            Expr::Op(op) => match op {
+                Op::BinOp(bin_op) => bin_op.file_pos.as_mut(),
+                Op::UnOp(un_op) => un_op.file_pos.as_mut(),
             },
         }
     }

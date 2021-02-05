@@ -48,7 +48,11 @@ pub enum InnerTy {
 #[allow(clippy::match_like_matches_macro)]
 impl InnerTy {
     pub fn is_solved(&self) -> bool {
-        self.is_primitive() || self.is_string() || self.is_adt() || self.is_trait()
+        self.is_primitive()
+            || self.is_string()
+            || self.is_adt()
+            || self.is_trait()
+            || matches!(self, InnerTy::UnknownInt(..) | InnerTy::UnknownFloat(..))
     }
 
     pub fn get_ident(&self) -> Option<String> {

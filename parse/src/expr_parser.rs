@@ -64,7 +64,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     ) -> LangResult<Option<Expr>> {
         // Take the file pos of the first symbol of the expression if possible.
         // This will be used if a more accurate/precise file_pos can't be used.
-        let file_pos = iter.peek_file_pos()?;
+        let first_file_pos = iter.peek_file_pos()?;
 
         let mut expr_parser = Self {
             iter,
@@ -78,16 +78,16 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
         match expr_parser.shunting_yard()? {
             // (was_empty, expr_file_pos_opt)
-            (false, Some(file_pos)) => {
+            (false, Some(mut file_pos)) => {
                 debug!("Outputs: {:#?}", &expr_parser.outputs);
-                expr_parser.rev_polish_to_expr(&file_pos).map(Some)
+                expr_parser.rev_polish_to_expr(&mut file_pos).map(Some)
             }
 
             (true, _) => Ok(None),
 
             (false, None) => Err(expr_parser.iter.err(
                 "Expr wasn't empty, but got back None expr_file_pos.".into(),
-                Some(file_pos),
+                Some(first_file_pos),
             )),
         }
     }
@@ -462,7 +462,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
     // TODO: Should empty expression be allowed?
     /// Converts the given "outputs" in reverse polsih notation to an expression.
-    fn rev_polish_to_expr(&mut self, full_expr_file_pos: &FilePosition) -> LangResult<Expr> {
+    fn rev_polish_to_expr(&mut self, full_expr_file_pos: &mut FilePosition) -> LangResult<Expr> {
         let mut expr_stack = Vec::new();
         let outputs = std::mem::take(&mut self.outputs);
 
@@ -555,7 +555,15 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             ));
         }
 
-        Ok(expr_stack.remove(0))
+        if let Some(prev_file_pos) = prev_file_pos {
+            full_expr_file_pos.set_end(&prev_file_pos)?;
+        }
+
+        let mut result_expr = expr_stack.remove(0);
+        if let Some(file_pos) = result_expr.file_pos_mut() {
+            *file_pos = *full_expr_file_pos;
+        }
+        Ok(result_expr)
     }
 
     fn parse_expr_ident(&mut self, ident: &str, mut file_pos: FilePosition) -> LangResult<Expr> {

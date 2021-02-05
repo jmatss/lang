@@ -86,8 +86,6 @@ impl<'a, 'tctx> Visitor for GenericsReplacer<'a, 'tctx> {
             ty.replace_self(old_name, new_ty);
         }
 
-        // Now that the generics might have been replaced, try to solve the type
-        // again.
         let inferred_ty = match self.type_context.inferred_type(ty, ctx.block_id) {
             Ok(inferred_ty) => inferred_ty,
             Err(err) => {

@@ -10,7 +10,7 @@ use std::{
 
 type NodeId = usize;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Node {
     /// The unique ID of the current node.
     id: NodeId,
@@ -29,6 +29,7 @@ struct Node {
 ///
 /// At the end of the inference step, one can fetch the type that is to be used
 /// from the root node of the sets.
+#[derive(Clone)]
 pub struct SubstitutionSets {
     ty_to_id: HashMap<Ty, NodeId>,
     id_to_node: HashMap<NodeId, Node>,
@@ -172,7 +173,7 @@ impl SubstitutionSets {
         Ok(new_root_id)
     }
 
-    /// Returns the parent ID of the node with the ID `id`.
+    /// Returns the root ID of the node with the ID `id`.
     fn find_root(&self, id: NodeId) -> Option<NodeId> {
         if let Some(node) = self.id_to_node.get(&id) {
             if node.id == node.parent_id {
@@ -183,6 +184,10 @@ impl SubstitutionSets {
         } else {
             None
         }
+    }
+
+    pub fn iter_types(&self) -> Vec<Ty> {
+        self.ty_to_id.keys().cloned().collect::<Vec<_>>()
     }
 }
 

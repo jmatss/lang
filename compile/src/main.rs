@@ -52,6 +52,14 @@ fn main() -> LangResult<()> {
                 .takes_value(false)
                 .required(false),
         )
+        .arg(
+            Arg::with_name("ast")
+                .short("a")
+                .long("ast")
+                .help("Set to print AST.")
+                .takes_value(false)
+                .required(false),
+        )
         .get_matches();
 
     let mut input_file = matches.value_of("input").unwrap().to_owned();
@@ -66,6 +74,7 @@ fn main() -> LangResult<()> {
     let output_file = matches.value_of("output").unwrap_or(&default_output_file);
     let optimize = matches.is_present("optimize");
     let dump = matches.is_present("dump");
+    let ast = matches.is_present("ast");
     let module_name = input_file_name.split('.').next().unwrap();
 
     env_logger::init();
@@ -175,6 +184,8 @@ fn main() -> LangResult<()> {
     println!("Analyzing complete ({:?}).", analyze_timer.elapsed());
     if log_enabled!(Level::Debug) {
         debug!("\nAST after analyze:\n{:#?}", ast_root);
+    } else if ast {
+        println!("\nAST after analyze:\n{:#?}", ast_root);
     }
     analyze_context.debug_print();
 

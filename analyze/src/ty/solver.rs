@@ -2,12 +2,13 @@ use super::context::TypeContext;
 use common::{
     error::LangError,
     token::op::UnOperator,
-    token::{expr::FuncCall, op::UnOp},
+    token::{ast::AstToken, expr::FuncCall, op::UnOp},
     traverser::TraverseContext,
     ty::ty::Ty,
     visitor::Visitor,
     BlockId,
 };
+use log::debug;
 
 /// Iterates through all types in the token and replaces them with their correctly
 /// solved types.
@@ -24,11 +25,22 @@ impl<'a, 'tctx> TypeSolver<'a, 'tctx> {
         }
     }
 
+    /// Replaced the type `ty` with the preferred inferred type. If it was solvable
+    /// true if return, otherwise false is returned.
     fn subtitute_type(&mut self, ty: &mut Ty, block_id: BlockId) {
+        if let Err(err) = self.type_context.final_solve(ty, block_id) {
+            if !self.errors.contains(&err) {
+                self.errors.push(err);
+            }
+            return;
+        }
+
         let mut inferred_ty = match self.type_context.inferred_type(ty, block_id) {
             Ok(inferred_ty) => inferred_ty,
             Err(err) => {
-                self.errors.push(err);
+                if !self.errors.contains(&err) {
+                    self.errors.push(err);
+                }
                 return;
             }
         };
@@ -55,6 +67,16 @@ impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
         } else {
             Some(std::mem::take(&mut self.errors))
         }
+    }
+
+    fn visit_default_block(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        debug!("Running deep solve.");
+        if let Err(err) = self.type_context.deep_solve() {
+            if !self.errors.contains(&err) {
+                self.errors.push(err);
+            }
+        }
+        debug!("Done with deep solve.");
     }
 
     fn visit_type(&mut self, ty: &mut Ty, ctx: &TraverseContext) {

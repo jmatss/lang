@@ -75,6 +75,12 @@ fn main() -> i32
     assert_equals_f64(0.0, null_s.b, 0.01)
 
 
+    var null_ptr: {u64} = @null<{u64}>()
+    printf("\n@is_null(null_ptr): ")
+    if @is_null(null_ptr) { printf("true") } else { printf("false") }
+    assert(@is_null(null_ptr))
+
+
     if false
     {
         @unreachable()

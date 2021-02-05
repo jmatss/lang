@@ -17,18 +17,15 @@ impl Nullable
     }
 
     // Creates a new `Nullable` containing the value `value`.
-    // If `value` isn't set, the default value will be null.
-    fn init(value: T = @null<T>()) -> Nullable<T>
+    fn init(value: T) -> Nullable<T>
     {
-        // TODO: Make this compare work. Ex. implement "Comparable" trait on `T`.
-        if value == @null<T>()
-        {
-            return Nullable<T> { value, true }
-        }
-        else
-        {
-            return Nullable<T> { value, false }
-        }
+        return Nullable<T> { value, false }
+    }
+
+    // Creates a new `Nullable` containing a null of type `T`.
+    fn null() -> Nullable<T>
+    {
+        return Nullable<T> { @null<T>(), true }
     }
 }
 

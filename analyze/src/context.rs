@@ -1,6 +1,10 @@
 use crate::{block::BlockInfo, decl};
 use common::{
-    error::{LangError, LangErrorKind::AnalyzeError, LangResult},
+    error::{
+        LangError,
+        LangErrorKind::{self, AnalyzeError},
+        LangResult,
+    },
     file::{FileId, FileInfo, FilePosition},
     token::{
         block::{Adt, AdtKind, BuiltIn, Function, Trait},
@@ -372,6 +376,7 @@ impl AnalyzeContext {
         adt_name: &str,
         member_name: &str,
         id: BlockId,
+        file_pos: Option<FilePosition>,
     ) -> LangResult<Rc<RefCell<Var>>> {
         let adt = self.get_adt(adt_name, id)?;
         let adt = adt.borrow();
@@ -383,10 +388,14 @@ impl AnalyzeContext {
         {
             Ok(Rc::clone(member))
         } else {
-            Err(self.err(format!(
-                "Unable to find member with name \"{}\" in ADT \"{}\".",
-                &member_name, &adt_name
-            )))
+            Err(LangError::new(
+                format!(
+                    "Unable to find member with name \"{}\" in ADT \"{}\".",
+                    &member_name, &adt_name
+                ),
+                LangErrorKind::GeneralError,
+                file_pos,
+            ))
         }
     }
 
