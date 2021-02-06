@@ -45,6 +45,10 @@ pub enum TypeInfo {
     /// Contains information about a Generic type.
     Generic(FilePosition),
 
+    /// Used to inticate that this type comes from a built in. This means that
+    /// it doesn't have a real file pos since it doesn't actualy exist in the code.
+    BuiltIn,
+
     /// A "default" `TypeInfo` that doesn't contain any information at all.
     None,
 }
@@ -65,7 +69,7 @@ impl TypeInfo {
                 file_pos_opt.as_ref()
             }
 
-            TypeInfo::None => None,
+            TypeInfo::None | TypeInfo::BuiltIn => None,
         }
     }
 }

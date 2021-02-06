@@ -7,7 +7,8 @@ use common::{
         expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall},
         lit::Lit,
     },
-    ty::{inner_ty::InnerTy, ty::Ty},
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
+    type_info::TypeInfo,
 };
 use inkwell::{
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
@@ -350,6 +351,40 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 ),
                 Some(file_pos),
             )),
+
+            // Gets the name of the given variable as a null terminated C string.
+            "name" => {
+                if let Some(value) = built_in_call.arguments.first().map(|arg| &arg.value) {
+                    if let Expr::Var(var) = &value {
+                        let name = var.name.clone();
+
+                        let mut expr = Expr::Lit(
+                            Lit::String(name),
+                            Some(Ty::Pointer(
+                                Box::new(Ty::CompoundType(
+                                    InnerTy::U8,
+                                    Generics::empty(),
+                                    TypeInfo::None,
+                                )),
+                                TypeInfo::None,
+                            )),
+                            Some(file_pos),
+                        );
+
+                        self.compile_expr(&mut expr, ExprTy::RValue)
+                    } else {
+                        Err(self.err(
+                            format!(
+                                "Invalid type of argument given to @name(). Should be var: {:#?}",
+                                built_in_call
+                            ),
+                            Some(file_pos),
+                        ))
+                    }
+                } else {
+                    unreachable!("Argument count check in Analyze.");
+                }
+            }
 
             // Creates a null/empty value of the specified type.
             "null" => {

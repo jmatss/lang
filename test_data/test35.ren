@@ -81,6 +81,12 @@ fn main() -> i32
     assert(@is_null(null_ptr))
 
 
+    var var_name = 1
+    var var_name_content = @name(var_name)
+    printf("\nvar_name: %s", var_name_content)
+    assert(strcmp(@name(var_name), "var_name") == 0)
+
+
     if false
     {
         @unreachable()

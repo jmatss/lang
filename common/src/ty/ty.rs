@@ -373,7 +373,7 @@ impl Ty {
                 file_pos_opt.as_ref()
             }
 
-            TypeInfo::None => None,
+            TypeInfo::None | TypeInfo::BuiltIn => None,
         }
     }
 
@@ -392,7 +392,7 @@ impl Ty {
                 file_pos_opt.as_mut()
             }
 
-            TypeInfo::None => None,
+            TypeInfo::None | TypeInfo::BuiltIn => None,
         }
     }
 
