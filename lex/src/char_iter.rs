@@ -44,9 +44,9 @@ impl<'a> CharIter<'a> {
 
     /// Peeks and clones the next upcoming item in the iterator.
     pub(crate) fn peek(&mut self) -> Option<char> {
-        let mark = self.iter.mark();
+        let pos = self.iter.pos();
         if let Some(res) = self.next_char() {
-            self.iter.rewind_to_mark(mark);
+            self.iter.rewind_to_pos(pos);
             Some(res)
         } else {
             None
@@ -55,10 +55,10 @@ impl<'a> CharIter<'a> {
 
     /// Peeks and clones the two upcoming items in the iterator.
     pub(crate) fn peek_two(&mut self) -> Option<(char, Option<char>)> {
-        let mark = self.iter.mark();
+        let pos = self.iter.pos();
         if let Some(c1) = self.next_char() {
             let c2 = self.next_char();
-            self.iter.rewind_to_mark(mark);
+            self.iter.rewind_to_pos(pos);
             Some((c1, c2))
         } else {
             None
@@ -67,11 +67,11 @@ impl<'a> CharIter<'a> {
 
     /// Peeks and clones the three upcoming items in the iterator.
     pub(crate) fn peek_three(&mut self) -> Option<(char, Option<char>, Option<char>)> {
-        let mark = self.iter.mark();
+        let pos = self.iter.pos();
         if let Some(c1) = self.next_char() {
             let c2 = self.next_char();
             let c3 = self.next_char();
-            self.iter.rewind_to_mark(mark);
+            self.iter.rewind_to_pos(pos);
             Some((c1, c2, c3))
         } else {
             None
@@ -99,7 +99,7 @@ impl<'a> CharIter<'a> {
     /// Checks if the previos character is a valid char of byte length `n`.
     fn is_valid_char_of_size(&mut self, n: usize) -> bool {
         let mut is_valid = false;
-        let mark = self.iter.mark();
+        let pos = self.iter.pos();
 
         if self.iter.rewind_n(n) {
             if let Some(first_b) = self.iter.peek() {
@@ -107,7 +107,7 @@ impl<'a> CharIter<'a> {
             }
         }
 
-        self.iter.rewind_to_mark(mark);
+        self.iter.rewind_to_pos(pos);
         is_valid
     }
 }

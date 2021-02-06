@@ -30,7 +30,7 @@ impl<'a, I: Clone> TokenIter<'a, I> {
     /// Returns the current position. This can be used to rewind the iterator
     /// to the given position at a later stage.
     #[inline]
-    pub fn mark(&mut self) -> usize {
+    pub fn pos(&mut self) -> usize {
         self.pos
     }
 
@@ -47,11 +47,11 @@ impl<'a, I: Clone> TokenIter<'a, I> {
         }
     }
 
-    /// Rewinds back the iterator to the given `mark`.
+    /// Rewinds back the iterator to the given `pos`.
     #[inline]
-    pub fn rewind_to_mark(&mut self, mark: usize) -> bool {
-        if mark <= self.iter.len() {
-            self.pos = mark;
+    pub fn rewind_to_pos(&mut self, pos: usize) -> bool {
+        if pos <= self.iter.len() {
+            self.pos = pos;
             true
         } else {
             false

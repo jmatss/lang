@@ -96,7 +96,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     /// explanation of the algorithm.
     /// Return `true` if the expression was empty.
     fn shunting_yard(&mut self) -> LangResult<(bool, Option<FilePosition>)> {
-        let mark = self.iter.mark();
+        let pos = self.iter.pos();
 
         let mut file_pos = self.iter.peek_file_pos()?;
 
@@ -243,7 +243,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 // Array init. Example: "var x = [1, 2, 3]"
                 LexTokenKind::Sym(Sym::SquareBracketBegin) => {
                     // The `parse_arg_list` function expects the start symbol
-                    self.iter.rewind_to_mark(mark);
+                    self.iter.rewind_to_pos(pos);
 
                     let start_symbol = Sym::SquareBracketBegin;
                     let end_symbol = Sym::SquareBracketEnd;
@@ -567,7 +567,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     }
 
     fn parse_expr_ident(&mut self, ident: &str, mut file_pos: FilePosition) -> LangResult<Expr> {
-        let mut mark = self.iter.mark();
+        let mut pos = self.iter.pos();
 
         // If the identifier is followed by a "PointyBracketBegin" it can either
         // be a start of a generic list for structures/function, or it can also
@@ -582,7 +582,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     }
                     Ok((generics, None)) => generics,
                     Err(_) => {
-                        self.iter.rewind_to_mark(mark);
+                        self.iter.rewind_to_pos(pos);
                         None
                     }
                 }
@@ -593,7 +593,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             None
         };
 
-        mark = self.iter.mark();
+        pos = self.iter.pos();
 
         // TODO: The peek doesn't skip line break, so can't ex. do a struct
         //       init with a line break at the start.
@@ -664,7 +664,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             | Operator::BinaryOperator(BinOperator::Of) => {
                                 // Put back the old `lex_token` contaning this
                                 // identifier and parse as type.
-                                self.iter.rewind_to_mark(mark);
+                                self.iter.rewind_to_pos(pos);
 
                                 let ty = self.iter.parse_type(None)?;
                                 let ty_file_pos = ty.file_pos().cloned();

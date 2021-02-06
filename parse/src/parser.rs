@@ -733,8 +733,8 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     #[inline]
-    pub fn mark(&mut self) -> usize {
-        self.iter.mark()
+    pub fn pos(&mut self) -> usize {
+        self.iter.pos()
     }
 
     #[inline]
@@ -753,8 +753,8 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     #[inline]
-    pub fn rewind_to_mark(&mut self, mark: usize) {
-        self.iter.rewind_to_mark(mark);
+    pub fn rewind_to_pos(&mut self, mark: usize) {
+        self.iter.rewind_to_pos(mark);
     }
 
     #[inline]
