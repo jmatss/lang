@@ -54,14 +54,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// This will be done at the start of the code generation so that one doesn't
     /// have do declare prototypes manual in the source before the use of the
     /// function/method.
-    pub(super) fn compile_func_decl(&mut self, mut ast_token: &mut AstToken) -> LangResult<()> {
+    pub(super) fn compile_fn_decl(&mut self, mut ast_token: &mut AstToken) -> LangResult<()> {
         self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
         if let AstToken::Block(header, file_pos, id, ref mut body) = &mut ast_token {
             self.cur_block_id = *id;
 
             match header {
-                BlockHeader::Function(func) => {
+                BlockHeader::Fn(func) => {
                     let func = func.borrow();
                     let linkage =
                         if func.name == "main" || func.modifiers.contains(&Modifier::Public) {
@@ -72,11 +72,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             ();
                             Linkage::External
                         };
-                    self.compile_func_proto(&func, Some(file_pos.to_owned()), Some(linkage))?;
+                    self.compile_fn_proto(&func, Some(file_pos.to_owned()), Some(linkage))?;
                 }
                 BlockHeader::Implement(..) => {
                     for mut ast_token in body.iter_mut() {
-                        if let AstToken::Block(BlockHeader::Function(func), ..) = &mut ast_token {
+                        if let AstToken::Block(BlockHeader::Fn(func), ..) = &mut ast_token {
                             let func = func.borrow();
                             let linkage = if func.name == "main"
                                 || func.modifiers.contains(&Modifier::Public)
@@ -86,11 +86,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                                 // Private and Hidden.
                                 Linkage::Private
                             };
-                            self.compile_func_proto(
-                                &func,
-                                Some(file_pos.to_owned()),
-                                Some(linkage),
-                            )?;
+                            self.compile_fn_proto(&func, Some(file_pos.to_owned()), Some(linkage))?;
                         }
                     }
                 }
@@ -98,7 +94,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
 
             for token in body {
-                self.compile_func_decl(token)?
+                self.compile_fn_decl(token)?
             }
         }
 

@@ -4,8 +4,8 @@ use common::{
     file::FilePosition,
     token::{
         ast::AstToken,
-        block::{AdtKind, BlockHeader, Function},
-        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FuncCall, Var},
+        block::{AdtKind, BlockHeader, Fn},
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, Var},
         lit::Lit,
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
         stmt::Modifier,
@@ -39,7 +39,7 @@ pub struct TypeInferencer<'a, 'b> {
     /// Keep a copy of the current function which body is being traversed.
     /// This will let the statements/exprs etc. inside the function know
     /// about the types of the parameters and the return type.
-    cur_func: Option<Rc<RefCell<Function>>>,
+    cur_func: Option<Rc<RefCell<Fn>>>,
 
     /// Contains the current match expression. Its type needs to be the same
     /// as the type in the match cases.
@@ -206,14 +206,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// tie them together with a constraint. This is done since a Generic can
     /// have multiple differet types depending on the context, which isn't solvable
     /// through the regular type inference logic.
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
-        let mut func_ret_ty = if func_call.is_method {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
+        let mut fn_ret_ty = if fn_call.is_method {
             // Get the "owning" structure type of this method. If it isn't set
             // explicitly, it should be set as a expression in the first argument
             // with the name "this".
-            let mut adt_ty = if let Some(adt_ty) = &func_call.method_adt {
+            let mut adt_ty = if let Some(adt_ty) = &fn_call.method_adt {
                 adt_ty.clone()
-            } else if let Some(first_arg) = func_call.arguments.first() {
+            } else if let Some(first_arg) = fn_call.arguments.first() {
                 if first_arg.name.as_ref().map_or(false, |name| name == "this") {
                     match first_arg.value.get_expr_type() {
                         Ok(ty) => ty,
@@ -225,13 +225,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 } else {
                     panic!(
                         "First arg of method with no method_adt set not \"this\": {:#?}",
-                        func_call
+                        fn_call
                     );
                 }
             } else {
                 panic!(
                     "No params for method with no method_adt set: {:#?}",
-                    func_call
+                    fn_call
                 );
             };
 
@@ -267,7 +267,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     if generic_names.len() != generic_types.len_types() {
                         let err = self.type_context.analyze_context.err(format!(
                                     "Wrong amount of generics for static call. Func call: {:#?}, generic_names: {:#?}",
-                                    func_call, generic_names
+                                    fn_call, generic_names
                                 ));
                         self.errors.push(err);
                         return;
@@ -295,11 +295,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // Set the `method_adt` for the function call now that the `method_adt`
             // might have been updated. This call might have no effect if no
             // modifications have been done in the logic above.
-            func_call.method_adt = Some(adt_ty.clone());
+            fn_call.method_adt = Some(adt_ty.clone());
 
             // Insert constraints between the function call argument type and
             // the method parameter types that will be figured out later.
-            for (idx, arg) in func_call.arguments.iter().enumerate() {
+            for (idx, arg) in fn_call.arguments.iter().enumerate() {
                 // If the argument is a named argument, give the argument name
                 // to the new "UnknownMethodArgument" to try and figure out the
                 // position of the argument through it. Otherwise use the index.
@@ -311,7 +311,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
                 let arg_ty = Ty::UnknownMethodArgument(
                     Box::new(adt_ty.clone()),
-                    func_call.name.clone(),
+                    fn_call.name.clone(),
                     position,
                     self.new_unknown_ident(""),
                     TypeInfo::DefaultOpt(arg.value.file_pos().cloned()),
@@ -337,11 +337,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             // Insert constraints between the function call generic type and
             // the method generic types that will be figured out later.
-            if let Some(generics) = &func_call.generics {
+            if let Some(generics) = &fn_call.generics {
                 for (idx, ty) in generics.iter_types().enumerate() {
                     let unknown_ty = Ty::UnknownMethodGeneric(
                         Box::new(adt_ty.clone()),
-                        func_call.name.clone(),
+                        fn_call.name.clone(),
                         idx,
                         self.new_unknown_ident(""),
                         TypeInfo::DefaultOpt(ty.file_pos().cloned()),
@@ -354,15 +354,15 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // The expected return type of the function call.
             Ty::UnknownAdtMethod(
                 Box::new(adt_ty),
-                func_call.name.clone(),
+                fn_call.name.clone(),
                 self.new_unknown_ident(""),
-                TypeInfo::FuncCall(func_call.file_pos.unwrap()),
+                TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
             )
         } else {
             let func = match self
                 .type_context
                 .analyze_context
-                .get_func(&func_call.name, ctx.block_id)
+                .get_func(&fn_call.name, ctx.block_id)
             {
                 Ok(func) => func,
                 Err(err) => {
@@ -379,13 +379,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // in `type_context` since at this point there is no way to know
             // the type of the struct and indirectly the method.
             if let Some(params) = &func.borrow().parameters {
-                for (idx, arg) in func_call.arguments.iter().enumerate() {
+                for (idx, arg) in fn_call.arguments.iter().enumerate() {
                     // If the argument is a named argument, get the index for the
                     // named parameter instead of using the index of its position
                     // in the function call.
                     let inner_idx = if let Some(arg_name) = &arg.name {
-                        match self.type_context.analyze_context.get_func_param_idx(
-                            &func_call.name,
+                        match self.type_context.analyze_context.get_fn_param_idx(
+                            &fn_call.name,
                             &arg_name,
                             ctx.block_id,
                         ) {
@@ -436,13 +436,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             let func = func.borrow();
             if let Some(mut ty) = func.ret_type.clone() {
-                *ty.file_pos_mut().unwrap() = func_call.file_pos.unwrap();
+                *ty.file_pos_mut().unwrap() = fn_call.file_pos.unwrap();
                 ty
             } else {
                 Ty::CompoundType(
                     InnerTy::Void,
                     Generics::empty(),
-                    TypeInfo::FuncCall(func_call.file_pos.unwrap()),
+                    TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
                 )
             }
         };
@@ -451,7 +451,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         // "Generic"s doesn't leak out to outside the function. Instead a
         // unique instance of a generic should be used instead. This will allow
         // for multiple different types to be mapped to the same single "Generic".
-        if let Some(generics) = func_ret_ty.get_generics() {
+        if let Some(generics) = fn_ret_ty.get_generics() {
             let mut generics_impl = Generics::new();
 
             for generic in &generics {
@@ -469,13 +469,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             }
 
-            func_ret_ty.replace_generics_impl(&generics_impl)
+            fn_ret_ty.replace_generics_impl(&generics_impl)
         }
 
         // TODO: Is it correct to directly set the return type for the function
         //       call? Should be inserted as a constraint instead? Will this
         //       affect generics?
-        func_call.ret_type = Some(func_ret_ty);
+        fn_call.ret_type = Some(fn_ret_ty);
     }
 
     fn visit_built_in_call(&mut self, built_in_call: &mut BuiltInCall, _ctx: &TraverseContext) {
@@ -1141,8 +1141,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_func(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Function(func), ..) = &mut ast_token {
+    fn visit_fn(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Fn(func), ..) = &mut ast_token {
             let func_ref = func.borrow_mut();
 
             // If this is a method and the first argument is named "this", set

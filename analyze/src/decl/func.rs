@@ -4,7 +4,7 @@ use common::{
     token::expr::Var,
     token::{
         ast::AstToken,
-        block::{AdtKind, BlockHeader, Function},
+        block::{AdtKind, BlockHeader, Fn},
         stmt::Modifier,
         stmt::Stmt,
     },
@@ -20,12 +20,12 @@ use std::{cell::RefCell, rc::Rc};
 /// Gathers information about all function/method declarations found in the AST
 /// and inserts them into the `analyze_context`. This includes external function
 /// declarations, functions and methods (in implement block).
-pub struct DeclFuncAnalyzer<'a> {
+pub struct DeclFnAnalyzer<'a> {
     analyze_context: &'a RefCell<AnalyzeContext>,
     errors: Vec<LangError>,
 }
 
-impl<'a> DeclFuncAnalyzer<'a> {
+impl<'a> DeclFnAnalyzer<'a> {
     pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
         Self {
             analyze_context,
@@ -33,10 +33,10 @@ impl<'a> DeclFuncAnalyzer<'a> {
         }
     }
 
-    fn analyze_func_header(&mut self, func: &mut Rc<RefCell<Function>>, func_id: BlockId) {
+    fn analyze_fn_header(&mut self, func: &mut Rc<RefCell<Fn>>, fn_id: BlockId) {
         // The function will be added in the scope of its parent, so fetch the
         // block id for the parent.
-        let parent_id = match self.analyze_context.borrow().get_parent_id(func_id) {
+        let parent_id = match self.analyze_context.borrow().get_parent_id(fn_id) {
             Ok(parent_id) => parent_id,
             Err(err) => {
                 self.errors.push(err);
@@ -124,13 +124,13 @@ impl<'a> DeclFuncAnalyzer<'a> {
         let key = (func.borrow().name.clone(), parent_id);
         self.analyze_context
             .borrow_mut()
-            .functions
+            .fns
             .insert(key, Rc::clone(func));
 
         // Add the parameters as variables in the function scope decl lookup.
         if let Some(params) = &func.borrow().parameters {
             for param in params {
-                let param_key = (param.borrow().name.clone(), func_id);
+                let param_key = (param.borrow().name.clone(), fn_id);
                 self.analyze_context
                     .borrow_mut()
                     .variables
@@ -139,12 +139,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
         }
     }
 
-    fn analyze_method_header(
-        &mut self,
-        ident: &str,
-        func: &mut Rc<RefCell<Function>>,
-        func_id: BlockId,
-    ) {
+    fn analyze_method_header(&mut self, ident: &str, func: &mut Rc<RefCell<Fn>>, func_id: BlockId) {
         // The given `ident` might be a ADT or Trait. Therefore the logic below is
         // duplicated, first checking Tratis and then checking the same for ADTs.
         let (decl_id, inner_ty) = if self.analyze_context.borrow().is_trait(ident, func_id) {
@@ -256,7 +251,7 @@ impl<'a> DeclFuncAnalyzer<'a> {
     }
 }
 
-impl<'a> Visitor for DeclFuncAnalyzer<'a> {
+impl<'a> Visitor for DeclFnAnalyzer<'a> {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -307,7 +302,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
         for mut body_token in body {
             if body_token.is_skippable() {
                 // skip
-            } else if let AstToken::Block(BlockHeader::Function(func), ..) = &mut body_token {
+            } else if let AstToken::Block(BlockHeader::Fn(func), ..) = &mut body_token {
                 func.borrow_mut().method_adt = Some(ty.clone());
             } else {
                 let err = analyze_context.err(format!(
@@ -319,8 +314,8 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
         }
     }
 
-    fn visit_func(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Function(func), _, func_id, ..) = &mut ast_token {
+    fn visit_fn(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Fn(func), _, func_id, ..) = &mut ast_token {
             let structure_ty = if let Some(structure_ty) = func.borrow().method_adt.clone() {
                 Some(structure_ty)
             } else {
@@ -352,7 +347,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
                     unreachable!("Method method_structure not CompoundType: {:#?}", func);
                 }
             } else {
-                self.analyze_func_header(func, *func_id);
+                self.analyze_fn_header(func, *func_id);
             }
         }
     }
@@ -366,7 +361,7 @@ impl<'a> Visitor for DeclFuncAnalyzer<'a> {
             //       parameters & return type.
             // External declarations should always be in the default block.
             let key = (func.borrow().name.clone(), BlockInfo::DEFAULT_BLOCK_ID);
-            analyze_context.functions.insert(key, Rc::clone(func));
+            analyze_context.fns.insert(key, Rc::clone(func));
         }
     }
 }

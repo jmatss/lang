@@ -5,7 +5,7 @@ use common::{
     file::FilePosition,
     token::{
         ast::AstToken,
-        block::{Adt, BlockHeader, Function, Trait},
+        block::{Adt, BlockHeader, Fn, Trait},
         expr::Expr,
         lit::Lit,
         stmt::{Modifier, Path, Stmt},
@@ -608,7 +608,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         if let Some(lex_token) = self.iter.next_skip_space_line() {
             let func = match lex_token.kind {
                 LexTokenKind::Kw(Kw::Function) => {
-                    self.parse_func_proto(modifiers, lex_token.file_pos)?
+                    self.parse_fn_proto(modifiers, lex_token.file_pos)?
                 }
                 _ => {
                     return Err(self.iter.err(
@@ -703,19 +703,19 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         modifiers: Vec<Modifier>,
         file_pos: FilePosition,
     ) -> LangResult<AstToken> {
-        let func = self.parse_func_proto(modifiers, file_pos)?;
-        let func_header = BlockHeader::Function(Rc::new(RefCell::new(func)));
+        let func = self.parse_fn_proto(modifiers, file_pos)?;
+        let func_header = BlockHeader::Fn(Rc::new(RefCell::new(func)));
         self.iter.next_block(func_header)
     }
 
     /// Parses a function prototype/header.
     ///   "[ <modifier>... ] function [ <modifier>... ] <ident> [ < <generic>, ... > ] ( [<ident>: <type>] [= <default value>], ... ) [ "->" <type> ]"
     /// The "function" keyword has already been consumed when this function is called.
-    fn parse_func_proto(
+    fn parse_fn_proto(
         &mut self,
         mut modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
-    ) -> LangResult<Function> {
+    ) -> LangResult<Fn> {
         // TODO: Handle FilePosition.
 
         static THIS: &str = "this";
@@ -857,7 +857,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             .map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
         let implements = self.parse_where(generics.as_ref())?;
 
-        Ok(Function::new(
+        Ok(Fn::new(
             ident,
             generic_names,
             implements,
@@ -1168,7 +1168,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 }
 
                 LexTokenKind::Kw(Kw::Function) => {
-                    let method = self.parse_func_proto(modifiers, lex_token.file_pos)?;
+                    let method = self.parse_fn_proto(modifiers, lex_token.file_pos)?;
                     methods.push(method);
                     modifiers = Vec::default();
                 }
@@ -1254,7 +1254,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // are functions.
         if let AstToken::Block(BlockHeader::Implement(..), file_pos, _, body) = &impl_token {
             for ast_token in body {
-                if let AstToken::Block(BlockHeader::Function(_), ..) = ast_token {
+                if let AstToken::Block(BlockHeader::Fn(_), ..) = ast_token {
                     // Do nothing, the token is of correct type.
                 } else if ast_token.is_skippable() {
                 } else {

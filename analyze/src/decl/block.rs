@@ -29,7 +29,7 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
     /// a new scope where every block created inside them only has access to
     /// this block + globals.
     fn is_root(&self, header: &BlockHeader) -> bool {
-        matches!(header, BlockHeader::Function(_)
+        matches!(header, BlockHeader::Fn(_)
             | BlockHeader::Struct(_)
             | BlockHeader::Enum(_)
             | BlockHeader::Trait(_)
@@ -92,7 +92,7 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
                 match child_token {
                     AstToken::Block(BlockHeader::If, _, child_id, _)
                     | AstToken::Block(BlockHeader::IfCase(_), _, child_id, _)
-                    | AstToken::Block(BlockHeader::Function(_), _, child_id, _)
+                    | AstToken::Block(BlockHeader::Fn(_), _, child_id, _)
                     | AstToken::Block(BlockHeader::Match(_), _, child_id, _)
                     | AstToken::Block(BlockHeader::MatchCase(_), _, child_id, _)
                     | AstToken::Block(BlockHeader::For(..), _, child_id, _)

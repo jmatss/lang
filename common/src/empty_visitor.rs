@@ -2,7 +2,7 @@ use crate::{
     error::LangError,
     token::{
         ast::AstToken,
-        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FuncCall, Var},
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, Var},
         op::{BinOp, UnOp},
         stmt::Stmt,
     },
@@ -46,7 +46,7 @@ impl Visitor for DummyVisitor {
         unreachable!()
     }
 
-    fn visit_func(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_fn(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         unreachable!()
     }
 
@@ -166,7 +166,7 @@ impl Visitor for DummyVisitor {
         unreachable!()
     }
 
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
         unreachable!()
     }
 

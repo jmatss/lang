@@ -18,7 +18,7 @@ pub enum BlockHeader {
     // Default == None, i.e. if there are no current block. Ex. at the start of a file.
     Default,
 
-    Function(Rc<RefCell<Function>>),
+    Fn(Rc<RefCell<Fn>>),
     Struct(Rc<RefCell<Adt>>),
     Enum(Rc<RefCell<Adt>>),
     Union(Rc<RefCell<Adt>>),
@@ -95,7 +95,7 @@ pub enum BlockHeader {
     While(Option<Expr>),
 
     // Function for testing, allows strings as test names with spaces etc.
-    Test(Function),
+    Test(Fn),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,7 +111,7 @@ pub struct Struct {
     pub modifiers: Vec<Modifier>,
 
     /// The key is the name of the method.
-    pub methods: Option<HashMap<String, Rc<RefCell<Function>>>>,
+    pub methods: Option<HashMap<String, Rc<RefCell<Fn>>>>,
 }
 
 /// Represents a Algebraic Data Type (ADT). Struct, enum or union.
@@ -122,7 +122,7 @@ pub struct Adt {
     pub modifiers: Vec<Modifier>,
     pub members: Vec<Rc<RefCell<Var>>>,
     /// The key is the name of the method.
-    pub methods: HashMap<String, Rc<RefCell<Function>>>,
+    pub methods: HashMap<String, Rc<RefCell<Fn>>>,
     pub kind: AdtKind,
 
     /* Values set for Struct and Union */
@@ -243,7 +243,7 @@ pub enum TraitCompareError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Function {
+pub struct Fn {
     pub name: String,
     pub generic_names: Option<Vec<String>>,
 
@@ -266,7 +266,7 @@ pub struct Function {
     pub method_adt: Option<Ty>,
 }
 
-impl Function {
+impl Fn {
     pub fn new(
         name: String,
         generic_names: Option<Vec<String>>,
@@ -276,7 +276,7 @@ impl Function {
         modifiers: Vec<Modifier>,
         is_var_arg: bool,
     ) -> Self {
-        Function {
+        Fn {
             name,
             generic_names,
             generic_impls: None,
@@ -291,7 +291,7 @@ impl Function {
 
     /// Checks if the name, parameter count, parameters types, generic count,
     /// generic names, implements and return types are the same.
-    pub fn trait_cmp(&self, trait_func: &Function) -> Result<(), Vec<TraitCompareError>> {
+    pub fn trait_cmp(&self, trait_func: &Fn) -> Result<(), Vec<TraitCompareError>> {
         let mut errors = Vec::default();
 
         // Since the `this`/`self` parameter won't be set for the trait function,
@@ -526,7 +526,7 @@ impl BuiltIn {
 pub struct Trait {
     pub name: String,
     pub generics: Option<Vec<String>>,
-    pub methods: Vec<Function>,
+    pub methods: Vec<Fn>,
     pub modifiers: Vec<Modifier>,
 }
 
@@ -534,7 +534,7 @@ impl Trait {
     pub fn new(
         name: String,
         generics: Option<Vec<String>>,
-        methods: Vec<Function>,
+        methods: Vec<Fn>,
         modifiers: Vec<Modifier>,
     ) -> Self {
         Trait {

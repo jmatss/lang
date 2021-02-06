@@ -52,7 +52,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
         if let Expr::Op(Op::BinOp(bin_op)) = expr {
             let analyze_context = self.analyze_context.borrow();
 
-            if let Some(method_call) = bin_op.rhs.eval_to_func_call() {
+            if let Some(method_call) = bin_op.rhs.eval_to_fn_call() {
                 match bin_op.operator {
                     // Instance structure access/method call.
                     BinOperator::Dot => {
@@ -62,7 +62,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
                         method_call.arguments.insert(0, arg);
                         method_call.is_method = true;
 
-                        *expr = Expr::FuncCall(method_call.clone());
+                        *expr = Expr::FnCall(method_call.clone());
                     }
 
                     // Static structure access/method call. The lhs should be a
@@ -73,7 +73,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
                             method_call.is_method = true;
                             method_call.method_adt = Some(lhs_ty.clone());
 
-                            *expr = Expr::FuncCall(method_call.clone());
+                            *expr = Expr::FnCall(method_call.clone());
                         }
 
                         _ => {

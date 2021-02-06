@@ -1,18 +1,16 @@
 use crate::AnalyzeContext;
-use common::{
-    error::LangError, token::expr::FuncCall, traverser::TraverseContext, visitor::Visitor,
-};
+use common::{error::LangError, token::expr::FnCall, traverser::TraverseContext, visitor::Visitor};
 
 /// Checks so that all function calls calling functions with generics actually
 /// specifies generics at the call site. This is needed because infering the
 /// generics currently aren't supported for generics on functions, only on
 /// generics for structs. This will need to be changed in the future.
-pub struct FuncGenericsCheck<'a> {
+pub struct FnGenericsCheck<'a> {
     analyze_context: &'a AnalyzeContext,
     errors: Vec<LangError>,
 }
 
-impl<'a> FuncGenericsCheck<'a> {
+impl<'a> FnGenericsCheck<'a> {
     pub fn new(analyze_context: &'a AnalyzeContext) -> Self {
         Self {
             analyze_context,
@@ -21,7 +19,7 @@ impl<'a> FuncGenericsCheck<'a> {
     }
 }
 
-impl<'a> Visitor for FuncGenericsCheck<'a> {
+impl<'a> Visitor for FnGenericsCheck<'a> {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -32,8 +30,8 @@ impl<'a> Visitor for FuncGenericsCheck<'a> {
 
     /// If this is a method call, makes sure that the amount of generics specified
     /// at the method call is the same amount as declared on the actual method.
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
-        if let Some(structure_ty) = &func_call.method_adt {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
+        if let Some(structure_ty) = &fn_call.method_adt {
             if structure_ty.is_generic() {
                 return;
             }
@@ -42,7 +40,7 @@ impl<'a> Visitor for FuncGenericsCheck<'a> {
 
             let method = match self.analyze_context.get_adt_method(
                 &structure_name,
-                &func_call.name,
+                &fn_call.name,
                 ctx.block_id,
             ) {
                 Ok(method) => method,
@@ -58,14 +56,14 @@ impl<'a> Visitor for FuncGenericsCheck<'a> {
                     return;
                 }
 
-                if let Some(func_call_generics) = &func_call.generics {
-                    if generic_impls.len() != func_call_generics.len_types() {
+                if let Some(fn_call_generics) = &fn_call.generics {
+                    if generic_impls.len() != fn_call_generics.len_types() {
                         let err = self.analyze_context.err(format!(
                             "Func decl and func call generic count differ. \
-                            Func decl #: {}, func call #: {}. Func_call: {:#?}",
+                            Func decl #: {}, func call #: {}. Fn_call: {:#?}",
                             generic_impls.len(),
-                            func_call_generics.len_types(),
-                            func_call
+                            fn_call_generics.len_types(),
+                            fn_call
                         ));
                         self.errors.push(err);
                         return;
@@ -74,7 +72,7 @@ impl<'a> Visitor for FuncGenericsCheck<'a> {
                     // TODO: Better error message.
                     let err = self.analyze_context.err(format!(
                         "Func decl contains generics, generics not specified for func call: {:#?}",
-                        func_call
+                        fn_call
                     ));
                     self.errors.push(err);
                     return;

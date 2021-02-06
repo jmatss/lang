@@ -156,7 +156,7 @@ impl<'a> AstTraverser<'a> {
                         v.visit_default_block(ast_token, &self.traverse_context);
                     }
                 }
-                BlockHeader::Function(func) => {
+                BlockHeader::Fn(func) => {
                     if self.traverse_context.deep_copy {
                         let mut new_func = func.borrow().clone();
 
@@ -205,7 +205,7 @@ impl<'a> AstTraverser<'a> {
 
                     debug!("Visiting func");
                     for v in self.visitors.iter_mut() {
-                        v.visit_func(ast_token, &self.traverse_context);
+                        v.visit_fn(ast_token, &self.traverse_context);
                     }
                 }
                 BlockHeader::Struct(struct_) => {
@@ -459,24 +459,24 @@ impl<'a> AstTraverser<'a> {
                     v.visit_var(var, &self.traverse_context)
                 }
             }
-            Expr::FuncCall(func_call) => {
-                if let Some(gen_tys) = &mut func_call.generics {
+            Expr::FnCall(fn_call) => {
+                if let Some(gen_tys) = &mut fn_call.generics {
                     for gen_ty in gen_tys.iter_types_mut() {
                         self.traverse_type(gen_ty)
                     }
                 }
 
-                if let Some(ty) = &mut func_call.method_adt {
+                if let Some(ty) = &mut fn_call.method_adt {
                     self.traverse_type(ty);
                 }
 
-                for arg in &mut func_call.arguments {
+                for arg in &mut fn_call.arguments {
                     self.traverse_expr(&mut arg.value);
                 }
 
-                debug!("Visiting func call");
+                debug!("Visiting fn call");
                 for v in self.visitors.iter_mut() {
-                    v.visit_func_call(func_call, &self.traverse_context)
+                    v.visit_fn_call(fn_call, &self.traverse_context)
                 }
             }
             Expr::BuiltInCall(built_in_call) => {

@@ -96,7 +96,7 @@ pub fn generate<'a, 'ctx>(
     // that all functions/methods. This makes it so that one doesn't have to
     // specifiy type/func prototypes above their use in the source code.
     code_gen.compile_type_decl(ast_root)?;
-    code_gen.compile_func_decl(ast_root)?;
+    code_gen.compile_fn_decl(ast_root)?;
     code_gen.compile(ast_root)?;
 
     // TODO: Temporary solution, loop through all merge blocks and look for all

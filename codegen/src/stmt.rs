@@ -52,7 +52,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // TODO: Add other external declares other than func (var, struct etc.)
             Stmt::ExternalDecl(func, file_pos) => {
                 let linkage = Linkage::External;
-                self.compile_func_proto(&func.borrow(), file_pos.to_owned(), Some(linkage))?;
+                self.compile_fn_proto(&func.borrow(), file_pos.to_owned(), Some(linkage))?;
                 Ok(())
             }
             Stmt::Assignment(assign_op, lhs, rhs, file_pos) => {

@@ -2,7 +2,7 @@ use super::substitution_sets::SubstitutionSets;
 use crate::context::AnalyzeContext;
 use common::{
     error::{LangError, LangErrorKind, LangResult},
-    token::{block::Function, expr::Expr},
+    token::{block::Fn, expr::Expr},
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     type_info::TypeInfo,
     BlockId,
@@ -606,7 +606,7 @@ impl<'a> TypeContext<'a> {
     /// This is needed to ensure that no "raw" `Ty::Generic`s are leaked outside
     /// the function body itself. I.e. this can be used to replace arguments and
     /// return values of function calls.
-    pub fn new_method_generics(method: &Function, type_info: &TypeInfo) -> Option<Generics> {
+    pub fn new_method_generics(method: &Fn, type_info: &TypeInfo) -> Option<Generics> {
         // TODO: This should be done somewhere else. This feels like a really
         //       random place to do it.
         if let Some(method_generic_names) = &method.generic_names {

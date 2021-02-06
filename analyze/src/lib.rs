@@ -16,20 +16,20 @@ use common::{
 };
 use context::AnalyzeContext;
 use decl::{
-    block::BlockAnalyzer, func::DeclFuncAnalyzer, ty::DeclTypeAnalyzer, var::DeclVarAnalyzer,
+    block::BlockAnalyzer, func::DeclFnAnalyzer, ty::DeclTypeAnalyzer, var::DeclVarAnalyzer,
 };
 use log::debug;
 use mid::{defer::DeferAnalyzer, generics::GenericsAnalyzer};
 use post::{
     call_args::CallArgs, clean_up::clean_up, exhaust::ExhaustAnalyzer,
-    func_generics_check::FuncGenericsCheck, traits_func::TraitsFuncAnalyzer,
+    fn_generics_check::FnGenericsCheck, traits_fn::TraitsFnAnalyzer,
     traits_generic::TraitsGenericAnalyzer, union_init_arg::UnionInitArg,
 };
 use pre::{indexing::IndexingAnalyzer, method::MethodAnalyzer};
 use std::{cell::RefCell, collections::HashMap};
 use ty::{
     context::TypeContext, generic_adt_creator::GenericAdtCreator,
-    generic_collector::GenericCollector, generic_func_creator::GenericFuncCreator,
+    generic_collector::GenericCollector, generic_fn_creator::GenericFnCreator,
     inferencer::TypeInferencer, solver::TypeSolver,
 };
 
@@ -60,7 +60,7 @@ use ty::{
 /// so that the "type analyzing" can know that it is a method vs function.
 /// The "MethodAnalyzer" should be ran after "decl analyzers" since it will
 /// need struct/func information to figure out types for method calls.
-/// "decl_func_analyzer"/"decl_type_analyzer"/"type..." needs to be ran before
+/// "decl_fn_analyzer"/"decl_type_analyzer"/"type..." needs to be ran before
 /// the "call_args" since it needs to access structs, functions and methods.
 pub fn analyze(
     ast_root: &mut AstToken,
@@ -91,9 +91,9 @@ pub fn analyze(
 
     debug!("Running DeclVarAnalyzer, running DeclFuncAnalyzer");
     let mut decl_var_analyzer = DeclVarAnalyzer::new(&analyze_context);
-    let mut decl_func_analyzer = DeclFuncAnalyzer::new(&analyze_context);
+    let mut decl_fn_analyzer = DeclFnAnalyzer::new(&analyze_context);
     AstTraverser::new()
-        .add_visitor(&mut decl_func_analyzer)
+        .add_visitor(&mut decl_fn_analyzer)
         .add_visitor(&mut decl_var_analyzer)
         .traverse_token(ast_root)
         .take_errors()?;
@@ -136,17 +136,17 @@ pub fn analyze(
         .traverse_token(ast_root)
         .take_errors()?;
 
-    debug!("Running FuncGenericsCheck");
-    let mut func_generics_check = FuncGenericsCheck::new(&type_context.analyze_context);
+    debug!("Running FnGenericsCheck");
+    let mut fn_generics_check = FnGenericsCheck::new(&type_context.analyze_context);
     AstTraverser::new()
-        .add_visitor(&mut func_generics_check)
+        .add_visitor(&mut fn_generics_check)
         .traverse_token(ast_root)
         .take_errors()?;
 
-    debug!("Running TraitsFuncAnalyzer");
-    let mut traits_func_analyze = TraitsFuncAnalyzer::new(&type_context.analyze_context);
+    debug!("Running TraitsFnAnalyzer");
+    let mut traits_fn_analyze = TraitsFnAnalyzer::new(&type_context.analyze_context);
     AstTraverser::new()
-        .add_visitor(&mut traits_func_analyze)
+        .add_visitor(&mut traits_fn_analyze)
         .traverse_token(ast_root)
         .take_errors()?;
 
@@ -160,10 +160,10 @@ pub fn analyze(
     let generic_methods = generic_collector.generic_methods;
     let generic_structs = generic_collector.generic_adts;
 
-    debug!("Running GenericFuncCreator");
-    let mut generic_func_creator = GenericFuncCreator::new(&mut type_context, generic_methods);
+    debug!("Running GenericFnCreator");
+    let mut generic_fn_creator = GenericFnCreator::new(&mut type_context, generic_methods);
     AstTraverser::new()
-        .add_visitor(&mut generic_func_creator)
+        .add_visitor(&mut generic_fn_creator)
         .traverse_token(ast_root)
         .take_errors()?;
 

@@ -3,7 +3,7 @@ use common::{
     error::LangError,
     error::LangResult,
     token::expr::Argument,
-    token::expr::FuncCall,
+    token::expr::FnCall,
     token::{
         block::AdtKind,
         expr::{AdtInit, Var},
@@ -128,7 +128,7 @@ impl<'a> CallArgs<'a> {
 
     fn default_args(
         &self,
-        func_call: &mut FuncCall,
+        fn_call: &mut FnCall,
         params: &[Rc<RefCell<Var>>],
         is_variadic: bool,
     ) -> LangResult<()> {
@@ -137,19 +137,19 @@ impl<'a> CallArgs<'a> {
         // are supposed to be filled in with the default parameters. If there are
         // no default value set, report that the function call contains to few
         // arguments.
-        if !is_variadic && func_call.arguments.len() < params.len() {
-            let start_idx = func_call.arguments.len();
+        if !is_variadic && fn_call.arguments.len() < params.len() {
+            let start_idx = fn_call.arguments.len();
             for param in params[start_idx..].iter() {
                 let param = param.borrow();
 
                 if let Some(default_value) = &param.value {
                     let default_arg =
                         Argument::new(Some(param.name.clone()), None, *default_value.clone());
-                    func_call.arguments.push(default_arg);
+                    fn_call.arguments.push(default_arg);
                 } else {
                     return Err(self.analyze_context.err(format!(
                         "Function call to \"{}\" missing argument for parameter \"{}\".",
-                        &func_call.name, &param.name
+                        &fn_call.name, &param.name
                     )));
                 }
             }
@@ -168,11 +168,11 @@ impl<'a> Visitor for CallArgs<'a> {
         }
     }
 
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
         // If this is a function contained in a structure (method), one needs to
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
-        let func_res = if let Some(ty) = &func_call.method_adt {
+        let func_res = if let Some(ty) = &fn_call.method_adt {
             let full_struct_name = match ty {
                 Ty::CompoundType(inner_ty, generics, ..) => match inner_ty {
                     InnerTy::Struct(ident)
@@ -182,7 +182,7 @@ impl<'a> Visitor for CallArgs<'a> {
                     _ => {
                         let err = self.analyze_context.err(format!(
                             "Bad inner type for func call method_structure: {:#?}",
-                            func_call
+                            fn_call
                         ));
                         self.errors.push(err);
                         return;
@@ -191,7 +191,7 @@ impl<'a> Visitor for CallArgs<'a> {
                 _ => {
                     let err = self.analyze_context.err(format!(
                         "method structure not valid type for func call: {:#?}",
-                        func_call
+                        fn_call
                     ));
                     self.errors.push(err);
                     return;
@@ -200,12 +200,12 @@ impl<'a> Visitor for CallArgs<'a> {
 
             self.analyze_context.get_adt_method(
                 &full_struct_name,
-                &func_call.half_name(),
+                &fn_call.half_name(),
                 ctx.block_id,
             )
         } else {
             self.analyze_context
-                .get_func(&func_call.half_name(), ctx.block_id)
+                .get_func(&fn_call.half_name(), ctx.block_id)
         };
 
         let func = match func_res {
@@ -230,11 +230,11 @@ impl<'a> Visitor for CallArgs<'a> {
 
         // Reorder the arguments of the function call according to the parameter
         // names used for the arguments.
-        self.reorder(&mut func_call.arguments, params);
+        self.reorder(&mut fn_call.arguments, params);
 
         // Assign any default value for arguments that are missing a value in
         // the function call.
-        if let Err(err) = self.default_args(func_call, params, func.is_var_arg) {
+        if let Err(err) = self.default_args(fn_call, params, func.is_var_arg) {
             self.errors.push(err);
             return;
         }

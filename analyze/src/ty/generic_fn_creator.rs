@@ -12,7 +12,7 @@ use common::{
 use log::debug;
 use std::{collections::HashMap, rc::Rc};
 
-pub struct GenericFuncCreator<'a, 'tctx> {
+pub struct GenericFnCreator<'a, 'tctx> {
     /// Needed to look up structures and types.
     type_context: &'a mut TypeContext<'tctx>,
 
@@ -25,7 +25,7 @@ pub struct GenericFuncCreator<'a, 'tctx> {
 
 /// Iterate throughall functions that take generic parameters. Creates new instances
 /// of them replacing the generics with actual implementations.
-impl<'a, 'tctx> GenericFuncCreator<'a, 'tctx> {
+impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
     pub fn new(
         type_context: &'a mut TypeContext<'tctx>,
         generic_methods: HashMap<String, HashMap<String, Vec<Generics>>>,
@@ -50,8 +50,7 @@ impl<'a, 'tctx> GenericFuncCreator<'a, 'tctx> {
                 // TODO: Change so that every method doesn't need to be cloned.
                 let method = impl_body.get(idx).cloned().unwrap();
 
-                let method_name = if let AstToken::Block(BlockHeader::Function(func), ..) = &method
-                {
+                let method_name = if let AstToken::Block(BlockHeader::Fn(func), ..) = &method {
                     func.borrow().name.clone()
                 } else {
                     panic!()
@@ -79,13 +78,12 @@ impl<'a, 'tctx> GenericFuncCreator<'a, 'tctx> {
                         }
 
                         // Set the generic impls on the new copy of the function.
-                        let func =
-                            if let AstToken::Block(BlockHeader::Function(func), ..) = &new_method {
-                                func.borrow_mut().generic_impls = Some(method_generics.clone());
-                                Rc::clone(func)
-                            } else {
-                                panic!()
-                            };
+                        let func = if let AstToken::Block(BlockHeader::Fn(func), ..) = &new_method {
+                            func.borrow_mut().generic_impls = Some(method_generics.clone());
+                            Rc::clone(func)
+                        } else {
+                            panic!()
+                        };
 
                         // Insert the method into the structure.
                         if let Err(err) = self.type_context.analyze_context.insert_method(
@@ -125,7 +123,7 @@ impl<'a, 'tctx> GenericFuncCreator<'a, 'tctx> {
     }
 }
 
-impl<'a, 'tctx> Visitor for GenericFuncCreator<'a, 'tctx> {
+impl<'a, 'tctx> Visitor for GenericFnCreator<'a, 'tctx> {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -162,7 +160,7 @@ impl<'a, 'tctx> Visitor for GenericFuncCreator<'a, 'tctx> {
                     while idx < impl_body.len() {
                         let method = impl_body.get(idx).unwrap();
 
-                        if let AstToken::Block(BlockHeader::Function(func), _, id, _) = method {
+                        if let AstToken::Block(BlockHeader::Fn(func), _, id, _) = method {
                             let contains_gens_decl = func
                                 .borrow()
                                 .generic_names

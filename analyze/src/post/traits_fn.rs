@@ -4,7 +4,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{Adt, BlockHeader},
-        expr::FuncCall,
+        expr::FnCall,
     },
     traverser::TraverseContext,
     ty::{inner_ty::InnerTy, ty::Ty},
@@ -20,7 +20,7 @@ use std::{
 /// Goes through all function calls done on variables with a generic type and
 /// makes sure that the function names can be found in traits required on the
 /// generic type in a "where" clause.
-pub struct TraitsFuncAnalyzer<'a> {
+pub struct TraitsFnAnalyzer<'a> {
     analyze_context: &'a AnalyzeContext,
 
     /// Contains a map mapping names of generics to names of methods that the
@@ -32,7 +32,7 @@ pub struct TraitsFuncAnalyzer<'a> {
     errors: Vec<LangError>,
 }
 
-impl<'a> TraitsFuncAnalyzer<'a> {
+impl<'a> TraitsFnAnalyzer<'a> {
     pub fn new(analyze_context: &'a AnalyzeContext) -> Self {
         Self {
             analyze_context,
@@ -113,7 +113,7 @@ impl<'a> TraitsFuncAnalyzer<'a> {
     }
 }
 
-impl<'a> Visitor for TraitsFuncAnalyzer<'a> {
+impl<'a> Visitor for TraitsFnAnalyzer<'a> {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -137,21 +137,21 @@ impl<'a> Visitor for TraitsFuncAnalyzer<'a> {
     }
 
     /// Check any function call in which the `method_structure` is a generic.
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
-        if let Some(method_structure) = &func_call.method_adt {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, _ctx: &TraverseContext) {
+        if let Some(method_structure) = &fn_call.method_adt {
             if !method_structure.is_generic() {
                 return;
             }
 
             let generic_name = method_structure.get_ident().unwrap();
-            let method_name = &func_call.name;
+            let method_name = &fn_call.name;
 
             if !self.is_valid_method(&generic_name, method_name) {
                 let err = self.analyze_context.err(format!(
                     "Used method named \"{0}\" on value with the generic type \"{1}\". \
                     No trait enforced on \"{1}\" contains a method with that name.\n\
                     At position: {2:#?}",
-                    method_name, &generic_name, func_call.file_pos
+                    method_name, &generic_name, fn_call.file_pos
                 ));
                 self.errors.push(err);
             }

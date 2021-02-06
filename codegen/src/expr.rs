@@ -4,7 +4,7 @@ use common::{
     file::FilePosition,
     token::{
         block::AdtKind,
-        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FuncCall},
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall},
         lit::Lit,
     },
     ty::{inner_ty::InnerTy, ty::Ty},
@@ -46,7 +46,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let any_value = match expr {
             Expr::Lit(lit, ty_opt, ..) => self.compile_lit(lit, ty_opt, file_pos),
-            Expr::FuncCall(func_call) => self.compile_func_call(func_call),
+            Expr::FnCall(fn_call) => self.compile_fn_call(fn_call),
             Expr::BuiltInCall(built_in_call) => self.compile_built_in_call(built_in_call),
             Expr::Op(op) => self.compile_op(op, expr_ty, file_pos),
             Expr::AdtInit(adt_init) => match adt_init.kind {
@@ -245,28 +245,25 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     //       Should make a custom value ex rusts "()" instead.
     /// Generates a function call. Returns the return value of the compiled
     /// function.
-    pub fn compile_func_call(
-        &mut self,
-        func_call: &mut FuncCall,
-    ) -> LangResult<AnyValueEnum<'ctx>> {
-        if let Some(func_ptr) = self.module.get_function(&func_call.full_name()?) {
+    pub fn compile_fn_call(&mut self, fn_call: &mut FnCall) -> LangResult<AnyValueEnum<'ctx>> {
+        if let Some(func_ptr) = self.module.get_function(&fn_call.full_name()?) {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
             // functions are supported to be compatible with C code.
-            if func_call.arguments.len() < func_ptr.count_params() as usize {
+            if fn_call.arguments.len() < func_ptr.count_params() as usize {
                 return Err(self.err(
                     format!(
                         "Wrong amount of args given when calling func \"{}\". Expected: {}, got: {}",
-                        &func_call.full_name()?,
+                        &fn_call.full_name()?,
                         func_ptr.count_params(),
-                        func_call.arguments.len()
+                        fn_call.arguments.len()
                     ),
-                    func_call.file_pos,
+                    fn_call.file_pos,
                 ));
             }
 
-            let mut args = Vec::with_capacity(func_call.arguments.len());
-            for arg in &mut func_call.arguments {
+            let mut args = Vec::with_capacity(fn_call.arguments.len());
+            for arg in &mut fn_call.arguments {
                 let any_value = self.compile_expr(&mut arg.value, ExprTy::RValue)?;
                 let basic_value = CodeGen::any_into_basic_value(any_value)?;
                 args.push(basic_value);
@@ -279,7 +276,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     // type of the argument can be casted to the same type.
                     self.infer_arg_type(
                         i,
-                        &func_call.full_name()?,
+                        &fn_call.full_name()?,
                         &param.get_type(),
                         &arg.get_type(),
                     )?;
@@ -301,10 +298,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Err(self.err(
                 format!(
                     "Unable to find function with name {} to call (full name: {:#?}).",
-                    &func_call.name,
-                    &func_call.full_name()
+                    &fn_call.name,
+                    &fn_call.full_name()
                 ),
-                func_call.file_pos,
+                fn_call.file_pos,
             ))
         }
     }

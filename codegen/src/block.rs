@@ -8,7 +8,7 @@ use common::{
     file::FilePosition,
     token::{
         ast::AstToken,
-        block::{Adt, BlockHeader, Function},
+        block::{Adt, BlockHeader, Fn},
         expr::{Expr, Var},
     },
     ty::{inner_ty::InnerTy, ty::Ty},
@@ -201,19 +201,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     self.compile(token)?
                 }
             }
-            BlockHeader::Function(func) => {
-                self.compile_func(&func.borrow(), file_pos, id, body)?;
+            BlockHeader::Fn(func) => {
+                self.compile_fn(&func.borrow(), file_pos, id, body)?;
             }
             BlockHeader::Implement(..) => {
                 for mut ast_token in body {
                     if let AstToken::Block(
-                        BlockHeader::Function(func),
+                        BlockHeader::Fn(func),
                         func_file_pos,
                         func_id,
                         func_body,
                     ) = &mut ast_token
                     {
-                        self.compile_func(&func.borrow(), func_file_pos, *func_id, func_body)?;
+                        self.compile_fn(&func.borrow(), func_file_pos, *func_id, func_body)?;
                     }
                 }
             }
@@ -277,9 +277,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_func(
+    fn compile_fn(
         &mut self,
-        func: &Function,
+        func: &Fn,
         file_pos: &FilePosition,
         func_id: BlockId,
         body: &mut [AstToken],
@@ -366,13 +366,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     /// Compiles a function prototype.
-    pub(super) fn compile_func_proto(
+    pub(super) fn compile_fn_proto(
         &self,
-        func: &Function,
+        func: &Fn,
         file_pos: Option<FilePosition>,
         linkage_opt: Option<Linkage>,
     ) -> LangResult<FunctionValue<'ctx>> {
-        debug!("compile_func_proto: {:#?}", func);
+        debug!("compile_fn_proto: {:#?}", func);
 
         let param_types = if let Some(params) = &func.parameters {
             let mut inner_types = Vec::with_capacity(params.len());

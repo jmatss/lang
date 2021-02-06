@@ -122,11 +122,11 @@ impl<'a, 'tctx> Visitor for GenericsReplacer<'a, 'tctx> {
 
     /// Since this `GenericsReplacer` is called with `deep_copy` set to true,
     /// this logic inserts a reference from the new ADT type to the new method.
-    fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let Some(new_adt) = &self.new_adt {
             let new_adt_name = new_adt.borrow().name.clone();
 
-            if let AstToken::Block(BlockHeader::Function(func), _, old_id, ..) = ast_token {
+            if let AstToken::Block(BlockHeader::Fn(func), _, old_id, ..) = ast_token {
                 func.borrow_mut().method_adt = self.new_ty.cloned();
 
                 // Insert a reference from the "new" ADT to this new method.

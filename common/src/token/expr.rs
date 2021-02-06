@@ -25,7 +25,7 @@ pub enum Expr {
     //       operators like ex. "as" in a simple way.
     Type(Ty, Option<FilePosition>),
     Var(Var),
-    FuncCall(FuncCall),
+    FnCall(FnCall),
     BuiltInCall(BuiltInCall),
     AdtInit(AdtInit),
     ArrayInit(ArrayInit),
@@ -48,8 +48,8 @@ impl Expr {
                     ));
                 }
             }
-            Expr::FuncCall(func_call) if func_call.ret_type.is_some() => {
-                if let Some(ty) = &func_call.ret_type {
+            Expr::FnCall(fn_call) if fn_call.ret_type.is_some() => {
+                if let Some(ty) = &fn_call.ret_type {
                     ty.clone()
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -116,8 +116,8 @@ impl Expr {
                     ));
                 }
             }
-            Expr::FuncCall(func_call) if func_call.ret_type.is_some() => {
-                if let Some(ty) = &mut func_call.ret_type {
+            Expr::FnCall(fn_call) if fn_call.ret_type.is_some() => {
+                if let Some(ty) = &mut fn_call.ret_type {
                     ty
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -172,7 +172,7 @@ impl Expr {
         match self {
             Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) => file_pos.as_ref(),
             Expr::Var(var) => var.file_pos.as_ref(),
-            Expr::FuncCall(func_call) => func_call.file_pos.as_ref(),
+            Expr::FnCall(fn_call) => fn_call.file_pos.as_ref(),
             Expr::BuiltInCall(built_in_call) => Some(&built_in_call.file_pos),
             Expr::AdtInit(adt_init) => adt_init.file_pos.as_ref(),
             Expr::ArrayInit(array_init) => Some(&array_init.file_pos),
@@ -187,7 +187,7 @@ impl Expr {
         match self {
             Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) => file_pos.as_mut(),
             Expr::Var(var) => var.file_pos.as_mut(),
-            Expr::FuncCall(func_call) => func_call.file_pos.as_mut(),
+            Expr::FnCall(fn_call) => fn_call.file_pos.as_mut(),
             Expr::BuiltInCall(built_in_call) => Some(&mut built_in_call.file_pos),
             Expr::AdtInit(adt_init) => adt_init.file_pos.as_mut(),
             Expr::ArrayInit(array_init) => Some(&mut array_init.file_pos),
@@ -287,7 +287,7 @@ impl Expr {
                         if bin_op.lhs.eval_to_var().is_some() {
                             if bin_op.rhs.eval_to_var().is_some() {
                                 bin_op.rhs.eval_to_var()
-                            } else if bin_op.rhs.eval_to_func_call().is_some() {
+                            } else if bin_op.rhs.eval_to_fn_call().is_some() {
                                 // If the rhs is a function call, this is a method
                                 // call on a variable. Return the var from the
                                 // lhs.
@@ -316,14 +316,14 @@ impl Expr {
 
     /// Returns Some if this expr is a function call or if this is a binary Dot
     /// operation where the rhs evals to a function call.
-    pub fn eval_to_func_call(&mut self) -> Option<&mut FuncCall> {
+    pub fn eval_to_fn_call(&mut self) -> Option<&mut FnCall> {
         match self {
-            Expr::FuncCall(func_call) => Some(func_call),
+            Expr::FnCall(fn_call) => Some(fn_call),
             Expr::Op(op) => match op {
                 Op::BinOp(bin_op) => match bin_op.operator {
                     BinOperator::Dot => {
-                        if bin_op.rhs.eval_to_func_call().is_some() {
-                            bin_op.rhs.eval_to_func_call()
+                        if bin_op.rhs.eval_to_fn_call().is_some() {
+                            bin_op.rhs.eval_to_fn_call()
                         } else {
                             None
                         }
@@ -400,7 +400,7 @@ impl Var {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FuncCall {
+pub struct FnCall {
     pub name: String,
     pub arguments: Vec<Argument>,
     pub ret_type: Option<Ty>,
@@ -417,7 +417,7 @@ pub struct FuncCall {
     pub is_method: bool,
 }
 
-impl FuncCall {
+impl FnCall {
     pub fn new(
         name: String,
         arguments: Vec<Argument>,

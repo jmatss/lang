@@ -254,7 +254,7 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
                 // New instances will be created for all shared references (see
                 // `set_deep_copy(true)` in `AstTraverser`).
                 for mut method in new_impl_body {
-                    if let AstToken::Block(BlockHeader::Function(..), ..) = method {
+                    if let AstToken::Block(BlockHeader::Fn(..), ..) = method {
                         traverser
                             .set_deep_copy_nr(new_idx)
                             .traverse_token(&mut method);

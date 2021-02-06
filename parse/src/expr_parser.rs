@@ -3,7 +3,7 @@ use common::{
     file::FilePosition,
     token::{
         block::AdtKind,
-        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FuncCall},
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
     ty::{
@@ -189,14 +189,14 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     };
 
                     // "Convert" the parsed function call into a built in call.
-                    let built_in_expr = if let Expr::FuncCall(func_call) = expr {
+                    let built_in_expr = if let Expr::FnCall(fn_call) = expr {
                         let mut built_in_file_pos = lex_token.file_pos;
-                        built_in_file_pos.set_end(&func_call.file_pos.unwrap())?;
+                        built_in_file_pos.set_end(&fn_call.file_pos.unwrap())?;
 
                         let built_in_call = BuiltInCall::new(
-                            func_call.name,
-                            func_call.arguments,
-                            func_call.generics,
+                            fn_call.name,
+                            fn_call.arguments,
+                            fn_call.generics,
                             built_in_file_pos,
                         );
                         Expr::BuiltInCall(built_in_call)
@@ -612,7 +612,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
                     file_pos.set_end(&args_file_pos)?;
 
-                    Ok(Expr::FuncCall(FuncCall::new(
+                    Ok(Expr::FnCall(FnCall::new(
                         ident.into(),
                         arguments,
                         generics,

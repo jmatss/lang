@@ -2,7 +2,7 @@ use super::context::TypeContext;
 use common::{
     error::LangError,
     token::op::UnOperator,
-    token::{ast::AstToken, expr::FuncCall, op::UnOp},
+    token::{ast::AstToken, expr::FnCall, op::UnOp},
     traverser::TraverseContext,
     ty::ty::Ty,
     visitor::Visitor,
@@ -83,8 +83,8 @@ impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
         self.subtitute_type(ty, ctx.block_id);
     }
 
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
-        if let Some(structure_ty) = &mut func_call.method_adt {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, _ctx: &TraverseContext) {
+        if let Some(structure_ty) = &mut fn_call.method_adt {
             // TODO: Fix this, seems very random to fix this here.
             // The `method_structure` might possible be a pointer to the
             // structure, need to get the actual structure type in that case.

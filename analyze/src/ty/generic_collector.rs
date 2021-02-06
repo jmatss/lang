@@ -5,7 +5,7 @@ use crate::{
 };
 use common::{
     error::{LangError, LangErrorKind, LangResult},
-    token::{ast::AstToken, block::BlockHeader, expr::FuncCall},
+    token::{ast::AstToken, block::BlockHeader, expr::FnCall},
     traverser::{AstTraverser, TraverseContext},
     ty::{generics::Generics, ty::Ty},
     visitor::Visitor,
@@ -167,11 +167,11 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
     fn collect_generic_method(
         &mut self,
         structure_ty: &Ty,
-        method_call: &FuncCall,
+        method_call: &FnCall,
         block_id: BlockId,
     ) {
-        let method_call_generics = if let Some(func_call_generics) = &method_call.generics {
-            func_call_generics.clone()
+        let method_call_generics = if let Some(fn_call_generics) = &method_call.generics {
+            fn_call_generics.clone()
         } else {
             return;
         };
@@ -785,9 +785,9 @@ impl<'a, 'tctx> Visitor for GenericCollector<'a, 'tctx> {
         self.collect_generic_adt(ty);
     }
 
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {
-        if let Some(structure_ty) = &func_call.method_adt {
-            self.collect_generic_method(structure_ty, func_call, ctx.block_id);
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
+        if let Some(structure_ty) = &fn_call.method_adt {
+            self.collect_generic_method(structure_ty, fn_call, ctx.block_id);
         }
     }
 
@@ -865,10 +865,10 @@ impl<'a> NestedGenericCollector<'a> {
         }
     }
 
-    fn collect_nested_generic_methods(&mut self, func_call: &FuncCall) {
-        let func_call_generics = if let Some(func_call_generics) = &func_call.generics {
-            if !func_call_generics.is_empty() {
-                func_call_generics
+    fn collect_nested_generic_methods(&mut self, fn_call: &FnCall) {
+        let fn_call_generics = if let Some(fn_call_generics) = &fn_call.generics {
+            if !fn_call_generics.is_empty() {
+                fn_call_generics
             } else {
                 return;
             }
@@ -876,24 +876,24 @@ impl<'a> NestedGenericCollector<'a> {
             return;
         };
 
-        let contains_nested_generic = func_call_generics
+        let contains_nested_generic = fn_call_generics
             .iter_types()
             .any(|ty| ty.contains_generic());
         if contains_nested_generic {
             let key = NestedMethodInfo {
                 method_name: self.cur_func_name.clone(),
-                method_call_name: func_call.name.clone(),
-                method_adt_name: func_call.method_adt.as_ref().unwrap().get_ident().unwrap(),
+                method_call_name: fn_call.name.clone(),
+                method_adt_name: fn_call.method_adt.as_ref().unwrap().get_ident().unwrap(),
             };
 
             match self.nested_generic_methods.entry(key) {
                 Entry::Occupied(mut o) => {
-                    if !o.get().contains(func_call_generics) {
-                        o.get_mut().push(func_call_generics.clone());
+                    if !o.get().contains(fn_call_generics) {
+                        o.get_mut().push(fn_call_generics.clone());
                     }
                 }
                 Entry::Vacant(v) => {
-                    v.insert(vec![func_call_generics.clone()]);
+                    v.insert(vec![fn_call_generics.clone()]);
                 }
             }
         }
@@ -909,14 +909,14 @@ impl<'a> Visitor for NestedGenericCollector<'a> {
         }
     }
 
-    fn visit_func(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Function(func), ..) = ast_token {
+    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
             self.cur_func_name = func.borrow().name.clone();
         }
     }
 
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, _ctx: &TraverseContext) {
-        self.collect_nested_generic_methods(func_call);
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, _ctx: &TraverseContext) {
+        self.collect_nested_generic_methods(fn_call);
     }
 
     fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {

@@ -2,7 +2,7 @@ use crate::{
     error::LangError,
     token::{
         ast::AstToken,
-        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FuncCall, Var},
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, Var},
         op::{BinOp, UnOp},
         stmt::Stmt,
     },
@@ -25,7 +25,7 @@ pub trait Visitor {
 
     /* BLOCKS */
     fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
-    fn visit_func(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
+    fn visit_fn(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
     fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
     fn visit_enum(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
     fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
@@ -60,7 +60,7 @@ pub trait Visitor {
     fn visit_lit(&mut self, expr: &mut Expr, ctx: &TraverseContext) {}
     //fn visit_type(&mut self, expr: &mut Expr, ctx: &TraverseContext) {}
     fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {}
-    fn visit_func_call(&mut self, func_call: &mut FuncCall, ctx: &TraverseContext) {}
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {}
     fn visit_built_in_call(&mut self, built_in_call: &mut BuiltInCall, ctx: &TraverseContext) {}
     fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {}
     fn visit_array_init(&mut self, array_init: &mut ArrayInit, ctx: &TraverseContext) {}

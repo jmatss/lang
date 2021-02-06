@@ -1,5 +1,5 @@
 use super::{
-    block::Function,
+    block::Fn,
     expr::{Expr, Var},
     op::AssignOperator,
 };
@@ -52,7 +52,7 @@ pub enum Stmt {
 
     // TODO: Implement extern for variables as well.
     /// Declaration of extern functions.
-    ExternalDecl(Rc<RefCell<Function>>, Option<FilePosition>),
+    ExternalDecl(Rc<RefCell<Fn>>, Option<FilePosition>),
 }
 
 impl PartialEq for Stmt {

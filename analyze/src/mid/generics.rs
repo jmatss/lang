@@ -92,12 +92,12 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
             // Iterate through the body of one method at a time and replace all
             // "UnknownIdent"s representing generics to "Generic"s.
             for method in body {
-                let func_generic_names =
-                    if let AstToken::Block(BlockHeader::Function(func), ..) = method {
-                        func.borrow().generic_names.clone()
-                    } else {
-                        None
-                    };
+                let func_generic_names = if let AstToken::Block(BlockHeader::Fn(func), ..) = method
+                {
+                    func.borrow().generic_names.clone()
+                } else {
+                    None
+                };
 
                 // No generics declared on either ADT/Trait or function, early skip.
                 if adt_generic_names.is_empty() && func_generic_names.is_none() {
