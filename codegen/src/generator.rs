@@ -398,10 +398,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             // Need to wrap `FunctionType`s inside `PointerType`s since they
             // aren't sized, and can't be used as args/params etc otherwise.
-            Ty::Fn(_, arg_tys, ret_ty, type_info) => {
-                let mut param_types = Vec::with_capacity(arg_tys.len());
-                for arg_ty in arg_tys {
-                    let compiled_ty = self.compile_type(arg_ty, arg_ty.file_pos().cloned())?;
+            Ty::Fn(_, param_tys, ret_ty, type_info) => {
+                let mut param_types = Vec::with_capacity(param_tys.len());
+                for param_ty in param_tys {
+                    let compiled_ty = self.compile_type(param_ty, param_ty.file_pos().cloned())?;
                     param_types.push(CodeGen::any_into_basic_type(compiled_ty)?);
                 }
 

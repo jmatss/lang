@@ -916,6 +916,10 @@ impl<'a> Visitor for NestedGenericCollector<'a> {
     }
 
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, _ctx: &TraverseContext) {
+        if fn_call.is_fn_ptr_call {
+            return;
+        }
+
         self.collect_nested_generic_methods(fn_call);
     }
 

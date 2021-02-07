@@ -26,6 +26,8 @@ pub enum Expr {
     Type(Ty, Option<FilePosition>),
     Var(Var),
     FnCall(FnCall),
+    /// The name is the name of the function and the generics are impls for the fn.
+    FnPtr(String, Generics, Option<Ty>, Option<FilePosition>),
     BuiltInCall(BuiltInCall),
     AdtInit(AdtInit),
     ArrayInit(ArrayInit),
@@ -50,6 +52,13 @@ impl Expr {
             }
             Expr::FnCall(fn_call) if fn_call.ret_type.is_some() => {
                 if let Some(ty) = &fn_call.ret_type {
+                    ty.clone()
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::FnPtr(_, _, ret_ty, _) if ret_ty.is_some() => {
+                if let Some(ty) = &ret_ty {
                     ty.clone()
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -92,7 +101,7 @@ impl Expr {
             }
             _ => {
                 return Err(LangError::new(
-                    "Unable to get type of expr.".into(),
+                    format!("Unable to get type of expr: {:#?}", self),
                     LangErrorKind::GeneralError,
                     self.file_pos().cloned(),
                 ))
@@ -118,6 +127,13 @@ impl Expr {
             }
             Expr::FnCall(fn_call) if fn_call.ret_type.is_some() => {
                 if let Some(ty) = &mut fn_call.ret_type {
+                    ty
+                } else {
+                    unreachable!("Value already verified to be Some.");
+                }
+            }
+            Expr::FnPtr(_, _, ret_ty, _) if ret_ty.is_some() => {
+                if let Some(ty) = ret_ty {
                     ty
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -170,7 +186,9 @@ impl Expr {
 
     pub fn file_pos(&self) -> Option<&FilePosition> {
         match self {
-            Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) => file_pos.as_ref(),
+            Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) | Expr::FnPtr(.., file_pos) => {
+                file_pos.as_ref()
+            }
             Expr::Var(var) => var.file_pos.as_ref(),
             Expr::FnCall(fn_call) => fn_call.file_pos.as_ref(),
             Expr::BuiltInCall(built_in_call) => Some(&built_in_call.file_pos),
@@ -185,7 +203,9 @@ impl Expr {
 
     pub fn file_pos_mut(&mut self) -> Option<&mut FilePosition> {
         match self {
-            Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) => file_pos.as_mut(),
+            Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) | Expr::FnPtr(.., file_pos) => {
+                file_pos.as_mut()
+            }
             Expr::Var(var) => var.file_pos.as_mut(),
             Expr::FnCall(fn_call) => fn_call.file_pos.as_mut(),
             Expr::BuiltInCall(built_in_call) => Some(&mut built_in_call.file_pos),
@@ -413,8 +433,13 @@ pub struct FnCall {
 
     /// Will be set if this is a method call. It will be set to the ADT
     /// that this method is called on.
-    pub method_adt: Option<Ty>,
     pub is_method: bool,
+    pub method_adt: Option<Ty>,
+
+    /// Will be set to true if this is a function call that is being called on
+    /// a variable that contains a function pointer.
+    pub is_fn_ptr_call: bool,
+    pub fn_full_name: Option<String>,
 }
 
 impl FnCall {
@@ -430,8 +455,10 @@ impl FnCall {
             ret_type: None,
             generics,
             file_pos,
-            method_adt: None,
             is_method: false,
+            method_adt: None,
+            is_fn_ptr_call: false,
+            fn_full_name: None,
         }
     }
 

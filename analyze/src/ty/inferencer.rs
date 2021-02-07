@@ -207,7 +207,112 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// have multiple differet types depending on the context, which isn't solvable
     /// through the regular type inference logic.
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
-        let mut fn_ret_ty = if fn_call.is_method {
+        // TODO: Support varargs for fn pointers?
+        // TODO: Support named arguments for fn pointers?
+
+        let mut fn_ret_ty = if fn_call.is_fn_ptr_call {
+            let var_name = fn_call.name.clone();
+            let decl_id = match self
+                .type_context
+                .analyze_context
+                .get_var_decl_scope(&var_name, ctx.block_id)
+            {
+                Ok(decl_id) => decl_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            let key = (fn_call.name.clone(), decl_id);
+            let var = match self.type_context.analyze_context.variables.get(&key) {
+                Some(var) => var,
+                None => {
+                    let err = self.type_context.analyze_context.err(
+                        format!(
+                            "Unable to find variable named \"{}\" containing a fn ptr in decl scope {}.",
+                            var_name, decl_id
+                        ),
+                    );
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            let (fn_gens, fn_params, fn_ret_ty) = if let Some(ty) = var.borrow().ty.clone() {
+                if let Ty::Fn(gens, params, ret_ty, _) = ty {
+                    (gens, params, ret_ty)
+                } else {
+                    let err = self.type_context.analyze_context.err(format!(
+                        "Variable named \"{}\" expected to contain a fn ptr, but didn't: {:#?}",
+                        var_name, ty
+                    ));
+                    self.errors.push(err);
+                    return;
+                }
+            } else {
+                let err = self.type_context.analyze_context.err(format!(
+                    "No type set for variable named \"{}\" expected to contain a fn ptr.",
+                    var_name
+                ));
+                self.errors.push(err);
+                return;
+            };
+
+            // Fn pointers doesn't support named arguments, so can zip the args
+            // and param types since their indices is always used to map them.
+            if fn_call.arguments.len() == fn_params.len() {
+                for (arg, param_ty) in fn_call.arguments.iter().zip(fn_params.iter()) {
+                    let arg_ty = match arg.value.get_expr_type() {
+                        Ok(ty) => ty.clone(),
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
+                    self.insert_constraint(&arg_ty, param_ty, ctx.block_id);
+                }
+            } else {
+                let err = self.type_context.analyze_context.err(format!(
+                    "Wrong amount of arguments for fn pointer call.\n\
+                    Func call: {:#?}\nfn_params: {:#?}",
+                    fn_call, fn_params
+                ));
+                self.errors.push(err);
+                return;
+            }
+
+            let fn_call_gens = if let Some(gens) = &fn_call.generics {
+                gens.iter_types().cloned().collect::<Vec<_>>()
+            } else {
+                Vec::with_capacity(0)
+            };
+
+            if fn_call_gens.len() == fn_gens.len() {
+                for (fn_call_gen, fn_gen) in fn_call_gens.iter().zip(fn_gens.iter()) {
+                    self.insert_constraint(fn_call_gen, fn_gen, ctx.block_id);
+                }
+            } else {
+                let err = self.type_context.analyze_context.err(format!(
+                    "Wrong amount of generics for fn pointer call.\n\
+                    Func call: {:#?}\nfn_gens: {:#?}",
+                    fn_call, fn_gens
+                ));
+                self.errors.push(err);
+                return;
+            }
+
+            if let Some(mut ty) = fn_ret_ty {
+                *ty.file_pos_mut().unwrap() = fn_call.file_pos.unwrap();
+                *ty
+            } else {
+                Ty::CompoundType(
+                    InnerTy::Void,
+                    Generics::empty(),
+                    TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
+                )
+            }
+        } else if fn_call.is_method {
             // Get the "owning" structure type of this method. If it isn't set
             // explicitly, it should be set as a expression in the first argument
             // with the name "this".
@@ -266,9 +371,9 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 if generic_types.len_types() > 0 {
                     if generic_names.len() != generic_types.len_types() {
                         let err = self.type_context.analyze_context.err(format!(
-                                    "Wrong amount of generics for static call. Func call: {:#?}, generic_names: {:#?}",
-                                    fn_call, generic_names
-                                ));
+                            "Wrong amount of generics for static call. Func call: {:#?}, generic_names: {:#?}",
+                            fn_call, generic_names
+                        ));
                         self.errors.push(err);
                         return;
                     }
@@ -432,8 +537,6 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             }
 
-            // TODO: generics.
-
             let func = func.borrow();
             if let Some(mut ty) = func.ret_type.clone() {
                 *ty.file_pos_mut().unwrap() = fn_call.file_pos.unwrap();
@@ -476,6 +579,93 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         //       call? Should be inserted as a constraint instead? Will this
         //       affect generics?
         fn_call.ret_type = Some(fn_ret_ty);
+    }
+
+    fn visit_fn_ptr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {
+        let (fn_name, fn_ptr_gens, fn_ty, file_pos) =
+            if let Expr::FnPtr(fn_name, gens, fn_ty, file_pos) = expr {
+                (fn_name, gens, fn_ty, file_pos)
+            } else {
+                unreachable!()
+            };
+
+        let func = match self
+            .type_context
+            .analyze_context
+            .get_func(fn_name, ctx.block_id)
+        {
+            Ok(func) => func,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+        let func = func.borrow();
+
+        let fn_gen_names = if let Some(gens) = &func.generic_names {
+            gens.clone()
+        } else {
+            Vec::with_capacity(0)
+        };
+
+        let mut fn_param_tys = if let Some(params) = &func.parameters {
+            params
+                .iter()
+                .map(|var| var.borrow().ty.as_ref().unwrap().clone())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::with_capacity(0)
+        };
+
+        let mut fn_ret_ty = func.ret_type.clone();
+
+        if fn_ptr_gens.len() != fn_gen_names.len() {
+            let err = self.type_context.analyze_context.err(format!(
+                "Function pointer to \"{}\" has incorrect amount of generics. Expected: {}, got: {}",
+                fn_name,
+                fn_gen_names.len(),
+                fn_ptr_gens.len()
+            ));
+            self.errors.push(err);
+            return;
+        }
+
+        // Combine the names for the fn declaration generics with the impl types
+        // of the function pointer. This will be used to replace the generics
+        // in the param and return types of the functions so that the generic
+        // decls doesn't "leak" outside the scope of the function.
+        let mut gens_impl = Generics::new();
+        for (gen_name, gen_ty) in fn_gen_names.iter().zip(fn_ptr_gens.iter_types()) {
+            gens_impl.insert(gen_name.clone(), gen_ty.clone());
+        }
+
+        fn_param_tys
+            .iter_mut()
+            .for_each(|ty| ty.replace_generics_impl(&gens_impl));
+        if let Some(ret_ty) = &mut fn_ret_ty {
+            ret_ty.replace_generics_impl(&gens_impl);
+        }
+
+        let new_fn_ty = Ty::Fn(
+            fn_ptr_gens.iter_types().cloned().collect::<Vec<_>>(),
+            fn_param_tys,
+            fn_ret_ty.map(Box::new),
+            TypeInfo::DefaultOpt(*file_pos),
+        );
+
+        if let Some(fn_ty) = fn_ty {
+            if fn_ty != &new_fn_ty {
+                let err = self.type_context.analyze_context.err(format!(
+                    "Bad function signature for function pointer, fn_name: {}. \
+                    fn_ty: {:#?}, new_fn_ty: {:#?}. Function pointer pos: {:#?}",
+                    fn_name, fn_ty, new_fn_ty, file_pos
+                ));
+                self.errors.push(err);
+                return;
+            }
+        } else {
+            *fn_ty = Some(new_fn_ty);
+        }
     }
 
     fn visit_built_in_call(&mut self, built_in_call: &mut BuiltInCall, _ctx: &TraverseContext) {

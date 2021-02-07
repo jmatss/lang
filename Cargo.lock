@@ -116,6 +116,7 @@ version = "0.1.0"
 dependencies = [
  "analyze",
  "common",
+ "either",
  "inkwell",
  "log",
  "parse",

@@ -169,6 +169,13 @@ impl<'a> Visitor for CallArgs<'a> {
     }
 
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
+        // Function calls on variables containing fn pointers does currently not
+        // support named arguments (since the names of the parameters isn't know
+        // in those cases).
+        if fn_call.is_fn_ptr_call {
+            return;
+        }
+
         // If this is a function contained in a structure (method), one needs to
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.

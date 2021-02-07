@@ -9,7 +9,9 @@ use common::{
     },
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     type_info::TypeInfo,
+    util,
 };
+use either::Either;
 use inkwell::{
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
     values::{AnyValueEnum, FloatValue, IntValue},
@@ -48,6 +50,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let any_value = match expr {
             Expr::Lit(lit, ty_opt, ..) => self.compile_lit(lit, ty_opt, file_pos),
             Expr::FnCall(fn_call) => self.compile_fn_call(fn_call),
+            Expr::FnPtr(..) => self.compile_fn_ptr(expr),
             Expr::BuiltInCall(built_in_call) => self.compile_built_in_call(built_in_call),
             Expr::Op(op) => self.compile_op(op, expr_ty, file_pos),
             Expr::AdtInit(adt_init) => match adt_init.kind {
@@ -247,62 +250,104 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// Generates a function call. Returns the return value of the compiled
     /// function.
     pub fn compile_fn_call(&mut self, fn_call: &mut FnCall) -> LangResult<AnyValueEnum<'ctx>> {
-        if let Some(func_ptr) = self.module.get_function(&fn_call.full_name()?) {
+        let mut args = Vec::with_capacity(fn_call.arguments.len());
+        for arg in &mut fn_call.arguments {
+            let any_value = self.compile_expr(&mut arg.value, ExprTy::RValue)?;
+            let basic_value = CodeGen::any_into_basic_value(any_value)?;
+            args.push(basic_value);
+        }
+
+        // TODO: Implement check for `is_fn_ptr_call`s arg/param count as well.
+
+        let fn_ptr = if fn_call.is_fn_ptr_call {
+            let var_name = &fn_call.name;
+            let decl_id = self
+                .analyze_context
+                .get_var_decl_scope(var_name, self.cur_block_id)?;
+
+            let key = (var_name.clone(), decl_id);
+            match self.variables.get(&key) {
+                Some(ptr_value) => {
+                    let fn_ptr = self.builder.build_load(*ptr_value, "fn.ptr.load");
+                    if !fn_ptr.is_pointer_value() {
+                        unreachable!("ptr_value: {:#?}", ptr_value);
+                    } else if let AnyTypeEnum::FunctionType(..) =
+                        fn_ptr.into_pointer_value().get_type().get_element_type()
+                    {
+                        // Happy path, `fn_ptr` is a pointer to a FunctionValue
+                        // as expected.
+                        Either::Right(fn_ptr.into_pointer_value())
+                    } else {
+                        unreachable!("ptr_value: {:#?}", ptr_value);
+                    }
+                }
+                None => {
+                    return Err(self.err(
+                        format!("Unable to find function pointer with key: {:#?}).", key),
+                        fn_call.file_pos,
+                    ));
+                }
+            }
+        } else if let Some(fn_value) = self.module.get_function(&fn_call.full_name()?) {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
             // functions are supported to be compatible with C code.
-            if fn_call.arguments.len() < func_ptr.count_params() as usize {
+            if fn_call.arguments.len() < fn_value.count_params() as usize {
                 return Err(self.err(
                     format!(
                         "Wrong amount of args given when calling func \"{}\". Expected: {}, got: {}",
                         &fn_call.full_name()?,
-                        func_ptr.count_params(),
+                        fn_value.count_params(),
                         fn_call.arguments.len()
                     ),
                     fn_call.file_pos,
                 ));
             }
 
-            let mut args = Vec::with_capacity(fn_call.arguments.len());
-            for arg in &mut fn_call.arguments {
-                let any_value = self.compile_expr(&mut arg.value, ExprTy::RValue)?;
-                let basic_value = CodeGen::any_into_basic_value(any_value)?;
-                args.push(basic_value);
-            }
-
-            for (i, param) in func_ptr.get_param_iter().enumerate() {
-                if let Some(arg) = args.get_mut(i) {
-                    // Checks to see if the types of the parameter and the
-                    // argument are the same. If they are different, see if the
-                    // type of the argument can be casted to the same type.
-                    self.infer_arg_type(
-                        i,
-                        &fn_call.full_name()?,
-                        &param.get_type(),
-                        &arg.get_type(),
-                    )?;
-                } else {
-                    unreachable!("None when comparing arg and par in func call compile.");
-                }
-            }
-
-            let call = self.builder.build_call(func_ptr, args.as_slice(), "call");
-
-            // Left == BasicValueEnum, Right == InstructionValue.
-            // Will be right if the function returns "void", left otherwise.
-            Ok(if let Some(ret_val) = call.try_as_basic_value().left() {
-                ret_val.into()
-            } else {
-                self.context.i32_type().const_zero().into()
-            })
+            Either::Left(fn_value)
         } else {
-            Err(self.err(
+            return Err(self.err(
                 format!(
                     "Unable to find function with name {} to call (full name: {:#?}).",
                     &fn_call.name,
                     &fn_call.full_name()
                 ),
                 fn_call.file_pos,
+            ));
+        };
+
+        let call = self.builder.build_call(fn_ptr, args.as_slice(), "fn.call");
+
+        // Left == BasicValueEnum, Right == InstructionValue.
+        // Will be right if the function returns "void", left otherwise.
+        Ok(if let Some(ret_val) = call.try_as_basic_value().left() {
+            ret_val.into()
+        } else {
+            self.context.i32_type().const_zero().into()
+        })
+    }
+
+    /// The FunctionValue will "converted" into a PointerValue to make it sized.
+    /// This will be done by first converting it into its GlobalValue.
+    pub fn compile_fn_ptr(&mut self, expr: &mut Expr) -> LangResult<AnyValueEnum<'ctx>> {
+        let (fn_name, generics, file_pos) =
+            if let Expr::FnPtr(fn_name, generics, _, file_pos) = expr {
+                (fn_name, generics, file_pos)
+            } else {
+                unreachable!("expr not fn_ptr: {:#?}", expr);
+            };
+
+        let full_name = util::to_generic_name(fn_name, generics);
+        if let Some(fn_value) = self.module.get_function(&full_name) {
+            let fn_ptr = fn_value.as_global_value().as_pointer_value();
+            Ok(fn_ptr.into())
+        } else {
+            Err(self.err(
+                format!(
+                    "Unable to find function with full name {} (compiling fn pointer).",
+                    &full_name
+                ),
+                file_pos.to_owned(),
             ))
         }
     }
@@ -517,17 +562,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let any_value = self.compile_expr(&mut arg.value, ExprTy::RValue)?;
             let basic_value = CodeGen::any_into_basic_value(any_value)?;
             args.push(basic_value);
-        }
-
-        for (i, param) in struct_type.get_field_types().iter().enumerate() {
-            if let Some(arg) = args.get_mut(i) {
-                // Checks to see if the types of the parameter and the
-                // argument are the same. If they are different, see if the
-                // type of the argument can be casted to the same type.
-                self.infer_arg_type(i, &struct_init.name, &param, &arg.get_type())?;
-            } else {
-                unreachable!("None when comparing arg and par in struct init compile.");
-            }
         }
 
         let is_const = CodeGen::is_const(
@@ -772,31 +806,5 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 ))
             }
         })
-    }
-
-    fn infer_arg_type(
-        &mut self,
-        i: usize,
-        func_name: &str,
-        param_type: &BasicTypeEnum,
-        arg_type: &BasicTypeEnum,
-    ) -> LangResult<()> {
-        if arg_type != param_type {
-            // TODO: Should be able to convert a {[u8: N]} to a {u8}. This is
-            //       useful when working with for example string literals.
-            //       Is there a way to see what type a PointerValue is poiting
-            //       at through the inkwell API?
-            // TODO: Add logic/edge cases where the type of the argument can
-            //       be converted to the type of the parameter with no issues.
-            Err(self.err(
-                format!(
-                "Arg type at index {} wrong type when calling func: {}. Expected: {:?}, got: {:?}",
-                i, func_name, param_type, arg_type,
-            ),
-                None,
-            ))
-        } else {
-            Ok(())
-        }
     }
 }

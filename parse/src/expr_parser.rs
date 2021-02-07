@@ -13,7 +13,7 @@ use common::{
     },
     type_info::TypeInfo,
 };
-use lex::token::{LexTokenKind, Sym};
+use lex::token::{Kw, LexTokenKind, Sym};
 use log::debug;
 
 use crate::{
@@ -261,6 +261,42 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         unreachable!("Expr doesn't have a file_pos: {:#?}", expr);
                     }
 
+                    self.shunt_operand(expr)?;
+                }
+
+                // Function pointer.
+                LexTokenKind::Kw(Kw::Function) => {
+                    let mut expr_file_pos = lex_token.file_pos.to_owned();
+
+                    let fn_name = if let Some(next_token) = self.iter.next_skip_space_line() {
+                        if let LexTokenKind::Ident(fn_name) = next_token.kind {
+                            expr_file_pos.set_end(&next_token.file_pos)?;
+                            fn_name
+                        } else {
+                            return Err(self.iter.err(
+                                format!(
+                                    "Expected fn_name ident after \"fn\" keyword in expr, got: {:#?}",
+                                    next_token
+                                ),
+                                Some(next_token.file_pos),
+                            ));
+                        }
+                    } else {
+                        return Err(self.iter.err(
+                            "Parsed None operator during expression for Kw::Function.".into(),
+                            Some(lex_token.file_pos),
+                        ));
+                    };
+
+                    let generics =
+                        if let Some(generics) = self.parse_generic_impls(&mut expr_file_pos) {
+                            generics
+                        } else {
+                            Generics::empty()
+                        };
+                    file_pos.set_end(&expr_file_pos)?;
+
+                    let expr = Expr::FnPtr(fn_name, generics, None, Some(expr_file_pos));
                     self.shunt_operand(expr)?;
                 }
 
@@ -567,33 +603,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     }
 
     fn parse_expr_ident(&mut self, ident: &str, mut file_pos: FilePosition) -> LangResult<Expr> {
-        let mut pos = self.iter.pos();
+        let generics = self.parse_generic_impls(&mut file_pos);
 
-        // If the identifier is followed by a "PointyBracketBegin" it can either
-        // be a start of a generic list for structures/function, or it can also
-        // be a "LessThan" compare operation. Try to parse it as a generic list,
-        // if it fails assume that it is a Lt compare.
-        let generics = if let Some(lex_token) = self.iter.peek_skip_space() {
-            if let LexTokenKind::Sym(Sym::PointyBracketBegin) = lex_token.kind {
-                match TypeParser::new(self.iter, None).parse_type_generics(GenericsKind::Impl) {
-                    Ok((generics, Some(tmp_file_pos))) => {
-                        file_pos.set_end(&tmp_file_pos)?;
-                        generics
-                    }
-                    Ok((generics, None)) => generics,
-                    Err(_) => {
-                        self.iter.rewind_to_pos(pos);
-                        None
-                    }
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        pos = self.iter.pos();
+        let pos = self.iter.pos();
 
         // TODO: The peek doesn't skip line break, so can't ex. do a struct
         //       init with a line break at the start.
@@ -695,6 +707,34 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             // The ident was the last token if the current file, something must
             // have gone wrong.
             unreachable!("Got back None from iter when looking at ident: {}", ident);
+        }
+    }
+
+    fn parse_generic_impls(&mut self, file_pos: &mut FilePosition) -> Option<Generics> {
+        let pos = self.iter.pos();
+
+        // If the next token is a  "PointyBracketBegin" it can either be a start
+        // of a generic list for structures/function, or it can also be a "LessThan"
+        // compare operation. Try to parse it as a generic list, if it fails assume
+        // that it is a Lt compare and return None.
+        if let Some(lex_token) = self.iter.peek_skip_space() {
+            if let LexTokenKind::Sym(Sym::PointyBracketBegin) = lex_token.kind {
+                match TypeParser::new(self.iter, None).parse_type_generics(GenericsKind::Impl) {
+                    Ok((generics, Some(tmp_file_pos))) => {
+                        file_pos.set_end(&tmp_file_pos).ok()?;
+                        generics
+                    }
+                    Ok((generics, None)) => generics,
+                    Err(_) => {
+                        self.iter.rewind_to_pos(pos);
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
         }
     }
 }

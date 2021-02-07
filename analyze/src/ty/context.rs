@@ -286,14 +286,14 @@ impl<'a> TypeContext<'a> {
 
         let mut new_ty = ty.clone();
 
-        if let Ty::Fn(gens, args, ret_ty, ..) = &mut new_ty {
-            for ty in gens.iter_mut().chain(args.iter_mut()) {
-                let old_gen_ty = ty.clone();
+        if let Ty::Fn(gens, params, ret_ty, ..) = &mut new_ty {
+            for ty in gens.iter_mut().chain(params.iter_mut()) {
+                let old_ty = ty.clone();
 
                 self.solve(ty, root_id)?;
                 *ty = self.inferred_type(ty, root_id)?;
 
-                self.insert_constraint(ty, &old_gen_ty, root_id)?;
+                self.insert_constraint(ty, &old_ty, root_id)?;
             }
 
             if let Some(ret_ty) = ret_ty {

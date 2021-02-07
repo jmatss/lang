@@ -479,6 +479,20 @@ impl<'a> AstTraverser<'a> {
                     v.visit_fn_call(fn_call, &self.traverse_context)
                 }
             }
+            Expr::FnPtr(_, generics, fn_ty, _) => {
+                for gen_ty in generics.iter_types_mut() {
+                    self.traverse_type(gen_ty);
+                }
+
+                if let Some(fn_ty) = fn_ty {
+                    self.traverse_type(fn_ty);
+                }
+
+                debug!("Visiting fn ptr");
+                for v in self.visitors.iter_mut() {
+                    v.visit_fn_ptr(expr, &self.traverse_context)
+                }
+            }
             Expr::BuiltInCall(built_in_call) => {
                 if let Some(gen_tys) = &mut built_in_call.generics {
                     for gen_ty in gen_tys.iter_types_mut() {

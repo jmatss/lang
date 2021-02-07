@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use common::{
     error::LangError,
     token::{
-        expr::{Argument, Expr},
+        expr::{Argument, Expr, FnCall},
         op::{BinOperator, Op},
     },
     traverser::TraverseContext,
@@ -16,6 +16,9 @@ use crate::AnalyzeContext;
 /// as the first argument. The bin ops representing the method call will be
 /// transformed into a single FunctionCall expr where the lhs will have been
 /// moved into the first parameter of the function call.
+///
+/// This step also checks for function calls that are done on variables containing
+/// function pointers rather than functions. A bool flag will be set in those calls.
 pub struct MethodAnalyzer<'a> {
     analyze_context: &'a RefCell<AnalyzeContext>,
     errors: Vec<LangError>,
@@ -89,6 +92,17 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
                     _ => (),
                 }
             }
+        }
+    }
+
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
+        if self
+            .analyze_context
+            .borrow()
+            .get_var(&fn_call.name, ctx.block_id)
+            .is_ok()
+        {
+            fn_call.is_fn_ptr_call = true;
         }
     }
 }

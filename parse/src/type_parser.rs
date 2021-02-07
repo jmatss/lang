@@ -121,8 +121,9 @@ impl<'a, 'b> TypeParser<'a, 'b> {
 
                     let start_symbol = Sym::ParenthesisBegin;
                     let end_symbol = Sym::ParenthesisEnd;
-                    let (args, args_file_pos) = self.parse_type_list(start_symbol, end_symbol)?;
-                    file_pos.set_end(&args_file_pos)?;
+                    let (params, params_file_pos) =
+                        self.parse_type_list(start_symbol, end_symbol)?;
+                    file_pos.set_end(&params_file_pos)?;
 
                     // If the next token is a "Arrow" ("->"), assume that the return type
                     // of the function is specified afterwards. If there are no arrow,
@@ -150,7 +151,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                         file_pos.set_end(&ret_ty_file_pos)?;
                     }
 
-                    Ok(Ty::Fn(gens, args, ret_ty, TypeInfo::Default(file_pos)))
+                    Ok(Ty::Fn(gens, params, ret_ty, TypeInfo::Default(file_pos)))
                 }
 
                 // Built in call.

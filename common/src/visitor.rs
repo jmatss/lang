@@ -61,6 +61,7 @@ pub trait Visitor {
     //fn visit_type(&mut self, expr: &mut Expr, ctx: &TraverseContext) {}
     fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {}
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {}
+    fn visit_fn_ptr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {}
     fn visit_built_in_call(&mut self, built_in_call: &mut BuiltInCall, ctx: &TraverseContext) {}
     fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {}
     fn visit_array_init(&mut self, array_init: &mut ArrayInit, ctx: &TraverseContext) {}
