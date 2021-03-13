@@ -1,4 +1,4 @@
-use std.assert
+extern fn printf(format: {u8}, ...) -> i32
 
 struct InnerStruct
 {
@@ -33,18 +33,18 @@ fn main() -> i32
     var inner_y1 = InnerStruct { 3.0, 4.0 }.y
     var inner_y2 = OuterStruct::new().y
     printf("inner_y1: %f, inner_y2: %f", inner_y1, inner_y2)
-    assert(inner_y1 == 4.0 and inner_y2 == 2.0)
+    std::assert(inner_y1 == 4.0 and inner_y2 == 2.0)
 
     var inner_sum1 = InnerStruct { 3.0, 4.0 }.sum()
     var inner_sum2 = OuterStruct::new().sum()
     printf("\ninner_sum1: %f, inner_sum2: %f", inner_sum1, inner_sum2)
-    assert(inner_sum1 == 7.0 and inner_sum2 == 3.0)
+    std::assert(inner_sum1 == 7.0 and inner_sum2 == 3.0)
 
     var a = OuterStruct::new()
     var b = a.y
     a.y = 3.0
     printf("\na.y: %f, b: %f", a.y, b)
-    assert(a.y == 3.0 and b == 2.0)
+    std::assert(a.y == 3.0 and b == 2.0)
 
     return 0
 }

@@ -16,21 +16,24 @@ use common::{
 };
 use context::AnalyzeContext;
 use decl::{
-    block::BlockAnalyzer, func::DeclFnAnalyzer, ty::DeclTypeAnalyzer, var::DeclVarAnalyzer,
+    adt::DeclTypeAnalyzer, block::BlockAnalyzer, func::DeclFnAnalyzer, var::DeclVarAnalyzer,
 };
 use log::debug;
-use mid::{defer::DeferAnalyzer, generics::GenericsAnalyzer};
+use mid::{
+    defer::DeferAnalyzer, generics::GenericsAnalyzer, method::MethodAnalyzer,
+    path_resolver::PathResolver,
+};
 use post::{
     call_args::CallArgs, clean_up::clean_up, exhaust::ExhaustAnalyzer,
     fn_generics_check::FnGenericsCheck, traits_fn::TraitsFnAnalyzer,
     traits_generic::TraitsGenericAnalyzer, union_init_arg::UnionInitArg,
 };
-use pre::{indexing::IndexingAnalyzer, method::MethodAnalyzer};
+use pre::indexing::IndexingAnalyzer;
 use std::{cell::RefCell, collections::HashMap};
 use ty::{
     context::TypeContext, generic_adt_creator::GenericAdtCreator,
     generic_collector::GenericCollector, generic_fn_creator::GenericFnCreator,
-    inferencer::TypeInferencer, solver::TypeSolver,
+    generic_tys_solved::GenericTysSolvedChecker, inferencer::TypeInferencer, solver::TypeSolver,
 };
 
 // TODO: Error if a function that doesn't have a return type has a return in it.
@@ -98,10 +101,20 @@ pub fn analyze(
         .traverse_token(ast_root)
         .take_errors()?;
 
+    debug!("Lookup tables after decl step:");
+    analyze_context.borrow().debug_print();
+
     debug!("Running MethodAnalyzer");
     let mut method_analyzer = MethodAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut method_analyzer)
+        .traverse_token(ast_root)
+        .take_errors()?;
+
+    debug!("Running PathResolver");
+    let mut path_resolver = PathResolver::new(&analyze_context);
+    AstTraverser::new()
+        .add_visitor(&mut path_resolver)
         .traverse_token(ast_root)
         .take_errors()?;
 
@@ -171,6 +184,13 @@ pub fn analyze(
     let mut generic_adt_creator = GenericAdtCreator::new(&mut type_context, generic_structs);
     AstTraverser::new()
         .add_visitor(&mut generic_adt_creator)
+        .traverse_token(ast_root)
+        .take_errors()?;
+
+    debug!("Running GenericTysSolvedChecker");
+    let mut generic_solved_checker = GenericTysSolvedChecker::new();
+    AstTraverser::new()
+        .add_visitor(&mut generic_solved_checker)
         .traverse_token(ast_root)
         .take_errors()?;
 

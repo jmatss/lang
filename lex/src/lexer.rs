@@ -13,7 +13,20 @@ use crate::{
 /// Lexes the characters in the source code to LexToken's and returns a vector
 /// containing all lex tokens.
 pub fn lex(file_nr: FileId, file_info: &FileInfo) -> Result<Vec<LexToken>, Vec<LangError>> {
-    let mut content = std::fs::read(&file_info.full_path()).map_err(|e| vec![e.into()])?;
+    let mut content = match std::fs::read(&file_info.full_path()) {
+        Ok(content) => content,
+        Err(fs_err) => {
+            return Err(vec![LangError::new(
+                format!(
+                    "Unable to read file to lex. Filename: {}, reason: {:#?}",
+                    &file_info.full_path(),
+                    fs_err.kind()
+                ),
+                LangErrorKind::LexError,
+                None,
+            )]);
+        }
+    };
     let mut iter = LexTokenIter::new(&mut content, file_nr);
 
     let mut lex_tokens = Vec::new();

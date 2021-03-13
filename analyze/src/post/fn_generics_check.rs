@@ -36,27 +36,27 @@ impl<'a> Visitor for FnGenericsCheck<'a> {
             return;
         }
 
-        if let Some(structure_ty) = &fn_call.method_adt {
-            if structure_ty.is_generic() {
+        if let Some(adt_ty) = &fn_call.method_adt {
+            if adt_ty.is_generic() {
                 return;
             }
 
-            let structure_name = structure_ty.get_ident().unwrap();
+            let adt_path = adt_ty.get_ident().unwrap();
 
-            let method = match self.analyze_context.get_adt_method(
-                &structure_name,
-                &fn_call.name,
-                ctx.block_id,
-            ) {
-                Ok(method) => method,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+            let method =
+                match self
+                    .analyze_context
+                    .get_method(&adt_path, &fn_call.name, ctx.block_id)
+                {
+                    Ok(method) => method,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
             let method = method.borrow();
 
-            if let Some(generic_impls) = &method.generic_impls {
+            if let Some(generic_impls) = &method.generics {
                 if generic_impls.is_empty() {
                     return;
                 }
@@ -64,11 +64,14 @@ impl<'a> Visitor for FnGenericsCheck<'a> {
                 if let Some(fn_call_generics) = &fn_call.generics {
                     if generic_impls.len() != fn_call_generics.len_types() {
                         let err = self.analyze_context.err(format!(
-                            "Func decl and func call generic count differ. \
-                            Func decl #: {}, func call #: {}. Fn_call: {:#?}",
+                            "Function declaration and function call generic count differs. \
+                            Function declaration amount: {}, function call amount: {}. \
+                            ADT: {}, method name: {}, file_pos: {:#?}",
                             generic_impls.len(),
                             fn_call_generics.len_types(),
-                            fn_call
+                            adt_path,
+                            fn_call.name,
+                            fn_call.file_pos
                         ));
                         self.errors.push(err);
                         return;
@@ -76,8 +79,9 @@ impl<'a> Visitor for FnGenericsCheck<'a> {
                 } else {
                     // TODO: Better error message.
                     let err = self.analyze_context.err(format!(
-                        "Func decl contains generics, generics not specified for func call: {:#?}",
-                        fn_call
+                        "Function declaration specifies generics, but no generics were given when \
+                        calling the function. ADT: {}, method name: {}, file_pos: {:#?}",
+                        adt_path, fn_call.name, fn_call.file_pos
                     ));
                     self.errors.push(err);
                     return;

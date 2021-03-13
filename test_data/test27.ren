@@ -1,18 +1,13 @@
-use std.assert
-
 fn two2(a: i32, b: i32)
 {
-
 }
 
 fn two(a: i32, b: f32)
 {
-
 }
 
 fn three(a: i32, b: f32, c: bool)
 {
-
 }
 
 fn main() -> i32

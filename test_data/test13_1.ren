@@ -1,0 +1,11 @@
+extern fn printf(format: {u8}, ...) -> i32
+
+fn main() -> i32
+{
+    var i = 3
+
+    second_file::double(i.&)
+    printf("i: %d", i)
+
+    return 0
+}

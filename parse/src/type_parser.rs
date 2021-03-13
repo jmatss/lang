@@ -2,6 +2,7 @@ use crate::parser::{ParseTokenIter, DEFAULT_ASSIGN_STOP_CONDS};
 use common::{
     error::LangResult,
     file::FilePosition,
+    path::LangPathBuilder,
     token::expr::Expr,
     ty::{
         generics::{Generics, GenericsKind},
@@ -25,12 +26,18 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     pub fn parse(
         iter: &'a mut ParseTokenIter<'b>,
         generics: Option<&'a Generics>,
+        path_builder: LangPathBuilder,
     ) -> LangResult<Ty> {
-        Self::new(iter, generics).parse_type()
+        Self::new(iter, generics).parse_type_with_path(path_builder)
+    }
+
+    fn parse_type(&mut self) -> LangResult<Ty> {
+        self.parse_type_with_path(LangPathBuilder::default())
     }
 
     /// Valid type formats:
     ///   X            // Basic type.
+    ///   ns::X        // Basic type with added module/namespace.
     ///   {X}          // Pointer to type (is the {X} syntax weird/ambiguous (?))
     ///   X<T>         // Type with generic argument.
     ///   X<T, V>      // Type with multiple generic arguments.
@@ -44,41 +51,54 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     ///   C                     Lang
     ///   uint32_t *(*x)[]      x: {[{u32}]}
     ///   char *x               x: {char}
-    fn parse_type(&mut self) -> LangResult<Ty> {
+    fn parse_type_with_path(&mut self, mut path_builder: LangPathBuilder) -> LangResult<Ty> {
         let mut file_pos = self.iter.peek_file_pos()?;
 
         if let Some(lex_token) = self.iter.next_skip_space() {
             match lex_token.kind {
                 // Ident.
                 LexTokenKind::Ident(ref ident) => {
-                    let generics = match self.parse_type_generics(GenericsKind::Impl)? {
-                        (generics, Some(file_pos_last)) => {
-                            file_pos.set_end(&file_pos_last)?;
-                            generics
-                        }
-                        (generics, None) => {
-                            file_pos.set_end(&lex_token.file_pos)?;
-                            generics
-                        }
-                    };
-                    let generics = generics.unwrap();
+                    path_builder.add_path(ident).file_pos(file_pos);
 
-                    // Wrap the current ident into a "Generic" if it exists in
-                    // the `self.generics` map. Otherwise return it as a
-                    // "UnknownIdent" wrapped in a "CompoundType".
-                    if let Some(true) = self.generics.map(|g| g.contains(ident)) {
-                        file_pos.set_end(&lex_token.file_pos)?;
-
-                        if !generics.is_empty() {
-                            panic!("TODO: Generic decl in type has generics itself.");
-                        }
-
-                        let type_info = TypeInfo::Generic(file_pos);
-                        Ok(Ty::Generic(ident.clone(), type_info))
+                    if let Some(LexTokenKind::Sym(Sym::DoubleColon)) =
+                        self.iter.peek_skip_space().map(|t| t.kind)
+                    {
+                        // This is a module/name space ident, call this function
+                        // recursively to parse the whole type.
+                        self.iter.next_skip_space();
+                        self.parse_type_with_path(path_builder)
                     } else {
-                        let inner_ty = InnerTy::ident_to_type(&ident, self.iter.current_block_id());
-                        let type_info = TypeInfo::Default(file_pos);
-                        Ok(Ty::CompoundType(inner_ty, generics, type_info))
+                        // This is ident that represents a name of a type/ADT.
+                        let generics = match self.parse_type_generics(GenericsKind::Impl)? {
+                            (generics, Some(file_pos_last)) => {
+                                file_pos.set_end(&file_pos_last)?;
+                                generics
+                            }
+                            (generics, None) => {
+                                file_pos.set_end(&lex_token.file_pos)?;
+                                generics
+                            }
+                        };
+                        let generics = generics.unwrap();
+
+                        // Wrap the current ident into a "Generic" if it exists in
+                        // the `self.generics` map. Otherwise return it as a
+                        // "UnknownIdent" wrapped in a "CompoundType".
+                        if let Some(true) = self.generics.map(|g| g.contains(ident)) {
+                            if !generics.is_empty() {
+                                panic!("TODO: Generic decl in type has generics itself.");
+                            }
+
+                            let type_info = TypeInfo::Generic(file_pos);
+                            Ok(Ty::Generic(ident.clone(), type_info))
+                        } else {
+                            let inner_ty = InnerTy::ident_to_type(
+                                &path_builder.build().full_name(),
+                                self.iter.current_block_id(),
+                            );
+                            let type_info = TypeInfo::Default(file_pos);
+                            Ok(Ty::CompoundType(inner_ty, generics, type_info))
+                        }
                     }
                 }
 
@@ -244,7 +264,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     generics.insert_type(ty.clone());
                     *ty.file_pos().unwrap()
                 }
-                _ => panic!("Bad GenericsKind: {:#?}", generics),
+                GenericsKind::Empty => file_pos.to_owned(),
             };
 
             let pos = self.iter.pos();

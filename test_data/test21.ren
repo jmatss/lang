@@ -1,4 +1,4 @@
-use std.assert
+extern fn printf(format: {u8}, ...) -> i32
 
 struct TestStruct
 {
@@ -13,8 +13,8 @@ fn main() -> i32
     test_struct.b = 3.4
 
     printf("x: %d, test_struct.b: %f", x, test_struct.b)
-    Assert::equals_i32(x, 123, "abc123")
-    Assert::equals_f64(test_struct.b, 3.4, 0.001)
+    std::assert(x == 123)
+    std::assert(test_struct.b == 3.4)
 
     return 0
 }

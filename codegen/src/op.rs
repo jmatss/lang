@@ -3,6 +3,7 @@ use analyze::block::BlockInfo;
 use common::{
     error::LangResult,
     file::FilePosition,
+    path::LangPathPart,
     token::{
         block::Adt,
         expr::Expr,
@@ -10,11 +11,10 @@ use common::{
         stmt::Stmt,
     },
     ty::ty::Ty,
-    util,
 };
 use inkwell::{
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
-    values::{AggregateValue, AnyValueEnum, BasicValueEnum, PointerValue},
+    values::{AggregateValue, AnyValueEnum, BasicValueEnum, IntValue, PointerValue},
     AddressSpace, FloatPredicate, IntPredicate,
 };
 use log::debug;
@@ -91,8 +91,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | BinOperator::Is
             | BinOperator::As
             | BinOperator::Of
-            | BinOperator::Dot
-            | BinOperator::DoubleColon => {}
+            | BinOperator::Dot => {}
 
             _ => {
                 if !self.is_same_base_type(left_type, right_type) {
@@ -121,7 +120,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BinOperator::Range => panic!("TODO: Range"),
             BinOperator::RangeInclusive => panic!("TODO: RangeInclusive"),
             BinOperator::Dot => unreachable!("Compile bin op Dot"),
-            BinOperator::DoubleColon => unreachable!("Compile bin op DoubleColon"),
 
             BinOperator::Eq
             | BinOperator::Neq
@@ -267,7 +265,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 )),
                 ExprTy::RValue => self.compile_un_op_enum_access(un_op),
             },
-            UnOperator::UnionIs(member_name, var_decl) => {
+            UnOperator::UnionIs(_, var_decl) => {
                 let var = if let Stmt::VariableDecl(var, ..) = var_decl.as_ref() {
                     var
                 } else {
@@ -286,63 +284,45 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     CodeGen::any_into_basic_value(union_access)?,
                 )?;
 
-                // TODO: Do in cleaner way.
-                // Get the type of the union and get the tag idx for the member
-                // that is being accessed. This will be compared to the actual
-                // tag idx of the variable in the code to see if this is a match
-                // or not.
-                let union_var = if let Expr::Op(Op::UnOp(inner_un_op)) = un_op.value.as_ref() {
-                    if let Expr::Var(union_var) = inner_un_op.value.as_ref() {
-                        union_var
-                    } else {
-                        unreachable!("inner_un_op.value not a var: {:#?}", un_op);
-                    }
+                let inner_un_op = if let Expr::Op(Op::UnOp(inner_un_op)) = un_op.value.as_mut() {
+                    inner_un_op
                 } else {
-                    unreachable!("un_op.value not union access: {:#?}", un_op);
+                    return Err(self.err(
+                        format!("Rhs value of UnionIs wasn't un op. Value: {:#?}", &un_op),
+                        un_op.file_pos.to_owned(),
+                    ));
                 };
 
-                let tag_cmp = if let Ty::CompoundType(inner_ty, generics, ..) =
-                    union_var.ty.as_ref().unwrap()
+                // The tag that this UnionIs is expected to match against.
+                let expected_tag = if let UnOperator::AdtAccess(_, tag_opt) = &inner_un_op.operator
                 {
-                    let adt_name = util::to_generic_name(&inner_ty.get_ident().unwrap(), generics);
-
-                    let expected_tag = self.analyze_context.get_adt_member_index(
-                        &adt_name,
-                        member_name,
-                        self.cur_block_id,
-                    )?;
-                    let expected_tag = self.context.i8_type().const_int(expected_tag, false);
-
-                    let union_var_ptr = self.get_var_ptr(union_var)?;
-                    let tag_ptr = self
-                        .builder
-                        .build_struct_gep(union_var_ptr, 0, "union.is.tag.gep")
-                        .map_err(|_| {
-                            self.err(
-                                format!("Unable to GEP union \"{}\" tag.", &adt_name),
-                                union_var.file_pos,
-                            )
-                        })?;
-
-                    let actual_tag = self.builder.build_load(tag_ptr, "union.is.tag.load");
-                    if !actual_tag.is_int_value() {
-                        unreachable!(
-                            "Union tag isn't IntValue. actual_tag: {:#?}, un_op: {:#?}",
-                            actual_tag, un_op
-                        );
+                    if let Some(tag) = tag_opt {
+                        self.context.i8_type().const_int(*tag, false)
+                    } else {
+                        unreachable!("Index not set for AdtAccess in UnionIs: {:#?}", inner_un_op);
                     }
+                } else {
+                    return Err(self.err(
+                        format!(
+                            "Rhs value of UnionIs wasn't AdtAccess. un_op value: {:#?}",
+                            &inner_un_op
+                        ),
+                        inner_un_op.file_pos.to_owned(),
+                    ));
+                };
 
-                    self.builder.build_int_compare(
+                // The actual tag of the current instance of the enum in the code.
+                let actual_tag = self.compile_union_tag_access(inner_un_op, expr_ty)?;
+
+                Ok(self
+                    .builder
+                    .build_int_compare(
                         IntPredicate::EQ,
                         expected_tag,
-                        actual_tag.into_int_value(),
+                        actual_tag,
                         "union.is.tag.cmp",
                     )
-                } else {
-                    unreachable!("inner_un_op.value type not compound: {:#?}", un_op);
-                };
-
-                Ok(tag_cmp.into())
+                    .into())
             }
             UnOperator::Positive => {
                 let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
@@ -1331,9 +1311,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let adt_ty = un_op.value.get_expr_type()?;
-        let adt_name = if let Ty::CompoundType(inner_ty, generics, ..) = &adt_ty {
+        let full_path = if let Ty::CompoundType(inner_ty, generics, ..) = &adt_ty {
             if inner_ty.is_adt() {
-                util::to_generic_name(&inner_ty.get_ident().unwrap(), generics)
+                let mut full_path = inner_ty.get_ident().unwrap();
+                let last_part = full_path.pop().unwrap();
+                full_path.push(LangPathPart(last_part.0, Some(generics.clone())));
+
+                full_path
             } else {
                 return Err(self.analyze_context.err(format!(
                     "Expression that was ADT accessed wasn't ADT, was: {:#?}",
@@ -1350,10 +1334,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // TODO: Don't hardcode default id.
         let id = BlockInfo::DEFAULT_BLOCK_ID;
 
-        if self.analyze_context.is_struct(&adt_name, id) {
+        if self.analyze_context.is_struct(&full_path, id) {
             self.compile_un_op_struct_access(un_op, expr_ty, idx as u32)
-        } else if self.analyze_context.is_union(&adt_name, id) {
-            let union_ = self.analyze_context.get_adt(&adt_name, id)?;
+        } else if self.analyze_context.is_union(&full_path, id) {
+            let union_ = self.analyze_context.get_adt(&full_path, id)?;
             self.compile_un_op_union_access(un_op, expr_ty, idx as u32, Rc::clone(&union_))
         } else {
             unreachable!("{:#?}", un_op);
@@ -1503,6 +1487,61 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
+    /// Returns the tag of a union as a IntValue.
+    fn compile_union_tag_access(
+        &mut self,
+        un_op: &mut UnOp,
+        expr_ty: ExprTy,
+    ) -> LangResult<IntValue<'ctx>> {
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
+        un_op.is_const = CodeGen::is_const(&[any_value]);
+
+        debug!(
+            "Compiling union tag access, -- un_op: {:#?}\nany_value: {:#?}",
+            un_op, any_value
+        );
+
+        let tag_idx = 0;
+        let tag_value = if any_value.is_pointer_value() {
+            let ptr = any_value.into_pointer_value();
+            let tag_ptr = self
+                .builder
+                .build_struct_gep(ptr, tag_idx, "union.tag.gep")
+                .map_err(|_| {
+                    self.err(format!("Unable to gep for union tag: {:?}.", un_op), None)
+                })?;
+            self.builder.build_load(tag_ptr, "union.tag.load")
+        } else if any_value.is_struct_value() {
+            // Known to be const at this point, so safe to "const extract".
+            if let ExprTy::RValue = expr_ty {
+                any_value
+                    .into_struct_value()
+                    .const_extract_value(&mut [tag_idx])
+            } else {
+                return Err(self.err(
+                    format!("StructValue not allowed in lvalue: {:#?}", un_op),
+                    None,
+                ));
+            }
+        } else {
+            return Err(self.err(
+                format!(
+                    "Expr in union tag access not a pointer or struct. Un up: {:#?}\ncompiled expr: {:#?}",
+                    un_op, any_value
+                ),
+                None,
+            ));
+        };
+
+        if !tag_value.is_int_value() {
+            unreachable!(
+                "Union tag isn't IntValue. actual_tag: {:#?}, un_op: {:#?}",
+                tag_value, un_op
+            );
+        }
+        Ok(tag_value.into_int_value())
+    }
+
     /// This function "creates" a instance of a member of a specific enum.
     /// This instance will be a const value.
     fn compile_un_op_enum_access(&mut self, un_op: &mut UnOp) -> LangResult<AnyValueEnum<'ctx>> {
@@ -1519,11 +1558,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 ));
             };
 
-        // TODO: Does the enum name need to be fetched in some other way in the
-        //       future? Will it be ex. prepended with package/module info?
-        let enum_name = if let Expr::Type(Ty::CompoundType(inner_ty, ..), ..) = un_op.value.as_ref()
+        let full_path = if let Expr::Type(Ty::CompoundType(inner_ty, ..), ..) = un_op.value.as_ref()
         {
-            inner_ty.to_string()
+            inner_ty.get_ident().unwrap()
         } else {
             return Err(self.err(
                 format!("Unop value in enum access not a enum type: {:#?}", un_op,),
@@ -1532,7 +1569,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let member = self.analyze_context.get_adt_member(
-            &enum_name,
+            &full_path,
             &member_name,
             block_id,
             un_op.file_pos,
@@ -1545,19 +1582,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return Err(self.err(
                 format!(
                     "Member of enum \"{}\" has no value set, member: {:#?}",
-                    enum_name, member
+                    full_path, member
                 ),
                 None,
             ));
         };
 
-        let enum_ty = if let Some(enum_ty) = self.module.get_struct_type(&enum_name) {
+        let enum_ty = if let Some(enum_ty) = self.module.get_struct_type(&full_path.to_string()) {
             enum_ty
         } else {
             return Err(self.err(
                 format!(
                     "Unable to find enum with name \"{}\" in codegen module.",
-                    enum_name
+                    full_path
                 ),
                 None,
             ));
@@ -1565,7 +1602,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         debug!(
             "Compiling enum access -- enum_name: {}, member_name: {}, basic_value: {:#?}",
-            enum_name, member_name, basic_value
+            full_path, member_name, basic_value
         );
 
         Ok(enum_ty.const_named_struct(&[basic_value]).into())

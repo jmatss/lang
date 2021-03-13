@@ -25,8 +25,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         // TODO: Currently only returns the first error, should return all.
         let include_impls = false;
-        let full_names = true;
-        let order = dependency_order(ast_token, include_impls, full_names)
+        let full_paths = true;
+        let order = dependency_order(self.analyze_context, ast_token, include_impls, full_paths)
             .map_err(|e| e.first().cloned().unwrap())?;
 
         for ident in &order {
@@ -60,37 +60,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if let AstToken::Block(header, file_pos, id, ref mut body) = &mut ast_token {
             self.cur_block_id = *id;
 
-            match header {
-                BlockHeader::Fn(func) => {
-                    let func = func.borrow();
-                    let linkage =
-                        if func.name == "main" || func.modifiers.contains(&Modifier::Public) {
-                            Linkage::External
-                        } else {
-                            // Private and Hidden.
-                            // TODO: Linkage::Private
-                            ();
-                            Linkage::External
-                        };
-                    self.compile_fn_proto(&func, Some(file_pos.to_owned()), Some(linkage))?;
-                }
-                BlockHeader::Implement(..) => {
-                    for mut ast_token in body.iter_mut() {
-                        if let AstToken::Block(BlockHeader::Fn(func), ..) = &mut ast_token {
-                            let func = func.borrow();
-                            let linkage = if func.name == "main"
-                                || func.modifiers.contains(&Modifier::Public)
-                            {
-                                Linkage::External
-                            } else {
-                                // Private and Hidden.
-                                Linkage::Private
-                            };
-                            self.compile_fn_proto(&func, Some(file_pos.to_owned()), Some(linkage))?;
-                        }
-                    }
-                }
-                _ => (),
+            if let BlockHeader::Fn(func) = header {
+                let func = func.borrow();
+                let linkage = if func.name == "main" || func.modifiers.contains(&Modifier::Public) {
+                    Linkage::External
+                } else {
+                    // Private and Hidden.
+                    // TODO: Linkage::Private
+                    ();
+                    Linkage::External
+                };
+                self.compile_fn_proto(&func, Some(file_pos.to_owned()), Some(linkage))?;
             }
 
             for token in body {

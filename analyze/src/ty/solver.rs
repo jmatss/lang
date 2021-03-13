@@ -79,6 +79,13 @@ impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
         debug!("Done with deep solve.");
     }
 
+    fn visit_end(&mut self, _ctx: &TraverseContext) {
+        debug!(
+            "Type solving done.\nSubs: {}",
+            self.type_context.pretty_print_subs()
+        );
+    }
+
     fn visit_type(&mut self, ty: &mut Ty, ctx: &TraverseContext) {
         self.subtitute_type(ty, ctx.block_id);
     }

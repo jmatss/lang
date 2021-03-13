@@ -1,4 +1,4 @@
-use std.assert
+extern fn printf(format: {u8}, ...) -> i32
 
 struct TestStruct
 {
@@ -13,7 +13,7 @@ fn main() -> i32
 
     var ret = ptr.* + ptr.*
     printf("ret: %d", ret)
-    assert(ret == 246)
+    std::assert(ret == 246)
 
     return 0
 }

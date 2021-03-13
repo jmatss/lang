@@ -10,7 +10,6 @@ use common::{
     },
     traverser::TraverseContext,
     ty::{inner_ty::InnerTy, ty::Ty},
-    util,
     visitor::Visitor,
 };
 use std::{
@@ -176,16 +175,26 @@ impl<'a> Visitor for CallArgs<'a> {
             return;
         }
 
-        // If this is a function contained in a structure (method), one needs to
+        // If this is a function contained in a ADT/trait (method), one needs to
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
-        let func_res = if let Some(ty) = &fn_call.method_adt {
-            let full_struct_name = match ty {
+        let func_res = if let Some(adt_ty) = &fn_call.method_adt {
+            let full_path = match adt_ty {
                 Ty::CompoundType(inner_ty, generics, ..) => match inner_ty {
-                    InnerTy::Struct(ident)
-                    | InnerTy::Enum(ident)
-                    | InnerTy::Union(ident)
-                    | InnerTy::Trait(ident) => util::to_generic_name(ident, generics),
+                    InnerTy::Struct(path)
+                    | InnerTy::Enum(path)
+                    | InnerTy::Union(path)
+                    | InnerTy::Trait(path) => {
+                        // TODO: Is this needed? Just want to make sure that the
+                        //       generics are as up-to-date as possible.
+                        let mut path_clone = path.clone();
+
+                        let mut last_part = path_clone.pop().unwrap();
+                        last_part.1 = Some(generics.clone());
+                        path_clone.push(last_part);
+
+                        path_clone
+                    }
                     _ => {
                         let err = self.analyze_context.err(format!(
                             "Bad inner type for func call method_structure: {:#?}",
@@ -205,14 +214,25 @@ impl<'a> Visitor for CallArgs<'a> {
                 }
             };
 
-            self.analyze_context.get_adt_method(
-                &full_struct_name,
-                &fn_call.half_name(),
-                ctx.block_id,
-            )
-        } else {
             self.analyze_context
-                .get_func(&fn_call.half_name(), ctx.block_id)
+                .get_method(&full_path, &fn_call.half_name(), ctx.block_id)
+        } else {
+            let partial_path = fn_call
+                .module
+                .clone_push(&fn_call.name, fn_call.generics.as_ref());
+
+            let full_path = match self
+                .analyze_context
+                .calculate_fn_full_path(&partial_path, ctx.block_id)
+            {
+                Ok(full_path) => full_path,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            self.analyze_context.get_fn(&full_path, ctx.block_id)
         };
 
         let func = match func_res {
@@ -254,15 +274,32 @@ impl<'a> Visitor for CallArgs<'a> {
             AdtKind::Enum | AdtKind::Unknown => unreachable!("{:#?}", adt_init.kind),
         }
 
-        let full_name = match adt_init.full_name() {
-            Ok(full_name) => full_name,
+        let generics = if let Some(Ty::CompoundType(_, generics, _)) = adt_init.ret_type.as_ref() {
+            if generics.len_types() > 0 {
+                Some(generics.clone())
+            } else {
+                None
+            }
+        } else {
+            unreachable!("Adt init type not compound: {:#?}", adt_init);
+        };
+
+        let partial_path = adt_init
+            .module
+            .clone_push(&adt_init.name, generics.as_ref());
+
+        let full_path = match self
+            .analyze_context
+            .calculate_adt_full_path(&partial_path, ctx.block_id)
+        {
+            Ok(full_path) => full_path,
             Err(err) => {
                 self.errors.push(err);
                 return;
             }
         };
 
-        let adt = match self.analyze_context.get_adt(&full_name, ctx.block_id) {
+        let adt = match self.analyze_context.get_adt(&full_path, ctx.block_id) {
             Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);

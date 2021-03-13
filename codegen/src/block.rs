@@ -6,13 +6,14 @@ use common::{
         LangResult,
     },
     file::FilePosition,
+    path::LangPath,
     token::{
         ast::AstToken,
         block::{Adt, BlockHeader, Fn},
         expr::{Expr, Var},
     },
     ty::{inner_ty::InnerTy, ty::Ty},
-    BlockId,
+    util, BlockId,
 };
 use inkwell::{
     basic_block::BasicBlock,
@@ -198,7 +199,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         match header {
             BlockHeader::Default => {
                 for token in body {
-                    self.compile(token)?
+                    self.compile(token)?;
+                    self.cur_block_id = id;
                 }
             }
             BlockHeader::Fn(func) => {
@@ -255,6 +257,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             //BlockHeader::Test(test_func) => self.compile_test_func(expr),
             _ => panic!(format!("TODO: compile_block type: {:?}", header)),
         }
+
         Ok(())
     }
 
@@ -284,11 +287,38 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         func_id: BlockId,
         body: &mut [AstToken],
     ) -> LangResult<()> {
-        let fn_val = if let Some(fn_val) = self.module.get_function(&func.full_name()?) {
+        let module = if let Some(module) = self.analyze_context.get_module(self.cur_block_id)? {
+            module
+        } else {
+            LangPath::default()
+        };
+
+        let fn_name = if let Some(adt_ty) = &func.method_adt {
+            if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
+                let adt_path = inner_ty.get_ident().unwrap();
+                util::to_method_name(
+                    &adt_path.last().cloned().unwrap().into(),
+                    Some(adt_gens),
+                    &func.name,
+                    None,
+                )
+            } else {
+                unreachable!("method call on non compund type: {:#?}", func);
+            }
+        } else {
+            func.name.clone()
+        };
+
+        let full_path = module.clone_push(&fn_name, func.generics.as_ref());
+
+        let fn_val = if let Some(fn_val) = self.module.get_function(&full_path.full_name()) {
             fn_val
         } else {
             return Err(self.err(
-                format!("Unable to find function with name \"{}\".", func.name),
+                format!(
+                    "Unable to find function with name \"{}\".",
+                    &full_path.full_name()
+                ),
                 Some(file_pos.to_owned()),
             ));
         };
@@ -310,7 +340,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return Err(self.err(
                 format!(
                     "Incorrect amount of parameters when generating function \"{:?}\". fn_val len: {}, params len: {}",
-                    &func.full_name(),
+                    &full_path,
                     fn_val.get_params().len(),
                     params.len()
                 ),
@@ -374,6 +404,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> LangResult<FunctionValue<'ctx>> {
         debug!("compile_fn_proto: {:#?}", func);
 
+        let module = if let Some(module) = self.analyze_context.get_module(self.cur_block_id)? {
+            module
+        } else {
+            LangPath::default()
+        };
+
+        let fn_name = if let Some(adt_ty) = &func.method_adt {
+            if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
+                let adt_path = inner_ty.get_ident().unwrap();
+                let last_part = adt_path.last().unwrap();
+                let short_adt_path = LangPath::new(vec![last_part.clone()], None);
+
+                util::to_method_name(&short_adt_path, Some(adt_gens), &func.name, None)
+            } else {
+                unreachable!("method call on non compund type: {:#?}", func);
+            }
+        } else {
+            func.name.clone()
+        };
+
+        let full_path = module.clone_push(&fn_name, func.generics.as_ref());
+
         let param_types = if let Some(params) = &func.parameters {
             let mut inner_types = Vec::with_capacity(params.len());
             for param in params {
@@ -388,8 +440,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     return Err(self.err(
                         format!(
                             "Bad type for parameter with name\"{}\" in function \"{}\".",
-                            &param.name,
-                            &func.full_name()?
+                            &param.name, &full_path
                         ),
                         param.file_pos.to_owned(),
                     ));
@@ -422,7 +473,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         Ok(self
             .module
-            .add_function(&func.full_name()?, fn_type, linkage_opt))
+            .add_function(&full_path.full_name(), fn_type, linkage_opt))
     }
 
     fn compile_anon(
@@ -810,6 +861,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_struct(&mut self, struct_: &Adt) -> LangResult<()> {
         debug!("Compiling struct -- {:#?}", struct_);
 
+        let full_path = struct_
+            .module
+            .clone_push(&struct_.name, struct_.generics.as_ref());
+
         let members = &struct_.members;
         let mut member_types = Vec::with_capacity(members.len());
 
@@ -827,7 +882,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Bad type for struct \"{}\" member \"{}\".",
-                        &struct_.name, &member.name
+                        &full_path, &member.name
                     ),
                     member_file_pos,
                 ));
@@ -835,7 +890,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         let packed = false;
-        let struct_ty = self.context.opaque_struct_type(&struct_.name);
+        let struct_ty = self.context.opaque_struct_type(&full_path.full_name());
         struct_ty.set_body(member_types.as_ref(), packed);
 
         Ok(())
@@ -843,6 +898,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub(super) fn compile_enum(&mut self, enum_: &Adt) -> LangResult<()> {
         debug!("Compiling enum -- {:#?}", enum_);
+
+        let full_path = enum_
+            .module
+            .clone_push(&enum_.name, enum_.generics.as_ref());
 
         // Create a new struct type containing a single member that has the type
         // of the "inner enum type". This will most likely be a integer type.
@@ -860,14 +919,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "No default value set for first member in enum \"{}\".",
-                        &enum_.name
+                        &full_path
                     ),
                     member_file_pos,
                 ));
             }
         } else {
             return Err(self.err(
-                format!("Unable to find first member in enum \"{}\".", &enum_.name),
+                format!("Unable to find first member in enum \"{}\".", &full_path),
                 None,
             ));
         };
@@ -876,7 +935,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let basic_ty = CodeGen::any_into_basic_type(any_ty)?;
 
         let packed = false;
-        let enum_ty = self.context.opaque_struct_type(&enum_.name);
+        let enum_ty = self.context.opaque_struct_type(&full_path.full_name());
         enum_ty.set_body(&[basic_ty], packed);
 
         Ok(())
@@ -887,6 +946,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// of the largest member.
     pub(super) fn compile_union(&mut self, union: &Adt) -> LangResult<()> {
         debug!("Compiling union -- {:#?}", union);
+
+        let full_path = union
+            .module
+            .clone_push(&union.name, union.generics.as_ref());
 
         let mut largest_size = 0;
 
@@ -912,7 +975,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Bad type for union \"{}\" member \"{}\".",
-                        &union.name, &member.name
+                        &full_path, &member.name
                     ),
                     member_file_pos,
                 ));
@@ -923,7 +986,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let member_ty = self.context.i8_type().array_type(largest_size as u32);
 
         let packed = false;
-        let union_ty = self.context.opaque_struct_type(&union.name);
+        let union_ty = self.context.opaque_struct_type(&full_path.full_name());
         union_ty.set_body(&[tag_ty.into(), member_ty.into()], packed);
 
         Ok(())

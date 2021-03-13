@@ -1,4 +1,4 @@
-use std.assert
+extern fn printf(format: {u8}, ...) -> i32
 
 struct TestStruct
 {
@@ -31,17 +31,17 @@ fn main() -> i32
 
     var by_ref = test_struct.&.inc()
     printf("by_ref: %llu, test_struct.x: %d", by_ref, test_struct.x)
-    assert(by_ref == 6)
-    assert(test_struct.x == 6)
+    std::assert(by_ref == 6)
+    std::assert(test_struct.x == 6)
 
     var by_val = test_struct.inc_by_val()
     printf("\nby_val: %llu, test_struct.x: %d", by_val, test_struct.x)
-    assert(by_val == 7)
-    assert(test_struct.x == 6)
+    std::assert(by_val == 7)
+    std::assert(test_struct.x == 6)
 
     var by_static = TestStruct::static_inc(5)
     printf("\nby_static: %llu", by_static)
-    assert(by_static == 6)
+    std::assert(by_static == 6)
 
     return 0
 }

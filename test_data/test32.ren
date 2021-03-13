@@ -1,4 +1,4 @@
-use std.assert
+extern fn printf(format: {u8}, ...) -> i32
 
 struct TestStruct<T>
 {
@@ -10,40 +10,36 @@ fn main() -> i32
     var i1 = 1
     var i2 = 2
     var i3: i16 = 3
-    //var i4 = 4
+    var i4 = 4
     var f1 = 123.
     var f2 = 456.
 
-    //var test_struct_i32 = TestStruct { i1 }
+    var test_struct_i32 = TestStruct { i1 }
     var test_struct_u64 = TestStruct<u64> { i2 }
     var test_struct_i16 = TestStruct { i3 }
-    //var test_struct_i8  = TestStruct { i4 }
-    //var test_struct_f32 = TestStruct { f1 }
+    var test_struct_i8  = TestStruct { i4 }
+    var test_struct_f32 = TestStruct { f1 }
     var test_struct_f64 = TestStruct<f64> { f2 }
 
     var expected_i32 = 1
     var expected_u64 = 2
     var expected_i16 = 3
-    // TODO: Make this work. This variable is being compared to the `test_struct_i8.inner` at
-    //       line 40, so the inner should be infereed to being i8. This isn't the case currently,
-    //       it is infered to being a unknown int and becomes i32 because the type of the `i4`
-    //       is prefereed, and the assert with the i8 is solved "to late".
-    //var expected_i8: i8 = 4
-    //var expected_f32 = 123.
+    var expected_i8: i8 = 4
+    var expected_f32 = 123.
     var expected_f64 = 456.
 
-    //printf("expected_i32: %d, test_struct_i32.inner: %d\n", expected_i32, test_struct_i32.inner)
-    //assert(expected_i32 == test_struct_i32.inner)
+    printf("expected_i32: %d, test_struct_i32.inner: %d\n", expected_i32, test_struct_i32.inner)
+    std::assert(expected_i32 == test_struct_i32.inner)
     printf("expected_u64: %llu, test_struct_u64.inner: %llu\n", expected_u64, test_struct_u64.inner)
-    assert(expected_u64 == test_struct_u64.inner)
+    std::assert(expected_u64 == test_struct_u64.inner)
     printf("expected_i16: %d, test_struct_i16.inner: %d\n", expected_i16 as i32, test_struct_i16.inner as i32)
-    assert(expected_i16 == test_struct_i16.inner)
-    //printf("expected_i8: %d, test_struct_i8.inner: %d\n", expected_i8 as i32, test_struct_i8.inner as i32)
-    //assert(expected_i8 == test_struct_i8.inner)
-    //printf("expected_f32: %f, test_struct_f32.inner: %f\n", expected_f32 as f64, test_struct_f32.inner as f64)
-    //assert(expected_f32 == test_struct_f32.inner)
+    std::assert(expected_i16 == test_struct_i16.inner)
+    printf("expected_i8: %d, test_struct_i8.inner: %d\n", expected_i8 as i32, test_struct_i8.inner as i32)
+    std::assert(expected_i8 == test_struct_i8.inner)
+    printf("expected_f32: %f, test_struct_f32.inner: %f\n", expected_f32 as f64, test_struct_f32.inner as f64)
+    std::assert(expected_f32 == test_struct_f32.inner)
     printf("expected_f64: %f, test_struct_f64.inner: %f", expected_f64, test_struct_f64.inner)
-    assert(expected_f64 == test_struct_f64.inner)
+    std::assert(expected_f64 == test_struct_f64.inner)
 
     return 0
 }

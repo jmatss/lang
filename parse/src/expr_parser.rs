@@ -1,9 +1,10 @@
 use common::{
     error::LangResult,
     file::FilePosition,
+    path::LangPathBuilder,
     token::{
         block::AdtKind,
-        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall},
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, FnPtr},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
     ty::{
@@ -13,7 +14,7 @@ use common::{
     },
     type_info::TypeInfo,
 };
-use lex::token::{Kw, LexTokenKind, Sym};
+use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 use log::debug;
 
 use crate::{
@@ -41,6 +42,9 @@ pub struct ExprParser<'a, 'b> {
 
     /// This bool is used to ensure that all "operands" are separated by operators.
     prev_was_operand: bool,
+
+    /// The previos lex token.
+    prev: Option<LexToken>,
 
     /// Keeps a count of the parenthesis seen in the expression.
     /// This number gets incremented when a "ParenthesisBegin" is found and gets
@@ -73,6 +77,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             operators: Vec::new(),
             stop_conds,
             prev_was_operand: false,
+            prev: None,
             parenthesis_count: 0,
         };
 
@@ -268,35 +273,23 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 LexTokenKind::Kw(Kw::Function) => {
                     let mut expr_file_pos = lex_token.file_pos.to_owned();
 
-                    let fn_name = if let Some(next_token) = self.iter.next_skip_space_line() {
-                        if let LexTokenKind::Ident(fn_name) = next_token.kind {
-                            expr_file_pos.set_end(&next_token.file_pos)?;
-                            fn_name
-                        } else {
-                            return Err(self.iter.err(
-                                format!(
-                                    "Expected fn_name ident after \"fn\" keyword in expr, got: {:#?}",
-                                    next_token
-                                ),
-                                Some(next_token.file_pos),
-                            ));
-                        }
-                    } else {
-                        return Err(self.iter.err(
-                            "Parsed None operator during expression for Kw::Function.".into(),
-                            Some(lex_token.file_pos),
-                        ));
-                    };
+                    let mut module = self
+                        .iter
+                        .parse_path(&mut expr_file_pos, GenericsKind::Impl)?;
 
-                    let generics =
-                        if let Some(generics) = self.parse_generic_impls(&mut expr_file_pos) {
-                            generics
-                        } else {
-                            Generics::empty()
-                        };
+                    let last_part = module.pop().unwrap();
+                    let name = last_part.0;
+                    let generics = last_part.1;
+
                     file_pos.set_end(&expr_file_pos)?;
 
-                    let expr = Expr::FnPtr(fn_name, generics, None, Some(expr_file_pos));
+                    let expr = Expr::FnPtr(FnPtr::new(
+                        name,
+                        module,
+                        generics,
+                        None,
+                        Some(expr_file_pos),
+                    ));
                     self.shunt_operand(expr)?;
                 }
 
@@ -355,6 +348,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     ));
                 }
             }
+
+            self.prev = Some(lex_token)
         }
 
         // Move the remaining `operators` to `outputs` before parsing the expression.
@@ -379,8 +374,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             self.iter.rewind_skip_space()?;
             self.iter.rewind_skip_space()?;
 
-            let prev_operand = self.iter.next_skip_space().unwrap();
-            self.iter.next_skip_space(); // Skip cur expr.
+            let prev_operand = self.prev.clone().unwrap();
 
             let mut err_file_pos = prev_operand.file_pos.to_owned();
             err_file_pos.set_end(expr.file_pos().unwrap())?;
@@ -602,8 +596,22 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         Ok(result_expr)
     }
 
-    fn parse_expr_ident(&mut self, ident: &str, mut file_pos: FilePosition) -> LangResult<Expr> {
+    fn parse_expr_ident(&mut self, ident: &str, file_pos: FilePosition) -> LangResult<Expr> {
+        self.parse_expr_ident_with_path(ident, file_pos, LangPathBuilder::default())
+    }
+
+    /// The given ident expression might be the start of a path. In that case
+    /// this function will be called recursively until the last identifier isn't
+    /// followed by a double colon.
+    fn parse_expr_ident_with_path(
+        &mut self,
+        ident: &str,
+        mut file_pos: FilePosition,
+        mut path_builder: LangPathBuilder,
+    ) -> LangResult<Expr> {
         let generics = self.parse_generic_impls(&mut file_pos);
+
+        path_builder.add_path(ident).file_pos(file_pos.to_owned());
 
         let pos = self.iter.pos();
 
@@ -624,8 +632,12 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
                     file_pos.set_end(&args_file_pos)?;
 
+                    let mut module = path_builder.build();
+                    module.pop();
+
                     Ok(Expr::FnCall(FnCall::new(
                         ident.into(),
+                        module,
                         arguments,
                         generics,
                         Some(file_pos),
@@ -643,8 +655,12 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
                     file_pos.set_end(&args_file_pos)?;
 
+                    let mut module = path_builder.build();
+                    module.pop();
+
                     Ok(Expr::AdtInit(AdtInit::new(
                         ident.into(),
+                        module,
                         arguments,
                         generics,
                         Some(file_pos),
@@ -652,18 +668,35 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     )))
                 }
 
-                // Static method/variable access, this is the lhs type.
+                // Either a static method/variable access or the lhs of a path.
+                // Add this path to the `path_builder` and call this function
+                // recursively until the end of the "path" is found.
                 LexTokenKind::Sym(Sym::DoubleColon)
                     if !self.stop_conds.contains(&Sym::DoubleColon) =>
                 {
-                    Ok(Expr::Type(
-                        Ty::CompoundType(
-                            InnerTy::UnknownIdent(ident.into(), self.iter.current_block_id()),
-                            generics.unwrap_or_else(Generics::empty),
-                            TypeInfo::Default(file_pos.to_owned()),
-                        ),
-                        Some(file_pos.to_owned()),
-                    ))
+                    // Consume the double colon
+                    self.iter.next_skip_space().unwrap();
+
+                    let next_lex_token = if let Some(lex_token) = self.iter.next_skip_space() {
+                        lex_token
+                    } else {
+                        return Err(self
+                            .iter
+                            .err("Got None after double colon path".into(), Some(file_pos)));
+                    };
+
+                    if let LexTokenKind::Ident(new_ident) = next_lex_token.kind {
+                        file_pos.set_end(&next_lex_token.file_pos)?;
+                        self.parse_expr_ident_with_path(&new_ident, file_pos, path_builder)
+                    } else {
+                        Err(self.iter.err(
+                            format!(
+                                "Expected ident after double colon path, found: {:#?}",
+                                next_lex_token
+                            ),
+                            Some(file_pos),
+                        ))
+                    }
                 }
 
                 _ => {
@@ -678,7 +711,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                                 // identifier and parse as type.
                                 self.iter.rewind_to_pos(pos);
 
-                                let ty = self.iter.parse_type(None)?;
+                                let ty = self.iter.parse_type_with_path(None, path_builder)?;
                                 let ty_file_pos = ty.file_pos().cloned();
                                 return Ok(Expr::Type(ty, ty_file_pos));
                             }
@@ -687,20 +720,47 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         }
                     }
 
-                    // Otherwise this is just a regular variable name.
-                    let parse_type = true;
-                    let parse_value = false;
-                    let is_const = false;
-                    let var = self.iter.parse_var(
-                        ident,
-                        parse_type,
-                        parse_value,
-                        is_const,
-                        generics.as_ref(),
-                        file_pos,
-                    )?;
+                    // If there are more than one part in the built up path, it
+                    // means that this must be some kind of "static" access on
+                    // a identifier. Currently the only valid static variable
+                    // access is on enums, so this must be a enum usage.
+                    //
+                    // If there is no path built up(just a single identifier),
+                    // this must be a regular variable.
+                    if path_builder.count() > 1 {
+                        let mut adt_path = path_builder.build();
+                        adt_path.pop(); // Remove the name of the enum variant.
 
-                    Ok(Expr::Var(var))
+                        let enum_ty = Ty::CompoundType(
+                            InnerTy::Enum(adt_path),
+                            Generics::empty(),
+                            TypeInfo::Default(file_pos.to_owned()),
+                        );
+                        let enum_access =
+                            UnOperator::EnumAccess(ident.into(), self.iter.current_block_id());
+                        let un_op = UnOp::new(
+                            enum_access,
+                            Box::new(Expr::Type(enum_ty, Some(file_pos.to_owned()))),
+                            Some(file_pos.to_owned()),
+                        );
+
+                        Ok(Expr::Op(Op::UnOp(un_op)))
+                    } else {
+                        // Otherwise this is just a regular variable name.
+                        let parse_type = true;
+                        let parse_value = false;
+                        let is_const = false;
+                        let var = self.iter.parse_var(
+                            ident,
+                            parse_type,
+                            parse_value,
+                            is_const,
+                            generics.as_ref(),
+                            file_pos,
+                        )?;
+
+                        Ok(Expr::Var(var))
+                    }
                 }
             }
         } else {

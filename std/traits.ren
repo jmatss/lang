@@ -1,4 +1,0 @@
-trait Disposable
-{
-    fn {this} deinit();
-}

@@ -1,7 +1,7 @@
 use crate::AnalyzeContext;
 use common::{
     error::LangError,
-    token::{ast::AstToken, expr::Expr, stmt::Stmt},
+    token::{ast::AstToken, block::BlockHeader, expr::Expr, stmt::Stmt},
     traverser::TraverseContext,
     visitor::Visitor,
     BlockId,
@@ -22,6 +22,8 @@ pub struct DeferAnalyzer<'a> {
     /// seen. This ensures that only the defers that have been "initialized"/"seen"
     /// will be inserted before a branch away which is the expected behaviour.
     pub defer_stmts: HashMap<BlockId, Vec<Expr>>,
+
+    errors: Vec<LangError>,
 }
 
 impl<'a> DeferAnalyzer<'a> {
@@ -29,6 +31,7 @@ impl<'a> DeferAnalyzer<'a> {
         Self {
             analyze_context,
             defer_stmts: HashMap::default(),
+            errors: Vec::default(),
         }
     }
 
@@ -43,6 +46,8 @@ impl<'a> DeferAnalyzer<'a> {
         }
     }
 
+    /// Inserts the given `defers` into the vector `body` starting at the index
+    /// `i` and shifts all following tokens to the right.
     fn insert_defers_into_ast(
         &mut self,
         i: &mut usize,
@@ -52,6 +57,13 @@ impl<'a> DeferAnalyzer<'a> {
         for expr in defers.into_iter() {
             body.insert(*i, AstToken::Stmt(Stmt::DeferExec(expr)));
             *i += 1;
+        }
+    }
+
+    /// Pushes the given `defers` to the end of vector `body`.
+    fn push_defers_into_ast(&mut self, body: &mut Vec<AstToken>, defers: Vec<Expr>) {
+        for expr in defers.into_iter() {
+            body.push(AstToken::Stmt(Stmt::DeferExec(expr)));
         }
     }
 
@@ -91,6 +103,12 @@ impl<'a> DeferAnalyzer<'a> {
         }
     }
 
+    /// Given a block ID `id`, returns every deferred expression declared in the
+    /// block with ID `id`. It does NOT look at any parents.
+    fn get_defers_curr_block(&mut self, id: BlockId) -> Option<Vec<Expr>> {
+        self.get_defers(id, |_| true)
+    }
+
     /// Given a block ID `id`, returns every deferred expression for this block
     /// AND all its parent blocks.
     fn get_defers_all_parents(&mut self, id: BlockId) -> Option<Vec<Expr>> {
@@ -103,31 +121,29 @@ impl<'a> DeferAnalyzer<'a> {
     fn get_defers_until_branchable(&mut self, id: BlockId) -> Option<Vec<Expr>> {
         self.get_defers(id, |x| x)
     }
-}
 
-impl<'a> Visitor for DeferAnalyzer<'a> {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
-        None
-    }
-
-    fn visit_block(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        if let AstToken::Block(_, _, id, body) = &mut ast_token {
+    fn traverse_block(&mut self, mut ast_token: &mut AstToken) {
+        if let AstToken::Block(block_header, _, id, body) = &mut ast_token {
             let mut i = 0;
             while i < body.len() {
-                match &body[i] {
+                let child_token = &mut body[i];
+                match child_token {
                     // If the token is a "Defer" statement, store the defer
                     // in the `self.defer_stmts`.
                     AstToken::Stmt(Stmt::Defer(expr, ..)) => {
                         self.store_defer(expr.clone(), *id);
                     }
 
-                    // This is a branch instruction, insert the stored defers
-                    // as instructions before this branch.
+                    // This is a branch out of the current function, return all
+                    // "outstanding" defers and add them before this return.
                     AstToken::Stmt(Stmt::Return(..)) => {
                         if let Some(defers) = self.get_defers_all_parents(*id) {
                             self.insert_defers_into_ast(&mut i, body, defers);
                         }
                     }
+
+                    // A branch out of a local scope, get the "outstanding"
+                    // deferes introduces in this scope.
                     AstToken::Stmt(Stmt::Yield(..))
                     | AstToken::Stmt(Stmt::Break(..))
                     | AstToken::Stmt(Stmt::Continue(..)) => {
@@ -136,11 +152,57 @@ impl<'a> Visitor for DeferAnalyzer<'a> {
                         }
                     }
 
-                    // For all other tokens and non-branching statements, do nothing.
-                    _ => (),
+                    // For all other tokens, traverse recursively so that the
+                    // defers are introduced in the correct scope.
+                    _ => self.traverse_block(child_token),
                 }
                 i += 1;
             }
+
+            let analyze_context = self.analyze_context.borrow();
+            let block_info = if let Some(block_info) = analyze_context.block_info.get(id) {
+                block_info
+            } else {
+                let err = analyze_context.err(format!(
+                    "Unable to find block info for block with ID: {}",
+                    id
+                ));
+                self.errors.push(err);
+                return;
+            };
+
+            // The end of the blocks scope has been reached. Any defers declared
+            // in this scope should be executed at this point.
+            if !block_info.all_children_contains_returns {
+                match block_header {
+                    BlockHeader::Anonymous
+                    | BlockHeader::If
+                    | BlockHeader::IfCase(_)
+                    | BlockHeader::Match(_)
+                    | BlockHeader::MatchCase(_)
+                    | BlockHeader::For(_, _)
+                    | BlockHeader::While(_) => {
+                        if let Some(defers) = self.get_defers_curr_block(*id) {
+                            self.push_defers_into_ast(body, defers);
+                        }
+                    }
+                    _ => (),
+                }
+            }
         }
+    }
+}
+
+impl<'a> Visitor for DeferAnalyzer<'a> {
+    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+        if self.errors.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.errors))
+        }
+    }
+
+    fn visit_default_block(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+        self.traverse_block(ast_token);
     }
 }

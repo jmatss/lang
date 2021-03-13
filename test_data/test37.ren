@@ -1,4 +1,4 @@
-use std.assert
+extern fn printf(format: {u8}, ...) -> i32
 
 fn main() -> i32
 {
@@ -13,8 +13,8 @@ fn main() -> i32
     printf("\nptr_1_2: %p", ptr_1_2)
     printf("\nptr_2: %p", ptr_2)
 
-    assert(ptr_1_1 == ptr_1_2)
-    assert(ptr_1_1 != ptr_2)
+    std::assert(ptr_1_1 == ptr_1_2)
+    std::assert(ptr_1_1 != ptr_2)
 
     return 0
 }

@@ -6,13 +6,17 @@ use common::{
     error::{LangError, LangErrorKind::ParseError, LangResult},
     file::FilePosition,
     iter::TokenIter,
+    path::{LangPath, LangPathBuilder},
     token::{
         ast::AstToken,
         block::BlockHeader,
         expr::{Argument, Expr, Var},
-        stmt::{Path, Stmt},
+        stmt::Stmt,
     },
-    ty::{generics::Generics, ty::Ty},
+    ty::{
+        generics::{Generics, GenericsKind},
+        ty::Ty,
+    },
     BlockId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
@@ -73,10 +77,6 @@ pub struct ParseTokenIter<'a> {
     /// that is being parsed. This will be used to create better errors messages.
     file_pos: FilePosition,
 
-    /// Contains references to "use" statements. They will be pushed when parsed
-    /// and the popped when they have been included/imported.
-    pub uses: Vec<Path>,
-
     /// Contains the blocks that are children of the "root" block.
     pub root_block_body: Vec<AstToken>,
     pub root_block_id: BlockId,
@@ -96,7 +96,6 @@ impl<'a> ParseTokenIter<'a> {
         Self {
             iter: TokenIter::new(<&mut [LexToken]>::default()),
             block_id: start_block_id,
-            uses: Vec::default(),
             file_pos: FilePosition::default(),
             root_block_body: Vec::default(),
             root_block_id,
@@ -139,36 +138,18 @@ impl<'a> ParseTokenIter<'a> {
     unsafe fn parse_priv(&mut self) -> Result<(), Vec<LangError>> {
         let mut errors = Vec::new();
 
-        // Keep track of the tokens that have been parsed for the current `parse`
-        // call. This is needed so that they can be added infront of the previous
-        // tokens in one go. This makes it so that the contents of a file included
-        // with a "use" is put before the file containing the "use".
-        let mut cur_block_body = Vec::new();
-
         loop {
             match self.next_token() {
-                Ok(parse_token) => {
-                    match &parse_token {
-                        AstToken::EOF => {
-                            break;
-                        }
-                        AstToken::Stmt(Stmt::Use(path)) => {
-                            self.uses.push(path.clone());
-                        }
-                        _ => (),
-                    }
-
-                    cur_block_body.push(parse_token);
+                Ok(AstToken::EOF) => {
+                    self.root_block_body.push(AstToken::EOF);
+                    break;
                 }
+                Ok(parse_token) => self.root_block_body.push(parse_token),
                 Err(e) => errors.push(e),
             }
         }
 
         if errors.is_empty() {
-            // Move all previous tokens to the end of this vec and then replace
-            // the old vec with the new one containing all tokens.
-            cur_block_body.append(&mut self.root_block_body);
-            self.root_block_body = cur_block_body;
             Ok(())
         } else {
             Err(errors)
@@ -371,7 +352,15 @@ impl<'a> ParseTokenIter<'a> {
     }
 
     pub fn parse_type(&mut self, generics: Option<&Generics>) -> LangResult<Ty> {
-        TypeParser::parse(self, generics)
+        self.parse_type_with_path(generics, LangPathBuilder::default())
+    }
+
+    pub fn parse_type_with_path(
+        &mut self,
+        generics: Option<&Generics>,
+        path_builder: LangPathBuilder,
+    ) -> LangResult<Ty> {
+        TypeParser::parse(self, generics, path_builder)
     }
 
     // TODO: Currently doesn't handle FilePosition. How should this be done?
@@ -726,6 +715,82 @@ impl<'a> ParseTokenIter<'a> {
         }
     }
 
+    /// Parses a double colon separate list of identifiers into a path.
+    /// A identifier part of a path may contain a String plus a list of generics.
+    pub(crate) fn parse_path(
+        &mut self,
+        file_pos: &mut FilePosition,
+        gens_kind: GenericsKind,
+    ) -> LangResult<LangPath> {
+        let mut path_builder = LangPathBuilder::default();
+
+        loop {
+            let (ident, ident_file_pos) = if let Some(lex_token) = self.next_skip_space() {
+                if let LexTokenKind::Ident(ident) = lex_token.kind {
+                    (ident, lex_token.file_pos)
+                } else {
+                    return Err(self.err(
+                        format!(
+                            "Expected ident when parsing path, got: {:#?}.\nPath builder: {:#?}",
+                            lex_token, path_builder
+                        ),
+                        Some(lex_token.file_pos),
+                    ));
+                }
+            } else {
+                return Err(self.err(
+                    format!("Got None when parsing path: {:#?}", path_builder),
+                    Some(*file_pos),
+                ));
+            };
+
+            file_pos.set_end(&ident_file_pos)?;
+
+            let next_token_kind = self.peek_skip_space().map(|t| t.kind);
+            if let Some(LexTokenKind::Sym(Sym::PointyBracketBegin)) = next_token_kind {
+                let mut type_parser = TypeParser::new(self, None);
+                let (gens, gens_file_pos) = type_parser.parse_type_generics(gens_kind.clone())?;
+
+                if let Some(gens_file_pos) = gens_file_pos {
+                    file_pos.set_end(&gens_file_pos)?;
+                }
+
+                let generics = if let Some(gens) = gens {
+                    gens
+                } else {
+                    Generics::empty()
+                };
+
+                path_builder.add_path_gen(&ident, &generics);
+            } else {
+                path_builder.add_path(&ident);
+            }
+
+            // If the next token is a double colon, continue parsing the path.
+            // If a end symbol is found, the end of the path has been found,
+            // break out of this loop and return from the function.
+            // Otherwise, found unexpected symbol, something has gone wrong.
+            if let Some(lex_token) = self.peek_skip_space() {
+                if let LexTokenKind::Sym(Sym::DoubleColon) = lex_token.kind {
+                    self.next_skip_space();
+                    continue;
+                /*
+                } else if lex_token.is_break_symbol() {
+                    self.next_skip_space();
+                    break;
+                */
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        path_builder.file_pos(*file_pos);
+        Ok(path_builder.build())
+    }
+
     /// Replaces the lex token at the current position with the value of `item`.
     /// Returns the old token that was replaced.
     pub fn replace(&mut self, item: LexToken) -> Option<LexToken> {
@@ -888,6 +953,9 @@ impl<'a> ParseTokenIter<'a> {
     pub(super) fn err(&mut self, msg: String, file_pos: Option<FilePosition>) -> LangError {
         while let Some(lex_token) = self.iter.next() {
             if lex_token.is_break_symbol() {
+                break;
+            } else if lex_token.is_eof() {
+                self.iter.rewind();
                 break;
             }
         }

@@ -1,0 +1,3 @@
+mod xyz;
+
+pub fn xyz_fn() {}

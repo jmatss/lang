@@ -6,8 +6,8 @@ use super::{
 };
 
 use crate::{
-    error::{LangError, LangErrorKind, LangResult},
-    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
+    path::LangPath,
+    ty::{generics::Generics, ty::Ty},
     util,
 };
 
@@ -24,12 +24,12 @@ pub enum BlockHeader {
     Union(Rc<RefCell<Adt>>),
     Trait(Rc<RefCell<Trait>>),
 
-    /// The first string is the name of the structure that this impl block
-    /// implements and the second optional string is the name of the trait if
-    /// impl block implements a trait. If this is just a impl for the struct,
-    /// the optional will be None.
-    /// The body of this block will contain thefunctions.
-    Implement(String, Option<String>),
+    /// The first LangPath is the path of the ADT that this impl block implements
+    /// and the second optional LangPath is the path of the trait if this impl
+    /// block implements a trait.
+    /// If this is just a impl for the struct, the optional will be None.
+    /// The body of this block will contain the functions.
+    Implement(LangPath, Option<LangPath>),
 
     /// A anonymous block "{ ... }" that can be used to limit the scope.
     Anonymous,
@@ -101,6 +101,7 @@ pub enum BlockHeader {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Struct {
     pub name: String,
+    pub module: LangPath,
     pub generics: Option<Vec<String>>,
 
     /// The key is the the name of the generic type it and the values are the
@@ -119,6 +120,7 @@ pub struct Struct {
 pub struct Adt {
     /* Values set for all Adt types */
     pub name: String,
+    pub module: LangPath,
     pub modifiers: Vec<Modifier>,
     pub members: Vec<Rc<RefCell<Var>>>,
     /// The key is the name of the method.
@@ -126,14 +128,14 @@ pub struct Adt {
     pub kind: AdtKind,
 
     /* Values set for Struct and Union */
-    pub generics: Option<Vec<String>>,
-    /// The key is the the name of the generic type and the values are the
+    pub generics: Option<Generics>,
+    /// The key is the the name of the generic and the values are the
     /// traits that the specific generic type needs to implement.
     pub implements: Option<HashMap<String, Vec<Ty>>>,
 
     /* Values set for Enum */
     /// The type of the enum values. Will most likely be a integer type.
-    pub ty: Option<Ty>,
+    pub enum_ty: Option<Ty>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -147,57 +149,63 @@ pub enum AdtKind {
 impl Adt {
     pub fn new_struct(
         name: String,
+        module: LangPath,
         modifiers: Vec<Modifier>,
         members: Vec<Rc<RefCell<Var>>>,
-        generics: Option<Vec<String>>,
+        generics: Option<Generics>,
         implements: Option<HashMap<String, Vec<Ty>>>,
     ) -> Self {
         Self {
             name,
+            module,
             modifiers,
             members,
             kind: AdtKind::Struct,
             methods: HashMap::default(),
             generics,
             implements,
-            ty: None,
+            enum_ty: None,
         }
     }
 
     pub fn new_union(
         name: String,
+        module: LangPath,
         modifiers: Vec<Modifier>,
         members: Vec<Rc<RefCell<Var>>>,
-        generics: Option<Vec<String>>,
+        generics: Option<Generics>,
         implements: Option<HashMap<String, Vec<Ty>>>,
     ) -> Self {
         Self {
             name,
+            module,
             modifiers,
             members,
             kind: AdtKind::Union,
             methods: HashMap::default(),
             generics,
             implements,
-            ty: None,
+            enum_ty: None,
         }
     }
 
     pub fn new_enum(
         name: String,
+        module: LangPath,
         modifiers: Vec<Modifier>,
         members: Vec<Rc<RefCell<Var>>>,
         ty: Option<Ty>,
     ) -> Self {
         Self {
             name,
+            module,
             modifiers,
             members,
             kind: AdtKind::Enum,
             methods: HashMap::default(),
             generics: None,
             implements: None,
-            ty,
+            enum_ty: ty,
         }
     }
 
@@ -245,11 +253,8 @@ pub enum TraitCompareError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fn {
     pub name: String,
-    pub generic_names: Option<Vec<String>>,
-
-    /// This is set when a new copy of this function is created that implements
-    /// the generics types (if any).
-    pub generic_impls: Option<Generics>,
+    pub module: LangPath,
+    pub generics: Option<Generics>,
 
     /// The key is the the name of the generic type it and the values are the
     /// traits that the specific generic type needs to implement.
@@ -261,7 +266,7 @@ pub struct Fn {
     pub is_var_arg: bool,
 
     /// Will be set if this is a function in a "impl" block which means that
-    /// this is a function tied to a ADt. The type will be the ADT (or the "ident"
+    /// this is a function tied to a ADT. The type will be the ADT (or the "ident"
     /// of the impl block if other than ADT are allowed).
     pub method_adt: Option<Ty>,
 }
@@ -269,7 +274,8 @@ pub struct Fn {
 impl Fn {
     pub fn new(
         name: String,
-        generic_names: Option<Vec<String>>,
+        module: LangPath,
+        generics: Option<Generics>,
         implements: Option<HashMap<String, Vec<Ty>>>,
         parameters: Option<Vec<Rc<RefCell<Var>>>>,
         ret_type: Option<Ty>,
@@ -278,8 +284,8 @@ impl Fn {
     ) -> Self {
         Fn {
             name,
-            generic_names,
-            generic_impls: None,
+            module,
+            generics,
             implements,
             parameters,
             ret_type,
@@ -363,7 +369,7 @@ impl Fn {
         }
 
         // Check generics in this match-statement.
-        match (&self.generic_names, &trait_func.generic_names) {
+        match (&self.generics, &trait_func.generics) {
             // Diff length of impls, error.
             (Some(self_generics), Some(trait_generics))
                 if self_generics.len() != trait_generics.len() =>
@@ -382,8 +388,10 @@ impl Fn {
 
             // Both functions have generics.
             (Some(self_generics), Some(trait_generics)) => {
-                for (idx, (self_param, other_param)) in
-                    self_generics.iter().zip(trait_generics.iter()).enumerate()
+                for (idx, (self_param, other_param)) in self_generics
+                    .iter_names()
+                    .zip(trait_generics.iter_names())
+                    .enumerate()
                 {
                     if self_param != other_param {
                         errors.push(TraitCompareError::GenericsNameDiff(idx));
@@ -446,42 +454,10 @@ impl Fn {
         }
     }
 
-    /// Returns the "full name" which is the name containing possible structure
-    /// and generics as well.
-    pub fn full_name(&self) -> LangResult<String> {
-        if let Some(ty) = &self.method_adt {
-            let (structure_name, structure_generics) =
-                if let Ty::CompoundType(inner_ty, generics, ..) = ty {
-                    match inner_ty {
-                        InnerTy::Struct(ident)
-                        | InnerTy::Enum(ident)
-                        | InnerTy::Union(ident)
-                        | InnerTy::Trait(ident) => (ident, generics),
-                        _ => unreachable!("Method on non structure type: {:#?}", self),
-                    }
-                } else {
-                    return Err(LangError::new(
-                        format!("Unable to get full name for method: {:#?}", self),
-                        LangErrorKind::GeneralError,
-                        None,
-                    ));
-                };
-
-            Ok(util::to_method_name(
-                structure_name,
-                Some(structure_generics),
-                &self.name,
-                self.generic_impls.as_ref(),
-            ))
-        } else {
-            Ok(self.name.clone())
-        }
-    }
-
     /// Returns the "half name" which is the name that does NOT contain anything
     /// related to the structure but will contain function generics (if any).
     pub fn half_name(&self) -> String {
-        if let Some(generics) = &self.generic_impls {
+        if let Some(generics) = &self.generics {
             util::to_generic_name(&self.name, generics)
         } else {
             self.name.clone()
@@ -525,6 +501,7 @@ impl BuiltIn {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Trait {
     pub name: String,
+    pub module: LangPath,
     pub generics: Option<Vec<String>>,
     pub methods: Vec<Fn>,
     pub modifiers: Vec<Modifier>,
@@ -533,12 +510,14 @@ pub struct Trait {
 impl Trait {
     pub fn new(
         name: String,
+        module: LangPath,
         generics: Option<Vec<String>>,
         methods: Vec<Fn>,
         modifiers: Vec<Modifier>,
     ) -> Self {
-        Trait {
+        Self {
             name,
+            module,
             generics,
             methods,
             modifiers,

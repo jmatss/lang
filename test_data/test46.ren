@@ -1,4 +1,4 @@
-use std.assert
+extern fn printf(format: {u8}, ...) -> i32
 
 fn test_fn1_impl() {}
 fn test_fn1(func: fn())
@@ -42,11 +42,11 @@ fn main() -> i32
 
     var result3 = test_fn3(fn test_fn3_impl)
     printf("result3: %d", result3 as i32)
-    assert(result3 == 3)
+    std::assert(result3 == 3)
 
     var result4 = test_fn4(fn test_fn4_impl)
     printf("\nresult4: %f", result4 as f64)
-    assert(result4 == 4.4)
+    std::assert(result4 == 4.4)
 
     return 0
 }

@@ -1,4 +1,4 @@
-use std.assert
+extern fn printf(format: {u8}, ...) -> i32
 
 union TestUnion
 {
@@ -28,7 +28,7 @@ fn main() -> i32
     {
         correct = false
     }
-    assert(correct)
+    std::assert(correct)
 
     if val is abc.another
     {
@@ -39,7 +39,7 @@ fn main() -> i32
         correct = true
         printf("\nabc.another not a match")
     }
-    assert(correct)
+    std::assert(correct)
 
     if val is def.var_a
     {
@@ -50,7 +50,7 @@ fn main() -> i32
         correct = true
         printf("\ndef.var_a not a match")
     }
-    assert(correct)
+    std::assert(correct)
 
     if val is def.another
     {
@@ -61,23 +61,23 @@ fn main() -> i32
     {
         correct = false
     }
-    assert(correct)
+    std::assert(correct)
 
 
     var ghi = TestGenericUnion<f32> { a = 12 }
     var jkl = TestGenericUnion { b = 34.56 as f32 }
 
     if val is ghi.a { correct = true } else { correct = false }
-    assert(correct)
+    std::assert(correct)
     if val is ghi.b { correct = false } else { correct = true }
-    assert(correct)
+    std::assert(correct)
     if val is jkl.a { correct = false } else { correct = true }
-    assert(correct)
+    std::assert(correct)
     if val is jkl.b { correct = true } else { correct = false }
-    assert(correct)
+    std::assert(correct)
 
     jkl.b = 78.90
-    assert(jkl.b == 78.90)
+    std::assert(jkl.b == 78.90)
 
     // Should result in a compile error since `T` isn't known.
     //var mno = TestGenericUnion { a = 78 }

@@ -8,7 +8,7 @@ use common::{
         block::{Adt, BlockHeader, Fn, Trait},
         expr::Expr,
         lit::Lit,
-        stmt::{Modifier, Path, Stmt},
+        stmt::{Modifier, Stmt},
     },
     ty::{
         generics::{Generics, GenericsKind},
@@ -19,10 +19,7 @@ use common::{
 };
 use lex::token::{Kw, LexTokenKind, Sym};
 
-use crate::{
-    parser::{ParseTokenIter, DEFAULT_STOP_CONDS, KEYWORD_STOP_CONDS},
-    type_parser::TypeParser,
-};
+use crate::parser::{ParseTokenIter, DEFAULT_STOP_CONDS, KEYWORD_STOP_CONDS};
 
 pub(crate) struct KeyworkParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
@@ -52,7 +49,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             Kw::For => self.parse_for(kw_file_pos),
             Kw::While => self.parse_while(kw_file_pos),
             Kw::Implement => self.parse_impl(kw_file_pos),
-            Kw::Function => self.parse_func(modifiers, kw_file_pos),
+            Kw::Function => self.parse_fn(modifiers, kw_file_pos),
 
             Kw::Return => self.parse_return(kw_file_pos),
             Kw::Yield => self.parse_yield(kw_file_pos),
@@ -60,7 +57,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             Kw::Continue => self.parse_continue(kw_file_pos),
 
             Kw::Use => self.parse_use(kw_file_pos),
-            Kw::Package => self.parse_package(kw_file_pos),
+            Kw::Module => self.parse_module(kw_file_pos),
             Kw::External => self.parse_external(modifiers, kw_file_pos),
 
             Kw::Var => self.parse_var_decl(false, kw_file_pos),
@@ -479,115 +476,29 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// ```no_run
     /// use <path>
     /// ```
-    /// (where path is a dot separated list of idents)
+    /// (where path is a double colon separated list of idents)
     ///
     /// The "use" keyword has already been consumed when this function is called.
     fn parse_use(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
-        let mut path_parts = Vec::new();
-
-        loop {
-            // Get the ident from the current path part.
-            let lex_token = self.iter.next_skip_space();
-            if let Some(LexTokenKind::Ident(ident)) = lex_token.as_ref().map(|token| &token.kind) {
-                path_parts.push(ident.clone());
-            } else {
-                return Err(self.iter.err(
-                    format!(
-                        "Expected ident when parsing \"use\" path, got: {:?}",
-                        lex_token
-                    ),
-                    lex_token.map(|t| t.file_pos),
-                ));
-            }
-
-            // The next symbol should either be a dot which indicates that the
-            // path continues; or a line break which indicates that the path
-            // has been ended.
-            if let Some(lex_token) = self.iter.peek_skip_space() {
-                if let LexTokenKind::Sym(Sym::Dot) = lex_token.kind {
-                    self.iter.next_skip_space(); // Consume "Dot".
-                    continue;
-                } else if let LexTokenKind::Sym(Sym::LineBreak) = lex_token.kind {
-                    self.iter.next_skip_space(); // Consume "LineBreak".
-
-                    // The only happy path that exists the loop.
-                    file_pos.set_end(&lex_token.file_pos)?;
-                    break;
-                } else {
-                    return Err(self.iter.err(
-                        "Received None when looking at \"use\" path.".into(),
-                        Some(lex_token.file_pos),
-                    ));
-                }
-            } else {
-                return Err(self.iter.err(
-                    "Received None when looking at separator in \"use\" path.".into(),
-                    Some(file_pos),
-                ));
-            }
-        }
-
-        Ok(AstToken::Stmt(Stmt::Use(Path::new(path_parts, file_pos))))
+        Ok(AstToken::Stmt(Stmt::Use(
+            self.iter.parse_path(&mut file_pos, GenericsKind::Empty)?,
+        )))
     }
 
-    /// Parses a `package` statement.
+    /// Parses a `mod` statement.
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// package <path>
+    /// mod <path>
     /// ```
-    /// (where path is a dot separated list of idents)
+    /// (where path is a double colon separated list of idents)
     ///
     /// The "package" keyword has already been consumed when this function is called.
-    fn parse_package(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
-        let mut path_parts = Vec::new();
-
-        loop {
-            // Get the ident from the current path part.
-            let lex_token = self.iter.next_skip_space();
-            if let Some(LexTokenKind::Ident(ident)) = lex_token.as_ref().map(|token| &token.kind) {
-                path_parts.push(ident.clone());
-            } else {
-                return Err(self.iter.err(
-                    format!(
-                        "Expected ident when parsing \"package\" path, got: {:?}",
-                        lex_token
-                    ),
-                    lex_token.map(|t| t.file_pos),
-                ));
-            }
-
-            // The next symbol should either be a dot which indicates that the
-            // path continues; or a line break which indicates that the path
-            // has been ended.
-            if let Some(lex_token) = self.iter.peek_skip_space() {
-                if let LexTokenKind::Sym(Sym::Dot) = lex_token.kind {
-                    self.iter.next_skip_space(); // Consume "Dot".
-                    continue;
-                } else if let LexTokenKind::Sym(Sym::LineBreak) = lex_token.kind {
-                    self.iter.next_skip_space(); // Consume "LineBreak".
-
-                    // The only happy path that exists the loop.
-                    file_pos.set_end(&lex_token.file_pos)?;
-                    break;
-                } else {
-                    return Err(self.iter.err(
-                        "Received None when looking at \"package\" path.".into(),
-                        Some(lex_token.file_pos),
-                    ));
-                }
-            } else {
-                return Err(self.iter.err(
-                    "Received None when looking at separator in \"package\" path.".into(),
-                    Some(file_pos),
-                ));
-            }
-        }
-
-        Ok(AstToken::Stmt(Stmt::Package(Path::new(
-            path_parts, file_pos,
-        ))))
+    fn parse_module(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
+        Ok(AstToken::Stmt(Stmt::Module(
+            self.iter.parse_path(&mut file_pos, GenericsKind::Empty)?,
+        )))
     }
 
     // TODO: External only valid for functions atm, add for variables.
@@ -695,10 +606,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         Ok(AstToken::Stmt(var_decl))
     }
 
-    /// Parses a function and its body. See `parse_func_proto` for the structure
+    /// Parses a function and its body. See `parse_fn_proto` for the structure
     /// of a function header/prototype.
     /// The "function" keyword has already been consumed when this function is called.
-    fn parse_func(
+    fn parse_fn(
         &mut self,
         modifiers: Vec<Modifier>,
         file_pos: FilePosition,
@@ -721,8 +632,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         static THIS: &str = "this";
 
         // Start by parsing the modifiers and identifier. This will loop until
-        // the identifier/name of the function is found.
-        let ident = loop {
+        // the identifier/path of the function is found.
+        let mut module = loop {
             if let Some(lex_token) = self.iter.next_skip_space_line() {
                 match &lex_token.kind {
                     // function this
@@ -772,8 +683,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                         modifiers.push(Modifier::ThisPointer);
                     }
 
-                    LexTokenKind::Ident(ident) => {
-                        break ident.clone();
+                    LexTokenKind::Ident(_) => {
+                        self.iter.rewind_skip_space()?;
+                        break self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
                     }
 
                     LexTokenKind::Kw(lex_kw) => {
@@ -808,12 +720,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             }
         };
 
-        let mut type_parse = TypeParser::new(self.iter, None);
-        let (generics, gens_file_pos) = type_parse.parse_type_generics(GenericsKind::Decl)?;
-
-        if let Some(gens_file_pos) = gens_file_pos {
-            file_pos.set_end(&gens_file_pos)?;
-        }
+        let last_part = module.pop().unwrap();
+        let name = last_part.0;
+        let generics = last_part.1;
 
         let start_symbol = Sym::ParenthesisBegin;
         let end_symbol = Sym::ParenthesisEnd;
@@ -852,48 +761,25 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             ));
         };
 
-        let generic_names = generics
-            .as_ref()
-            .map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
         let implements = self.parse_where(generics.as_ref())?;
-
         Ok(Fn::new(
-            ident,
-            generic_names,
-            implements,
-            params_opt,
-            return_ty,
-            modifiers,
-            is_var_arg,
+            name, module, generics, implements, params_opt, return_ty, modifiers, is_var_arg,
         ))
     }
 
     /// Parses a struct header.
-    ///   "struct <ident> [ < <generic>, ... > ] [{ [<ident>: <type>] [[,] ...] }]"
+    ///   "struct <ident> [ < <generic>, ... > ] [where ...] [{ [<ident>: <type>] [[,] ...] }]"
     /// The "struct" keyword has already been consumed when this function is called.
     fn parse_struct(
         &mut self,
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
-        // Start by parsing the identifier.
-        let lex_token = self.iter.next_skip_space_line();
-        let ident =
-            if let Some(LexTokenKind::Ident(ident)) = lex_token.as_ref().map(|token| &token.kind) {
-                ident.clone()
-            } else {
-                return Err(self.iter.err(
-                    format!("Not ident after parsing \"struct\": {:?}", lex_token),
-                    lex_token.map(|t| t.file_pos),
-                ));
-            };
+        let mut module = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
 
-        let mut type_parse = TypeParser::new(self.iter, None);
-        let (generics, gens_file_pos) = type_parse.parse_type_generics(GenericsKind::Decl)?;
-
-        if let Some(gens_file_pos) = gens_file_pos {
-            file_pos.set_end(&gens_file_pos)?;
-        }
+        let last_part = module.pop().unwrap();
+        let name = last_part.0;
+        let generics = last_part.1;
 
         let implements = self.parse_where(generics.as_ref())?;
 
@@ -924,14 +810,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             return Err(self.iter.err(
                 format!(
                     "Found invalid var_arg symbol in struct with name: {}",
-                    &ident
+                    &name
                 ),
                 Some(file_pos),
             ));
         }
 
-        let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
-        let struct_ = Adt::new_struct(ident, modifiers, members, generic_names, implements);
+        let struct_ = Adt::new_struct(name, module, modifiers, members, generics, implements);
         let header = BlockHeader::Struct(Rc::new(RefCell::new(struct_)));
 
         let block_id = self.iter.reserve_block_id();
@@ -950,17 +835,12 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
-        // Start by parsing the identifier.
-        let lex_token = self.iter.next_skip_space_line();
-        let ident =
-            if let Some(LexTokenKind::Ident(ident)) = lex_token.as_ref().map(|token| &token.kind) {
-                ident.clone()
-            } else {
-                return Err(self.iter.err(
-                    format!("Not ident after parsing \"enum\": {:?}", lex_token),
-                    lex_token.map(|t| t.file_pos),
-                ));
-            };
+        let full_path = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
+
+        let mut module = full_path.clone();
+
+        let last_part = module.pop().unwrap();
+        let name = last_part.0;
 
         // Parse the members of the enum.
         let start_symbol = Sym::CurlyBracketBegin;
@@ -972,7 +852,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         if is_var_arg {
             return Err(self.iter.err(
-                format!("Found invalid var_arg symbol in enum with name: {}", &ident),
+                format!("Found invalid var_arg symbol in enum with name: {}", &name),
                 Some(file_pos),
             ));
         }
@@ -992,7 +872,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         for (idx, member) in members.iter_mut().enumerate() {
             let member_file_pos = member.file_pos.clone().unwrap();
 
-            let enum_type_info = (ident.clone(), file_pos.to_owned());
+            let enum_type_info = (name.clone(), file_pos.to_owned());
             let member_type_info = (member.name.clone(), member_file_pos);
             let member_value_ty = Ty::CompoundType(
                 InnerTy::I32,
@@ -1001,7 +881,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             );
 
             let enum_ty = Ty::CompoundType(
-                InnerTy::Enum(ident.clone()),
+                InnerTy::Enum(full_path.clone()),
                 Generics::empty(),
                 TypeInfo::Enum(member_file_pos.to_owned()),
             );
@@ -1021,12 +901,12 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         //       it would take a generic impl instead of a generic decl as structs.
         //       Is this ok?
         let enum_ty = Ty::CompoundType(
-            InnerTy::Enum(ident.clone()),
+            InnerTy::Enum(full_path),
             Generics::empty(),
             TypeInfo::Enum(file_pos.to_owned()),
         );
 
-        let enum_ = Adt::new_enum(ident, modifiers, members_rc, Some(enum_ty));
+        let enum_ = Adt::new_enum(name, module, modifiers, members_rc, Some(enum_ty));
         let header = BlockHeader::Enum(Rc::new(RefCell::new(enum_)));
 
         let block_id = self.iter.reserve_block_id();
@@ -1036,31 +916,18 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     }
 
     /// Parses a union header.
-    ///   "union <ident> [ < <generic>, ... > ] [{ [<ident>: <type>] [[,] ...] }]"
+    ///   "union <ident> [ < <generic>, ... > ] [where ...] [{ [<ident>: <type>] [[,] ...] }]"
     /// The "union" keyword has already been consumed when this function is called.
     fn parse_union(
         &mut self,
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
-        // Start by parsing the identifier.
-        let lex_token = self.iter.next_skip_space_line();
-        let ident =
-            if let Some(LexTokenKind::Ident(ident)) = lex_token.as_ref().map(|token| &token.kind) {
-                ident.clone()
-            } else {
-                return Err(self.iter.err(
-                    format!("Not ident after parsing \"union\": {:?}", lex_token),
-                    lex_token.map(|t| t.file_pos),
-                ));
-            };
+        let mut module = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
 
-        let mut type_parse = TypeParser::new(self.iter, None);
-        let (generics, gens_file_pos) = type_parse.parse_type_generics(GenericsKind::Decl)?;
-
-        if let Some(gens_file_pos) = gens_file_pos {
-            file_pos.set_end(&gens_file_pos)?;
-        }
+        let last_part = module.pop().unwrap();
+        let name = last_part.0;
+        let generics = last_part.1;
 
         let implements = self.parse_where(generics.as_ref())?;
 
@@ -1089,16 +956,12 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         if is_var_arg {
             return Err(self.iter.err(
-                format!(
-                    "Found invalid var_arg symbol in union with name: {}",
-                    &ident
-                ),
+                format!("Found invalid var_arg symbol in union with name: {}", &name),
                 Some(file_pos),
             ));
         }
 
-        let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
-        let union = Adt::new_union(ident, modifiers, members, generic_names, implements);
+        let union = Adt::new_union(name, module, modifiers, members, generics, implements);
         let header = BlockHeader::Union(Rc::new(RefCell::new(union)));
 
         let block_id = self.iter.reserve_block_id();
@@ -1116,22 +979,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
-        // Start by parsing the identifier.
-        let lex_token = self.iter.next_skip_space_line();
-        let ident =
-            if let Some(LexTokenKind::Ident(ident)) = lex_token.as_ref().map(|token| &token.kind) {
-                ident.clone()
-            } else {
-                return Err(self.iter.err(
-                    format!("Not ident after parsing \"trait\": {:?}", lex_token),
-                    lex_token.map(|t| t.file_pos),
-                ));
-            };
+        let mut module = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
 
-        let (generic_names, gens_file_pos) = self.parse_generics()?;
-        if let Some(gens_file_pos) = gens_file_pos {
-            file_pos.set_end(&gens_file_pos)?;
-        }
+        let last_part = module.pop().unwrap();
+        let name = last_part.0;
+        let generics = last_part.1;
 
         // Consume the expected CurlyBracketBegin.
         let start_token = self.iter.next_skip_space_line();
@@ -1188,7 +1040,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             }
         }
 
-        let trait_ = Trait::new(ident, generic_names, methods, modifiers);
+        let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
+
+        let trait_ = Trait::new(name, module, generic_names, methods, modifiers);
         let header = BlockHeader::Trait(Rc::new(RefCell::new(trait_)));
 
         let block_id = self.iter.reserve_block_id();
@@ -1202,52 +1056,24 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// a structure or it can also be a impl of a trait for a structure.
     ///   "implement <ident> [for <ident>] { [<func> ...] }"
     /// The "implement" keyword has already been consumed when this function is called.
-    fn parse_impl(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
-        // Start by parsing the identifier.
-        let lex_token = self.iter.next_skip_space_line();
-        let ident =
-            if let Some(LexTokenKind::Ident(ident)) = lex_token.as_ref().map(|token| &token.kind) {
-                ident.clone()
-            } else {
-                return Err(self.iter.err(
-                    format!("Not ident after parsing \"implement\": {:?}", lex_token),
-                    lex_token.map(|t| t.file_pos),
-                ));
-            };
+    fn parse_impl(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
+        let first_path = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
 
         // If the next token is a "for" keyword, this is a impl for a trait
         // and the previosly parsed `ident` is the name of the trait. If not,
         // the previous `ident` is the name of a structure.
-        let (ident, trait_name) = if let Some(LexTokenKind::Kw(Kw::For)) =
+        let (adt_path, trait_path) = if let Some(LexTokenKind::Kw(Kw::For)) =
             self.iter.peek_skip_space_line().as_ref().map(|t| &t.kind)
         {
             self.iter.next_skip_space_line();
+            let adt_path = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
 
-            // Parse the name of the structure here. This will be used as the
-            // `ident` and the old `ident` will be the name of the trait.
-            let new_ident = if let Some(LexTokenKind::Ident(new_ident)) = self
-                .iter
-                .next_skip_space_line()
-                .as_ref()
-                .map(|token| &token.kind)
-            {
-                new_ident.clone()
-            } else {
-                return Err(self.iter.err(
-                    format!(
-                        "Not ident after parsing \"for\" in \"implement\": {:?}",
-                        lex_token
-                    ),
-                    lex_token.map(|t| t.file_pos),
-                ));
-            };
-
-            (new_ident, Some(ident))
+            (adt_path, Some(first_path))
         } else {
-            (ident, None)
+            (first_path, None)
         };
 
-        let header = BlockHeader::Implement(ident, trait_name);
+        let header = BlockHeader::Implement(adt_path, trait_path);
         let impl_token = self.iter.next_block(header)?;
 
         // Iterate through the tokens in the body and make sure that all tokens
@@ -1278,21 +1104,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
 
         Ok(impl_token)
-    }
-
-    /// Parses a generic parameter list. The generics will be returned as Strings
-    /// stored in a vector. If at least on generic was found and was parsed
-    /// correctly, the FilePosition will point to the PointyBracketEnd that ends
-    /// the generic parameter list.
-    fn parse_generics(&mut self) -> LangResult<(Option<Vec<String>>, Option<FilePosition>)> {
-        let mut type_parse = TypeParser::new(self.iter, None);
-        match type_parse.parse_type_generics(GenericsKind::Decl) {
-            Ok((generics, file_pos_opt)) => Ok((
-                generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>()),
-                file_pos_opt,
-            )),
-            Err(err) => Err(err),
-        }
     }
 
     /// Parses a where clause. Every "implements" statement are parsed to the

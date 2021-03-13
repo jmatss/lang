@@ -42,6 +42,10 @@ impl Visitor for DummyVisitor {
         unreachable!()
     }
 
+    fn visit_end(&mut self, ctx: &TraverseContext) {
+        unreachable!()
+    }
+
     fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         unreachable!()
     }

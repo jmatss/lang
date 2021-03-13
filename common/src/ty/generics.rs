@@ -68,6 +68,10 @@ impl Generics {
         self.names.is_empty() && self.types.is_empty()
     }
 
+    pub fn is_empty_types(&self) -> bool {
+        self.types.is_empty()
+    }
+
     pub fn get(&self, name: &str) -> Option<&Ty> {
         if let Some(idx) = self.lookup.get(name) {
             self.types.get(*idx)
@@ -82,6 +86,10 @@ impl Generics {
         } else {
             None
         }
+    }
+
+    pub fn get_name(&self, idx: usize) -> Option<String> {
+        self.names.get(idx).cloned()
     }
 
     pub fn contains(&self, name: &str) -> bool {

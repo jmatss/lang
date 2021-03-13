@@ -5,6 +5,7 @@ use crate::{
 };
 use common::{
     error::{LangError, LangErrorKind, LangResult},
+    path::{LangPath, LangPathPart},
     token::{ast::AstToken, block::BlockHeader, expr::FnCall},
     traverser::{AstTraverser, TraverseContext},
     ty::{generics::Generics, ty::Ty},
@@ -20,7 +21,7 @@ use std::collections::{hash_map::Entry, HashMap, HashSet};
 struct NestedMethodInfo {
     pub method_name: String,
     pub method_call_name: String,
-    pub method_adt_name: String,
+    pub method_adt_path: LangPath,
 }
 
 /// Iterates through the tokens and gathers all ADT/methods containing generics.
@@ -36,9 +37,9 @@ pub struct GenericCollector<'a, 'tctx> {
 
     /// Will contain all types containing generics. This will then be used to
     /// create new generic ADTs with the specific generic implementations.
-    /// The String key is the name of the ADT/type. The Ty values are the
+    /// The LangPath key is the path of the ADT/type. The Ty values are the
     /// actual types containing generic implentations/instances.
-    pub generic_adts: HashMap<String, Vec<Ty>>,
+    pub generic_adts: HashMap<LangPath, Vec<Ty>>,
 
     /// Will contain all NESTED types containing generics. These are types containing
     /// generics that aren't part of the "using" structure.
@@ -70,26 +71,27 @@ pub struct GenericCollector<'a, 'tctx> {
     /// The entrys in this map will be moved/converted into `self.generic_adts`
     /// before this stage is done. This one will be left empty.
     ///
-    /// The first String key is the name of the containing ADT (`A` in the example)
+    /// The first LangPath key is the path of the containing ADT (`A` in the example)
     /// and the second String key is the name of the method in which these `Ty`s
     /// was found.
-    nested_generic_adts: HashMap<String, HashMap<String, Vec<Ty>>>,
+    nested_generic_adts: HashMap<LangPath, HashMap<String, Vec<Ty>>>,
 
-    /// The first string is the name of the ADT and the second string is
-    /// the name of the method.
-    pub generic_methods: HashMap<String, HashMap<String, Vec<Generics>>>,
+    /// The first LangPath is the path of the ADT and the second string is
+    /// the name of the method. The LangPath will NOT contain any references
+    /// to generics.
+    pub generic_methods: HashMap<LangPath, HashMap<String, Vec<Generics>>>,
 
     /// See explanation for `nested_generic_adts` & `generic_methods`.
-    /// The first String is the name of the structure in which the information
+    /// The first LangPath is the name of the ADT in which the information
     /// was found.
-    nested_generic_methods: HashMap<String, HashMap<NestedMethodInfo, Vec<Generics>>>,
+    nested_generic_methods: HashMap<LangPath, HashMap<NestedMethodInfo, Vec<Generics>>>,
 
     /// A list of all structure names in the dependecy order. This list will be
     /// in reverse order compared to how it is calculated. This means that a
     /// structure `A` depending on structure `B` would come before in the list.
     /// This is done since `A` should "expand" all its generic implementations
     /// before `B` is "calculated".
-    dependency_order_rev: Vec<String>,
+    dependency_order_rev: Vec<LangPath>,
 
     errors: Vec<LangError>,
 }
@@ -121,13 +123,16 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             return;
         }
 
-        let ident = match ty {
+        let path = match ty {
             Ty::CompoundType(inner_ty, generics, ..) => {
-                if !generics.is_empty() {
-                    inner_ty.to_string()
-                } else {
+                if generics.is_empty() {
                     return;
                 }
+
+                let mut path = inner_ty.get_ident().unwrap();
+                let last_part = path.pop().unwrap();
+                path.push(LangPathPart(last_part.0, None));
+                path
             }
 
             Ty::Pointer(ty_box, ..) | Ty::Array(ty_box, ..) => {
@@ -147,7 +152,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             return;
         }
 
-        match self.generic_adts.entry(ident) {
+        match self.generic_adts.entry(path) {
             Entry::Occupied(mut o) => {
                 if !o.get().contains(ty) {
                     o.get_mut().push(ty.clone());
@@ -159,17 +164,12 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
         }
     }
 
-    /// If the method with name `method_name`, on the structure with type
-    /// `structure_ty`, contains generics; this function will save all "implementing"
+    /// If the method with name `method_name`, on the ADT with type `adt_ty`
+    /// contains generics; this function will save all "implementing"
     /// methods where the generics have been given a "real type instance".
     /// This function also adds the names for the generics if they aren't already
     /// set.
-    fn collect_generic_method(
-        &mut self,
-        structure_ty: &Ty,
-        method_call: &FnCall,
-        block_id: BlockId,
-    ) {
+    fn collect_generic_method(&mut self, adt_ty: &Ty, method_call: &FnCall, block_id: BlockId) {
         let method_call_generics = if let Some(fn_call_generics) = &method_call.generics {
             fn_call_generics.clone()
         } else {
@@ -188,26 +188,32 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
 
         let method_name = method_call.name.clone();
 
-        let structure_name = if let Some(structure_name) = structure_ty.get_ident() {
-            structure_name
+        let old_path = if let Some(mut old_path) = adt_ty.get_ident() {
+            // Make sure no generics are in the path.
+            let last_part = old_path.pop().unwrap();
+            old_path.push(LangPathPart(last_part.0, None));
+            old_path
         } else {
             return;
         };
 
-        let method = match self.type_context.analyze_context.get_adt_method(
-            &structure_name,
-            &method_name,
-            block_id,
-        ) {
-            Ok(method) => method,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
+        let method =
+            match self
+                .type_context
+                .analyze_context
+                .get_method(&old_path, &method_name, block_id)
+            {
+                Ok(method) => method,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
         let method = method.borrow();
 
-        if let Some(func_generic_names) = &method.generic_names {
+        if let Some(func_generics) = &method.generics {
+            let func_generic_names = func_generics.iter_names().cloned().collect::<Vec<_>>();
+
             // Ensure that the func call has the same amount of generic impls
             // as the func declaration has declared.
             if method_call_generics.len_types() != func_generic_names.len() {
@@ -231,7 +237,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
 
             // Insert the new generic types into `self.generic_funcs`. These
             // generics will then be used when creating copies of the method.
-            match self.generic_methods.entry(structure_name) {
+            match self.generic_methods.entry(old_path) {
                 Entry::Occupied(mut o_outer) => match o_outer.get_mut().entry(method_name) {
                     Entry::Occupied(mut o_inner) => {
                         if !o_inner.get().contains(&new_generics) {
@@ -251,7 +257,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
         } else {
             let err = self.type_context.analyze_context.err(format!(
                 "Func call for method \"{}\" on struct \"{}\"has generics, but func decl doesn't.",
-                &method_name, &structure_name
+                &method_name, &old_path
             ));
             self.errors.push(err);
         }
@@ -260,18 +266,18 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
     fn collect_nested(&mut self, ast_tokens: &mut Vec<AstToken>) {
         for ast_token in ast_tokens {
             // Need to do this ugly hack to make the borrow checker happy.
-            // We wan't to borrow the `adt_name` and use it in the logic below,
+            // We wan't to borrow the `adt_path` and use it in the logic below,
             // but at the same time borrow the `ast_token` which contains the
-            // `adt_name`.
+            // `adt_path`.
             let impl_opt = match ast_token {
-                AstToken::Block(BlockHeader::Implement(adt_name, _), _, block_id, _) => {
+                AstToken::Block(BlockHeader::Implement(adt_path, _), _, block_id, _) => {
                     if self
                         .type_context
                         .analyze_context
-                        .get_adt(adt_name, *block_id)
+                        .get_adt(adt_path, *block_id)
                         .is_ok()
                     {
-                        Some(adt_name.clone())
+                        Some(adt_path.clone())
                     } else {
                         None
                     }
@@ -280,8 +286,8 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                 _ => continue,
             };
 
-            if let Some(adt_name) = impl_opt {
-                let mut nested_collector = NestedGenericCollector::new(&adt_name);
+            if let Some(adt_path) = impl_opt {
+                let mut nested_collector = NestedGenericCollector::new(&adt_path);
                 let mut traverser = AstTraverser::new();
                 if let Err(errs) = traverser
                     .add_visitor(&mut nested_collector)
@@ -293,7 +299,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
 
                 for (method_name, tys) in nested_collector.nested_generic_adts.iter() {
                     for ty in tys {
-                        match self.nested_generic_adts.entry(adt_name.clone()) {
+                        match self.nested_generic_adts.entry(adt_path.clone()) {
                             Entry::Occupied(mut o_outer) => {
                                 match o_outer.get_mut().entry(method_name.clone()) {
                                     Entry::Occupied(mut o_inner) => {
@@ -317,7 +323,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
 
                 for (nested_info, generics_vec) in nested_collector.nested_generic_methods.iter() {
                     for generics in generics_vec {
-                        match self.nested_generic_methods.entry(adt_name.clone()) {
+                        match self.nested_generic_methods.entry(adt_path.clone()) {
                             Entry::Occupied(mut o_outer) => {
                                 match o_outer.get_mut().entry(nested_info.clone()) {
                                     Entry::Occupied(mut o_inner) => {
@@ -349,15 +355,15 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
         );
 
         // Converts all `self.nested_generic_adts` into regular `self.generic_adts`.
-        for adt_name in self.dependency_order_rev.clone().iter() {
-            if !self.nested_generic_adts.contains_key(adt_name) {
+        for adt_path in self.dependency_order_rev.clone().iter() {
+            if !self.nested_generic_adts.contains_key(adt_path) {
                 continue;
             }
 
-            let nested_gen_adt = self.nested_generic_adts.remove(adt_name).unwrap();
+            let nested_gen_adt = self.nested_generic_adts.remove(adt_path).unwrap();
             for (method_name, nested_adt_tys) in nested_gen_adt.iter() {
                 for nested_adt_ty in nested_adt_tys.iter() {
-                    let nested_ident = if let Some(nested_ident) = nested_adt_ty.get_ident() {
+                    let nested_adt_path = if let Some(nested_ident) = nested_adt_ty.get_ident() {
                         nested_ident
                     } else {
                         let err = self.type_context.analyze_context.err(format!(
@@ -368,28 +374,28 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                         return;
                     };
 
-                    self.convert_nested_adt_from_adt(&adt_name, nested_adt_ty, &nested_ident);
+                    self.convert_nested_adt_from_adt(&adt_path, nested_adt_ty, &nested_adt_path);
                     self.convert_nested_adt_from_method(
-                        &adt_name,
+                        &adt_path,
                         method_name,
                         nested_adt_ty,
-                        &nested_ident,
+                        &nested_adt_path,
                     );
                 }
             }
         }
 
         // Converts all `self.nested_generic_methods` into regular `self.generic_methods`.
-        for adt_name in self.dependency_order_rev.clone().iter() {
-            if !self.nested_generic_methods.contains_key(adt_name) {
+        for adt_path in self.dependency_order_rev.clone().iter() {
+            if !self.nested_generic_methods.contains_key(adt_path) {
                 continue;
             }
 
-            let nested_gen_methods = self.nested_generic_methods.remove(adt_name).unwrap();
+            let nested_gen_methods = self.nested_generic_methods.remove(adt_path).unwrap();
 
             // Figures out and returns a list of the methods in the order that
             // they should be iterated.
-            let method_order = match GenericCollector::order(adt_name, nested_gen_methods.keys()) {
+            let method_order = match GenericCollector::order(adt_path, nested_gen_methods.keys()) {
                 Ok(order) => order,
                 Err(err) => {
                     self.errors.push(err);
@@ -405,9 +411,9 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                 for (method_info, nested_method_tys) in &nested_gen_methods {
                     if &method_info.method_call_name == order_method_name {
                         for generics in nested_method_tys.iter() {
-                            self.convert_nested_method_from_adt(&adt_name, &method_info, generics);
+                            self.convert_nested_method_from_adt(adt_path, &method_info, generics);
                             self.convert_nested_method_from_method(
-                                &adt_name,
+                                adt_path,
                                 &method_info,
                                 generics,
                             );
@@ -423,8 +429,8 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             // `self.generic_methods`.
             for (method_info, nested_method_tys) in &nested_gen_methods {
                 for generics in nested_method_tys.iter() {
-                    self.convert_nested_method_from_adt(&adt_name, &method_info, generics);
-                    self.convert_nested_method_from_method(&adt_name, &method_info, generics);
+                    self.convert_nested_method_from_adt(&adt_path, &method_info, generics);
+                    self.convert_nested_method_from_method(&adt_path, &method_info, generics);
                 }
             }
         }
@@ -432,11 +438,11 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
 
     fn convert_nested_adt_from_adt(
         &mut self,
-        adt_name: &str,
+        adt_path: &LangPath,
         nested_adt_ty: &Ty,
-        nested_ident: &str,
+        nested_adt_path: &LangPath,
     ) {
-        let gen_adt_tys = if let Some(gen_adt_tys) = self.generic_adts.get(adt_name) {
+        let gen_adt_tys = if let Some(gen_adt_tys) = self.generic_adts.get(adt_path) {
             gen_adt_tys.clone()
         } else {
             // This can happen if there are no implementation of a
@@ -444,7 +450,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             return;
         };
 
-        // Go through all implementations of the ADT `adt_name` and use those
+        // Go through all implementations of the ADT `adt_path` and use those
         // generic instances to create new ADT instances for the nested one.
         // This will be done for all generics of the outer ADT.
         for gen_adt_ty in gen_adt_tys {
@@ -466,7 +472,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                 continue;
             }
 
-            match self.generic_adts.entry(nested_ident.into()) {
+            match self.generic_adts.entry(nested_adt_path.clone()) {
                 Entry::Occupied(mut o) => {
                     if !o.get().contains(&nested_ty_clone) {
                         o.get_mut().push(nested_ty_clone.clone());
@@ -481,14 +487,14 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
 
     fn convert_nested_adt_from_method(
         &mut self,
-        adt_name: &str,
+        adt_path: &LangPath,
         method_name: &str,
         nested_adt_ty: &Ty,
-        nested_ident: &str,
+        nested_adt_path: &LangPath,
     ) {
         let gen_func_tys = if let Some(gen_func_tys) = self
             .generic_methods
-            .get(adt_name)
+            .get(adt_path)
             .map(|s| s.get(method_name))
             .flatten()
         {
@@ -508,7 +514,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                 continue;
             }
 
-            match self.generic_adts.entry(nested_ident.into()) {
+            match self.generic_adts.entry(nested_adt_path.clone()) {
                 Entry::Occupied(mut o) => {
                     if !o.get().contains(&nested_ty_clone) {
                         o.get_mut().push(nested_ty_clone.clone());
@@ -523,14 +529,14 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
 
     fn convert_nested_method_from_adt(
         &mut self,
-        adt_name: &str,
+        adt_path: &LangPath,
         method_info: &NestedMethodInfo,
         generics: &Generics,
     ) {
         let method_call_name = &method_info.method_call_name;
-        let method_adt_name = &method_info.method_adt_name;
+        let method_adt_path = &method_info.method_adt_path;
 
-        let gen_adt_tys = if let Some(gen_adt_tys) = self.generic_adts.get(adt_name) {
+        let gen_adt_tys = if let Some(gen_adt_tys) = self.generic_adts.get(adt_path) {
             gen_adt_tys.clone()
         } else {
             return;
@@ -539,18 +545,18 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
         // TODO:
         let block_id = BlockInfo::DEFAULT_BLOCK_ID;
 
-        let method_gen_names = match self.type_context.analyze_context.get_adt_method(
-            method_adt_name,
+        let method_gen_names = match self.type_context.analyze_context.get_method(
+            method_adt_path,
             method_call_name,
             block_id,
         ) {
             Ok(method) => {
-                if let Some(method_gen_names) = &method.borrow().generic_names {
-                    method_gen_names.clone()
+                if let Some(method_gens) = &method.borrow().generics {
+                    method_gens.iter_names().cloned().collect::<Vec<_>>()
                 } else {
                     unreachable!(
-                        "method_adt_name: {}, method_call_name: {}, block_id: {}",
-                        method_adt_name, method_call_name, block_id
+                        "method_adt_path: {}, method_call_name: {}, block_id: {}",
+                        method_adt_path, method_call_name, block_id
                     );
                 }
             }
@@ -589,7 +595,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             // The method call is done on the structure `method_structure_name`, so
             // use that instead of the `struct_name` which represents the structure
             // in which this call was found.
-            match self.generic_methods.entry(method_adt_name.into()) {
+            match self.generic_methods.entry(method_adt_path.clone()) {
                 Entry::Occupied(mut o_outer) => {
                     match o_outer.get_mut().entry(method_call_name.clone()) {
                         Entry::Occupied(mut o_inner) => {
@@ -613,17 +619,17 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
 
     fn convert_nested_method_from_method(
         &mut self,
-        adt_name: &str,
+        adt_path: &LangPath,
         method_info: &NestedMethodInfo,
         generics: &Generics,
     ) {
         let method_name = &method_info.method_name;
         let method_call_name = &method_info.method_call_name;
-        let method_adt_name = &method_info.method_adt_name;
+        let method_adt_path = &method_info.method_adt_path;
 
         let gen_func_tys = if let Some(gen_func_tys) = self
             .generic_methods
-            .get(adt_name)
+            .get(adt_path)
             .map(|s| s.get(method_name))
             .flatten()
         {
@@ -635,18 +641,18 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
         // TODO:
         let block_id = BlockInfo::DEFAULT_BLOCK_ID;
 
-        let method_gen_names = match self.type_context.analyze_context.get_adt_method(
-            method_adt_name,
+        let method_gen_names = match self.type_context.analyze_context.get_method(
+            method_adt_path,
             method_call_name,
             block_id,
         ) {
             Ok(method) => {
-                if let Some(method_gen_names) = &method.borrow().generic_names {
-                    method_gen_names.clone()
+                if let Some(method_gens) = &method.borrow().generics {
+                    method_gens.iter_names().cloned().collect::<Vec<_>>()
                 } else {
                     unreachable!(
-                        "method_adt_name: {}, method_call_name: {}, block_id: {}",
-                        method_adt_name, method_call_name, block_id
+                        "method_adt_path: {}, method_call_name: {}, block_id: {}",
+                        method_adt_path, method_call_name, block_id
                     );
                 }
             }
@@ -674,7 +680,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             // The method call is done on the structure `method_structure_name`, so
             // use that instead of the `struct_name` which represents the structure
             // in which this call was found.
-            match self.generic_methods.entry(method_adt_name.into()) {
+            match self.generic_methods.entry(method_adt_path.clone()) {
                 Entry::Occupied(mut o_outer) => {
                     match o_outer.get_mut().entry(method_call_name.clone()) {
                         Entry::Occupied(mut o_inner) => {
@@ -697,9 +703,9 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
     }
 
     /// Figures out the order in which the nested methods needs to be "handled"/
-    /// "expanded". The returned vector will contain the names of the methods in
+    /// "expanded". The returned vector will contain the names/paths of the methods in
     /// the order in which they should be converted to "regular" generic methods.
-    fn order<I>(adt_name: &str, nested_method_infos: I) -> LangResult<Vec<String>>
+    fn order<I>(adt_path: &LangPath, nested_method_infos: I) -> LangResult<Vec<String>>
     where
         I: IntoIterator<Item = &'a NestedMethodInfo>,
     {
@@ -711,7 +717,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
         for nested_method_info in nested_method_infos {
             // We only care about methods that are referenced from the same
             // ADT.
-            if adt_name != nested_method_info.method_adt_name {
+            if adt_path != &nested_method_info.method_adt_path {
                 continue;
             }
 
@@ -745,7 +751,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             Err(cyc_err) => Err(LangError::new(
                 format!(
                     "Cyclic dependency between method \"{}\" and \"{}\" in ADT \"{}\".",
-                    cyc_err.0, cyc_err.1, adt_name
+                    cyc_err.0, cyc_err.1, adt_path
                 ),
                 LangErrorKind::GeneralError,
                 None,
@@ -765,8 +771,13 @@ impl<'a, 'tctx> Visitor for GenericCollector<'a, 'tctx> {
 
     fn visit_default_block(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
         let include_impls = true;
-        let full_names = false;
-        match dependency_order(ast_token, include_impls, full_names) {
+        let full_paths = false;
+        match dependency_order(
+            &self.type_context.analyze_context,
+            ast_token,
+            include_impls,
+            full_paths,
+        ) {
             Ok(mut dependency_order) => {
                 dependency_order.reverse();
                 self.dependency_order_rev = dependency_order;
@@ -791,7 +802,7 @@ impl<'a, 'tctx> Visitor for GenericCollector<'a, 'tctx> {
         }
     }
 
-    fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_end(&mut self, _ctx: &TraverseContext) {
         debug!(
             "self.generic_adts: {:#?}, self.generic_methods: {:#?}",
             self.generic_adts, self.generic_methods
@@ -801,7 +812,7 @@ impl<'a, 'tctx> Visitor for GenericCollector<'a, 'tctx> {
 }
 
 struct NestedGenericCollector<'a> {
-    adt_name: &'a str,
+    adt_path: &'a LangPath,
 
     /// The key String is the name of the function that this type/generics was
     /// found in.
@@ -818,9 +829,9 @@ struct NestedGenericCollector<'a> {
 }
 
 impl<'a> NestedGenericCollector<'a> {
-    fn new(adt_name: &'a str) -> Self {
+    fn new(adt_path: &'a LangPath) -> Self {
         Self {
-            adt_name,
+            adt_path,
             nested_generic_adts: HashMap::default(),
             nested_generic_methods: HashMap::default(),
             cur_func_name: "".into(),
@@ -831,8 +842,8 @@ impl<'a> NestedGenericCollector<'a> {
     fn collect_nested_generic_adts(&mut self, ty: &Ty) {
         if !ty.contains_generic() {
             return;
-        } else if let Some(ty_ident) = ty.get_ident() {
-            if self.adt_name == ty_ident {
+        } else if let Some(ty_path) = &ty.get_ident() {
+            if self.adt_path == ty_path {
                 return;
             }
         }
@@ -866,6 +877,10 @@ impl<'a> NestedGenericCollector<'a> {
     }
 
     fn collect_nested_generic_methods(&mut self, fn_call: &FnCall) {
+        if fn_call.method_adt.is_none() {
+            return;
+        }
+
         let fn_call_generics = if let Some(fn_call_generics) = &fn_call.generics {
             if !fn_call_generics.is_empty() {
                 fn_call_generics
@@ -883,7 +898,7 @@ impl<'a> NestedGenericCollector<'a> {
             let key = NestedMethodInfo {
                 method_name: self.cur_func_name.clone(),
                 method_call_name: fn_call.name.clone(),
-                method_adt_name: fn_call.method_adt.as_ref().unwrap().get_ident().unwrap(),
+                method_adt_path: fn_call.method_adt.as_ref().unwrap().get_ident().unwrap(),
             };
 
             match self.nested_generic_methods.entry(key) {

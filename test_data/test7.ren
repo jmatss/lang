@@ -1,7 +1,6 @@
 extern fn printf(format: {u8}, ...) -> i32
 extern fn malloc(size: i32) -> {u8}
 extern fn free(ptr: {u8})
-//extern fn itoa(value: i32, s: {u8}, radix: i32) -> {u8}
 
 fn fac(n: i32) -> i32
 {
@@ -30,7 +29,6 @@ fn main() -> i32
     printf("n: %d, result: %d", n, fac(n))
     
     var buf: {u8} = malloc(20)
-    //printf("\nitoa: %s", itoa(n, buf, 10))
     
     free(buf)
     return 0

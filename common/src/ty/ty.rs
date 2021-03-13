@@ -2,9 +2,10 @@ use super::{generics::Generics, inner_ty::InnerTy};
 use crate::{
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
+    path::{LangPath, LangPathPart},
     token::expr::Expr,
     type_info::TypeInfo,
-    util, TypeId,
+    TypeId,
 };
 use core::panic;
 use either::Either;
@@ -57,29 +58,39 @@ pub enum Ty {
     /// where `@type(i)` would return the type of expression `i` which is `i64`.
     Expr(Box<Expr>, TypeInfo),
 
-    /// Unknown member of the struct/enum/interface type "Type" with the member
+    /// Unknown member of the struct/enum/trait type "Type" with the member
     /// name "String".
     UnknownAdtMember(Box<Ty>, String, TypeId, TypeInfo),
 
-    /// Unknown method of the struct/enum/interface type "Type" with the name
-    /// "String".
-    UnknownAdtMethod(Box<Ty>, String, TypeId, TypeInfo),
+    /// Unknown method of the struct/enum/trait type "Type" with the name
+    /// "String". The vector are generics specified at the function call,
+    /// the usize is the index and the types are "UnknownMethodGeneric" types.
+    UnknownAdtMethod(Box<Ty>, String, Vec<Ty>, TypeId, TypeInfo),
 
-    /// Unknown method argument of the struct/enum/interface type "Type" with
-    /// the name "String". The "Either" is either the name of the argument or
-    /// the index of the argument in the method call if no argument name is set.
-    UnknownMethodArgument(Box<Ty>, String, Either<String, usize>, TypeId, TypeInfo),
+    /// Unknown method argument of the struct/enum/trait type "Type" with
+    /// the name "String". The vector are generics specified at the function call,
+    /// and the "Either" is either the name of the argument or the index of the
+    /// argument in the method call if no argument name is set.
+    UnknownMethodArgument(
+        Box<Ty>,
+        String,
+        Vec<Ty>,
+        Either<String, usize>,
+        TypeId,
+        TypeInfo,
+    ),
 
-    /// Unknown method generic argument of the struct/enum/interface type "Type"
-    /// with the name "String". The "usize" is the index of the generic argument
-    // in the method call.
-    UnknownMethodGeneric(Box<Ty>, String, usize, TypeId, TypeInfo),
+    /// Unknown method generic argument of the struct/enum/trait type "Type"
+    /// with the name "String". The  The "Either<usize, String>" is either the index
+    /// or the name of the generic argument in the method call.
+    UnknownMethodGeneric(Box<Ty>, String, Either<usize, String>, TypeId, TypeInfo),
 
     /// Unknown type of array member of array with type "Type".
     UnknownArrayMember(Box<Ty>, TypeId, TypeInfo),
 }
 
 impl Hash for Ty {
+    #[allow(clippy::many_single_char_names)]
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         // TODO: Better way to hash other than adding an arbitrary int to make
         //       the enum variants "unique"?
@@ -126,18 +137,20 @@ impl Hash for Ty {
                 b.hash(state);
                 c.hash(state);
             }
-            Ty::UnknownAdtMethod(a, b, c, ..) => {
+            Ty::UnknownAdtMethod(a, b, c, d, ..) => {
                 9.hash(state);
                 a.hash(state);
                 b.hash(state);
                 c.hash(state);
+                d.hash(state);
             }
-            Ty::UnknownMethodArgument(a, b, c, d, ..) => {
+            Ty::UnknownMethodArgument(a, b, c, d, e, ..) => {
                 10.hash(state);
                 a.hash(state);
                 b.hash(state);
                 c.hash(state);
                 d.hash(state);
+                e.hash(state);
             }
             Ty::UnknownMethodGeneric(a, b, c, d, ..) => {
                 11.hash(state);
@@ -278,11 +291,11 @@ impl Ty {
 
             Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => true,
 
-            Ty::UnknownAdtMember(_, _, _, _)
-            | Ty::UnknownAdtMethod(_, _, _, _)
-            | Ty::UnknownMethodArgument(_, _, _, _, _)
-            | Ty::UnknownMethodGeneric(_, _, _, _, _)
-            | Ty::UnknownArrayMember(_, _, _) => false,
+            Ty::UnknownAdtMember(..)
+            | Ty::UnknownAdtMethod(..)
+            | Ty::UnknownMethodArgument(..)
+            | Ty::UnknownMethodGeneric(..)
+            | Ty::UnknownArrayMember(..) => false,
         }
     }
 
@@ -348,12 +361,18 @@ impl Ty {
         }
     }
 
+    pub fn get_generic_ident(&self) -> Option<String> {
+        match self {
+            Ty::Generic(ident, ..) | Ty::GenericInstance(ident, ..) => Some(ident.clone()),
+            _ => None,
+        }
+    }
+
     /// Returns the identifier if this type represents a structure or a generic.
     /// If this type isn't a structure or generic, None is returned.
-    pub fn get_ident(&self) -> Option<String> {
+    pub fn get_ident(&self) -> Option<LangPath> {
         match self {
             Ty::CompoundType(inner_ty, ..) => inner_ty.get_ident(),
-            Ty::Generic(ident, ..) | Ty::GenericInstance(ident, ..) => Some(ident.clone()),
             _ => None,
         }
     }
@@ -451,7 +470,6 @@ impl Ty {
             }
 
             Ty::Pointer(ty, ..)
-            | Ty::Array(ty, ..)
             | Ty::UnknownAdtMember(ty, ..)
             | Ty::UnknownAdtMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
@@ -461,6 +479,17 @@ impl Ty {
                     for inner_expr in inner_exprs {
                         exprs.push(unsafe { (inner_expr as *mut Expr).as_mut().unwrap() });
                     }
+                }
+            }
+
+            Ty::Array(ty, dim_expr_opt, ..) => {
+                if let Some(inner_exprs) = ty.get_exprs_mut() {
+                    for inner_expr in inner_exprs {
+                        exprs.push(unsafe { (inner_expr as *mut Expr).as_mut().unwrap() });
+                    }
+                }
+                if let Some(dim_expr) = dim_expr_opt {
+                    exprs.push(unsafe { (dim_expr.as_mut() as *mut Expr).as_mut().unwrap() });
                 }
             }
 
@@ -503,15 +532,18 @@ impl Ty {
 
     /// Recursively replaces any generic identifiers from "UnknownIdent" wrapped
     /// inside a "CompoundType" into "Generic"s.
-    pub fn replace_generics(&mut self, generic_names: &[String]) {
+    pub fn replace_generics(&mut self, generics: &Generics) {
         match self {
-            Ty::CompoundType(InnerTy::UnknownIdent(ident, ..), generics, type_info) => {
-                for generic in generics.iter_types_mut() {
-                    generic.replace_generics(generic_names);
+            Ty::CompoundType(InnerTy::UnknownIdent(path, ..), gens, type_info) => {
+                for gen in gens.iter_types_mut() {
+                    gen.replace_generics(generics);
                 }
 
-                if generic_names.contains(ident) {
-                    *self = Ty::Generic(ident.clone(), type_info.clone());
+                if path.count() == 1 {
+                    let possible_gen_name = path.first().unwrap().name();
+                    if generics.iter_names().any(|x| x == possible_gen_name) {
+                        *self = Ty::Generic(possible_gen_name.into(), type_info.clone());
+                    }
                 }
             }
 
@@ -521,22 +553,21 @@ impl Ty {
             | Ty::UnknownAdtMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
             | Ty::UnknownMethodGeneric(ty, ..)
-            | Ty::UnknownArrayMember(ty, ..) => ty.replace_generics(generic_names),
+            | Ty::UnknownArrayMember(ty, ..) => ty.replace_generics(generics),
 
             Ty::Fn(gens, params, ret_ty, ..) => {
                 if let Some(ty) = ret_ty.as_mut() {
-                    ty.replace_generics(generic_names)
+                    ty.replace_generics(generics)
                 }
-                gens.iter_mut()
-                    .for_each(|ty| ty.replace_generics(generic_names));
+                gens.iter_mut().for_each(|ty| ty.replace_generics(generics));
                 params
                     .iter_mut()
-                    .for_each(|ty| ty.replace_generics(generic_names));
+                    .for_each(|ty| ty.replace_generics(generics));
             }
 
             Ty::Expr(expr, ..) => {
                 if let Ok(ty) = expr.get_expr_type_mut() {
-                    ty.replace_generics(generic_names);
+                    ty.replace_generics(generics);
                 }
             }
 
@@ -660,32 +691,41 @@ impl Ty {
         }
     }
 
-    /// Gets a set of the names of all ADTs/traits that is contained in the type.
-    /// Set `full_names` to true to fetch the names as full names, set to false
-    // to just return the names without generics.
-    pub fn get_adt_and_trait_names(&self, full_names: bool) -> Option<HashSet<String>> {
-        let mut names = HashSet::default();
+    /// Gets a set of the paths of all ADTs/traits that is contained in the type.
+    /// Set `full_paths` to true to fetch the names as full names, set to false
+    /// to just return the names without generics.
+    pub fn get_adt_and_trait_paths(&self, full_paths: bool) -> Option<HashSet<LangPath>> {
+        let mut paths = HashSet::default();
 
         match self {
             Ty::CompoundType(inner_ty, generics, _) => {
                 for generic in generics.iter_types() {
-                    if let Some(inner_names) = generic.get_adt_and_trait_names(full_names) {
-                        names.extend(inner_names.into_iter());
+                    if let Some(inner_paths) = generic.get_adt_and_trait_paths(full_paths) {
+                        paths.extend(inner_paths.into_iter());
                     }
                 }
 
+                let generics_opt = if generics.len_types() > 0 {
+                    Some(generics.clone())
+                } else {
+                    None
+                };
+
                 match inner_ty {
-                    InnerTy::Struct(ident)
-                    | InnerTy::Enum(ident)
-                    | InnerTy::Union(ident)
-                    | InnerTy::Trait(ident)
-                    | InnerTy::UnknownIdent(ident, ..) => {
-                        let name = if full_names {
-                            util::to_generic_name(ident, generics)
+                    InnerTy::Struct(path)
+                    | InnerTy::Enum(path)
+                    | InnerTy::Union(path)
+                    | InnerTy::Trait(path)
+                    | InnerTy::UnknownIdent(path, ..) => {
+                        let mut path_clone = path.clone();
+                        let last_part = path_clone.pop().unwrap();
+                        if full_paths {
+                            path_clone.push(LangPathPart(last_part.0, generics_opt));
                         } else {
-                            ident.clone()
-                        };
-                        names.insert(name);
+                            path_clone.push(LangPathPart(last_part.0, None));
+                        }
+
+                        paths.insert(path_clone);
                     }
                     _ => (),
                 }
@@ -698,35 +738,35 @@ impl Ty {
             | Ty::UnknownMethodArgument(ty, ..)
             | Ty::UnknownMethodGeneric(ty, ..)
             | Ty::UnknownArrayMember(ty, ..) => {
-                if let Some(inner_names) = ty.get_adt_and_trait_names(full_names) {
-                    names.extend(inner_names.into_iter());
+                if let Some(inner_paths) = ty.get_adt_and_trait_paths(full_paths) {
+                    paths.extend(inner_paths.into_iter());
                 }
             }
 
             Ty::Fn(gens, params, ret_ty, ..) => {
-                if let Some(inner_names) = ret_ty
+                if let Some(inner_paths) = ret_ty
                     .as_ref()
-                    .map(|ty| ty.get_adt_and_trait_names(full_names))
+                    .map(|ty| ty.get_adt_and_trait_paths(full_paths))
                     .flatten()
                 {
-                    names.extend(inner_names);
+                    paths.extend(inner_paths);
                 }
                 for gen in gens {
-                    if let Some(inner_names) = gen.get_adt_and_trait_names(full_names) {
-                        names.extend(inner_names);
+                    if let Some(inner_paths) = gen.get_adt_and_trait_paths(full_paths) {
+                        paths.extend(inner_paths);
                     }
                 }
                 for param in params {
-                    if let Some(inner_names) = param.get_adt_and_trait_names(full_names) {
-                        names.extend(inner_names);
+                    if let Some(inner_paths) = param.get_adt_and_trait_paths(full_paths) {
+                        paths.extend(inner_paths);
                     }
                 }
             }
 
             Ty::Expr(expr, ..) => {
                 if let Ok(ty) = expr.get_expr_type() {
-                    if let Some(inner_names) = ty.get_adt_and_trait_names(full_names) {
-                        names.extend(inner_names.into_iter());
+                    if let Some(inner_paths) = ty.get_adt_and_trait_paths(full_paths) {
+                        paths.extend(inner_paths.into_iter());
                     }
                 }
             }
@@ -734,8 +774,8 @@ impl Ty {
             _ => (),
         }
 
-        if !names.is_empty() {
-            Some(names)
+        if !paths.is_empty() {
+            Some(paths)
         } else {
             None
         }
@@ -744,15 +784,15 @@ impl Ty {
     /// Recursively replaces any structure types with idents that matches the
     /// old structure name. These will be replaced with the new type with the
     /// generics "replaced"/"implemented".
-    pub fn replace_self(&mut self, old_name: &str, new_self_ty: &Ty) {
+    pub fn replace_self(&mut self, old_path: &LangPath, new_self_ty: &Ty) {
         match self {
             Ty::CompoundType(inner_ty, ..) => match inner_ty {
-                InnerTy::Struct(ident)
-                | InnerTy::Enum(ident)
-                | InnerTy::Union(ident)
-                | InnerTy::Trait(ident)
-                | InnerTy::UnknownIdent(ident, ..) => {
-                    if ident == old_name {
+                InnerTy::Struct(path)
+                | InnerTy::Enum(path)
+                | InnerTy::Union(path)
+                | InnerTy::Trait(path)
+                | InnerTy::UnknownIdent(path, ..) => {
+                    if path == old_path {
                         *self = new_self_ty.clone();
                     }
                 }
@@ -765,22 +805,22 @@ impl Ty {
             | Ty::UnknownAdtMethod(ty, ..)
             | Ty::UnknownMethodArgument(ty, ..)
             | Ty::UnknownMethodGeneric(ty, ..)
-            | Ty::UnknownArrayMember(ty, ..) => ty.replace_self(old_name, new_self_ty),
+            | Ty::UnknownArrayMember(ty, ..) => ty.replace_self(old_path, new_self_ty),
 
             Ty::Fn(gens, params, ret_ty, ..) => {
                 if let Some(ty) = ret_ty.as_mut() {
-                    ty.replace_self(old_name, new_self_ty)
+                    ty.replace_self(old_path, new_self_ty)
                 }
                 gens.iter_mut()
-                    .for_each(|ty| ty.replace_self(old_name, new_self_ty));
+                    .for_each(|ty| ty.replace_self(old_path, new_self_ty));
                 params
                     .iter_mut()
-                    .for_each(|ty| ty.replace_self(old_name, new_self_ty));
+                    .for_each(|ty| ty.replace_self(old_path, new_self_ty));
             }
 
             Ty::Expr(expr, ..) => {
                 if let Ok(ty) = expr.get_expr_type_mut() {
-                    ty.replace_self(old_name, new_self_ty);
+                    ty.replace_self(old_path, new_self_ty);
                 }
             }
 
@@ -1081,12 +1121,14 @@ impl Ty {
             || self.contains_ty(&Ty::UnknownAdtMethod(
                 Box::new(tmp_ty.clone()),
                 tmp_str.clone(),
+                Vec::with_capacity(0),
                 "".into(),
                 TypeInfo::None,
             ))
             || self.contains_ty(&Ty::UnknownMethodArgument(
                 Box::new(tmp_ty.clone()),
                 tmp_str.clone(),
+                Vec::with_capacity(0),
                 Either::Right(0),
                 "".into(),
                 TypeInfo::None,
@@ -1094,7 +1136,7 @@ impl Ty {
             || self.contains_ty(&Ty::UnknownMethodGeneric(
                 Box::new(tmp_ty.clone()),
                 tmp_str,
-                0,
+                Either::Left(0),
                 "".into(),
                 TypeInfo::None,
             ))
@@ -1114,7 +1156,7 @@ impl Ty {
     }
 
     pub fn contains_unknown_ident(&self) -> bool {
-        self.contains_inner_ty(&InnerTy::UnknownIdent("".into(), 0))
+        self.contains_inner_ty(&InnerTy::UnknownIdent(LangPath::default(), 0))
     }
 
     pub fn contains_unknown_array_member(&self) -> bool {

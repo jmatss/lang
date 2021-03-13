@@ -1,5 +1,3 @@
-use std.assert
-
 extern fn printf(format: {u8}, ...) -> i32
 
 fn double(n: {i32}) -> bool
@@ -12,7 +10,7 @@ fn double(n: {i32}) -> bool
 fn main() -> i32
 {
     var num = 3
-    
+
     if true and 1 == 1 or double(num.&) {
     }
     
@@ -28,8 +26,8 @@ fn main() -> i32
     {
         printf("FALSE\n")
     }
-    
-    assert_msg(num == 3, "Short circuit not working correctly.")    
+
+    std::assert(num == 3, "Short circuit not working correctly.")
 
     return 0
 }

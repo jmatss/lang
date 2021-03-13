@@ -9,7 +9,6 @@ use common::{
     },
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     type_info::TypeInfo,
-    util,
 };
 use either::Either;
 use inkwell::{
@@ -330,24 +329,29 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// The FunctionValue will "converted" into a PointerValue to make it sized.
     /// This will be done by first converting it into its GlobalValue.
     pub fn compile_fn_ptr(&mut self, expr: &mut Expr) -> LangResult<AnyValueEnum<'ctx>> {
-        let (fn_name, generics, file_pos) =
-            if let Expr::FnPtr(fn_name, generics, _, file_pos) = expr {
-                (fn_name, generics, file_pos)
-            } else {
-                unreachable!("expr not fn_ptr: {:#?}", expr);
-            };
+        let fn_ptr = if let Expr::FnPtr(fn_ptr) = expr {
+            fn_ptr
+        } else {
+            unreachable!("expr not fn_ptr: {:#?}", expr);
+        };
 
-        let full_name = util::to_generic_name(fn_name, generics);
-        if let Some(fn_value) = self.module.get_function(&full_name) {
+        let partial_path = fn_ptr
+            .module
+            .clone_push(&fn_ptr.name, fn_ptr.generics.as_ref());
+        let full_path = self
+            .analyze_context
+            .calculate_fn_full_path(&partial_path, self.cur_block_id)?;
+
+        if let Some(fn_value) = self.module.get_function(&full_path.to_string()) {
             let fn_ptr = fn_value.as_global_value().as_pointer_value();
             Ok(fn_ptr.into())
         } else {
             Err(self.err(
                 format!(
                     "Unable to find function with full name {} (compiling fn pointer).",
-                    &full_name
+                    &full_path
                 ),
-                file_pos.to_owned(),
+                fn_ptr.file_pos.to_owned(),
             ))
         }
     }
@@ -608,15 +612,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         union_init: &mut AdtInit,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let full_name = union_init.full_name()?;
+        let partial_path = union_init
+            .module
+            .clone_push(&union_init.name, union_init.generics.as_ref());
+        let full_path = self
+            .analyze_context
+            .calculate_adt_full_path(&partial_path, self.cur_block_id)?;
 
-        let union_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
+        let union_type = if let Some(inner) = self.module.get_struct_type(&full_path.to_string()) {
             inner
         } else {
             return Err(self.err(
                 format!(
                     "Unable to get union with name \"{}\". Union init: {:#?}",
-                    full_name, union_init
+                    full_path, union_init
                 ),
                 union_init.file_pos,
             ));
@@ -627,7 +636,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let basic_value = CodeGen::any_into_basic_value(any_value)?;
 
         let tag_idx = self.analyze_context.get_adt_member_index(
-            &full_name,
+            &full_path,
             &arg.name.as_ref().unwrap(),
             self.cur_block_id,
         )?;
