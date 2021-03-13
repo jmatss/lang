@@ -1,8 +1,8 @@
-use std.mem_new
+use std::mem::Allocator
+use std::mem::Disposable
+use std::mem::Ptr
 
-// TODO: std.mem already includes std.traits. Should rework import logic.
-//use std.traits
-
+extern fn printf(format: {u8}, ...) -> i32
 extern fn strlen(str: {u8}) -> i32
 
 enum ErrorKind
@@ -49,11 +49,11 @@ fn main() -> i32
     needs_deinit = true
     var heap_err = Error { kind, msg, needs_deinit }
 
-    var a = Ptr::init(heap_err)
-    a.&.deinit()
-
     printf("Stack: %s", stack_err.msg)
     printf("\nHeap: %s", heap_err.msg)
+
+    var a = Ptr::init(heap_err)
+    a.&.deinit()
 
     return 0
 }

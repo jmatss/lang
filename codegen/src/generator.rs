@@ -2,13 +2,14 @@ use analyze::context::AnalyzeContext;
 use common::{
     error::{LangError, LangErrorKind::CodeGenError, LangResult},
     file::FilePosition,
+    path::LangPathPart,
     token::{
         ast::AstToken,
         expr::{Expr, Var},
         lit::Lit,
     },
     ty::{inner_ty::InnerTy, ty::Ty},
-    util, BlockId,
+    BlockId,
 };
 use inkwell::{
     basic_block::BasicBlock,
@@ -225,7 +226,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub(super) fn compile_var_decl(&mut self, var: &Var) -> LangResult<()> {
-        debug!("Compiling var var_decl: {:#?}", &var);
+        debug!("Compiling var_decl: {:#?}", &var);
 
         // Constants are never "compiled" into instructions, they are handled
         // "internally" in this code during compilation.
@@ -426,31 +427,40 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             Ty::CompoundType(inner_ty, generics, ..) => {
                 match inner_ty {
-                    InnerTy::Struct(ident) | InnerTy::Union(ident) => {
-                        let ident = if !generics.is_empty() {
-                            util::to_generic_name(ident, generics)
-                        } else {
-                            ident.clone()
-                        };
+                    InnerTy::Struct(path) | InnerTy::Union(path) => {
+                        let mut full_path = path.clone();
+                        let last_part = full_path.pop().unwrap();
+                        full_path.push(LangPathPart(last_part.0, Some(generics.clone())));
 
-                        if let Some(struct_type) = self.module.get_struct_type(&ident) {
+                        if let Some(struct_type) =
+                            self.module.get_struct_type(&full_path.to_string())
+                        {
                             struct_type.clone().into()
                         } else {
                             return Err(self.err(
                                 format!(
-                                    "Unable to find custom struct type with name: {:#?}",
-                                    ident
+                                    "Unable to find custom struct type with name: {}",
+                                    full_path
                                 ),
                                 file_pos,
                             ));
                         }
                     }
-                    InnerTy::Enum(ident) => {
-                        if let Some(struct_type) = self.module.get_struct_type(&ident) {
+                    InnerTy::Enum(path) => {
+                        let mut full_path = path.clone();
+                        let last_part = full_path.pop().unwrap();
+                        full_path.push(LangPathPart(last_part.0, Some(generics.clone())));
+
+                        if let Some(struct_type) =
+                            self.module.get_struct_type(&full_path.to_string())
+                        {
                             struct_type.clone().into()
                         } else {
                             return Err(self.err(
-                                format!("Unable to find custom enum type with name: {:#?}", ident),
+                                format!(
+                                    "Unable to find custom enum type with name: {:#?}",
+                                    full_path
+                                ),
                                 file_pos,
                             ));
                         }

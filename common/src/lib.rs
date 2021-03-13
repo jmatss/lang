@@ -17,6 +17,7 @@ pub mod empty_visitor;
 pub mod error;
 pub mod file;
 pub mod iter;
+pub mod path;
 pub mod token;
 pub mod traverser;
 pub mod ty;

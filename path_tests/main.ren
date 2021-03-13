@@ -1,0 +1,42 @@
+// Since this contains the main function, it should have no path.
+// The start function used for a executable is "main" in the "empty namespace".
+
+// incl(ude) takes a string literal that represents a path in the file system.
+//incl "other.ren"
+//incl "*.ren"    // All files named `*.ren` in the current directory.
+//incl "dir/*"    // All files in the subdirectory `dir`, extension doesn't matter.
+//incl "dir\\*"   // Same as above.
+
+incl "abc_def.ren"
+use abc::def::AbcDefStruct
+use abc::def
+
+incl "dir/xyz.ren"
+use xyz::xyz_fn
+
+fn main() -> i32
+{
+    test_fn()
+    
+    var a: AbcDefStruct
+    a = AbcDefStruct { 1.0 }
+    a = def::AbcDefStruct { 2.0 }
+    a = abc::def::AbcDefStruct { 3.0 }
+    
+    AbcDefStruct::struct_fn(1)
+    def::AbcDefStruct::struct_fn(2)
+    abc::def::AbcDefStruct::struct_fn(3)
+    
+    xyz_fn()
+    xyz::xyz_fn()
+    
+    // Should result in compile errors because of invalid paths
+    //ghi::xyz_fn()
+
+    return 0
+}
+
+fn test_fn() -> u8
+{
+    return 2
+}

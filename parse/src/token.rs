@@ -37,7 +37,6 @@ pub fn get_if_expr_op(symbol: &Sym) -> Option<Operator> {
         Sym::PointyBracketEnd => Operator::BinaryOperator(BinOperator::Gt),
 
         Sym::Dot => Operator::BinaryOperator(BinOperator::Dot),
-        Sym::DoubleColon => Operator::BinaryOperator(BinOperator::DoubleColon),
         //Symbol::Comma,
         //Symbol::QuestionMark,
         //Symbol::ExclamationMark,
@@ -219,7 +218,6 @@ impl Operator {
                 BinOperator::Range => (true, 16, Fix::Dummy),
                 BinOperator::RangeInclusive => (true, 16, Fix::Dummy),
                 BinOperator::Dot => (true, 1, Fix::Dummy),
-                BinOperator::DoubleColon => (true, 1, Fix::Dummy),
 
                 BinOperator::Eq => (true, 9, Fix::Dummy),
                 BinOperator::Neq => (true, 9, Fix::Dummy),

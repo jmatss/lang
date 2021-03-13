@@ -1,4 +1,4 @@
-use std.assert
+extern fn printf(format: {u8}, ...) -> i32
 
 struct NestedStruct
 {
@@ -24,8 +24,8 @@ fn main() -> i32
     var k = TestStruct { 456, s.& }
     double(k.y.*.b)
     k.y.*.b.* += 2
-    assert(i == 8)
+    std::assert(i == 8)
     printf("Output: %d", i)
-    
+
     return 0
 }

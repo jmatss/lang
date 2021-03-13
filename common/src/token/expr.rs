@@ -9,6 +9,7 @@ use super::{
 use crate::{
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
+    path::{LangPath, LangPathPart},
     ty::{generics::Generics, ty::Ty},
     util, BlockId,
 };
@@ -26,8 +27,7 @@ pub enum Expr {
     Type(Ty, Option<FilePosition>),
     Var(Var),
     FnCall(FnCall),
-    /// The name is the name of the function and the generics are impls for the fn.
-    FnPtr(String, Generics, Option<Ty>, Option<FilePosition>),
+    FnPtr(FnPtr),
     BuiltInCall(BuiltInCall),
     AdtInit(AdtInit),
     ArrayInit(ArrayInit),
@@ -57,8 +57,8 @@ impl Expr {
                     unreachable!("Value already verified to be Some.");
                 }
             }
-            Expr::FnPtr(_, _, ret_ty, _) if ret_ty.is_some() => {
-                if let Some(ty) = &ret_ty {
+            Expr::FnPtr(fn_ptr) if fn_ptr.fn_ty.is_some() => {
+                if let Some(ty) = &fn_ptr.fn_ty {
                     ty.clone()
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -132,8 +132,8 @@ impl Expr {
                     unreachable!("Value already verified to be Some.");
                 }
             }
-            Expr::FnPtr(_, _, ret_ty, _) if ret_ty.is_some() => {
-                if let Some(ty) = ret_ty {
+            Expr::FnPtr(fn_ptr) if fn_ptr.fn_ty.is_some() => {
+                if let Some(ty) = &mut fn_ptr.fn_ty {
                     ty
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -186,11 +186,10 @@ impl Expr {
 
     pub fn file_pos(&self) -> Option<&FilePosition> {
         match self {
-            Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) | Expr::FnPtr(.., file_pos) => {
-                file_pos.as_ref()
-            }
+            Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) => file_pos.as_ref(),
             Expr::Var(var) => var.file_pos.as_ref(),
             Expr::FnCall(fn_call) => fn_call.file_pos.as_ref(),
+            Expr::FnPtr(fn_ptr) => fn_ptr.file_pos.as_ref(),
             Expr::BuiltInCall(built_in_call) => Some(&built_in_call.file_pos),
             Expr::AdtInit(adt_init) => adt_init.file_pos.as_ref(),
             Expr::ArrayInit(array_init) => Some(&array_init.file_pos),
@@ -203,11 +202,10 @@ impl Expr {
 
     pub fn file_pos_mut(&mut self) -> Option<&mut FilePosition> {
         match self {
-            Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) | Expr::FnPtr(.., file_pos) => {
-                file_pos.as_mut()
-            }
+            Expr::Lit(.., file_pos) | Expr::Type(.., file_pos) => file_pos.as_mut(),
             Expr::Var(var) => var.file_pos.as_mut(),
             Expr::FnCall(fn_call) => fn_call.file_pos.as_mut(),
+            Expr::FnPtr(fn_ptr) => fn_ptr.file_pos.as_mut(),
             Expr::BuiltInCall(built_in_call) => Some(&mut built_in_call.file_pos),
             Expr::AdtInit(adt_init) => adt_init.file_pos.as_mut(),
             Expr::ArrayInit(array_init) => Some(&mut array_init.file_pos),
@@ -422,11 +420,9 @@ impl Var {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FnCall {
     pub name: String,
+    pub module: LangPath,
     pub arguments: Vec<Argument>,
     pub ret_type: Option<Ty>,
-
-    /// Will be set if the function call "hardcoded" generics. Otherwise the
-    /// generics will be fetched from the type of this function call.
     pub generics: Option<Generics>,
 
     pub file_pos: Option<FilePosition>,
@@ -439,18 +435,19 @@ pub struct FnCall {
     /// Will be set to true if this is a function call that is being called on
     /// a variable that contains a function pointer.
     pub is_fn_ptr_call: bool,
-    pub fn_full_name: Option<String>,
 }
 
 impl FnCall {
     pub fn new(
         name: String,
+        module: LangPath,
         arguments: Vec<Argument>,
         generics: Option<Generics>,
         file_pos: Option<FilePosition>,
     ) -> Self {
         Self {
             name,
+            module,
             arguments,
             ret_type: None,
             generics,
@@ -458,49 +455,43 @@ impl FnCall {
             is_method: false,
             method_adt: None,
             is_fn_ptr_call: false,
-            fn_full_name: None,
-        }
-    }
-
-    /// Returns the generics. If generics was set at the function call, this
-    /// function will replace the types of the types parsed during type inference
-    /// with type specified at the func call.
-    pub fn generics(&self) -> Option<&Generics> {
-        if let Some(generics) = &self.generics {
-            Some(generics)
-        } else {
-            None
         }
     }
 
     /// Returns the "full name" which is the name containing possible ADT
     /// and generics as well.
     pub fn full_name(&self) -> LangResult<String> {
-        let (adt_name, adt_generics) = if let Some(adt_ty) = &self.method_adt {
-            if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
-                if inner_ty.is_adt() {
-                    let ident = inner_ty.get_ident().unwrap();
-                    (ident, Some(adt_generics))
+        if let Some(adt_ty) = &self.method_adt {
+            let (adt_path, adt_generics) =
+                if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
+                    if inner_ty.is_adt() {
+                        let adt_path = inner_ty.get_ident().unwrap();
+                        (adt_path, Some(adt_generics))
+                    } else {
+                        return Err(LangError::new(
+                            format!("Method call on non ADT type: {:#?}", self),
+                            LangErrorKind::GeneralError,
+                            self.file_pos.to_owned(),
+                        ));
+                    }
                 } else {
-                    unreachable!("Method call on non ADT type: {:#?}", self)
-                }
-            } else {
-                return Err(LangError::new(
-                    format!("Unable to get full name for method call: {:#?}", self),
-                    LangErrorKind::GeneralError,
-                    self.file_pos.to_owned(),
-                ));
-            }
-        } else {
-            return Ok(self.name.clone());
-        };
+                    return Err(LangError::new(
+                        format!("Unable to get full name for method call: {:#?}", self),
+                        LangErrorKind::GeneralError,
+                        self.file_pos.to_owned(),
+                    ));
+                };
 
-        Ok(util::to_method_name(
-            &adt_name,
-            adt_generics,
-            &self.name,
-            self.generics.as_ref(),
-        ))
+            Ok(util::to_method_name(
+                &adt_path,
+                adt_generics,
+                &self.name,
+                self.generics.as_ref(),
+            ))
+        } else {
+            let fn_path = self.module.clone_push(&self.name, self.generics.as_ref());
+            Ok(fn_path.full_name())
+        }
     }
 
     /// Returns the "half name" which is the name that does NOT contain anything
@@ -511,6 +502,44 @@ impl FnCall {
         } else {
             self.name.clone()
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FnPtr {
+    pub name: String,
+    pub module: LangPath,
+    pub generics: Option<Generics>,
+    pub fn_ty: Option<Ty>,
+    pub file_pos: Option<FilePosition>,
+}
+
+impl FnPtr {
+    pub fn new(
+        name: String,
+        module: LangPath,
+        generics: Option<Generics>,
+        fn_ty: Option<Ty>,
+        file_pos: Option<FilePosition>,
+    ) -> Self {
+        Self {
+            name,
+            module,
+            generics,
+            fn_ty,
+            file_pos,
+        }
+    }
+
+    /// Returns the "full name" which is the name containing possible ADT
+    /// and generics as well.
+    pub fn full_name(&self) -> LangResult<String> {
+        let fn_name_part = LangPathPart(self.name.clone(), self.generics.clone());
+        let full_path = self
+            .module
+            .join(&LangPath::new(vec![fn_name_part], None), None);
+
+        Ok(full_path.full_name())
     }
 }
 
@@ -543,6 +572,7 @@ impl BuiltInCall {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AdtInit {
     pub name: String,
+    pub module: LangPath,
     pub arguments: Vec<Argument>,
     pub ret_type: Option<Ty>,
     pub generics: Option<Generics>,
@@ -553,6 +583,7 @@ pub struct AdtInit {
 impl AdtInit {
     pub fn new(
         name: String,
+        module: LangPath,
         arguments: Vec<Argument>,
         generics: Option<Generics>,
         file_pos: Option<FilePosition>,
@@ -560,6 +591,7 @@ impl AdtInit {
     ) -> Self {
         Self {
             name,
+            module,
             arguments,
             ret_type: None,
             generics,
@@ -575,7 +607,7 @@ impl AdtInit {
         let ty_generics = if let Some(Ty::CompoundType(_, ty_generics, _)) = &self.ret_type {
             ty_generics
         } else {
-            panic!("Struct init type not struct.");
+            panic!("Struct init type not ADT.");
         };
 
         if let Some(generics) = &mut self.generics {
@@ -599,18 +631,23 @@ impl AdtInit {
             None
         };
 
-        if let Some(ty) = &self.ret_type {
-            if let Ty::CompoundType(inner_ty, adt_generics, ..) = ty {
+        if let Some(adt_ty) = &self.ret_type {
+            if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
                 let generics = if let Some(adt_init_generics) = adt_init_generics {
                     adt_init_generics
                 } else {
                     adt_generics.clone()
                 };
 
-                Ok(util::to_generic_name(
-                    &inner_ty.get_ident().unwrap(),
-                    &generics,
-                ))
+                // Remove the "name" fetched from the ADT type and use the name
+                // and the included generics from this ADT init instead.
+                let mut adt_path = inner_ty.get_ident().unwrap();
+                adt_path.pop();
+
+                let new_adt_name = LangPathPart(self.name.clone(), Some(generics));
+                let new_adt_path = adt_path.join(&LangPath::new(vec![new_adt_name], None), None);
+
+                Ok(new_adt_path.full_name())
             } else {
                 Err(LangError::new(
                     format!("Unable to get full name for ADT init: {:#?}", self),

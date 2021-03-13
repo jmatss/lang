@@ -22,7 +22,7 @@ pub struct AstTraverser<'a> {
 }
 
 // TODO: Add more context here.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TraverseContext {
     /// Indicates if any found shared references (ex. RefCount) should be "deep"
     /// copied before the traverser visits it. This comes in handy when working
@@ -96,7 +96,15 @@ impl<'a> AstTraverser<'a> {
         }
     }
 
-    pub fn traverse_token(&mut self, mut ast_token: &mut AstToken) -> &mut Self {
+    pub fn traverse_token(&mut self, ast_token: &mut AstToken) -> &mut Self {
+        self.traverse_token_priv(ast_token);
+        for v in self.visitors.iter_mut() {
+            v.visit_end(&self.traverse_context);
+        }
+        self
+    }
+
+    fn traverse_token_priv(&mut self, mut ast_token: &mut AstToken) -> &mut Self {
         let old_pos = self.traverse_context.file_pos.to_owned();
         if let Some(file_pos) = ast_token.file_pos() {
             self.traverse_context.file_pos = file_pos.to_owned();
@@ -112,7 +120,7 @@ impl<'a> AstTraverser<'a> {
                 if let AstToken::Block(.., id, body) = ast_token {
                     for body_token in body {
                         self.traverse_context.block_id = *id;
-                        self.traverse_token(body_token);
+                        self.traverse_token_priv(body_token);
                     }
                 }
             }
@@ -193,7 +201,7 @@ impl<'a> AstTraverser<'a> {
                         }
                     }
 
-                    if let Some(generic_impls) = &mut func.borrow_mut().generic_impls {
+                    if let Some(generic_impls) = &mut func.borrow_mut().generics {
                         for ty in generic_impls.iter_types_mut() {
                             self.traverse_type(ty);
                         }
@@ -479,13 +487,15 @@ impl<'a> AstTraverser<'a> {
                     v.visit_fn_call(fn_call, &self.traverse_context)
                 }
             }
-            Expr::FnPtr(_, generics, fn_ty, _) => {
-                for gen_ty in generics.iter_types_mut() {
-                    self.traverse_type(gen_ty);
+            Expr::FnPtr(fn_ptr) => {
+                if let Some(gen_tys) = &mut fn_ptr.generics {
+                    for gen_ty in gen_tys.iter_types_mut() {
+                        self.traverse_type(gen_ty);
+                    }
                 }
 
-                if let Some(fn_ty) = fn_ty {
-                    self.traverse_type(fn_ty);
+                if let Some(ty) = &mut fn_ptr.fn_ty {
+                    self.traverse_type(ty);
                 }
 
                 debug!("Visiting fn ptr");
@@ -616,7 +626,7 @@ impl<'a> AstTraverser<'a> {
                     v.visit_use(stmt, &self.traverse_context)
                 }
             }
-            Stmt::Package(..) => {
+            Stmt::Module(..) => {
                 debug!("Visiting package");
                 for v in self.visitors.iter_mut() {
                     v.visit_package(stmt, &self.traverse_context)

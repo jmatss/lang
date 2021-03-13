@@ -13,7 +13,7 @@ use common::{
 use log::debug;
 
 /// Rewrites "access" operations to make them "easier" to work with.
-/// Binary ADT/enum member indexing and union "is" matches will be written into
+/// Binary ADT member indexing and union "is" matches will be written into
 /// un ops.
 pub struct IndexingAnalyzer {
     errors: Vec<LangError>,
@@ -55,7 +55,7 @@ impl Visitor for IndexingAnalyzer {
         }
     }
 
-    fn visit_expr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {
+    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
         if let Expr::Op(Op::BinOp(bin_op)) = expr {
             match bin_op.operator {
                 // Struct or union access.
@@ -73,28 +73,6 @@ impl Visitor for IndexingAnalyzer {
 
                     let adt_access = UnOperator::AdtAccess(var.name.clone(), None);
                     let un_op = UnOp::new(adt_access, bin_op.lhs.clone(), expr.file_pos().cloned());
-                    *expr = Expr::Op(Op::UnOp(un_op));
-                }
-
-                // TODO: Will this double colon access always be for enums only?
-                //       Is there a possibility that this might be used for
-                //       static/const as well access in the future?
-                // Enum access.
-                BinOperator::DoubleColon => {
-                    let var = if let Some(var) = bin_op.rhs.eval_to_var() {
-                        var
-                    } else {
-                        return;
-                    };
-
-                    debug!(
-                        "Rewriting enum access -- lhs: {:#?}, rhs: {:#?}",
-                        bin_op.lhs, &var
-                    );
-
-                    let enum_access = UnOperator::EnumAccess(var.name.clone(), ctx.block_id);
-                    let un_op =
-                        UnOp::new(enum_access, bin_op.lhs.clone(), expr.file_pos().cloned());
                     *expr = Expr::Op(Op::UnOp(un_op));
                 }
 

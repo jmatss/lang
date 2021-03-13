@@ -1,12 +1,15 @@
-use crate::BlockId;
+use crate::{
+    path::{LangPath, LangPathPart},
+    BlockId,
+};
 use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum InnerTy {
-    Struct(String),
-    Enum(String),
-    Union(String),
-    Trait(String),
+    Struct(LangPath),
+    Enum(LangPath),
+    Union(LangPath),
+    Trait(LangPath),
 
     Void,
     Character,
@@ -33,7 +36,7 @@ pub enum InnerTy {
     /// This is used during the type inference stage. This type will be given to
     /// found identifier type. This can be ex. the name of a struct/interface/enum.
     /// The block id is used to find the structure in the correct scope.
-    UnknownIdent(String, BlockId),
+    UnknownIdent(LangPath, BlockId),
 
     /// A int type used during type inferece. It is known that it is of a int
     /// type, but the bit size isn't known.
@@ -55,7 +58,7 @@ impl InnerTy {
             || matches!(self, InnerTy::UnknownInt(..) | InnerTy::UnknownFloat(..))
     }
 
-    pub fn get_ident(&self) -> Option<String> {
+    pub fn get_ident(&self) -> Option<LangPath> {
         match self {
             InnerTy::Struct(ident)
             | InnerTy::Enum(ident)
@@ -74,6 +77,8 @@ impl InnerTy {
         InnerTy::F32
     }
 
+    // TODO: Converting from `&str` to `LangPath` doesn't work for generics.
+    //       Is this ok?
     pub fn ident_to_type(s: &str, id: BlockId) -> Self {
         match s {
             "void" => InnerTy::Void,
@@ -92,7 +97,13 @@ impl InnerTy {
             "f64" => InnerTy::F64,
             "i128" => InnerTy::I128,
             "u128" => InnerTy::U128,
-            _ => InnerTy::UnknownIdent(s.to_string(), id),
+            _ => {
+                let parts = s
+                    .split("::")
+                    .map(|s| LangPathPart(s.to_string(), None))
+                    .collect::<Vec<_>>();
+                InnerTy::UnknownIdent(parts.into(), id)
+            }
         }
     }
 
@@ -169,10 +180,7 @@ impl InnerTy {
     /// Checks if this InnerTy is a ADT i.e. a struct, enum or union.
     /// It does NOT check if this is a UnknownIdent.
     pub fn is_adt(&self) -> bool {
-        match self {
-            InnerTy::Struct(_) | InnerTy::Enum(_) | InnerTy::Union(_) => true,
-            _ => false,
-        }
+        matches!(self, InnerTy::Struct(_) |  InnerTy::Enum(_) | InnerTy::Union(_))
     }
 
     pub fn is_trait(&self) -> bool {
@@ -244,11 +252,15 @@ impl InnerTy {
 
 impl Display for InnerTy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InnerTy::Struct(path)
+            | InnerTy::Enum(path)
+            | InnerTy::Union(path)
+            | InnerTy::Trait(path) => return write!(f, "{}", path.to_string()),
+            _ => (),
+        }
+
         let result = match self {
-            InnerTy::Struct(ident)
-            | InnerTy::Enum(ident)
-            | InnerTy::Union(ident)
-            | InnerTy::Trait(ident) => ident,
             InnerTy::Void => "void",
             InnerTy::Character => "char",
             InnerTy::String => "String",
@@ -270,7 +282,6 @@ impl Display for InnerTy {
                 self
             ),
         };
-
         write!(f, "{}", result)
     }
 }

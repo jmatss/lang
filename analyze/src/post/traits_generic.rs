@@ -1,10 +1,10 @@
 use crate::AnalyzeContext;
 use common::{
     error::LangError,
+    path::{LangPath, LangPathPart},
     token::block::TraitCompareError,
     traverser::TraverseContext,
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
-    util,
     visitor::Visitor,
     BlockId,
 };
@@ -32,10 +32,26 @@ impl<'a> TraitsGenericAnalyzer<'a> {
         }
     }
 
-    fn verify_adt_traits(&mut self, old_adt_name: &str, generics: &Generics, block_id: BlockId) {
-        let adt_name = util::to_generic_name(old_adt_name, generics);
+    /// Given a ADT with the path `adt_path`, makes sure that the "instance"s of
+    /// its generics implements the traits that are required on the generic
+    /// declarations in a "where" clause.
+    ///
+    /// For example given the code below:
+    ///
+    /// ```no_run
+    /// pub struct A<T> where T impls B {}
+    /// var a = A<TImpl> {}
+    /// ```
+    ///
+    /// The generic `T` are required to implement the trait `B`. In this case
+    /// the `verify_adt_traits` function would make sure that the generic
+    /// "instance" `TImpl` also implements the trait `B`.
+    fn verify_adt_traits(&mut self, adt_path: &LangPath, generics: &Generics, block_id: BlockId) {
+        let mut adt_path_with_gens = adt_path.clone();
+        let last_part = adt_path_with_gens.pop().unwrap();
+        adt_path_with_gens.push(LangPathPart(last_part.0, Some(generics.clone())));
 
-        let adt = match self.analyze_context.get_adt(&adt_name, block_id) {
+        let adt = match self.analyze_context.get_adt(&adt_path_with_gens, block_id) {
             Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);
@@ -79,7 +95,7 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                 let err = self.analyze_context.err(format!(
                     "ADT \"{0}\" has \"where\" clause for type \"{1}\" which isn't a ADT. \
                     The type \"{1}\" can therefore not implement the required traits:{2}.",
-                    adt_name,
+                    adt_path_with_gens,
                     generic_ty.to_string(),
                     trait_names,
                 ));
@@ -97,7 +113,7 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                 } else {
                     let err = self.analyze_context.err(format!(
                         "Generic with name \"{}\" on ADT \"{}\" implements non trait type: {:#?}",
-                        generic_name, adt_name, trait_ty
+                        generic_name, adt_path_with_gens, trait_ty
                     ));
                     self.errors.push(err);
                     continue;
@@ -114,20 +130,23 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                 for trait_method in &trait_.borrow().methods {
                     let method_name = trait_method.name.clone();
 
-                    let gen_struct_method = if let Some(struct_method) =
-                        gen_struct_methods.get(&method_name)
-                    {
-                        struct_method
-                    } else {
-                        let err = self.analyze_context.err(format!(
-                            "Struct \"{0}\" requires that its generic type \"{1}\" implements \
+                    let gen_struct_method =
+                        if let Some(struct_method) = gen_struct_methods.get(&method_name) {
+                            struct_method
+                        } else {
+                            let err = self.analyze_context.err(format!(
+                                "Struct \"{0}\" requires that its generic type \"{1}\" implements \
                             the trait \"{2}\". The type \"{3}\" is used as generic \"{1}\", \
                             but it does NOT implement the function \"{4}\" from the trait \"{2}\".",
-                            old_adt_name, generic_name, trait_name, generic_adt_name, method_name
-                        ));
-                        self.errors.push(err);
-                        return;
-                    };
+                                adt_path_with_gens,
+                                generic_name,
+                                trait_name,
+                                generic_adt_name,
+                                method_name
+                            ));
+                            self.errors.push(err);
+                            return;
+                        };
 
                     // TODO: Make safe. Gets a borrow error if done as usual,
                     //       there is a mutable borrow already. Where is that?
@@ -138,7 +157,7 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                     if let Err(cmp_errors) = struct_method_borrow.trait_cmp(trait_method) {
                         let err_msg_start = format!(
                             "Struct \"{}\"s impl of trait \"{}\"s method \"{}\" is incorrect.\n",
-                            old_adt_name, trait_name, method_name,
+                            adt_path_with_gens, trait_name, method_name,
                         );
                         let err_msg_end = format!(
                             "\nstruct_method: {:#?}\ntrait_method: {:#?}",
@@ -186,8 +205,8 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                                     format!(
                                         "Generic at idx {} differs. Struct generic name: {:#?}, trait generic name: {:#?}",
                                         idx,
-                                        struct_method_borrow.generic_names.as_ref().unwrap().get(idx).unwrap(),
-                                        trait_method.generic_names.as_ref().unwrap().get(idx).unwrap(),
+                                        struct_method_borrow.generics.as_ref().unwrap().get_name(idx).unwrap(),
+                                        trait_method.generics.as_ref().unwrap().get_name(idx).unwrap(),
                                     )
                                 }
                                 TraitCompareError::ImplsLenDiff(s_len, t_len) => {
@@ -231,9 +250,9 @@ impl<'a> TraitsGenericAnalyzer<'a> {
         }
     }
 
-    /// Recursively gets the types for the given `ty`. If any of the types are
-    /// a ADT with a generic, checks that the generics of that ADT actually
-    /// implements the specified traits in the "where" clause (if any).
+    /// Recursively checks the types contained in the given `ty`. If any of the
+    /// types are a ADT with a generic, checks that the generics of that ADT
+    /// actually implements the specified traits in the "where" clause (if any).
     fn check_adt_traits(&mut self, ty: &Ty, block_id: BlockId) {
         match ty {
             Ty::CompoundType(inner_ty, generics, ..) => {
@@ -241,11 +260,10 @@ impl<'a> TraitsGenericAnalyzer<'a> {
                     self.check_adt_traits(ty_i, block_id);
                 }
 
-                // TODO: Implement for unions as well.
                 match inner_ty {
-                    InnerTy::Struct(ident) | InnerTy::Union(ident) => {
+                    InnerTy::Struct(path) | InnerTy::Union(path) => {
                         if !generics.is_empty() {
-                            self.verify_adt_traits(ident, generics, block_id);
+                            self.verify_adt_traits(path, generics, block_id);
                         }
                     }
                     _ => (),

@@ -1,6 +1,7 @@
 use crate::{block::BlockInfo, AnalyzeContext};
 use common::{
     error::LangError,
+    path::{LangPath, LangPathPart},
     token::expr::Var,
     token::{
         ast::AstToken,
@@ -44,13 +45,26 @@ impl<'a> DeclFnAnalyzer<'a> {
             }
         };
 
+        let full_path = match self.analyze_context.borrow().get_module(fn_id) {
+            Ok(module_opt) => {
+                let module = if let Some(module) = module_opt {
+                    module
+                } else {
+                    LangPath::default()
+                };
+
+                let func = func.borrow();
+                module.clone_push(&func.name, func.generics.as_ref())
+            }
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
         // If true: Function already declared somewhere, make sure that the
         // current declaration and the previous one matches.
-        if let Ok(prev_func) = self
-            .analyze_context
-            .borrow()
-            .get_func(&func.borrow().name, parent_id)
-        {
+        if let Ok(prev_func) = self.analyze_context.borrow().get_fn(&full_path, parent_id) {
             let func = func.borrow();
 
             let empty_vec = Vec::new();
@@ -121,7 +135,7 @@ impl<'a> DeclFnAnalyzer<'a> {
         }
 
         // Add the function into decl lookup maps.
-        let key = (func.borrow().name.clone(), parent_id);
+        let key = (full_path, parent_id);
         self.analyze_context
             .borrow_mut()
             .fns
@@ -139,14 +153,19 @@ impl<'a> DeclFnAnalyzer<'a> {
         }
     }
 
-    fn analyze_method_header(&mut self, ident: &str, func: &mut Rc<RefCell<Fn>>, func_id: BlockId) {
+    fn analyze_method_header(
+        &mut self,
+        adt_path: &LangPath,
+        func: &mut Rc<RefCell<Fn>>,
+        func_id: BlockId,
+    ) {
         // The given `ident` might be a ADT or Trait. Therefore the logic below is
-        // duplicated, first checking Tratis and then checking the same for ADTs.
-        let (decl_id, inner_ty) = if self.analyze_context.borrow().is_trait(ident, func_id) {
+        // duplicated, first checking Traits and then checking the same for ADTs.
+        let (decl_id, inner_ty) = if self.analyze_context.borrow().is_trait(adt_path, func_id) {
             let decl_id = match self
                 .analyze_context
                 .borrow()
-                .get_trait_decl_scope(ident, func_id)
+                .get_trait_decl_scope(adt_path, func_id)
             {
                 Ok(decl_id) => decl_id,
                 Err(err) => {
@@ -155,12 +174,12 @@ impl<'a> DeclFnAnalyzer<'a> {
                 }
             };
 
-            (decl_id, InnerTy::Trait(ident.into()))
+            (decl_id, InnerTy::Trait(adt_path.clone()))
         } else {
             let decl_id = match self
                 .analyze_context
                 .borrow()
-                .get_adt_decl_scope(ident, func_id)
+                .get_adt_decl_scope(adt_path, func_id)
             {
                 Ok(decl_id) => decl_id,
                 Err(err) => {
@@ -169,11 +188,11 @@ impl<'a> DeclFnAnalyzer<'a> {
                 }
             };
 
-            let inner_ty = match self.analyze_context.borrow().get_adt(ident, func_id) {
+            let inner_ty = match self.analyze_context.borrow().get_adt(adt_path, func_id) {
                 Ok(adt) => match adt.borrow().kind {
-                    AdtKind::Struct => InnerTy::Struct(ident.into()),
-                    AdtKind::Union => InnerTy::Union(ident.into()),
-                    AdtKind::Enum => InnerTy::Enum(ident.into()),
+                    AdtKind::Struct => InnerTy::Struct(adt_path.clone()),
+                    AdtKind::Union => InnerTy::Union(adt_path.clone()),
+                    AdtKind::Enum => InnerTy::Enum(adt_path.clone()),
                     AdtKind::Unknown => unreachable!("AdtKind::Unknown"),
                 },
                 Err(err) => {
@@ -205,8 +224,8 @@ impl<'a> DeclFnAnalyzer<'a> {
                 )
             } else {
                 let err = self.analyze_context.borrow().err(format!(
-                    "Non static function did not contain \"this\" or \"this ptr\" reference. Structure name: {}, func: {:#?}.",
-                    ident, func
+                    "Non static function did not contain \"this\" or \"this ptr\" reference. ADT name: {}, func: {:#?}.",
+                    adt_path, func
                 ));
                 self.errors.push(err);
                 return;
@@ -221,6 +240,7 @@ impl<'a> DeclFnAnalyzer<'a> {
                 None,
                 false,
             )));
+
             if let Some(ref mut params) = func.parameters {
                 params.insert(0, var);
             } else {
@@ -232,7 +252,7 @@ impl<'a> DeclFnAnalyzer<'a> {
         if let Err(err) =
             self.analyze_context
                 .borrow_mut()
-                .insert_method(ident, Rc::clone(func), decl_id)
+                .insert_method(adt_path, Rc::clone(func), decl_id)
         {
             self.errors.push(err);
             return;
@@ -271,43 +291,59 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
     fn visit_impl(&mut self, mut ast_token: &mut AstToken, ctx: &TraverseContext) {
         let analyze_context = self.analyze_context.borrow();
 
-        let (ident, body) =
-            if let AstToken::Block(BlockHeader::Implement(ident, _), .., body) = &mut ast_token {
-                (ident, body)
+        // TODO: This won't work for all cases. The `impl_path` doesn't consider
+        //       the module path or "use"s.
+
+        let (impl_path, body) =
+            if let AstToken::Block(BlockHeader::Implement(impl_path, _), .., body) = &mut ast_token
+            {
+                (impl_path, body)
             } else {
                 return;
             };
 
-        let inner_ty = if analyze_context.is_struct(ident, ctx.block_id) {
-            InnerTy::Struct(ident.clone())
-        } else if analyze_context.is_enum(ident, ctx.block_id) {
-            InnerTy::Enum(ident.clone())
-        } else if analyze_context.is_union(ident, ctx.block_id) {
-            InnerTy::Union(ident.clone())
-        } else if analyze_context.is_trait(ident, ctx.block_id) {
-            InnerTy::Trait(ident.clone())
+        let mut partial_path = impl_path.clone();
+        let last_part = partial_path.pop().unwrap();
+        partial_path.push(LangPathPart(last_part.0, None));
+
+        let inner_ty = if let Ok(full_path) =
+            analyze_context.calculate_adt_full_path(impl_path, ctx.block_id)
+        {
+            if analyze_context.is_struct(&full_path, ctx.block_id) {
+                InnerTy::Struct(full_path)
+            } else if analyze_context.is_enum(&full_path, ctx.block_id) {
+                InnerTy::Enum(full_path)
+            } else if analyze_context.is_union(&full_path, ctx.block_id) {
+                InnerTy::Union(full_path)
+            } else {
+                unreachable!("full_path: {:#?}", full_path);
+            }
+        } else if let Ok(full_path) =
+            analyze_context.calculate_trait_full_path(impl_path, ctx.block_id)
+        {
+            InnerTy::Trait(full_path)
         } else {
-            let err = analyze_context.err(format!(
-                "Unable to find ADT/Trait for impl block: {:#?}",
-                ast_token
-            ));
+            let err = analyze_context.err_adt(
+                format!("Unable to find ADT with path: {}", partial_path),
+                &partial_path,
+            );
             self.errors.push(err);
             return;
         };
 
         // TODO: Will `TypeInfo::None` work? Does this need some sort of type
         //       info?
-        let ty = Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None);
+        let impl_ty = Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None);
 
         for mut body_token in body {
             if body_token.is_skippable() {
                 // skip
             } else if let AstToken::Block(BlockHeader::Fn(func), ..) = &mut body_token {
-                func.borrow_mut().method_adt = Some(ty.clone());
+                func.borrow_mut().method_adt = Some(impl_ty.clone());
             } else {
                 let err = analyze_context.err(format!(
                     "AST token in impl block with name \"{}\" not a function: {:?}",
-                    ident, body_token
+                    impl_path, body_token
                 ));
                 self.errors.push(err);
             }
@@ -316,26 +352,20 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
 
     fn visit_fn(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
         if let AstToken::Block(BlockHeader::Fn(func), _, func_id, ..) = &mut ast_token {
-            let structure_ty = if let Some(structure_ty) = func.borrow().method_adt.clone() {
-                Some(structure_ty)
+            let adt_ty = if let Some(adt_ty) = func.borrow().method_adt.clone() {
+                Some(adt_ty)
             } else {
                 None
             };
 
-            if let Some(structure_ty) = structure_ty {
-                if let Ty::CompoundType(inner_ty, ..) = structure_ty {
+            if let Some(adt_ty) = adt_ty {
+                if let Ty::CompoundType(inner_ty, ..) = adt_ty {
                     match inner_ty {
-                        InnerTy::Struct(ident)
-                        | InnerTy::Enum(ident)
-                        | InnerTy::Union(ident)
-                        | InnerTy::Trait(ident) => {
-                            self.analyze_method_header(&ident, func, *func_id);
-                        }
-
-                        // TODO: Clean this logic up, does it need to exists
-                        //       logic for both known and unknown idents here?
-                        InnerTy::UnknownIdent(ident, id) => {
-                            self.analyze_method_header(&ident, func, id);
+                        InnerTy::Struct(path)
+                        | InnerTy::Enum(path)
+                        | InnerTy::Union(path)
+                        | InnerTy::Trait(path) => {
+                            self.analyze_method_header(&path, func, *func_id);
                         }
 
                         _ => unreachable!(
@@ -360,7 +390,11 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
             //       declarations of a function that they have the same
             //       parameters & return type.
             // External declarations should always be in the default block.
-            let key = (func.borrow().name.clone(), BlockInfo::DEFAULT_BLOCK_ID);
+            let key = {
+                let func = func.borrow();
+                let path = func.module.clone_push(&func.name, None);
+                (path, BlockInfo::DEFAULT_BLOCK_ID)
+            };
             analyze_context.fns.insert(key, Rc::clone(func));
         }
     }

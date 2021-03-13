@@ -2,6 +2,7 @@ use crate::AnalyzeContext;
 use common::{
     error::LangError,
     error::LangResult,
+    path::LangPath,
     token::{
         ast::AstToken,
         block::BlockHeader,
@@ -42,13 +43,13 @@ impl<'a> ExhaustAnalyzer<'a> {
 
     fn exhaust_enum(
         &mut self,
-        ident: &str,
+        full_path: &LangPath,
         block_id: BlockId,
         match_cases: &mut Vec<AstToken>,
         ctx: &TraverseContext,
     ) -> LangResult<()> {
         // Gather all names of the members for the enum into a hash set.
-        let enum_ = self.analyze_context.get_adt(ident, block_id)?;
+        let enum_ = self.analyze_context.get_adt(full_path, block_id)?;
         let mut member_names = enum_
             .borrow()
             .members
@@ -130,8 +131,20 @@ impl<'a> Visitor for ExhaustAnalyzer<'a> {
             };
 
             match &match_case_ty {
-                Ty::CompoundType(InnerTy::Enum(ident), ..) => {
-                    if let Err(err) = self.exhaust_enum(ident, ctx.block_id, match_cases, ctx) {
+                Ty::CompoundType(InnerTy::Enum(partial_path), ..) => {
+                    let full_path = match self
+                        .analyze_context
+                        .calculate_adt_full_path(&partial_path, ctx.block_id)
+                    {
+                        Ok(full_path) => full_path,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
+
+                    if let Err(err) = self.exhaust_enum(&full_path, ctx.block_id, match_cases, ctx)
+                    {
                         self.errors.push(err);
                     }
                 }

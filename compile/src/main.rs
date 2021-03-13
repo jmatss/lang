@@ -11,84 +11,76 @@ use inkwell::context::Context;
 use lex::lexer;
 use log::{log_enabled, Level};
 use parse::parser::ParseTokenIter;
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap, path::Path, time::Instant};
 
 #[macro_use]
 extern crate log;
 
 fn main() -> LangResult<()> {
-    let matches = App::new("lang")
-        .arg(
-            Arg::with_name("input")
-                .short("i")
-                .long("input")
-                .value_name("FILE")
-                .help("The file to compile.")
-                .takes_value(true)
-                .required(true),
-        )
-        .arg(
-            Arg::with_name("output")
-                .short("o")
-                .long("output")
-                .value_name("NAME")
-                .help("The output name of the produced object file.")
-                .takes_value(true)
-                .required(false),
-        )
-        .arg(
-            Arg::with_name("optimize")
-                .short("O")
-                .long("optimize")
-                .help("Set to run optimization of the LLVM IR.")
-                .takes_value(false)
-                .required(false),
-        )
-        .arg(
-            Arg::with_name("dump")
-                .short("d")
-                .long("dump")
-                .help("Set to dump/print the generated LLVM IR code.")
-                .takes_value(false)
-                .required(false),
-        )
-        .arg(
-            Arg::with_name("ast")
-                .short("a")
-                .long("ast")
-                .help("Set to print AST.")
-                .takes_value(false)
-                .required(false),
-        )
-        .get_matches();
-
-    let mut input_file = matches.value_of("input").unwrap().to_owned();
-    if !input_file.ends_with(".ren") {
-        error!("Expected input file to end with the extension \".ren\".");
-        std::process::exit(1);
-    }
-    let input_file_clone = input_file.clone();
-    let input_file_name = input_file_clone.split('/').last().unwrap();
-
-    let default_output_file = input_file_name.replace(".ren", ".o");
-    let output_file = matches.value_of("output").unwrap_or(&default_output_file);
-    let optimize = matches.is_present("optimize");
-    let dump = matches.is_present("dump");
-    let ast = matches.is_present("ast");
-    let module_name = input_file_name.split('.').next().unwrap();
-
     env_logger::init();
+
+    let mut opts = parse_opts();
+
+    if let Some(input_files_list) = &opts.input_files_list {
+        let content = match std::fs::read_to_string(input_files_list) {
+            Ok(content) => content,
+            Err(fs_err) => {
+                return Err(LangError::new(
+                    format!(
+                        "Unable to read file specified in \"input\" option. Filename: {}, reason: {:#?}",
+                        input_files_list,
+                        fs_err.kind()
+                    ),
+                    LangErrorKind::GeneralError,
+                    None,
+                ));
+            }
+        };
+
+        let parent_path = Path::new(input_files_list)
+            .parent()
+            .unwrap_or_else(|| Path::new(""));
+        for input_file in content.split_whitespace() {
+            let child_path = Path::new(input_file);
+            let path = if child_path.is_absolute() {
+                child_path.to_path_buf()
+            } else {
+                parent_path.join(child_path)
+            };
+
+            if let Some(path_str) = path.to_str() {
+                opts.input_files.push(path_str.into())
+            } else {
+                return Err(LangError::new(
+                    format!(
+                        "Unable to convert path to string. Path: {}",
+                        child_path.to_string_lossy()
+                    ),
+                    LangErrorKind::GeneralError,
+                    None,
+                ));
+            }
+        }
+    }
+
+    if opts.input_files.is_empty() {
+        return Err(LangError::new(
+            "No input files found.".into(),
+            LangErrorKind::GeneralError,
+            None,
+        ));
+    }
 
     // Keep track of the files that are being parsed. This information will be
     // used when debugging and giving good error messages.
     let mut file_nr: FileId = 0;
     let mut file_info: HashMap<FileId, FileInfo> = HashMap::default();
 
-    // Loop through files and lex+parse them until there or no more uses/includes
-    // to process. ALl files will be incldued in the same module.
+    // Loop through files and lex+parse them. All files will be incldued in the
+    // same LLVM module.
     let mut parser = ParseTokenIter::new();
-    let mut ast_root = loop {
-        let path = std::path::Path::new(&input_file);
+    for input_file in &opts.input_files {
+        let path = std::path::Path::new(input_file);
         let filename = path
             .file_name()
             .map(|os| os.to_str())
@@ -151,22 +143,9 @@ fn main() -> LangResult<()> {
             &file.filename,
             parse_timer.elapsed()
         );
+    }
 
-        if let Some(use_path) = parser.uses.pop() {
-            input_file = match use_path.to_file_path() {
-                Ok(input_file) => input_file,
-                Err(e) => {
-                    eprintln!("[ERROR] {}", e);
-                    std::process::exit(1);
-                }
-            };
-        } else {
-            // No more "use" statements that includes more files. Break, all
-            // files parsed/lexed.
-            break parser.take_root_block();
-        }
-    };
-
+    let mut ast_root = parser.take_root_block();
     if log_enabled!(Level::Debug) {
         debug!("\nAST after parsing:\n{:#?}", ast_root);
     }
@@ -184,7 +163,7 @@ fn main() -> LangResult<()> {
     println!("Analyzing complete ({:?}).", analyze_timer.elapsed());
     if log_enabled!(Level::Debug) {
         debug!("\nAST after analyze:\n{:#?}", ast_root);
-    } else if ast {
+    } else if opts.ast {
         println!("\nAST after analyze:\n{:#?}", ast_root);
     }
     analyze_context.debug_print();
@@ -193,7 +172,7 @@ fn main() -> LangResult<()> {
     let target_machine = compiler::setup_target()?;
     let context = Context::create();
     let builder = context.create_builder();
-    let module = context.create_module(module_name);
+    let module = context.create_module(&opts.module_name);
     match generator::generate(
         &mut ast_root,
         &analyze_context,
@@ -210,22 +189,119 @@ fn main() -> LangResult<()> {
     }
 
     println!("Generating complete ({:?}).", generate_timer.elapsed());
-    if dump {
+    if opts.dump {
         println!("\n## LLVM IR before optimization ##");
         module.print_to_stderr();
     }
 
     let compile_timer = Instant::now();
     module.verify()?;
-    compiler::compile(target_machine, &module, output_file, optimize)?;
+    compiler::compile(target_machine, &module, &opts.output_file, opts.optimize)?;
     println!("Compiling complete ({:?}).", compile_timer.elapsed());
 
-    if dump && optimize {
+    if opts.dump && opts.optimize {
         println!("\n## LLVM IR after optimization ##");
         module.print_to_stderr();
     }
 
-    println!("Compiled to: {}", output_file);
+    println!("Compiled to: {}", opts.output_file);
 
     Ok(())
+}
+
+struct Options {
+    input_files: Vec<String>,
+    input_files_list: Option<String>,
+    output_file: String,
+    module_name: String,
+    optimize: bool,
+    dump: bool,
+    ast: bool,
+}
+
+fn parse_opts() -> Options {
+    let matches = App::new("lang")
+        .arg(
+            Arg::with_name("INPUTS")
+                .help("List of input files.")
+                .multiple(true)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("input")
+                .short("i")
+                .long("input")
+                .value_name("FILE")
+                .help(
+                    "A file containing a list of input files. \
+                    Relative paths inside the file will be resolved relative to this file path.",
+                )
+                .takes_value(true)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("output")
+                .short("o")
+                .long("output")
+                .value_name("NAME")
+                .help("The output name of the produced object file.")
+                .default_value("a.o")
+                .takes_value(true)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("optimize")
+                .short("O")
+                .long("optimize")
+                .help("Set to run optimization of the LLVM IR.")
+                .takes_value(false)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("llvm")
+                .short("l")
+                .long("llvm")
+                .help("Set to dump/print the generated LLVM IR code.")
+                .takes_value(false)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("ast")
+                .short("a")
+                .long("ast")
+                .help("Set to print AST.")
+                .takes_value(false)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("module")
+                .short("m")
+                .long("module")
+                .help("Set the name of the LLVM module.")
+                .default_value("lang_module")
+                .takes_value(true)
+                .required(false),
+        )
+        .get_matches();
+
+    let mut input_files = Vec::default();
+    if let Some(inputs) = matches.values_of("INPUTS") {
+        inputs.for_each(|f| input_files.push(f.into()));
+    }
+
+    let input_files_list = if let Some(input) = matches.value_of("input") {
+        Some(input.into())
+    } else {
+        None
+    };
+
+    Options {
+        input_files,
+        input_files_list,
+        output_file: matches.value_of("output").unwrap().into(),
+        module_name: matches.value_of("module").unwrap().into(),
+        optimize: matches.is_present("optimize"),
+        dump: matches.is_present("dump"),
+        ast: matches.is_present("ast"),
+    }
 }

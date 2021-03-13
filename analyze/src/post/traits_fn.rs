@@ -1,6 +1,7 @@
 use crate::AnalyzeContext;
 use common::{
     error::LangError,
+    path::LangPathPart,
     token::{
         ast::AstToken,
         block::{Adt, BlockHeader},
@@ -24,9 +25,12 @@ pub struct TraitsFnAnalyzer<'a> {
     analyze_context: &'a AnalyzeContext,
 
     /// Contains a map mapping names of generics to names of methods that the
-    /// specific generic implements (according to the "wwhile" clause).
+    /// specific generic implements (according to the "while" clause).
     /// This map will be set everytime a `implement` block is seen. It will
     /// then be accessed when the containing methods are traversed.
+    ///
+    /// This variable will be set/re-set for every new "implement" block visited.
+    /// This will only contain generics related to ADT for the impl block.
     generic_trait_method_names: Option<HashMap<String, HashSet<String>>>,
 
     errors: Vec<LangError>,
@@ -123,8 +127,26 @@ impl<'a> Visitor for TraitsFnAnalyzer<'a> {
     }
 
     fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
-        if let AstToken::Block(BlockHeader::Implement(ident, ..), ..) = ast_token {
-            let adt = match self.analyze_context.get_adt(ident, ctx.block_id) {
+        if let AstToken::Block(BlockHeader::Implement(impl_path, ..), ..) = ast_token {
+            let full_impl_path = match self.analyze_context.get_module(ctx.block_id) {
+                Ok(Some(mut full_impl_path)) => {
+                    let impl_ident = impl_path.last().unwrap().0.clone();
+                    full_impl_path.push(LangPathPart(impl_ident, None));
+                    full_impl_path
+                }
+                Ok(None) => {
+                    let mut full_impl_path = impl_path.clone();
+                    let last_part = full_impl_path.pop().unwrap();
+                    full_impl_path.push(LangPathPart(last_part.0, None));
+                    full_impl_path
+                }
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            let adt = match self.analyze_context.get_adt(&full_impl_path, ctx.block_id) {
                 Ok(adt) => adt,
                 Err(err) => {
                     self.errors.push(err);
@@ -136,14 +158,14 @@ impl<'a> Visitor for TraitsFnAnalyzer<'a> {
         }
     }
 
-    /// Check any function call in which the `method_structure` is a generic.
+    /// Check any function call in which the `method_adt` is a generic.
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, _ctx: &TraverseContext) {
-        if let Some(method_structure) = &fn_call.method_adt {
-            if !method_structure.is_generic() {
+        if let Some(method_adt) = &fn_call.method_adt {
+            if !method_adt.is_generic() {
                 return;
             }
 
-            let generic_name = method_structure.get_ident().unwrap();
+            let generic_name = method_adt.get_generic_ident().unwrap();
             let method_name = &fn_call.name;
 
             if !self.is_valid_method(&generic_name, method_name) {

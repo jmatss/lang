@@ -2,11 +2,8 @@ use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::LangResult,
     file::FilePosition,
-    token::{
-        expr::Expr,
-        op::AssignOperator,
-        stmt::{Path, Stmt},
-    },
+    path::LangPath,
+    token::{expr::Expr, op::AssignOperator, stmt::Stmt},
 };
 use inkwell::{
     module::Linkage, types::AnyTypeEnum, values::BasicValueEnum, values::InstructionValue,
@@ -21,7 +18,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Stmt::Break(file_pos) => self.compile_break(file_pos),
             Stmt::Continue(file_pos) => self.compile_continue(file_pos),
             Stmt::Use(path) => self.compile_use(path),
-            Stmt::Package(path) => self.compile_package(path),
+            Stmt::Module(path) => self.compile_module(path),
+
             Stmt::Increment(expr, file_pos) => self.compile_inc(expr, file_pos),
             Stmt::Decrement(expr, file_pos) => self.compile_dec(expr, file_pos),
 
@@ -99,16 +97,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn compile_use(&mut self, path: &Path) -> LangResult<()> {
+    fn compile_use(&mut self, _path: &LangPath) -> LangResult<()> {
         // Do nothing, "use"s are done during lexing/parsing for now.
         Ok(())
     }
 
-    fn compile_package(&mut self, path: &Path) -> LangResult<()> {
-        Err(self.err(
-            "TODO: Implement \"package\" statement.".into(),
-            Some(path.file_pos.to_owned()),
-        ))
+    fn compile_module(&mut self, _path: &LangPath) -> LangResult<()> {
+        // Do nothing, "module"s are done during lexing/parsing for now.
+        Ok(())
     }
 
     fn compile_inc(&mut self, expr: &mut Expr, file_pos: &Option<FilePosition>) -> LangResult<()> {

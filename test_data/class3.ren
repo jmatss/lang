@@ -1,6 +1,0 @@
-class ClassName:
-    member_field_int @ Integer static = 1
-    member_field_bool @ Boolean
-    
-    constructor (member_field_bool @ Boolean):
-        this.member_field_bool = true

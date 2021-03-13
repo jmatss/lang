@@ -2,6 +2,7 @@ use super::context::TypeContext;
 use common::{
     error::LangError,
     file::FilePosition,
+    path::LangPath,
     token::{
         ast::AstToken,
         block::{AdtKind, BlockHeader, Fn},
@@ -91,6 +92,60 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
             self.errors.push(err);
         }
     }
+
+    fn combine_generics(
+        &mut self,
+        inner_ty: &InnerTy,
+        generic_types: &mut Generics,
+        fn_call_path: &LangPath,
+        id: BlockId,
+    ) {
+        let generic_names = if let Some(ident) = inner_ty.get_ident() {
+            if let Ok(adt) = self.type_context.analyze_context.get_adt(&ident, id) {
+                if let Some(generics) = &adt.borrow().generics {
+                    generics.iter_names().cloned().collect::<Vec<_>>()
+                } else {
+                    Vec::default()
+                }
+            } else {
+                Vec::default()
+            }
+        } else {
+            Vec::default()
+        };
+
+        let mut generics = Generics::new();
+
+        // If the generics impls have been specified, use those
+        // to populate the Generics.
+        // Else if no generic implements have been specified,
+        // create new "GenericInstance"s.
+        if generic_types.len_types() > 0 {
+            if generic_names.len() != generic_types.len_types() {
+                let err = self.type_context.analyze_context.err(format!(
+                    "Wrong amount of generics for static call. Func call: {}, generic_names: {:#?}",
+                    fn_call_path, generic_names
+                ));
+                self.errors.push(err);
+                return;
+            }
+
+            generic_names
+                .iter()
+                .cloned()
+                .zip(generic_types.iter_types().cloned())
+                .for_each(|(gen_name, gen_ty)| generics.insert(gen_name, gen_ty));
+        } else {
+            for gen_name in generic_names {
+                let unknown_ident = self.new_unknown_ident(&format!("generic_{}", gen_name));
+                let gen_ty = Ty::GenericInstance(gen_name.clone(), unknown_ident, TypeInfo::None);
+
+                generics.insert(gen_name.clone(), gen_ty);
+            }
+        }
+
+        *generic_types = generics;
+    }
 }
 
 impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
@@ -107,9 +162,9 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             ast_token.file_pos().cloned().unwrap_or_default();
     }
 
-    fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_end(&mut self, _ctx: &TraverseContext) {
         debug!(
-            "Type inference colleting Done.\nSubs: {}",
+            "Type inference done.\nSubs: {}",
             self.type_context.pretty_print_subs()
         );
     }
@@ -118,7 +173,6 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// explicitly set. This new type will then be temporarilty used during this
     /// stage and should be converted/subtituted into a "real" type before this
     /// analyzing step is done.
-
     fn visit_lit(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
         let (lit, ty_opt, type_info) = if let Expr::Lit(lit, ty_opt, file_pos) = expr {
             let type_info = TypeInfo::Lit(file_pos.to_owned());
@@ -313,9 +367,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 )
             }
         } else if fn_call.is_method {
-            // Get the "owning" structure type of this method. If it isn't set
-            // explicitly, it should be set as a expression in the first argument
-            // with the name "this".
+            // Get the "owning" ADT type of this method. If it isn't set explicitly,
+            // it should be set as a expression in the first argument with name "this".
             let mut adt_ty = if let Some(adt_ty) = &fn_call.method_adt {
                 adt_ty.clone()
             } else if let Some(first_arg) = fn_call.arguments.first() {
@@ -343,64 +396,27 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // If the ADT type is know and contains generics, this logic will fetch
             // the ADT and combine the names for the generics found in the ADT
             // declaration with potential generic impls in the ADT init/func call.
+            let fn_half_path = fn_call.module.clone_push(&fn_call.name, None);
             if let Ty::CompoundType(inner_ty, generic_types, ..) = &mut adt_ty {
-                let generic_names = if let Some(ident) = inner_ty.get_ident() {
-                    if let Ok(adt) = self
-                        .type_context
-                        .analyze_context
-                        .get_adt(&ident, ctx.block_id)
-                    {
-                        if let Some(generics) = &adt.borrow().generics {
-                            generics.clone()
-                        } else {
-                            Vec::default()
-                        }
-                    } else {
-                        Vec::default()
-                    }
-                } else {
-                    Vec::default()
-                };
-
-                let mut generics = Generics::new();
-
-                // If the generics impls have been specified, use those
-                // to populate the Generics.
-                // Else if no generic implements have been specified,
-                // create new "GenericInstance"s.
-                if generic_types.len_types() > 0 {
-                    if generic_names.len() != generic_types.len_types() {
-                        let err = self.type_context.analyze_context.err(format!(
-                            "Wrong amount of generics for static call. Func call: {:#?}, generic_names: {:#?}",
-                            fn_call, generic_names
-                        ));
-                        self.errors.push(err);
-                        return;
-                    }
-
-                    generic_names
-                        .iter()
-                        .cloned()
-                        .zip(generic_types.iter_types().cloned())
-                        .for_each(|(gen_name, gen_ty)| generics.insert(gen_name, gen_ty));
-                } else {
-                    for gen_name in generic_names {
-                        let unknown_ident =
-                            self.new_unknown_ident(&format!("generic_{}", gen_name));
-                        let gen_ty =
-                            Ty::GenericInstance(gen_name.clone(), unknown_ident, TypeInfo::None);
-
-                        generics.insert(gen_name.clone(), gen_ty);
-                    }
+                self.combine_generics(inner_ty, generic_types, &fn_half_path, ctx.block_id);
+            } else if let Ty::Pointer(adt_ty_box, ..) = &mut adt_ty {
+                if let Ty::CompoundType(inner_ty, generic_types, ..) = adt_ty_box.as_mut() {
+                    self.combine_generics(inner_ty, generic_types, &fn_half_path, ctx.block_id);
                 }
-
-                *generic_types = generics;
             }
 
             // Set the `method_adt` for the function call now that the `method_adt`
             // might have been updated. This call might have no effect if no
             // modifications have been done in the logic above.
             fn_call.method_adt = Some(adt_ty.clone());
+
+            let fn_call_gens = fn_call
+                .generics
+                .clone()
+                .unwrap_or_else(Generics::empty)
+                .iter_types()
+                .cloned()
+                .collect::<Vec<_>>();
 
             // Insert constraints between the function call argument type and
             // the method parameter types that will be figured out later.
@@ -417,6 +433,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 let arg_ty = Ty::UnknownMethodArgument(
                     Box::new(adt_ty.clone()),
                     fn_call.name.clone(),
+                    fn_call_gens.clone(),
                     position,
                     self.new_unknown_ident(""),
                     TypeInfo::DefaultOpt(arg.value.file_pos().cloned()),
@@ -430,9 +447,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     }
                 };
 
-                // TODO: Need to do this for a more general case and it should
-                //       prevent any kind of infinite loops. Should be implemented
-                //       somewhere else.
+                // TODO: Need to be able to solve this in some way. Currently it
+                //       sometimes causes a infinite loop because of nested types.
+                //       This needs to be solved some way in the future because
+                //       some param/args can't be type inferred/checked atm.
                 // Don't add a constraint if the argument has the same type as
                 // the ADT.
                 if arg_expr_ty != adt_ty {
@@ -444,30 +462,45 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // the method generic types that will be figured out later.
             if let Some(generics) = &fn_call.generics {
                 for (idx, ty) in generics.iter_types().enumerate() {
-                    let unknown_ty = Ty::UnknownMethodGeneric(
+                    let unknown_gen_ty = Ty::UnknownMethodGeneric(
                         Box::new(adt_ty.clone()),
                         fn_call.name.clone(),
-                        idx,
+                        Either::Left(idx),
                         self.new_unknown_ident(""),
                         TypeInfo::DefaultOpt(ty.file_pos().cloned()),
                     );
 
-                    self.insert_constraint(&unknown_ty, ty, ctx.block_id);
+                    self.insert_constraint(&unknown_gen_ty, ty, ctx.block_id);
                 }
             }
-
             // The expected return type of the function call.
             Ty::UnknownAdtMethod(
                 Box::new(adt_ty),
                 fn_call.name.clone(),
+                fn_call_gens,
                 self.new_unknown_ident(""),
                 TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
             )
         } else {
+            let partial_path = fn_call
+                .module
+                .clone_push(&fn_call.name, fn_call.generics.as_ref());
+            let full_path = match self
+                .type_context
+                .analyze_context
+                .calculate_fn_full_path(&partial_path, ctx.block_id)
+            {
+                Ok(full_path) => full_path,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
             let func = match self
                 .type_context
                 .analyze_context
-                .get_func(&fn_call.name, ctx.block_id)
+                .get_fn(&full_path, ctx.block_id)
             {
                 Ok(func) => func,
                 Err(err) => {
@@ -490,7 +523,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     // in the function call.
                     let inner_idx = if let Some(arg_name) = &arg.name {
                         match self.type_context.analyze_context.get_fn_param_idx(
-                            &fn_call.name,
+                            &full_path,
                             &arg_name,
                             ctx.block_id,
                         ) {
@@ -554,15 +587,15 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         // "Generic"s doesn't leak out to outside the function. Instead a
         // unique instance of a generic should be used instead. This will allow
         // for multiple different types to be mapped to the same single "Generic".
-        if let Some(generics) = fn_ret_ty.get_generics() {
+        if let Some(gen_tys) = fn_ret_ty.get_generics() {
             let mut generics_impl = Generics::new();
 
-            for generic in &generics {
-                if let Ty::Generic(ident, ..) = generic {
+            for gen_ty in &gen_tys {
+                if let Ty::Generic(ident, ..) = gen_ty {
                     let generic_impl = Ty::GenericInstance(
                         ident.into(),
                         self.type_id.to_string(),
-                        TypeInfo::DefaultOpt(generic.file_pos().cloned()),
+                        TypeInfo::DefaultOpt(gen_ty.file_pos().cloned()),
                     );
                     self.type_id += 1;
 
@@ -582,17 +615,37 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     }
 
     fn visit_fn_ptr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {
-        let (fn_name, fn_ptr_gens, fn_ty, file_pos) =
-            if let Expr::FnPtr(fn_name, gens, fn_ty, file_pos) = expr {
-                (fn_name, gens, fn_ty, file_pos)
-            } else {
-                unreachable!()
-            };
+        let fn_ptr = if let Expr::FnPtr(fn_ptr) = expr {
+            fn_ptr
+        } else {
+            unreachable!()
+        };
+
+        let fn_ptr_gens = if let Some(gens) = &fn_ptr.generics {
+            gens.clone()
+        } else {
+            Generics::empty()
+        };
+
+        let partial_path = fn_ptr
+            .module
+            .clone_push(&fn_ptr.name, fn_ptr.generics.as_ref());
+        let full_path = match self
+            .type_context
+            .analyze_context
+            .calculate_fn_full_path(&partial_path, ctx.block_id)
+        {
+            Ok(full_path) => full_path,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
 
         let func = match self
             .type_context
             .analyze_context
-            .get_func(fn_name, ctx.block_id)
+            .get_fn(&full_path, ctx.block_id)
         {
             Ok(func) => func,
             Err(err) => {
@@ -602,8 +655,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         };
         let func = func.borrow();
 
-        let fn_gen_names = if let Some(gens) = &func.generic_names {
-            gens.clone()
+        let fn_gen_names = if let Some(gens) = &func.generics {
+            gens.iter_names().cloned().collect::<Vec<_>>()
         } else {
             Vec::with_capacity(0)
         };
@@ -622,7 +675,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         if fn_ptr_gens.len() != fn_gen_names.len() {
             let err = self.type_context.analyze_context.err(format!(
                 "Function pointer to \"{}\" has incorrect amount of generics. Expected: {}, got: {}",
-                fn_name,
+                full_path,
                 fn_gen_names.len(),
                 fn_ptr_gens.len()
             ));
@@ -650,21 +703,21 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             fn_ptr_gens.iter_types().cloned().collect::<Vec<_>>(),
             fn_param_tys,
             fn_ret_ty.map(Box::new),
-            TypeInfo::DefaultOpt(*file_pos),
+            TypeInfo::DefaultOpt(fn_ptr.file_pos),
         );
 
-        if let Some(fn_ty) = fn_ty {
+        if let Some(fn_ty) = &fn_ptr.fn_ty {
             if fn_ty != &new_fn_ty {
                 let err = self.type_context.analyze_context.err(format!(
-                    "Bad function signature for function pointer, fn_name: {}. \
+                    "Bad function signature for function pointer, fn_path: {}. \
                     fn_ty: {:#?}, new_fn_ty: {:#?}. Function pointer pos: {:#?}",
-                    fn_name, fn_ty, new_fn_ty, file_pos
+                    full_path, fn_ty, new_fn_ty, fn_ptr.file_pos
                 ));
                 self.errors.push(err);
                 return;
             }
         } else {
-            *fn_ty = Some(new_fn_ty);
+            fn_ptr.fn_ty = Some(new_fn_ty);
         }
     }
 
@@ -771,10 +824,23 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Adds the correct type for the ADT init and ties the types of the ADT
     /// members with the type of the ADT init arguments.
     fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {
+        let partial_path = adt_init.module.clone_push(&adt_init.name, None);
+        let full_path = match self
+            .type_context
+            .analyze_context
+            .calculate_adt_full_path(&partial_path, ctx.block_id)
+        {
+            Ok(full_path) => full_path,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
         let adt = match self
             .type_context
             .analyze_context
-            .get_adt(&adt_init.name, ctx.block_id)
+            .get_adt(&full_path, ctx.block_id)
         {
             Ok(adt) => adt,
             Err(err) => {
@@ -791,14 +857,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         // to ensure that two members of a ADT with the same ident uses the same
         // unknown generic type. It is also needed to ensure that different ADTs
         // uses different types for the generics.
-        let generics = if let Some(generic_names) = &adt.generics {
+        let generics = if let Some(generics_decl) = &adt.generics {
             let mut generics = Generics::new();
 
             // If the ADT init call has specified explicitly the implementation
             // types for the generics, use those instead of unknown generics.
             // Currently these explicit types must be solved types.
             if let Some(generics_impl) = &adt_init.generics {
-                if generic_names.len() != generics_impl.len() {
+                if generics_decl.len() != generics_impl.len() {
                     let err = self.type_context.analyze_context.err(format!(
                         "Wrong amount of generics for ADT init. ADT init: {:#?}, ADT: {:#?}",
                         adt_init, adt
@@ -807,11 +873,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     return;
                 }
 
-                for (name, gen_ty) in generic_names.iter().zip(generics_impl.iter_types()) {
+                for (name, gen_ty) in generics_decl.iter_names().zip(generics_impl.iter_types()) {
                     generics.insert(name.clone(), gen_ty.clone());
                 }
             } else {
-                for generic_name in generic_names {
+                for generic_name in generics_decl.iter_names() {
                     let unknown_ident =
                         self.new_unknown_ident(&format!("generic_{}", generic_name));
                     let gen_ty =
@@ -819,6 +885,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
                     generics.insert(generic_name.clone(), gen_ty);
                 }
+
+                adt_init.generics = Some(generics.clone());
             }
 
             generics
@@ -833,7 +901,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
             _ => {
                 adt_init.ret_type = Some(Ty::CompoundType(
-                    InnerTy::UnknownIdent(adt_init.name.clone(), ctx.block_id),
+                    InnerTy::UnknownIdent(full_path.clone(), ctx.block_id),
                     generics.clone(),
                     TypeInfo::Default(adt_init.file_pos.unwrap()),
                 ));
@@ -864,7 +932,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     // the name `arg.name`.
                     let index: usize = if let Some(arg_name) = &arg.name {
                         match self.type_context.analyze_context.get_adt_member_index(
-                            &adt.name,
+                            &full_path,
                             arg_name,
                             ctx.block_id,
                         ) {
@@ -979,7 +1047,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 };
 
                 let member = match self.type_context.analyze_context.get_adt_member(
-                    &adt.name,
+                    &full_path,
                     member_name,
                     ctx.block_id,
                     adt_init.file_pos,
@@ -1167,7 +1235,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             }
 
-            BinOperator::Dot | BinOperator::DoubleColon => {
+            BinOperator::Dot => {
                 self.insert_constraint(&ret_ty, &rhs_ty, ctx.block_id);
             }
 
@@ -1292,7 +1360,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         }
                     }
                 } else {
-                    unreachable!("un_op.value not union access: {:#?}", un_op);
+                    unreachable!("un_op.value not un op (i.e. union access): {:#?}", un_op);
                 };
 
                 // Link the type of the new var decl to the type of the member.

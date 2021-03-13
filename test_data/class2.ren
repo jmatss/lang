@@ -1,5 +1,0 @@
-class _ClassName<T> is Comparable<_ClassName>:
-    function fA(input @ Integer = 1) @ Float:
-        x @ Float = 1.0 + 2.0
-
-        return x

@@ -1,6 +1,0 @@
-while x == 3
-{
-    print('a')
-    x++
-    return x
-}

@@ -231,15 +231,28 @@ impl<'a> TypeContext<'a> {
         }
 
         // Solve the inner structure type.
-        if let InnerTy::UnknownIdent(ident, id) = inner_ty {
-            if self.analyze_context.is_struct(ident, *id) {
-                *inner_ty = InnerTy::Struct(ident.clone());
-            } else if self.analyze_context.is_enum(ident, *id) {
-                *inner_ty = InnerTy::Enum(ident.clone());
-            } else if self.analyze_context.is_union(ident, *id) {
-                *inner_ty = InnerTy::Union(ident.clone());
-            } else if self.analyze_context.is_trait(ident, *id) {
-                *inner_ty = InnerTy::Trait(ident.clone());
+        if let InnerTy::UnknownIdent(path, id) = inner_ty {
+            let full_path_opt = if let Ok(full_path) =
+                self.analyze_context.calculate_adt_full_path(path, *id)
+            {
+                Some(full_path)
+            } else if let Ok(full_path) = self.analyze_context.calculate_trait_full_path(path, *id)
+            {
+                Some(full_path)
+            } else {
+                None
+            };
+
+            if let Some(full_path) = full_path_opt {
+                if self.analyze_context.is_struct(&full_path, *id) {
+                    *inner_ty = InnerTy::Struct(full_path);
+                } else if self.analyze_context.is_enum(&full_path, *id) {
+                    *inner_ty = InnerTy::Enum(full_path);
+                } else if self.analyze_context.is_union(&full_path, *id) {
+                    *inner_ty = InnerTy::Union(full_path);
+                } else if self.analyze_context.is_trait(&full_path, *id) {
+                    *inner_ty = InnerTy::Trait(full_path);
+                }
             }
         }
 
@@ -356,15 +369,15 @@ impl<'a> TypeContext<'a> {
     fn solve_unknown_adt_method(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         debug!("solve_unknown_adt_method: {:#?}", ty);
 
-        let (adt_ty, method_name, type_info) =
-            if let Ty::UnknownAdtMethod(ty, method_name, _, type_info) = &ty {
-                (ty, method_name, type_info)
+        let (adt_ty, method_name, fn_call_gens_vec, type_info) =
+            if let Ty::UnknownAdtMethod(ty, method_name, fn_call_gens_vec, _, type_info) = &ty {
+                (ty, method_name, fn_call_gens_vec, type_info)
             } else {
                 unreachable!()
             };
 
         let adt_ty_info = self.solve_adt_type(adt_ty, root_id)?;
-        let (inner_ty, generics) = if let Some(info) = adt_ty_info {
+        let (inner_ty, adt_gens) = if let Some(info) = adt_ty_info {
             info
         } else {
             return self.solve_partial_adt_type(ty, adt_ty, root_id);
@@ -372,40 +385,62 @@ impl<'a> TypeContext<'a> {
 
         let method = if let Some(adt_name) = inner_ty.get_ident() {
             self.analyze_context
-                .get_adt_method(&adt_name, method_name, root_id)?
+                .get_method(&adt_name, method_name, root_id)?
         } else {
             return Ok(ty.clone());
         };
         let method = method.borrow();
+        let fn_gens = method.generics.clone().unwrap_or_else(Generics::empty);
 
-        let new_ty = if let Some(mut new_ty) = method.ret_type.clone() {
-            new_ty.replace_generics_impl(&generics);
-            if let Some(method_generics) = &TypeContext::new_method_generics(&method, type_info) {
-                new_ty.replace_generics_impl(method_generics);
+        // Create/get the generics for the function call and replace potential
+        // generics in the return type of "this function call".
+        let fn_call_gens = if fn_call_gens_vec.is_empty() {
+            if let Some(method_generics) = TypeContext::new_method_generics(&method, type_info) {
+                method_generics
+            } else {
+                Generics::empty()
             }
+        } else {
+            let mut fn_call_gens = Generics::new();
+            for (gen_name, gen_unknown_ty) in fn_gens.iter_names().zip(fn_call_gens_vec) {
+                fn_call_gens.insert(gen_name.clone(), gen_unknown_ty.clone());
+            }
+            fn_call_gens
+        };
 
-            new_ty
+        let new_fn_ret_ty = if let Some(mut new_fn_ret_ty) = method.ret_type.clone() {
+            new_fn_ret_ty.replace_generics_impl(&fn_call_gens);
+            new_fn_ret_ty.replace_generics_impl(&adt_gens);
+            new_fn_ret_ty
         } else {
             // The return type of the method is None == Void.
             Ty::CompoundType(InnerTy::Void, Generics::empty(), TypeInfo::None)
         };
 
-        self.insert_constraint(&new_ty, ty, root_id)?;
-        Ok(new_ty)
+        self.insert_constraint(&new_fn_ret_ty, ty, root_id)?;
+        Ok(new_fn_ret_ty)
     }
 
     fn solve_unknown_method_argument(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         debug!("solve_unknown_method_argument: {:#?}", ty);
 
-        let (adt_ty, method_name, name_or_idx, type_info) =
-            if let Ty::UnknownMethodArgument(ty, method_name, name_or_idx, _, type_info) = &ty {
-                (ty, method_name, name_or_idx, type_info)
+        let (adt_ty, method_name, fn_call_gens_vec, name_or_idx, type_info) =
+            if let Ty::UnknownMethodArgument(
+                ty,
+                method_name,
+                fn_call_gens_vec,
+                name_or_idx,
+                _,
+                type_info,
+            ) = &ty
+            {
+                (ty, method_name, fn_call_gens_vec, name_or_idx, type_info)
             } else {
                 unreachable!()
             };
 
         let adt_ty_info = self.solve_adt_type(adt_ty, root_id)?;
-        let (inner_ty, generics) = if let Some(info) = adt_ty_info {
+        let (inner_ty, adt_gens) = if let Some(info) = adt_ty_info {
             info
         } else {
             return self.solve_partial_adt_type(ty, adt_ty, root_id);
@@ -435,13 +470,28 @@ impl<'a> TypeContext<'a> {
 
         let method = self
             .analyze_context
-            .get_adt_method(&adt_name, method_name, root_id)?;
+            .get_method(&adt_name, method_name, root_id)?;
         let method = method.borrow();
+        let fn_gens = method.generics.clone().unwrap_or_else(Generics::empty);
 
-        new_ty.replace_generics_impl(&generics);
-        if let Some(method_generics) = &TypeContext::new_method_generics(&method, type_info) {
-            new_ty.replace_generics_impl(method_generics);
-        }
+        // Create/get the generics for the function call and replace potential
+        // generics in the return type of "this function call".
+        let fn_call_gens = if fn_call_gens_vec.is_empty() {
+            if let Some(method_gens) = TypeContext::new_method_generics(&method, type_info) {
+                method_gens
+            } else {
+                Generics::empty()
+            }
+        } else {
+            let mut fn_call_gens = Generics::new();
+            for (gen_name, gen_unknown_ty) in fn_gens.iter_names().zip(fn_call_gens_vec) {
+                fn_call_gens.insert(gen_name.clone(), gen_unknown_ty.clone());
+            }
+            fn_call_gens
+        };
+
+        new_ty.replace_generics_impl(&fn_call_gens);
+        new_ty.replace_generics_impl(&adt_gens);
 
         self.insert_constraint(&new_ty, ty, root_id)?;
         Ok(new_ty)
@@ -450,9 +500,9 @@ impl<'a> TypeContext<'a> {
     fn solve_unknown_method_generic(&mut self, ty: &Ty, root_id: BlockId) -> LangResult<Ty> {
         debug!("solve_unknown_method_generic: {:#?}", ty);
 
-        let (adt_ty, method_name, idx, type_info) =
-            if let Ty::UnknownMethodGeneric(ty, method_name, idx, _, type_info) = &ty {
-                (ty, method_name, idx, type_info)
+        let (adt_ty, method_name, gen_idx_or_name, type_info) =
+            if let Ty::UnknownMethodGeneric(ty, method_name, gen_idx_or_name, _, type_info) = &ty {
+                (ty, method_name, gen_idx_or_name, type_info)
             } else {
                 unreachable!()
             };
@@ -466,25 +516,31 @@ impl<'a> TypeContext<'a> {
 
         let method = if let Some(adt_name) = inner_ty.get_ident() {
             self.analyze_context
-                .get_adt_method(&adt_name, method_name, root_id)?
+                .get_method(&adt_name, method_name, root_id)?
         } else {
             return Ok(ty.clone());
         };
         let method = method.borrow();
 
-        let generic_name = if let Some(generic_name) = method
-            .generic_names
-            .as_ref()
-            .map(|gens| gens.get(*idx))
-            .flatten()
-        {
-            generic_name.clone()
-        } else {
-            let err = self.analyze_context.err(format!(
-                "Method call specified generic at index {}. Method declaration for \"{}\" has no generic at that index.",
-                idx, method_name
-            ));
-            return Err(err);
+        let gen_name = match gen_idx_or_name {
+            Either::Left(idx) => {
+                if let Some(generic_name) = method
+                    .generics
+                    .as_ref()
+                    .map(|gens| gens.get_name(*idx))
+                    .flatten()
+                {
+                    generic_name
+                } else {
+                    let err = self.analyze_context.err(format!(
+                        "Method call specified generic at index {}. \
+                        Method declaration for \"{}\" has no generic at that index.",
+                        gen_idx_or_name, method_name
+                    ));
+                    return Err(err);
+                }
+            }
+            Either::Right(gen_name) => gen_name.clone(),
         };
 
         // Get some arbitrary data from the file_pos to create a unique ID.
@@ -493,7 +549,7 @@ impl<'a> TypeContext<'a> {
             "R:{}-Cs:{}-Ce:{}",
             file_pos.line_start, file_pos.column_start, file_pos.column_end
         );
-        let mut new_ty = Ty::GenericInstance(generic_name, id, type_info.clone());
+        let mut new_ty = Ty::GenericInstance(gen_name, id, type_info.clone());
 
         new_ty.replace_generics_impl(&generics);
         if let Some(method_generics) = &TypeContext::new_method_generics(&method, type_info) {
@@ -609,10 +665,10 @@ impl<'a> TypeContext<'a> {
     pub fn new_method_generics(method: &Fn, type_info: &TypeInfo) -> Option<Generics> {
         // TODO: This should be done somewhere else. This feels like a really
         //       random place to do it.
-        if let Some(method_generic_names) = &method.generic_names {
-            let mut method_generics = Generics::new();
+        if let Some(method_generics) = &method.generics {
+            let mut new_method_generics = Generics::new();
 
-            for generic_name in method_generic_names.iter() {
+            for generic_name in method_generics.iter_names() {
                 // Get some arbitrary data from the file_pos to create a unique ID.
                 let file_pos = type_info.file_pos().unwrap();
                 let id = format!(
@@ -621,10 +677,10 @@ impl<'a> TypeContext<'a> {
                 );
                 let ty = Ty::GenericInstance(generic_name.clone(), id, type_info.clone());
 
-                method_generics.insert(generic_name.clone(), ty);
+                new_method_generics.insert(generic_name.clone(), ty);
             }
 
-            Some(method_generics)
+            Some(new_method_generics)
         } else {
             None
         }
@@ -652,8 +708,8 @@ impl<'a> TypeContext<'a> {
             };
             let adt = adt.borrow();
 
-            if let Some(generic_names) = &adt.generics {
-                for (idx, gen_name) in generic_names.iter().enumerate() {
+            if let Some(adt_gens) = &adt.generics {
+                for (idx, gen_name) in adt_gens.iter_names().enumerate() {
                     generics.insert_lookup(gen_name.clone(), idx);
                     generics.insert_name(gen_name.clone());
                 }

@@ -1,5 +1,3 @@
-use std.assert
-
 fn return_short_circuit(a: i32, b: i32) -> bool
 {
     return a == 3 and b == 4
@@ -24,8 +22,8 @@ fn main() -> i32
         }
     }
     
-    assert_msg(one == 10 and ten == 4, "Bad short circut inside while loop.")
-    assert(return_short_circuit(3, 4))
+    std::assert(one == 10 and ten == 4, "Bad short circut inside while loop.")
+    std::assert(return_short_circuit(3, 4))
 
     return 0
 }

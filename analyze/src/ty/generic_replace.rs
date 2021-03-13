@@ -1,6 +1,7 @@
 use super::context::TypeContext;
 use common::{
     error::LangError,
+    path::LangPath,
     token::{
         ast::AstToken,
         block::{Adt, BlockHeader},
@@ -32,7 +33,7 @@ pub struct GenericsReplacer<'a, 'tctx> {
     generics_impl: &'a Generics,
 
     new_adt: Option<Rc<RefCell<Adt>>>,
-    old_name: Option<&'a str>,
+    old_path: Option<&'a LangPath>,
     new_ty: Option<&'a Ty>,
 
     errors: Vec<LangError>,
@@ -43,7 +44,7 @@ impl<'a, 'tctx> GenericsReplacer<'a, 'tctx> {
         type_context: &'a mut TypeContext<'tctx>,
         new_adt: Rc<RefCell<Adt>>,
         generics_impl: &'a Generics,
-        old_name: &'a str,
+        old_path: &'a LangPath,
         new_ty: &'a Ty,
     ) -> Self {
         Self {
@@ -51,7 +52,7 @@ impl<'a, 'tctx> GenericsReplacer<'a, 'tctx> {
             modified_variables: HashSet::default(),
             generics_impl,
             new_adt: Some(new_adt),
-            old_name: Some(old_name),
+            old_path: Some(old_path),
             new_ty: Some(new_ty),
             errors: Vec::default(),
         }
@@ -63,7 +64,7 @@ impl<'a, 'tctx> GenericsReplacer<'a, 'tctx> {
             modified_variables: HashSet::default(),
             generics_impl,
             new_adt: None,
-            old_name: None,
+            old_path: None,
             new_ty: None,
             errors: Vec::default(),
         }
@@ -82,7 +83,7 @@ impl<'a, 'tctx> Visitor for GenericsReplacer<'a, 'tctx> {
     fn visit_type(&mut self, ty: &mut Ty, ctx: &TraverseContext) {
         ty.replace_generics_impl(self.generics_impl);
 
-        if let (Some(old_name), Some(new_ty)) = (self.old_name, self.new_ty) {
+        if let (Some(old_name), Some(new_ty)) = (self.old_path, self.new_ty) {
             ty.replace_self(old_name, new_ty);
         }
 
@@ -122,9 +123,21 @@ impl<'a, 'tctx> Visitor for GenericsReplacer<'a, 'tctx> {
 
     /// Since this `GenericsReplacer` is called with `deep_copy` set to true,
     /// this logic inserts a reference from the new ADT type to the new method.
-    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_fn(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
         if let Some(new_adt) = &self.new_adt {
-            let new_adt_name = new_adt.borrow().name.clone();
+            let module = match self.type_context.analyze_context.get_module(ctx.block_id) {
+                Ok(Some(module)) => module,
+                Ok(None) => LangPath::default(),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            let new_adt_name = {
+                let new_adt = new_adt.borrow();
+                module.clone_push(&new_adt.name, Some(self.generics_impl))
+            };
 
             if let AstToken::Block(BlockHeader::Fn(func), _, old_id, ..) = ast_token {
                 func.borrow_mut().method_adt = self.new_ty.cloned();

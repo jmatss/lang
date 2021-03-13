@@ -1,5 +1,4 @@
-use std.assert
-
+extern fn printf(format: {u8}, ...) -> i32
 extern fn strcmp(s1: {u8}, s2: {u8}) -> i32
 
 struct TestStruct<T>
@@ -28,16 +27,16 @@ fn main() -> i32
 
     // Size in bytes, so might not be true for all architectures.
     printf("i32 size: %d", size_i)
-    assert(size_i == 4)
+    std::assert(size_i == 4)
 
     printf("\nf64 size: %d", size_f)
-    assert(size_f == 8)
+    std::assert(size_f == 8)
 
     printf("\nTestStruct{i64,f32} size: %d", size_s)
-    assert(size_s == 16)
+    std::assert(size_s == 16)
 
     printf("\ninner size (f64): %d", size_inner)
-    assert(size_inner == 8)
+    std::assert(size_inner == 8)
 
 
     var int_1: i16 = 123
@@ -45,7 +44,7 @@ fn main() -> i32
     var size_t = @size<@type(int_1)>()
 
     printf("\nsize_t(i16) size: %d", size_t)
-    assert(size_t == 2)
+    std::assert(size_t == 2)
 
 
     //              21          33
@@ -54,37 +53,37 @@ fn main() -> i32
     var filename = @file()
 
     printf("\ncolumn_nr: %d", column_nr)
-    assert(column_nr == 21 + 33)
+    std::assert(column_nr == 21 + 33)
 
     printf("\nline_nr: %d", line_nr)
-    assert(line_nr == 53)
+    std::assert(line_nr == 52)
 
     printf("\nfilename: %s", filename)
-    assert(strcmp(filename, "test35.ren") == 0)
+    std::assert(strcmp(filename, "test35.ren") == 0)
 
 
     var null_i: i64 = @null<i64>()
     var null_s: TestStruct<f64> = @null<TestStruct<f64>>()
 
     printf("\nnull_i: %lld", null_i)
-    assert(null_i == 0)
+    std::assert(null_i == 0)
 
     printf("\nnull_s.a: %lld", null_s.a)
-    assert(null_s.a == 0)
+    std::assert(null_s.a == 0)
     printf("\nnull_s.b: %f", null_s.b)
-    assert_equals_f64(0.0, null_s.b, 0.01)
+    std::assert(0.0 == null_s.b)
 
 
     var null_ptr: {u64} = @null<{u64}>()
     printf("\n@is_null(null_ptr): ")
     if @is_null(null_ptr) { printf("true") } else { printf("false") }
-    assert(@is_null(null_ptr))
+    std::assert(@is_null(null_ptr))
 
 
     var var_name = 1
     var var_name_content = @name(var_name)
     printf("\nvar_name: %s", var_name_content)
-    assert(strcmp(@name(var_name), "var_name") == 0)
+    std::assert(strcmp(@name(var_name), "var_name") == 0)
 
 
     if false

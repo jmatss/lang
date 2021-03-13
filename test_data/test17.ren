@@ -25,9 +25,10 @@ fn main() -> i32
             break
         }
     }
-    
+
     var x = 0
     var early_return = false
+
     {
         defer printf("\na, x: %d", x)
         x += 1
@@ -42,9 +43,9 @@ fn main() -> i32
         }
 
         defer printf("\nb, x: %d", x)
-        x += 1
+        x += 3
     }
-    
+
     printf("\nEND")
 
     return 0

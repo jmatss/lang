@@ -22,6 +22,8 @@ pub trait Visitor {
     fn visit_expr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {}
     fn visit_stmt(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {}
     fn visit_eof(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}
+    /// Called when the AST have been traversed fully and the end of the AST is reached.
+    fn visit_end(&mut self, ctx: &TraverseContext) {}
 
     /* BLOCKS */
     fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {}

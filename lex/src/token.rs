@@ -41,7 +41,7 @@ pub enum Kw {
     Continue,
 
     Use,
-    Package,
+    Module,
     External,
 
     Var,
@@ -218,7 +218,7 @@ impl LexToken {
             "continue" => LexTokenKind::Kw(Kw::Continue),
 
             "use" => LexTokenKind::Kw(Kw::Use),
-            "package" => LexTokenKind::Kw(Kw::Package),
+            "mod" => LexTokenKind::Kw(Kw::Module),
             "extern" => LexTokenKind::Kw(Kw::External),
 
             "var" => LexTokenKind::Kw(Kw::Var),

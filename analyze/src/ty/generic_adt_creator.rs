@@ -3,6 +3,7 @@ use crate::block::BlockInfo;
 use common::{
     error::LangError,
     file::FilePosition,
+    path::{LangPath, LangPathPart},
     token::{
         ast::AstToken,
         block::{AdtKind, BlockHeader},
@@ -10,13 +11,15 @@ use common::{
     traverser::AstTraverser,
     traverser::TraverseContext,
     ty::ty::Ty,
-    util,
     visitor::Visitor,
     BlockId,
 };
 use log::debug;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
+/// Remove any ADTs that contain generics. Add new ADTs that contain replaced
+/// generics (static dispatch). The old blocks are set to "Empty".
+/// This will done for the "implement" block and all its contained methods as well.
 pub struct GenericAdtCreator<'a, 'tctx> {
     /// Needed to look up ADTs and types.
     type_context: &'a mut TypeContext<'tctx>,
@@ -26,18 +29,15 @@ pub struct GenericAdtCreator<'a, 'tctx> {
     ///
     /// The key is the name of the ADT and the values are the unique types
     /// of the ADT with the generics implemented.
-    generic_adts: HashMap<String, Vec<Ty>>,
+    generic_adts: HashMap<LangPath, Vec<Ty>>,
 
     errors: Vec<LangError>,
 }
 
-/// Remove any ADTs that contain generics. Add new ADTs that contain replaced
-/// generics (static dispatch). The old blocks are set to "Empty".
-/// This will done for the "implement" block and all its contained methods as well.
 impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
     pub fn new(
         type_context: &'a mut TypeContext<'tctx>,
-        generic_adts: HashMap<String, Vec<Ty>>,
+        generic_adts: HashMap<LangPath, Vec<Ty>>,
     ) -> Self {
         debug!("generic_adts: {:#?}", generic_adts);
 
@@ -48,8 +48,12 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
         }
     }
 
-    /// Creates new instance of the ADT with name `old_name`. These new instances
+    /// Creates new instance of the ADT with path `old_path`.These new instances
     /// will have the generics replaced with some implementation.
+    ///
+    /// The given `old_path` is the path to the ADT WITHOUT any generics. The
+    /// `new_path` will represent the new ADTs which will contain generics.
+    ///
     /// Returns the amount of new ADT blocks. Since this function will most
     /// likely be called from a loop iterating through the AstTokens, the returned
     /// value can be used to skip over the newly created ADTs.
@@ -58,18 +62,18 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
     /// It will removed even though no new ADTs are created.
     fn create_adt_instance(
         &mut self,
-        old_name: &str,
+        old_path: &LangPath,
         body: &mut Vec<AstToken>,
         file_pos: &FilePosition,
         old_idx: usize,
         old_id: BlockId,
         parent_id: BlockId,
     ) -> Option<usize> {
-        if let Some(generic_adt_tys) = self.generic_adts.get(old_name).cloned() {
+        if let Some(generic_adt_tys) = self.generic_adts.get(old_path).cloned() {
             // TODO: Do not hardcode default block ID, get ID from somewhere else.
             let id = BlockInfo::DEFAULT_BLOCK_ID;
 
-            let adt = match self.type_context.analyze_context.get_adt(old_name, id) {
+            let adt = match self.type_context.analyze_context.get_adt(old_path, id) {
                 Ok(adt) => Rc::clone(&adt),
                 Err(err) => {
                     self.errors.push(err);
@@ -100,11 +104,10 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
                     return None;
                 };
 
-                let new_name = util::to_generic_name(&new_adt.name, &generics);
-
-                // Give the new copy of the ADT type the "full name" containing
-                // information about the generic arguments.
-                new_adt.name = new_name.clone();
+                // Create the new path containing generics.
+                let mut new_path = old_path.clone();
+                let last_part = new_path.pop().unwrap();
+                new_path = new_path.clone_push(&last_part.0, Some(&generics));
 
                 // TODO: Can this be done with a visitor/traverser? The current
                 //       default traverser takes a AstToken, so would need to create
@@ -117,11 +120,13 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
 
                     if let Some(ty) = &mut new_member.ty {
                         ty.replace_generics_impl(&generics);
-                        ty.replace_self(&old_name, gen_adt_ty);
+                        ty.replace_self(&old_path, gen_adt_ty);
                     }
 
                     *member = Rc::new(RefCell::new(new_member));
                 }
+
+                new_adt.generics = Some(generics);
 
                 // Insert the new ADT variants that have replaced the generic
                 // parameters with an actual real type. These new ADTs will be
@@ -135,7 +140,7 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
                 let new_adt_rc = Rc::new(RefCell::new(new_adt));
 
                 // Insert the new ADT into the lookup table.
-                let key = (new_name.clone(), parent_id);
+                let key = (new_path, parent_id);
                 self.type_context
                     .analyze_context
                     .adts
@@ -162,7 +167,7 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
             }
 
             // Remove the old, now unused, ADT.
-            self.remove_adt_instance(old_name, body, old_idx, parent_id);
+            self.remove_adt_instance(old_path, body, old_idx, parent_id);
 
             Some(generic_adt_tys.len())
         } else {
@@ -174,12 +179,12 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
     /// Removed both from the AST and the look-up table.
     fn remove_adt_instance(
         &mut self,
-        old_name: &str,
+        old_path: &LangPath,
         body: &mut Vec<AstToken>,
         old_idx: usize,
         parent_id: BlockId,
     ) {
-        let key = (old_name.into(), parent_id);
+        let key = (old_path.clone(), parent_id);
         self.type_context.analyze_context.adts.remove(&key);
 
         *body.get_mut(old_idx).expect("Known to be in bounds.") = AstToken::Empty;
@@ -192,10 +197,10 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
         &mut self,
         body: &mut Vec<AstToken>,
         old_idx: usize,
-        old_name: &str,
+        old_path: &LangPath,
         old_impl_token: &mut AstToken,
     ) -> Option<usize> {
-        if let Some(generic_adt_tys) = self.generic_adts.get(old_name).cloned() {
+        if let Some(generic_adt_tys) = self.generic_adts.get(old_path).cloned() {
             for (new_idx, gen_adt_ty) in generic_adt_tys.iter().enumerate() {
                 let generics = if let Ty::CompoundType(_, generics, ..) = &gen_adt_ty {
                     generics.clone()
@@ -211,12 +216,15 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
                 // Make a clone of the old implement block and change the name of
                 // this new impl block to contain the generics.
                 let mut new_impl_token = old_impl_token.clone();
-                let (new_impl_body, new_name) =
-                    if let AstToken::Block(BlockHeader::Implement(ident, _), .., new_impl_body) =
+                let (new_impl_body, new_path) =
+                    if let AstToken::Block(BlockHeader::Implement(_, _), .., new_impl_body) =
                         &mut new_impl_token
                     {
-                        *ident = util::to_generic_name(&old_name, &generics);
-                        (new_impl_body, ident.clone())
+                        let mut new_path = old_path.clone();
+                        let last_part = new_path.pop().unwrap();
+                        new_path.push(LangPathPart(last_part.0, Some(generics.clone())));
+
+                        (new_impl_body, new_path)
                     } else {
                         unreachable!("TODO: Add err handling.");
                     };
@@ -225,7 +233,7 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
                 let id = BlockInfo::DEFAULT_BLOCK_ID;
 
                 // Get the new instance of the ADT that has had the generics implemented.
-                let new_adt = match self.type_context.analyze_context.get_adt(&new_name, id) {
+                let new_adt = match self.type_context.analyze_context.get_adt(&new_path, id) {
                     Ok(new_adt) => Rc::clone(&new_adt),
                     Err(err) => {
                         self.errors.push(err);
@@ -237,7 +245,7 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
                     &mut self.type_context,
                     Rc::clone(&new_adt),
                     &generics,
-                    old_name,
+                    old_path,
                     gen_adt_ty,
                 );
 
@@ -310,19 +318,28 @@ impl<'a, 'tctx> Visitor for GenericAdtCreator<'a, 'tctx> {
             while i < body.len() {
                 let body_token = body.get(i).cloned().expect("Known to be in bounds.");
 
-                // TODO: Implemement for other types other than struct as well.
                 // Modify and create the new ADTs. The old ADT will also be removed.
                 if let AstToken::Block(header, file_pos, old_id, ..) = &body_token {
                     match header {
                         BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
-                            if self.generic_adts.contains_key(&adt.borrow().name) {
+                            let full_path = {
+                                let module =
+                                    match self.type_context.analyze_context.get_module(*old_id) {
+                                        Ok(Some(module)) => module,
+                                        Ok(None) => LangPath::default(),
+                                        Err(err) => {
+                                            self.errors.push(err);
+                                            return;
+                                        }
+                                    };
+
+                                let adt = adt.borrow();
+                                module.clone_push(&adt.name, None)
+                            };
+
+                            if self.generic_adts.contains_key(&full_path) {
                                 if let Some(skip) = self.create_adt_instance(
-                                    &adt.borrow().name.clone(),
-                                    body,
-                                    file_pos,
-                                    i,
-                                    *old_id,
-                                    *parent_id,
+                                    &full_path, body, file_pos, i, *old_id, *parent_id,
                                 ) {
                                     // Skip the newly created ADT blocks (if any).
                                     i += skip;
@@ -336,13 +353,8 @@ impl<'a, 'tctx> Visitor for GenericAdtCreator<'a, 'tctx> {
                             {
                                 // If the ADT contains generics but isn't in `self.generic_adts`,
                                 // it means that the ADT isn't used anywhere and contains generics.
-                                // Need to remove if from the AST.
-                                self.remove_adt_instance(
-                                    &adt.borrow().name.clone(),
-                                    body,
-                                    i,
-                                    *parent_id,
-                                );
+                                // Need to remove it.
+                                self.remove_adt_instance(&full_path, body, i, *parent_id);
                             }
                         }
 
@@ -363,12 +375,26 @@ impl<'a, 'tctx> Visitor for GenericAdtCreator<'a, 'tctx> {
                 // generics. These new impl blocks will contain the actual generic
                 // implementations/instances. The old impl blocks containing the
                 // generic placeholders will be removed.
-                if let AstToken::Block(BlockHeader::Implement(adt_name, _), ..) = &body_token {
-                    let adt_name = adt_name.clone();
+                if let AstToken::Block(BlockHeader::Implement(adt_path, _), _, old_id, _) =
+                    &body_token
+                {
+                    let full_path = {
+                        let module = match self.type_context.analyze_context.get_module(*old_id) {
+                            Ok(Some(module)) => module,
+                            Ok(None) => LangPath::default(),
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        };
 
-                    if self.generic_adts.contains_key(&adt_name) {
+                        let last_part = adt_path.last().unwrap();
+                        module.clone_push(&last_part.0, None)
+                    };
+
+                    if self.generic_adts.contains_key(&full_path) {
                         if let Some(skip) =
-                            self.create_method_instance(body, i, &adt_name, &mut body_token)
+                            self.create_method_instance(body, i, &full_path, &mut body_token)
                         {
                             // Skip the newly created impl blocks (if any).
                             i += skip;
@@ -377,13 +403,12 @@ impl<'a, 'tctx> Visitor for GenericAdtCreator<'a, 'tctx> {
                         // TODO: Don't hardcode default id.
                         let id = BlockInfo::DEFAULT_BLOCK_ID;
 
-                        // TODO: Union.
                         // If this is a impl block for a ADT that has been
                         // removed, remove the impl block as well.
                         if self
                             .type_context
                             .analyze_context
-                            .get_adt(&adt_name, id)
+                            .get_adt(&full_path, id)
                             .is_err()
                         {
                             self.remove_impl_instance(body, i);

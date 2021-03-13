@@ -1,20 +1,23 @@
-use crate::ty::generics::Generics;
+use crate::{
+    path::{LangPath, LangPathPart},
+    ty::generics::Generics,
+};
 
 /// Concatenates a ADT name and a method name to create the name that will
 /// be used to refer to this function. The name is concatenated with a dash.
 pub fn to_method_name(
-    adt_name: &str,
+    adt_path: &LangPath,
     adt_generics: Option<&Generics>,
     method_name: &str,
     method_generics: Option<&Generics>,
 ) -> String {
-    let adt_generic_name = if let Some(adt_generics) = adt_generics {
-        to_generic_name(adt_name, adt_generics)
-    } else {
-        adt_name.into()
-    };
+    let mut adt_path_clone = adt_path.clone();
+    let last_part = adt_path_clone.pop().unwrap();
+    adt_path_clone.push(LangPathPart(last_part.0, adt_generics.cloned()));
+    let adt_generic_name = adt_path_clone.full_name();
+
     let method_generic_name = if let Some(method_generics) = method_generics {
-        to_generic_name(method_name, method_generics)
+        to_generic_name(&method_name, method_generics)
     } else {
         method_name.into()
     };
@@ -35,7 +38,7 @@ pub fn to_var_name(name: &str, copy_nr: usize) -> String {
 ///    TestStruct<K,V>
 /// This would be the exact format, case sensitive, no spaces etc.
 pub fn to_generic_name(old_name: &str, generics: &Generics) -> String {
-    if generics.is_empty() {
+    if generics.is_empty_types() {
         old_name.to_owned()
     } else {
         format!("{}{}", old_name, generics.to_string())

@@ -1,13 +1,9 @@
-use std.assert
-
 fn one(a: i32, b: i32 = 3)
 {
-
 }
 
 fn two(a: bool = false, b: f32 = 123.0)
 {
-
 }
 
 fn main() -> i32

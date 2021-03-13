@@ -3,6 +3,7 @@ use crate::block::BlockInfo;
 use super::{context::TypeContext, generic_replace::GenericsReplacer};
 use common::{
     error::LangError,
+    path::LangPath,
     token::{ast::AstToken, block::BlockHeader},
     traverser::AstTraverser,
     traverser::TraverseContext,
@@ -16,9 +17,9 @@ pub struct GenericFnCreator<'a, 'tctx> {
     /// Needed to look up structures and types.
     type_context: &'a mut TypeContext<'tctx>,
 
-    /// The first string is the name of the structure and the second string is
-    /// the name of the method.
-    generic_methods: HashMap<String, HashMap<String, Vec<Generics>>>,
+    /// The first string is the path of the ADT and the second string is the name
+    /// of the method.
+    generic_methods: HashMap<LangPath, HashMap<String, Vec<Generics>>>,
 
     errors: Vec<LangError>,
 }
@@ -28,7 +29,7 @@ pub struct GenericFnCreator<'a, 'tctx> {
 impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
     pub fn new(
         type_context: &'a mut TypeContext<'tctx>,
-        generic_methods: HashMap<String, HashMap<String, Vec<Generics>>>,
+        generic_methods: HashMap<LangPath, HashMap<String, Vec<Generics>>>,
     ) -> Self {
         debug!("generic_methods: {:#?}", generic_methods);
 
@@ -39,8 +40,8 @@ impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
         }
     }
 
-    fn create_method_instance(&mut self, structure_name: &str, impl_body: &mut Vec<AstToken>) {
-        if let Some(generic_methods) = self.generic_methods.get(structure_name).cloned() {
+    fn create_method_instance(&mut self, adt_path: &LangPath, impl_body: &mut Vec<AstToken>) {
+        if let Some(generic_methods) = self.generic_methods.get(adt_path).cloned() {
             let mut idx = 0;
 
             // TODO: Don't hardcode default block.
@@ -50,15 +51,24 @@ impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
                 // TODO: Change so that every method doesn't need to be cloned.
                 let method = impl_body.get(idx).cloned().unwrap();
 
-                let method_name = if let AstToken::Block(BlockHeader::Fn(func), ..) = &method {
-                    func.borrow().name.clone()
-                } else {
-                    panic!()
-                };
+                let (method_name, has_gens) =
+                    if let AstToken::Block(BlockHeader::Fn(func), ..) = &method {
+                        let func = func.borrow();
+                        (
+                            func.name.clone(),
+                            func.generics
+                                .as_ref()
+                                .map_or(false, |gens| !gens.is_empty()),
+                        )
+                    } else {
+                        panic!()
+                    };
 
                 // If this method exists in `generic_methods`, this is a method
-                // with generics. Go through all implementations of the generics
-                // and create a new method for every generic impl.
+                // with generics that is used somewhere in the code base with
+                // "implemented"/"instances" of the generics. Go through all
+                // implementations of the generics and create a new method for
+                // every generic impl.
                 if generic_methods.contains_key(&method_name) {
                     for method_generics in generic_methods.get(&method_name).unwrap() {
                         let mut new_method = method.clone();
@@ -79,18 +89,18 @@ impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
 
                         // Set the generic impls on the new copy of the function.
                         let func = if let AstToken::Block(BlockHeader::Fn(func), ..) = &new_method {
-                            func.borrow_mut().generic_impls = Some(method_generics.clone());
+                            func.borrow_mut().generics = Some(method_generics.clone());
                             Rc::clone(func)
                         } else {
                             panic!()
                         };
 
                         // Insert the method into the structure.
-                        if let Err(err) = self.type_context.analyze_context.insert_method(
-                            structure_name,
-                            func,
-                            block_id,
-                        ) {
+                        if let Err(err) = self
+                            .type_context
+                            .analyze_context
+                            .insert_method(adt_path, func, block_id)
+                        {
                             self.errors.push(err);
                             return;
                         }
@@ -102,11 +112,25 @@ impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
                     }
 
                     // When the logic above is done creating all generic impls for
-                    // the methods, `idx` will point to the old block with no generic
+                    // the method, `idx` will point to the old method with no generic
                     // impls, it should be removed.
                     // Remove it from both the structure and the AST.
                     if let Err(err) = self.type_context.analyze_context.remove_method(
-                        structure_name,
+                        adt_path,
+                        &method_name,
+                        block_id,
+                    ) {
+                        self.errors.push(err);
+                        return;
+                    }
+
+                    impl_body.remove(idx);
+                } else if has_gens {
+                    // If the method has generics, but isn't in the `generic_methods`
+                    // map, it means that it is a method that isn't used anywhere
+                    // in the code base; remove it.
+                    if let Err(err) = self.type_context.analyze_context.remove_method(
+                        adt_path,
                         &method_name,
                         block_id,
                     ) {
@@ -142,13 +166,13 @@ impl<'a, 'tctx> Visitor for GenericFnCreator<'a, 'tctx> {
             while i < body.len() {
                 let mut body_token = body.get_mut(i).expect("Known to be in bounds.");
 
-                if let AstToken::Block(BlockHeader::Implement(structure_name, _), .., impl_body) =
+                if let AstToken::Block(BlockHeader::Implement(adt_path, _), .., impl_body) =
                     &mut body_token
                 {
-                    let structure_name = structure_name.clone();
+                    let adt_path = adt_path.clone();
 
-                    if self.generic_methods.contains_key(&structure_name) {
-                        self.create_method_instance(&structure_name, impl_body);
+                    if self.generic_methods.contains_key(&adt_path) {
+                        self.create_method_instance(&adt_path, impl_body);
                     }
 
                     // Go through the methods in the impl block one more time.
@@ -163,15 +187,15 @@ impl<'a, 'tctx> Visitor for GenericFnCreator<'a, 'tctx> {
                         if let AstToken::Block(BlockHeader::Fn(func), _, id, _) = method {
                             let contains_gens_decl = func
                                 .borrow()
-                                .generic_names
+                                .generics
                                 .as_ref()
                                 .map(|n| !n.is_empty())
                                 .unwrap_or(false);
-                            let contains_gens_impl = func.borrow().generic_impls.is_some();
+                            let contains_gens_impl = func.borrow().generics.is_some();
 
                             if contains_gens_decl && !contains_gens_impl {
                                 if let Err(err) = self.type_context.analyze_context.remove_method(
-                                    &structure_name,
+                                    &adt_path,
                                     &func.borrow().name,
                                     *id,
                                 ) {

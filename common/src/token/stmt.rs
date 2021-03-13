@@ -6,6 +6,7 @@ use super::{
 use crate::{
     error::{LangError, LangErrorKind::GeneralError, LangResult},
     file::FilePosition,
+    path::LangPath,
     ENV_VAR,
 };
 use std::{cell::RefCell, hash::Hash, path::PathBuf, rc::Rc};
@@ -18,8 +19,8 @@ pub enum Stmt {
     Break(Option<FilePosition>),
     Continue(Option<FilePosition>),
 
-    Use(Path),
-    Package(Path),
+    Use(LangPath),
+    Module(LangPath), // Module ~= Package
 
     /// Inc/dec are statements so that they can't be used in other expressions.
     Increment(Expr, Option<FilePosition>),
@@ -60,7 +61,7 @@ impl PartialEq for Stmt {
         match (self, other) {
             (Stmt::Return(a, b), Stmt::Return(c, d)) => a == c && b == d,
             (Stmt::Break(a), Stmt::Break(b)) | (Stmt::Continue(a), Stmt::Continue(b)) => a == b,
-            (Stmt::Use(a), Stmt::Use(b)) | (Stmt::Package(a), Stmt::Package(b)) => a == b,
+            (Stmt::Use(a), Stmt::Use(b)) | (Stmt::Module(a), Stmt::Module(b)) => a == b,
             (Stmt::Yield(a, b), Stmt::Yield(c, d))
             | (Stmt::Increment(a, b), Stmt::Increment(c, d))
             | (Stmt::Decrement(a, b), Stmt::Decrement(c, d))
@@ -86,7 +87,7 @@ impl Hash for Stmt {
             Stmt::Break(a) | Stmt::Continue(a) => {
                 a.hash(state);
             }
-            Stmt::Use(a) | Stmt::Package(a) => {
+            Stmt::Use(a) | Stmt::Module(a) => {
                 a.hash(state);
             }
             Stmt::Yield(a, b)
@@ -112,8 +113,7 @@ impl Hash for Stmt {
             Stmt::ExternalDecl(a, b) => {
                 let func = a.borrow();
                 func.name.hash(state);
-                func.generic_names.hash(state);
-                func.generic_impls.hash(state);
+                func.generics.hash(state);
                 func.ret_type.hash(state);
                 func.modifiers.hash(state);
                 func.is_var_arg.hash(state);
@@ -138,7 +138,7 @@ impl Stmt {
             | Stmt::VariableDecl(.., file_pos)
             | Stmt::ExternalDecl(_, file_pos) => file_pos.as_ref(),
 
-            Stmt::Use(path) | Stmt::Package(path) => Some(&path.file_pos),
+            Stmt::Use(path) | Stmt::Module(path) => path.file_pos(),
 
             Stmt::DeferExec(_) => None,
         }

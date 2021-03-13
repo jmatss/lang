@@ -1,0 +1,47 @@
+mod std::types
+
+pub union Optional<T>
+{
+    some: T,
+    none: T,
+}
+
+impl Optional
+{
+    fn some(value: T = @null<T>()) -> Optional<T>
+    {
+        return Optional<T> { some = value }
+    }
+
+    fn none() -> Optional<T>
+    {
+        return Optional<T> { none = @null<T>() }
+    }
+
+    fn {this} is_some() -> bool
+    {
+        if val is this.*.some
+        {
+            return true
+        }
+        else
+        {
+            return false
+        }
+    }
+
+    fn {this} is_none() -> bool
+    {
+        return not this.is_some()
+    }
+
+    fn this get() -> T
+    {
+        return this.some
+    }
+
+    fn {this} set(value: T)
+    {
+        this.*.some = value
+    }
+}

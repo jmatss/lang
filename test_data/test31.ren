@@ -1,5 +1,3 @@
-//use std.assert
-
 struct TestStruct<T>
 {
     inner: T,

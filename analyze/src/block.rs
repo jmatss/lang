@@ -1,4 +1,6 @@
-use common::{file::FilePosition, BlockId};
+use std::collections::HashSet;
+
+use common::{file::FilePosition, path::LangPath, BlockId};
 
 #[derive(Debug, Clone)]
 pub struct BlockInfo {
@@ -43,6 +45,16 @@ pub struct BlockInfo {
     /// and "continue" statements. This is true for while-loops while it is not
     /// true for if-statements.
     pub is_branchable_block: bool,
+
+    /// The module/nameSpace that this block is stored in.
+    pub module: Option<LangPath>,
+
+    /// The "use" paths that are "active" for the current block. These "use"s
+    /// can be used to resolve type/function paths in the current block.
+    /// Currently ALL "use" statements declared in a block is accessable from the
+    /// whole block, even if the "use" is declared below a statement that uses it,
+    /// order doesn't matter. This might change in the future.
+    pub uses: HashSet<LangPath>,
 }
 
 impl BlockInfo {
@@ -54,6 +66,8 @@ impl BlockInfo {
         file_pos: FilePosition,
         is_root_block: bool,
         is_branchable_block: bool,
+        module: Option<LangPath>,
+        uses: HashSet<LangPath>,
     ) -> Self {
         Self {
             block_id,
@@ -67,6 +81,12 @@ impl BlockInfo {
             all_children_contains_returns: false,
             is_root_block,
             is_branchable_block,
+            module,
+            uses,
         }
+    }
+
+    pub fn add_use(&mut self, path: LangPath) {
+        self.uses.insert(path);
     }
 }
