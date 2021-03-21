@@ -30,18 +30,24 @@ impl<'a> Visitor for FnGenericsCheck<'a> {
 
     /// If this is a method call, makes sure that the amount of generics specified
     /// at the method call is the same amount as declared on the actual method.
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseContext) {
         // This is done for function pointers at a earlier stage(during type inference).
         if fn_call.is_fn_ptr_call {
             return;
         }
 
-        if let Some(adt_ty) = &fn_call.method_adt {
-            if adt_ty.is_generic() {
+        if let Some(adt_type_id) = &fn_call.method_adt {
+            if let Ok(true) = self.analyze_context.ty_env.is_generic(*adt_type_id) {
                 return;
             }
 
-            let adt_path = adt_ty.get_ident().unwrap();
+            let adt_path = match self.analyze_context.ty_env.get_ident(*adt_type_id) {
+                Ok(adt_path_opt) => adt_path_opt.unwrap(),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
             let method =
                 match self

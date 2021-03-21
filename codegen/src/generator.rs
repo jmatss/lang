@@ -9,7 +9,7 @@ use common::{
         lit::Lit,
     },
     ty::{inner_ty::InnerTy, ty::Ty},
-    BlockId,
+    BlockId, TypeId,
 };
 use inkwell::{
     basic_block::BasicBlock,
@@ -34,7 +34,7 @@ pub(super) struct CodeGen<'a, 'ctx> {
 
     /// Information parsed during the "Analyzing" stage. This contains ex.
     /// defintions (var, struct, func etc.) and information about the AST blocks.
-    pub analyze_context: &'ctx AnalyzeContext,
+    pub analyze_context: &'ctx mut AnalyzeContext,
 
     /// The ID of the current block that is being compiled.
     pub cur_block_id: BlockId,
@@ -86,7 +86,7 @@ pub(super) struct CodeGen<'a, 'ctx> {
 
 pub fn generate<'a, 'ctx>(
     ast_root: &'ctx mut AstToken,
-    analyze_context: &'ctx AnalyzeContext,
+    analyze_context: &'ctx mut AnalyzeContext,
     context: &'ctx Context,
     builder: &'a Builder<'ctx>,
     module: &'a Module<'ctx>,
@@ -141,7 +141,7 @@ pub fn generate<'a, 'ctx>(
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn new(
         context: &'ctx Context,
-        analyze_context: &'ctx AnalyzeContext,
+        analyze_context: &'ctx mut AnalyzeContext,
         builder: &'a Builder<'ctx>,
         module: &'a Module<'ctx>,
         target_machine: &'a TargetMachine,
@@ -189,9 +189,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     }
 
     pub(super) fn alloc_var(&self, var: &Var) -> LangResult<PointerValue<'ctx>> {
-        if let Some(var_type) = &var.ty {
+        if let Some(var_type_id) = &var.ty {
             Ok(
-                match self.compile_type(&var_type, var.file_pos.to_owned())? {
+                match self.compile_type(*var_type_id, var.file_pos.to_owned())? {
                     AnyTypeEnum::ArrayType(ty) => {
                         let sign_extend = false;
                         let dim = self
@@ -329,16 +329,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
     pub(super) fn compile_type(
         &self,
-        ty: &Ty,
+        type_id: TypeId,
         file_pos: Option<FilePosition>,
     ) -> LangResult<AnyTypeEnum<'ctx>> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Generic;
 
+        let ty = self.analyze_context.ty_env.ty(type_id)?.clone();
         Ok(match ty {
-            Ty::Pointer(ptr, ..) => {
+            Ty::Pointer(ptr_type_id, ..) => {
                 // Get the type of the inner type and wrap into a "PointerType".
-                match self.compile_type(ptr, file_pos)? {
+                match self.compile_type(ptr_type_id, file_pos)? {
                     AnyTypeEnum::ArrayType(ty) => ty.ptr_type(address_space).into(),
                     AnyTypeEnum::FloatType(ty) => ty.ptr_type(address_space).into(),
                     AnyTypeEnum::FunctionType(ty) => ty.ptr_type(address_space).into(),
@@ -356,7 +357,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             // TODO: Calculate array size that contains ther things than just
             //       a single integer literal
-            Ty::Array(inner_ty, dim_opt, ..) => {
+            Ty::Array(inner_type_id, dim_opt, ..) => {
                 let lit_dim = if let Some(dim) = dim_opt {
                     match dim.as_ref() {
                         Expr::Lit(Lit::Integer(num, radix), ..) => {
@@ -377,7 +378,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     return Err(self.err("No dimension set for array.".into(), file_pos));
                 };
 
-                match self.compile_type(inner_ty, file_pos)? {
+                match self.compile_type(inner_type_id, file_pos)? {
                     AnyTypeEnum::ArrayType(ty) => ty.array_type(lit_dim).into(),
                     AnyTypeEnum::FloatType(ty) => ty.array_type(lit_dim).into(),
                     AnyTypeEnum::IntType(ty) => ty.array_type(lit_dim).into(),
@@ -399,17 +400,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             // Need to wrap `FunctionType`s inside `PointerType`s since they
             // aren't sized, and can't be used as args/params etc otherwise.
-            Ty::Fn(_, param_tys, ret_ty, type_info) => {
+            Ty::Fn(_, param_tys, ret_type_id_opt, type_info) => {
                 let mut param_types = Vec::with_capacity(param_tys.len());
                 for param_ty in param_tys {
-                    let compiled_ty = self.compile_type(param_ty, param_ty.file_pos().cloned())?;
+                    let file_pos = self.analyze_context.ty_env.file_pos(param_ty).cloned();
+                    let compiled_ty = self.compile_type(param_ty, file_pos)?;
                     param_types.push(CodeGen::any_into_basic_type(compiled_ty)?);
                 }
 
                 let address_space = AddressSpace::Generic;
-                if let Some(ret_ty) = ret_ty {
+                if let Some(ret_type_id) = ret_type_id_opt {
                     let compiled_ret_ty =
-                        self.compile_type(ret_ty, type_info.file_pos().cloned())?;
+                        self.compile_type(ret_type_id, type_info.file_pos().cloned())?;
                     let basic_ty = CodeGen::any_into_basic_type(compiled_ret_ty)?;
 
                     basic_ty
@@ -427,10 +429,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             Ty::CompoundType(inner_ty, generics, ..) => {
                 match inner_ty {
-                    InnerTy::Struct(path) | InnerTy::Union(path) => {
-                        let mut full_path = path.clone();
+                    InnerTy::Struct(mut full_path) | InnerTy::Union(mut full_path) => {
                         let last_part = full_path.pop().unwrap();
-                        full_path.push(LangPathPart(last_part.0, Some(generics.clone())));
+                        full_path.push(LangPathPart(last_part.0, Some(generics)));
 
                         if let Some(struct_type) =
                             self.module.get_struct_type(&full_path.to_string())
@@ -446,10 +447,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                             ));
                         }
                     }
-                    InnerTy::Enum(path) => {
-                        let mut full_path = path.clone();
+                    InnerTy::Enum(mut full_path) => {
                         let last_part = full_path.pop().unwrap();
-                        full_path.push(LangPathPart(last_part.0, Some(generics.clone())));
+                        full_path.push(LangPathPart(last_part.0, Some(generics)));
 
                         if let Some(struct_type) =
                             self.module.get_struct_type(&full_path.to_string())
@@ -490,7 +490,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                     _ => {
                         return Err(self.err(
-                            format!("Invalid type during type codegen: {:?}", ty),
+                            format!(
+                                "Invalid inner type during type codegen. Type ID: {:?}, inner type: {:#}",
+                                type_id, inner_ty
+                            ),
                             file_pos,
                         ))
                     }
@@ -499,7 +502,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             _ => {
                 return Err(self.err(
-                    format!("Invalid type during type codegen: {:?}", ty),
+                    format!(
+                        "Invalid type during type codegen. Type ID: {:?}, type: {:#?}",
+                        type_id, ty
+                    ),
                     file_pos,
                 ))
             }

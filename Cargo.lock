@@ -28,6 +28,7 @@ dependencies = [
 name = "analyze"
 version = "0.1.0"
 dependencies = [
+ "backtrace",
  "common",
  "either",
  "log",

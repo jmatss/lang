@@ -10,10 +10,9 @@ use common::{
     token::{
         block::{Adt, AdtKind, BuiltIn, Fn, Trait},
         expr::Var,
-        stmt::Path,
     },
-    ty::ty::Ty,
-    BlockId,
+    ty::environment::TypeEnvironment,
+    BlockId, TypeId,
 };
 use log::{debug, log_enabled, Level};
 use std::{
@@ -26,6 +25,9 @@ use std::{
 
 #[derive(Debug)]
 pub struct AnalyzeContext {
+    /// A environment containing information about all types in this code.
+    pub ty_env: TypeEnvironment,
+
     /// Contains all declarations that have been seen traversing down to this
     /// part of the code. The BlockId represent the outer scope for a item.
     /// For variables it will be the scope in which they are declared in and for
@@ -40,7 +42,6 @@ pub struct AnalyzeContext {
     pub(super) built_ins: HashMap<&'static str, BuiltIn>,
 
     pub block_info: HashMap<BlockId, BlockInfo>,
-    pub use_paths: Vec<Path>,
 
     /// Mapping file IDs to the corresponding file information. This can be used
     /// to find the filename and directory for file IDs stored in "FilePosition"s.
@@ -53,26 +54,30 @@ pub struct AnalyzeContext {
 
 impl Default for AnalyzeContext {
     fn default() -> Self {
-        AnalyzeContext::new(HashMap::default())
+        Self::new(TypeEnvironment::default(), HashMap::default()).unwrap()
     }
 }
 
 impl AnalyzeContext {
-    pub fn new(file_info: HashMap<FileId, FileInfo>) -> Self {
-        Self {
+    pub fn new(
+        mut ty_env: TypeEnvironment,
+        file_info: HashMap<FileId, FileInfo>,
+    ) -> LangResult<Self> {
+        let built_ins = decl::built_in::init_built_ins(&mut ty_env)?;
+        Ok(Self {
+            ty_env,
+
             variables: HashMap::default(),
             fns: HashMap::default(),
             adts: HashMap::default(),
             traits: HashMap::default(),
 
-            built_ins: decl::built_in::init_built_ins(),
-
+            built_ins,
             block_info: HashMap::default(),
-            use_paths: Vec::default(),
 
             file_info,
             file_pos: FilePosition::default(),
-        }
+        })
     }
 
     pub fn debug_print(&self) {
@@ -616,9 +621,9 @@ impl AnalyzeContext {
 
     /// Given a function or method `func`, finds the type of the parameter with
     /// the name `param_name`.
-    fn get_param_type(&self, func: Rc<RefCell<Fn>>, idx: usize) -> LangResult<Ty> {
-        if let Some(ty) = &self.get_param_with_idx(Rc::clone(&func), idx)?.ty {
-            Ok(ty.clone())
+    fn get_param_type(&self, func: Rc<RefCell<Fn>>, idx: usize) -> LangResult<TypeId> {
+        if let Some(type_id) = &self.get_param_with_idx(Rc::clone(&func), idx)?.ty {
+            Ok(*type_id)
         } else {
             Err(self.err(format!(
                 "Parameter at index \"{}\" in function \"{}\" has no type set.",
@@ -637,14 +642,19 @@ impl AnalyzeContext {
         method_name: &str,
         idx: usize,
         id: BlockId,
-    ) -> LangResult<Ty> {
+    ) -> LangResult<TypeId> {
         let method = self.get_method(adt_path, method_name, id)?;
         self.get_param_type(method, idx)
     }
 
     /// Finds the function with the path `fn_path` in a scope containing the block
     /// with ID `id` and returns the type of the parameter with name `param_name`.
-    pub fn get_fn_param_type(&self, fn_path: &LangPath, idx: usize, id: BlockId) -> LangResult<Ty> {
+    pub fn get_fn_param_type(
+        &self,
+        fn_path: &LangPath,
+        idx: usize,
+        id: BlockId,
+    ) -> LangResult<TypeId> {
         let func = self.get_fn(fn_path, id)?;
         self.get_param_type(func, idx)
     }

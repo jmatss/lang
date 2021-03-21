@@ -11,7 +11,7 @@ use common::{
     traverser::TraverseContext,
     ty::{generics::Generics, ty::Ty},
     visitor::Visitor,
-    BlockId,
+    BlockId, TypeId,
 };
 use std::{cell::RefCell, collections::HashSet, rc::Rc};
 
@@ -80,35 +80,65 @@ impl<'a, 'tctx> Visitor for GenericsReplacer<'a, 'tctx> {
         }
     }
 
-    fn visit_type(&mut self, ty: &mut Ty, ctx: &TraverseContext) {
-        ty.replace_generics_impl(self.generics_impl);
-
-        if let (Some(old_name), Some(new_ty)) = (self.old_path, self.new_ty) {
-            ty.replace_self(old_name, new_ty);
+    fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseContext) {
+        if let Err(err) = self
+            .type_context
+            .analyze_context
+            .ty_env
+            .replace_generics_impl(*type_id, &self.generics_impl)
+        {
+            self.errors.push(err);
+            return;
         }
 
-        let inferred_ty = match self.type_context.inferred_type(ty, ctx.block_id) {
-            Ok(inferred_ty) => inferred_ty,
+        if let (Some(old_path), Some(new_ty)) = (self.old_path, self.new_ty) {
+            if let Err(err) = self
+                .type_context
+                .analyze_context
+                .ty_env
+                .replace_self(*type_id, old_path, new_ty)
+            {
+                self.errors.push(err);
+                return;
+            }
+        }
+
+        let inferred_type_id = match self.type_context.inferred_type(*type_id, ctx.block_id) {
+            Ok(inferred_type_id) => inferred_type_id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+        let sub_sets = match self.type_context.analyze_context.get_root_id(ctx.block_id) {
+            Ok(root_id) => self.type_context.substitutions.get(&root_id),
             Err(err) => {
                 self.errors.push(err);
                 return;
             }
         };
 
-        if inferred_ty.is_solved() {
-            *ty = inferred_ty;
-        } else {
-            let err = self
-                .type_context
-                .analyze_context
-                .err(format!("Unable to solve type: {:#?}", ty));
-            self.errors.push(err);
+        match self
+            .type_context
+            .analyze_context
+            .ty_env
+            .is_solved(sub_sets, inferred_type_id)
+        {
+            Ok(true) => *type_id = inferred_type_id,
+            Ok(false) => {
+                let err = self
+                    .type_context
+                    .analyze_context
+                    .err(format!("Unable to solve type: {:#?}", type_id));
+                self.errors.push(err);
+            }
+            Err(err) => self.errors.push(err),
         }
     }
 
     /// Since this `GenericsReplacer` is called with `deep_copy` set to true,
     /// this function will store the newly copied/created variables.
-    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseContext) {
         if let Stmt::VariableDecl(var, ..) = stmt {
             let old_key = (var.borrow().name.clone(), ctx.block_id);
             self.modified_variables.insert(old_key);
@@ -123,7 +153,7 @@ impl<'a, 'tctx> Visitor for GenericsReplacer<'a, 'tctx> {
 
     /// Since this `GenericsReplacer` is called with `deep_copy` set to true,
     /// this logic inserts a reference from the new ADT type to the new method.
-    fn visit_fn(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_fn(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseContext) {
         if let Some(new_adt) = &self.new_adt {
             let module = match self.type_context.analyze_context.get_module(ctx.block_id) {
                 Ok(Some(module)) => module,
@@ -140,7 +170,18 @@ impl<'a, 'tctx> Visitor for GenericsReplacer<'a, 'tctx> {
             };
 
             if let AstToken::Block(BlockHeader::Fn(func), _, old_id, ..) = ast_token {
-                func.borrow_mut().method_adt = self.new_ty.cloned();
+                let type_id_opt = if let Some(new_ty) = self.new_ty {
+                    match self.type_context.analyze_context.ty_env.id(new_ty) {
+                        Ok(type_id) => Some(type_id),
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    }
+                } else {
+                    None
+                };
+                func.borrow_mut().method_adt = type_id_opt;
 
                 // Insert a reference from the "new" ADT to this new method.
                 // The name set will be the "half name" containing the generics
@@ -167,7 +208,7 @@ impl<'a, 'tctx> Visitor for GenericsReplacer<'a, 'tctx> {
     /// need to add the `copy_nr` to all variables uses which declarations have
     /// been given a `copy_nr`. These "modified" declarations can be found in
     /// `self.modified_variables`.
-    fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {
+    fn visit_var(&mut self, var: &mut Var, ctx: &mut TraverseContext) {
         match self
             .type_context
             .analyze_context

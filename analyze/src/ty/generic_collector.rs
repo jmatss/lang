@@ -8,9 +8,9 @@ use common::{
     path::{LangPath, LangPathPart},
     token::{ast::AstToken, block::BlockHeader, expr::FnCall},
     traverser::{AstTraverser, TraverseContext},
-    ty::{generics::Generics, ty::Ty},
+    ty::{environment::TypeEnvironment, generics::Generics, ty::Ty},
     visitor::Visitor,
-    BlockId,
+    BlockId, TypeId,
 };
 use core::panic;
 use log::debug;
@@ -39,7 +39,7 @@ pub struct GenericCollector<'a, 'tctx> {
     /// create new generic ADTs with the specific generic implementations.
     /// The LangPath key is the path of the ADT/type. The Ty values are the
     /// actual types containing generic implentations/instances.
-    pub generic_adts: HashMap<LangPath, Vec<Ty>>,
+    pub generic_adts: HashMap<LangPath, Vec<TypeId>>,
 
     /// Will contain all NESTED types containing generics. These are types containing
     /// generics that aren't part of the "using" structure.
@@ -74,7 +74,7 @@ pub struct GenericCollector<'a, 'tctx> {
     /// The first LangPath key is the path of the containing ADT (`A` in the example)
     /// and the second String key is the name of the method in which these `Ty`s
     /// was found.
-    nested_generic_adts: HashMap<LangPath, HashMap<String, Vec<Ty>>>,
+    nested_generic_adts: HashMap<LangPath, HashMap<String, Vec<TypeId>>>,
 
     /// The first LangPath is the path of the ADT and the second string is
     /// the name of the method. The LangPath will NOT contain any references
@@ -115,18 +115,30 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
     /// stage be used to create all the ADTs containing the different generic types.
     /// This function also adds the names for the generics if they aren't already
     /// set and that information is attainable.
-    fn collect_generic_adt(&mut self, ty: &mut Ty) {
+    fn collect_generic_adt(&mut self, type_id: TypeId) -> LangResult<()> {
         // Do not create a "copy" of the actual ADT type that contains the
         // generic declarations, should only create "copies" for the ADTs
         // that "implements" the generics.
-        if ty.contains_generic() {
-            return;
+        if self
+            .type_context
+            .analyze_context
+            .ty_env
+            .contains_generic_shallow(type_id)?
+        {
+            return Ok(());
         }
+
+        let ty = self
+            .type_context
+            .analyze_context
+            .ty_env
+            .ty(type_id)?
+            .clone();
 
         let path = match ty {
             Ty::CompoundType(inner_ty, generics, ..) => {
                 if generics.is_empty() {
-                    return;
+                    return Ok(());
                 }
 
                 let mut path = inner_ty.get_ident().unwrap();
@@ -135,80 +147,85 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                 path
             }
 
-            Ty::Pointer(ty_box, ..) | Ty::Array(ty_box, ..) => {
-                self.collect_generic_adt(ty_box);
-                return;
+            Ty::Pointer(type_id_i, ..) | Ty::Array(type_id_i, ..) => {
+                self.collect_generic_adt(type_id_i);
+                return Ok(());
             }
 
-            _ => return,
+            _ => return Ok(()),
         };
 
         // TODO: Don't hardcode default id.
-        let id = BlockInfo::DEFAULT_BLOCK_ID;
+        let block_id = BlockInfo::DEFAULT_BLOCK_ID;
 
         // Set names of generics if they aren't set already.
-        if let Err(err) = self.type_context.set_generic_names(ty, id) {
-            self.errors.push(err);
-            return;
-        }
+        self.type_context.set_generic_names(type_id, block_id)?;
 
         match self.generic_adts.entry(path) {
             Entry::Occupied(mut o) => {
-                if !o.get().contains(ty) {
-                    o.get_mut().push(ty.clone());
+                if !o.get().contains(&type_id) {
+                    o.get_mut().push(type_id);
                 }
             }
             Entry::Vacant(v) => {
-                v.insert(vec![ty.clone()]);
+                v.insert(vec![type_id]);
             }
         }
+
+        Ok(())
     }
 
-    /// If the method with name `method_name`, on the ADT with type `adt_ty`
+    /// If the method with name `method_name`, on the ADT with type `adt_type_id`
     /// contains generics; this function will save all "implementing"
     /// methods where the generics have been given a "real type instance".
     /// This function also adds the names for the generics if they aren't already
     /// set.
-    fn collect_generic_method(&mut self, adt_ty: &Ty, method_call: &FnCall, block_id: BlockId) {
+    fn collect_generic_method(
+        &mut self,
+        adt_type_id: TypeId,
+        method_call: &FnCall,
+        block_id: BlockId,
+    ) -> LangResult<()> {
         let method_call_generics = if let Some(fn_call_generics) = &method_call.generics {
             fn_call_generics.clone()
         } else {
-            return;
+            return Ok(());
         };
 
         // Do not "store" any types containing generic declarations inside
-        // `generic_methods`, only store method callsthat have had the generics
+        // `generic_methods`, only store method calls that have had the generics
         // "implemented".
-        if method_call_generics
-            .iter_types()
-            .any(|ty| ty.contains_generic())
-        {
-            return;
+        for gen_type_id in method_call_generics.iter_types() {
+            if self
+                .type_context
+                .analyze_context
+                .ty_env
+                .contains_generic_shallow(*gen_type_id)?
+            {
+                return Ok(());
+            }
         }
 
         let method_name = method_call.name.clone();
 
-        let old_path = if let Some(mut old_path) = adt_ty.get_ident() {
+        let old_path = if let Some(mut old_path) = self
+            .type_context
+            .analyze_context
+            .ty_env
+            .get_ident(adt_type_id)?
+        {
             // Make sure no generics are in the path.
             let last_part = old_path.pop().unwrap();
             old_path.push(LangPathPart(last_part.0, None));
             old_path
         } else {
-            return;
+            return Ok(());
         };
 
         let method =
-            match self
-                .type_context
+            self.type_context
                 .analyze_context
-                .get_method(&old_path, &method_name, block_id)
-            {
-                Ok(method) => method,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+                .get_method(&old_path, &method_name, block_id)?;
         let method = method.borrow();
 
         if let Some(func_generics) = &method.generics {
@@ -223,8 +240,7 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                     method_call_generics.len_types(),
                     func_generic_names.len()
                 ));
-                self.errors.push(err);
-                return;
+                return Err(err);
             }
 
             let mut new_generics = Generics::new();
@@ -254,12 +270,14 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                     v_outer.insert(m);
                 }
             }
+
+            Ok(())
         } else {
             let err = self.type_context.analyze_context.err(format!(
                 "Func call for method \"{}\" on struct \"{}\"has generics, but func decl doesn't.",
                 &method_name, &old_path
             ));
-            self.errors.push(err);
+            Err(err)
         }
     }
 
@@ -287,7 +305,10 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             };
 
             if let Some(adt_path) = impl_opt {
-                let mut nested_collector = NestedGenericCollector::new(&adt_path);
+                let mut nested_collector = NestedGenericCollector::new(
+                    &mut self.type_context.analyze_context.ty_env,
+                    &adt_path,
+                );
                 let mut traverser = AstTraverser::new();
                 if let Err(errs) = traverser
                     .add_visitor(&mut nested_collector)
@@ -297,24 +318,24 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
                     self.errors.extend(errs.into_iter());
                 }
 
-                for (method_name, tys) in nested_collector.nested_generic_adts.iter() {
-                    for ty in tys {
+                for (method_name, type_ids) in nested_collector.nested_generic_adts.iter() {
+                    for type_id in type_ids {
                         match self.nested_generic_adts.entry(adt_path.clone()) {
                             Entry::Occupied(mut o_outer) => {
                                 match o_outer.get_mut().entry(method_name.clone()) {
                                     Entry::Occupied(mut o_inner) => {
-                                        if !o_inner.get().contains(&ty) {
-                                            o_inner.get_mut().push(ty.clone());
+                                        if !o_inner.get().contains(type_id) {
+                                            o_inner.get_mut().push(*type_id);
                                         }
                                     }
                                     Entry::Vacant(v_inner) => {
-                                        v_inner.insert(vec![ty.clone()]);
+                                        v_inner.insert(vec![*type_id]);
                                     }
                                 }
                             }
                             Entry::Vacant(v_outer) => {
                                 let mut m = HashMap::default();
-                                m.insert(method_name.clone(), vec![ty.clone()]);
+                                m.insert(method_name.clone(), vec![*type_id]);
                                 v_outer.insert(m);
                             }
                         }
@@ -361,26 +382,44 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             }
 
             let nested_gen_adt = self.nested_generic_adts.remove(adt_path).unwrap();
-            for (method_name, nested_adt_tys) in nested_gen_adt.iter() {
-                for nested_adt_ty in nested_adt_tys.iter() {
-                    let nested_adt_path = if let Some(nested_ident) = nested_adt_ty.get_ident() {
-                        nested_ident
-                    } else {
-                        let err = self.type_context.analyze_context.err(format!(
-                            "Nested ADT type doesn't contain ident: {:#?}",
-                            nested_adt_ty
-                        ));
-                        self.errors.push(err);
-                        return;
+            for (method_name, nested_adt_type_ids) in nested_gen_adt.iter() {
+                for nested_adt_type_id in nested_adt_type_ids.iter() {
+                    let nested_adt_path = match self
+                        .type_context
+                        .analyze_context
+                        .ty_env
+                        .get_ident(*nested_adt_type_id)
+                    {
+                        Ok(Some(path)) => path,
+                        Ok(None) => {
+                            let err = self.type_context.analyze_context.err(format!(
+                                "Nested ADT type doesn't contain ident: {:#?}",
+                                nested_adt_type_id
+                            ));
+                            self.errors.push(err);
+                            return;
+                        }
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
                     };
 
-                    self.convert_nested_adt_from_adt(&adt_path, nested_adt_ty, &nested_adt_path);
-                    self.convert_nested_adt_from_method(
+                    if let Err(err) = self.convert_nested_adt_from_adt(
+                        &adt_path,
+                        *nested_adt_type_id,
+                        &nested_adt_path,
+                    ) {
+                        self.errors.push(err);
+                    }
+                    if let Err(err) = self.convert_nested_adt_from_method(
                         &adt_path,
                         method_name,
-                        nested_adt_ty,
+                        *nested_adt_type_id,
                         &nested_adt_path,
-                    );
+                    ) {
+                        self.errors.push(err);
+                    }
                 }
             }
         }
@@ -439,59 +478,65 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
     fn convert_nested_adt_from_adt(
         &mut self,
         adt_path: &LangPath,
-        nested_adt_ty: &Ty,
+        nested_adt_type_id: TypeId,
         nested_adt_path: &LangPath,
-    ) {
-        let gen_adt_tys = if let Some(gen_adt_tys) = self.generic_adts.get(adt_path) {
-            gen_adt_tys.clone()
+    ) -> LangResult<()> {
+        let gen_adt_type_ids = if let Some(gen_adt_type_ids) = self.generic_adts.get(adt_path) {
+            gen_adt_type_ids.clone()
         } else {
             // This can happen if there are no implementation of a
             // ADT that contains generics.
-            return;
+            return Ok(());
         };
 
         // Go through all implementations of the ADT `adt_path` and use those
         // generic instances to create new ADT instances for the nested one.
         // This will be done for all generics of the outer ADT.
-        for gen_adt_ty in gen_adt_tys {
+        for gen_adt_type_id in gen_adt_type_ids {
+            let gen_adt_ty = self
+                .type_context
+                .analyze_context
+                .ty_env
+                .ty(gen_adt_type_id)?
+                .clone();
+
             let generics = if let Ty::CompoundType(_, generics, ..) = gen_adt_ty {
                 generics
             } else {
                 let err = self.type_context.analyze_context.err(format!(
                     "Generic instance type not compound: {:#?}",
-                    gen_adt_ty
+                    gen_adt_type_id
                 ));
-                self.errors.push(err);
-                return;
+                return Err(err);
             };
 
-            let mut nested_ty_clone = nested_adt_ty.clone();
-            nested_ty_clone.replace_generics_impl(&generics);
-
-            if &nested_ty_clone == nested_adt_ty {
-                continue;
-            }
+            self.type_context
+                .analyze_context
+                .ty_env
+                .replace_generics_impl(nested_adt_type_id, &generics)?;
 
             match self.generic_adts.entry(nested_adt_path.clone()) {
                 Entry::Occupied(mut o) => {
-                    if !o.get().contains(&nested_ty_clone) {
-                        o.get_mut().push(nested_ty_clone.clone());
+                    if !o.get().contains(&nested_adt_type_id) {
+                        o.get_mut().push(nested_adt_type_id);
                     }
                 }
                 Entry::Vacant(v) => {
-                    v.insert(vec![nested_ty_clone.clone()]);
+                    v.insert(vec![nested_adt_type_id]);
                 }
             };
         }
+
+        Ok(())
     }
 
     fn convert_nested_adt_from_method(
         &mut self,
         adt_path: &LangPath,
         method_name: &str,
-        nested_adt_ty: &Ty,
+        nested_adt_type_id: TypeId,
         nested_adt_path: &LangPath,
-    ) {
+    ) -> LangResult<()> {
         let gen_func_tys = if let Some(gen_func_tys) = self
             .generic_methods
             .get(adt_path)
@@ -500,31 +545,31 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
         {
             gen_func_tys
         } else {
-            return;
+            return Ok(());
         };
 
         // Go through all implementations of the method `method_name` and
         // use those generic instances to create new method instances for
         // the nested one.
         for generics in gen_func_tys {
-            let mut nested_ty_clone = nested_adt_ty.clone();
-            nested_ty_clone.replace_generics_impl(&generics);
-
-            if &nested_ty_clone == nested_adt_ty {
-                continue;
-            }
+            self.type_context
+                .analyze_context
+                .ty_env
+                .replace_generics_impl(nested_adt_type_id, &generics)?;
 
             match self.generic_adts.entry(nested_adt_path.clone()) {
                 Entry::Occupied(mut o) => {
-                    if !o.get().contains(&nested_ty_clone) {
-                        o.get_mut().push(nested_ty_clone.clone());
+                    if !o.get().contains(&nested_adt_type_id) {
+                        o.get_mut().push(nested_adt_type_id);
                     }
                 }
                 Entry::Vacant(v) => {
-                    v.insert(vec![nested_ty_clone.clone()]);
+                    v.insert(vec![nested_adt_type_id]);
                 }
             };
         }
+
+        Ok(())
     }
 
     fn convert_nested_method_from_adt(
@@ -566,7 +611,15 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             }
         };
 
-        for gen_adt_ty in gen_adt_tys {
+        for gen_adt_type_id in gen_adt_tys {
+            let gen_adt_ty = match self.type_context.analyze_context.ty_env.ty(gen_adt_type_id) {
+                Ok(gen_adt_ty) => gen_adt_ty.clone(),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
             let adt_generics = if let Ty::CompoundType(_, adt_generics, ..) = gen_adt_ty {
                 adt_generics
             } else {
@@ -582,10 +635,17 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             // function declaration. Also add names of the generics into `Generics`
             // if they are missing (might have no effect if the names are set already).
             let mut new_generics = Generics::new();
-            for (name, ty) in method_gen_names.iter().zip(generics.iter_types()) {
-                let mut new_ty = ty.clone();
-                new_ty.replace_generics_impl(&adt_generics);
-                new_generics.insert(name.clone(), new_ty);
+            for (name, type_id) in method_gen_names.iter().zip(generics.iter_types()) {
+                if let Err(err) = self
+                    .type_context
+                    .analyze_context
+                    .ty_env
+                    .replace_generics_impl(*type_id, &adt_generics)
+                {
+                    self.errors.push(err);
+                    return;
+                };
+                new_generics.insert(name.clone(), *type_id);
             }
 
             if &new_generics == generics {
@@ -667,10 +727,17 @@ impl<'a, 'tctx> GenericCollector<'a, 'tctx> {
             // function declaration. Also add names of the generics into `Generics`
             // if they are missing (might have no effect if the names are set already).
             let mut new_generics = Generics::new();
-            for (name, ty) in method_gen_names.iter().zip(generics.iter_types()) {
-                let mut new_ty = ty.clone();
-                new_ty.replace_generics_impl(&generics_impls);
-                new_generics.insert(name.clone(), new_ty);
+            for (name, type_id) in method_gen_names.iter().zip(generics.iter_types()) {
+                if let Err(err) = self
+                    .type_context
+                    .analyze_context
+                    .ty_env
+                    .replace_generics_impl(*type_id, &generics_impls)
+                {
+                    self.errors.push(err);
+                    return;
+                };
+                new_generics.insert(name.clone(), *type_id);
             }
 
             if &new_generics == generics {
@@ -769,7 +836,7 @@ impl<'a, 'tctx> Visitor for GenericCollector<'a, 'tctx> {
         }
     }
 
-    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         let include_impls = true;
         let full_paths = false;
         match dependency_order(
@@ -792,17 +859,17 @@ impl<'a, 'tctx> Visitor for GenericCollector<'a, 'tctx> {
         }
     }
 
-    fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
-        self.collect_generic_adt(ty);
+    fn visit_type(&mut self, type_id: &mut TypeId, _ctx: &mut TraverseContext) {
+        self.collect_generic_adt(*type_id);
     }
 
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
-        if let Some(structure_ty) = &fn_call.method_adt {
-            self.collect_generic_method(structure_ty, fn_call, ctx.block_id);
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseContext) {
+        if let Some(adt_type_id) = &fn_call.method_adt {
+            self.collect_generic_method(*adt_type_id, fn_call, ctx.block_id);
         }
     }
 
-    fn visit_end(&mut self, _ctx: &TraverseContext) {
+    fn visit_end(&mut self, _ctx: &mut TraverseContext) {
         debug!(
             "self.generic_adts: {:#?}, self.generic_methods: {:#?}",
             self.generic_adts, self.generic_methods
@@ -812,11 +879,12 @@ impl<'a, 'tctx> Visitor for GenericCollector<'a, 'tctx> {
 }
 
 struct NestedGenericCollector<'a> {
+    ty_env: &'a mut TypeEnvironment,
     adt_path: &'a LangPath,
 
     /// The key String is the name of the function that this type/generics was
     /// found in.
-    pub nested_generic_adts: HashMap<String, Vec<Ty>>,
+    pub nested_generic_adts: HashMap<String, Vec<TypeId>>,
 
     /// The first String is the name of the function that this type/generics was
     /// found in and the second String is the name of the function call.
@@ -829,8 +897,9 @@ struct NestedGenericCollector<'a> {
 }
 
 impl<'a> NestedGenericCollector<'a> {
-    fn new(adt_path: &'a LangPath) -> Self {
+    fn new(ty_env: &'a mut TypeEnvironment, adt_path: &'a LangPath) -> Self {
         Self {
+            ty_env,
             adt_path,
             nested_generic_adts: HashMap::default(),
             nested_generic_methods: HashMap::default(),
@@ -839,66 +908,83 @@ impl<'a> NestedGenericCollector<'a> {
         }
     }
 
-    fn collect_nested_generic_adts(&mut self, ty: &Ty) {
-        if !ty.contains_generic() {
-            return;
-        } else if let Some(ty_path) = &ty.get_ident() {
-            if self.adt_path == ty_path {
-                return;
+    fn collect_nested_generic_adts(&mut self, type_id: TypeId) -> LangResult<()> {
+        if self.ty_env.contains_generic_shallow(type_id)? {
+            return Ok(());
+        } else if let Ok(Some(ty_path)) = self.ty_env.get_ident(type_id) {
+            if self.adt_path == &ty_path {
+                return Ok(());
             }
         }
 
+        let ty = self.ty_env.ty(type_id)?.clone();
         match ty {
             Ty::CompoundType(inner_ty, generics, _) => {
-                let contains_generic = generics.iter_types().any(|ty| ty.contains_generic());
+                let mut contains_generic = false;
+                for gen_type_id in generics.iter_types() {
+                    if self.ty_env.contains_generic_shallow(*gen_type_id)? {
+                        contains_generic = true;
+                    }
+                }
+
                 if contains_generic && inner_ty.is_adt() {
                     match self.nested_generic_adts.entry(self.cur_func_name.clone()) {
                         Entry::Occupied(mut o) => {
-                            if !o.get().contains(ty) {
-                                o.get_mut().push(ty.clone());
+                            if !o.get().contains(&type_id) {
+                                o.get_mut().push(type_id);
                             }
                         }
                         Entry::Vacant(v) => {
-                            v.insert(vec![ty.clone()]);
+                            v.insert(vec![type_id]);
                         }
                     }
                 }
             }
-            Ty::Pointer(ty_i, _) | Ty::Array(ty_i, _, _) => {
-                self.collect_nested_generic_adts(ty_i);
+            Ty::Pointer(type_id_i, ..) | Ty::Array(type_id_i, ..) => {
+                self.collect_nested_generic_adts(type_id_i)?;
             }
-            Ty::Expr(expr, _) => {
-                if let Ok(ty_i) = expr.get_expr_type() {
-                    self.collect_nested_generic_adts(&ty_i);
+            Ty::Expr(expr, ..) => {
+                if let Ok(type_id_i) = expr.get_expr_type() {
+                    self.collect_nested_generic_adts(type_id_i)?;
                 }
             }
             _ => (),
         }
+
+        Ok(())
     }
 
-    fn collect_nested_generic_methods(&mut self, fn_call: &FnCall) {
+    fn collect_nested_generic_methods(&mut self, fn_call: &FnCall) -> LangResult<()> {
         if fn_call.method_adt.is_none() {
-            return;
+            return Ok(());
         }
 
         let fn_call_generics = if let Some(fn_call_generics) = &fn_call.generics {
             if !fn_call_generics.is_empty() {
                 fn_call_generics
             } else {
-                return;
+                return Ok(());
             }
         } else {
-            return;
+            return Ok(());
         };
 
-        let contains_nested_generic = fn_call_generics
-            .iter_types()
-            .any(|ty| ty.contains_generic());
+        let mut contains_nested_generic = false;
+        for gen_type_id in fn_call_generics.iter_types() {
+            if self.ty_env.contains_generic_shallow(*gen_type_id)? {
+                contains_nested_generic = true;
+            }
+        }
+
         if contains_nested_generic {
+            let method_adt_path = self
+                .ty_env
+                .get_ident(*fn_call.method_adt.as_ref().unwrap())?
+                .unwrap();
             let key = NestedMethodInfo {
                 method_name: self.cur_func_name.clone(),
                 method_call_name: fn_call.name.clone(),
-                method_adt_path: fn_call.method_adt.as_ref().unwrap().get_ident().unwrap(),
+                method_adt_path,
             };
 
             match self.nested_generic_methods.entry(key) {
@@ -912,6 +998,8 @@ impl<'a> NestedGenericCollector<'a> {
                 }
             }
         }
+
+        Ok(())
     }
 }
 
@@ -924,21 +1012,25 @@ impl<'a> Visitor for NestedGenericCollector<'a> {
         }
     }
 
-    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
             self.cur_func_name = func.borrow().name.clone();
         }
     }
 
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, _ctx: &TraverseContext) {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, _ctx: &mut TraverseContext) {
         if fn_call.is_fn_ptr_call {
             return;
         }
 
-        self.collect_nested_generic_methods(fn_call);
+        if let Err(err) = self.collect_nested_generic_methods(fn_call) {
+            self.errors.push(err);
+        }
     }
 
-    fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
-        self.collect_nested_generic_adts(ty);
+    fn visit_type(&mut self, type_id: &mut TypeId, _ctx: &mut TraverseContext) {
+        if let Err(err) = self.collect_nested_generic_adts(*type_id) {
+            self.errors.push(err);
+        }
     }
 }

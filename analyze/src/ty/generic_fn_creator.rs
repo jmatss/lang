@@ -156,7 +156,7 @@ impl<'a, 'tctx> Visitor for GenericFnCreator<'a, 'tctx> {
         }
     }
 
-    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Default, .., body) = &mut ast_token {
             let mut i = 0;
 
@@ -217,6 +217,6 @@ impl<'a, 'tctx> Visitor for GenericFnCreator<'a, 'tctx> {
     }
 
     // TODO: Implement similar generic logic as for structs.
-    fn visit_trait(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {}
-    fn visit_enum(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {}
+    fn visit_trait(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseContext) {}
+    fn visit_enum(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseContext) {}
 }

@@ -64,7 +64,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
     /// This function will also add "this" as the first argument of the method
     /// calls that are called on a instance. This can either be "this" by value
     /// or by pointer depending on the modified attached to the method.
-    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
+    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &mut TraverseContext) {
         if let Expr::Op(Op::BinOp(bin_op)) = expr {
             if let Some(method_call) = bin_op.rhs.eval_to_fn_call() {
                 if let BinOperator::Dot = bin_op.operator {
@@ -79,7 +79,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
         }
     }
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Implement(adt_name, ..), _, id, _) = ast_token {
             let analyze_context = self.analyze_context.borrow();
 
@@ -107,7 +107,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
         }
     }
 
-    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
             self.fn_generics = func.borrow().generics.clone();
 
@@ -120,7 +120,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
         }
     }
 
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseContext) {
         if self
             .analyze_context
             .borrow()
@@ -136,24 +136,37 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
         // to see if the module/path of the function call represents a ADT.
         // If that is the case, this is a static function call on that ADT.
         if fn_call.module.count() > 0 {
-            if let Ok(adt) = self
+            let full_path_opt = if let Ok(adt) = self
                 .analyze_context
                 .borrow()
                 .get_adt_partial(&fn_call.module, ctx.block_id)
             {
                 let adt = adt.borrow();
-
                 let fn_call_gens = fn_call.module.last().unwrap().1.as_ref();
-                let full_path = adt.module.clone_push(&adt.name, fn_call_gens);
+                Some(adt.module.clone_push(&adt.name, fn_call_gens))
+            } else {
+                None
+            };
 
-                let ty = Ty::CompoundType(
-                    InnerTy::UnknownIdent(full_path, ctx.block_id),
-                    Generics::empty(),
-                    TypeInfo::Default(ctx.file_pos.to_owned()),
-                );
+            if let Some(full_path) = full_path_opt {
+                let type_id = match self
+                    .analyze_context
+                    .borrow_mut()
+                    .ty_env
+                    .id(&Ty::CompoundType(
+                        InnerTy::UnknownIdent(full_path, ctx.block_id),
+                        Generics::empty(),
+                        TypeInfo::Default(ctx.file_pos.to_owned()),
+                    )) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
                 fn_call.is_method = true;
-                fn_call.method_adt = Some(ty);
+                fn_call.method_adt = Some(type_id);
 
                 return;
             }
@@ -168,21 +181,37 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
 
             if let Some(fn_gens) = &self.fn_generics {
                 if fn_gens.contains(possible_generic_name) {
-                    fn_call.is_method = true;
-                    fn_call.method_adt = Some(Ty::Generic(
+                    let type_id = match self.analyze_context.borrow_mut().ty_env.id(&Ty::Generic(
                         possible_generic_name.into(),
                         TypeInfo::Default(ctx.file_pos.to_owned()),
-                    ));
+                    )) {
+                        Ok(type_id) => type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
+
+                    fn_call.is_method = true;
+                    fn_call.method_adt = Some(type_id);
                 }
             }
 
             if let Some(impl_gens) = &self.impl_generics {
                 if impl_gens.contains(possible_generic_name) {
-                    fn_call.is_method = true;
-                    fn_call.method_adt = Some(Ty::Generic(
+                    let type_id = match self.analyze_context.borrow_mut().ty_env.id(&Ty::Generic(
                         possible_generic_name.into(),
                         TypeInfo::Default(ctx.file_pos.to_owned()),
-                    ));
+                    )) {
+                        Ok(type_id) => type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
+
+                    fn_call.is_method = true;
+                    fn_call.method_adt = Some(type_id);
                 }
             }
         }

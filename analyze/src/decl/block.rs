@@ -321,16 +321,16 @@ impl<'a> Visitor for BlockAnalyzer<'a> {
     /// All traversing is done from the default block, no other visit function
     /// will be used. The reason being that this needs to be called recursively
     /// on blocks, which currently isn't possible to do with the regular traverser.
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_default_block(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         let mut analyze_context = self.analyze_context.borrow_mut();
         self.analyze_block(&mut analyze_context, ast_token, usize::MAX);
     }
 
-    fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         self.is_first_stmt = true;
     }
 
-    fn visit_end(&mut self, _ctx: &TraverseContext) {
+    fn visit_end(&mut self, _ctx: &mut TraverseContext) {
         debug!(
             "BLOCK_INFO --\n{:#?}",
             self.analyze_context.borrow_mut().block_info

@@ -202,7 +202,7 @@ impl<'a> Visitor for DeferAnalyzer<'a> {
         }
     }
 
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_default_block(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         self.traverse_block(ast_token);
     }
 }

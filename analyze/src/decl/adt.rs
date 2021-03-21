@@ -86,31 +86,31 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
         }
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         self.analyze_context.borrow_mut().file_pos =
             ast_token.file_pos().cloned().unwrap_or_default();
     }
 
-    fn visit_struct(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_struct(&mut self, mut ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Struct(struct_), _, id, ..) = &mut ast_token {
             self.decl_new_adt(struct_, *id);
         }
     }
 
-    fn visit_enum(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_enum(&mut self, mut ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Enum(enum_), _, id, ..) = &mut ast_token {
             self.decl_new_adt(enum_, *id);
         }
     }
 
-    fn visit_union(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_union(&mut self, mut ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Union(union), _, id, ..) = &mut ast_token {
             self.decl_new_adt(union, *id);
         }
     }
 
     // TODO: Merge logic with ADTs.
-    fn visit_trait(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_trait(&mut self, mut ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Trait(trait_), _, trait_id, ..) = &mut ast_token {
             let mut analyze_context = self.analyze_context.borrow_mut();
 

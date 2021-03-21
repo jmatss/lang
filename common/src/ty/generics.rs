@@ -1,6 +1,8 @@
 use std::{collections::HashMap, fmt::Display, hash::Hash};
 
-use super::ty::Ty;
+use crate::{error::LangResult, TypeId};
+
+use super::environment::TypeEnvironment;
 
 /// Used to indicate what kind this "Generics" is.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -22,7 +24,7 @@ pub enum GenericsKind {
 #[derive(Debug, Clone, Eq, Default)]
 pub struct Generics {
     names: Vec<String>,
-    types: Vec<Ty>,
+    types: Vec<TypeId>,
 
     /// A map used to do fast lookups. The key is the name of the generic and
     /// the value is the index of that generic in both `names` and `types`.
@@ -72,17 +74,9 @@ impl Generics {
         self.types.is_empty()
     }
 
-    pub fn get(&self, name: &str) -> Option<&Ty> {
+    pub fn get(&self, name: &str) -> Option<TypeId> {
         if let Some(idx) = self.lookup.get(name) {
-            self.types.get(*idx)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_mut(&mut self, name: &str) -> Option<&mut Ty> {
-        if let Some(idx) = self.lookup.get(name) {
-            self.types.get_mut(*idx)
+            self.types.get(*idx).copied()
         } else {
             None
         }
@@ -99,15 +93,15 @@ impl Generics {
     /// Inserts a new generic type into this Generics. If the generic with the
     /// name `name` already has been set, this will change the type of that
     /// generic instead of creating a new entry.
-    pub fn insert(&mut self, name: String, ty: Ty) {
+    pub fn insert(&mut self, name: String, id: TypeId) {
         if let Some(idx) = self.lookup.get(&name) {
-            self.types[*idx] = ty;
+            self.types[*idx] = id;
         } else {
             let idx = self.names.len();
             self.lookup.insert(name.clone(), idx);
 
             self.names.push(name);
-            self.types.push(ty);
+            self.types.push(id);
         }
     }
 
@@ -121,9 +115,9 @@ impl Generics {
         }
     }
 
-    pub fn insert_type(&mut self, ty: Ty) {
-        if !self.types.contains(&ty) {
-            self.types.push(ty);
+    pub fn insert_type(&mut self, id: TypeId) {
+        if !self.types.contains(&id) {
+            self.types.push(id);
         }
     }
 
@@ -135,25 +129,27 @@ impl Generics {
         self.names.iter_mut()
     }
 
-    pub fn iter_types(&self) -> std::slice::Iter<Ty> {
+    pub fn iter_types(&self) -> std::slice::Iter<TypeId> {
         self.types.iter()
     }
 
-    pub fn iter_types_mut(&mut self) -> std::slice::IterMut<Ty> {
+    pub fn iter_types_mut(&mut self) -> std::slice::IterMut<TypeId> {
         self.types.iter_mut()
     }
 
-    pub fn is_solved(&self) -> bool {
+    pub fn is_solved(&self, ty_env: &mut TypeEnvironment) -> LangResult<bool> {
         let mut solved = true;
 
-        for ty in &self.types {
-            if ty.contains_unknown_any() || ty.contains_generic() {
+        for type_id in &self.types {
+            if ty_env.contains_unknown_any_shallow(*type_id)?
+                || ty_env.contains_generic_shallow(*type_id)?
+            {
                 solved = false;
                 break;
             }
         }
 
-        solved
+        Ok(solved)
     }
 }
 

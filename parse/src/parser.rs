@@ -14,13 +14,13 @@ use common::{
         stmt::Stmt,
     },
     ty::{
+        environment::TypeEnvironment,
         generics::{Generics, GenericsKind},
-        ty::Ty,
     },
-    BlockId,
+    BlockId, TypeId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
-use log::debug;
+use log::{debug, warn};
 
 /// The common stop conditions used when parsing expressions.
 pub const DEFAULT_STOP_CONDS: [Sym; 4] = [
@@ -77,6 +77,9 @@ pub struct ParseTokenIter<'a> {
     /// that is being parsed. This will be used to create better errors messages.
     file_pos: FilePosition,
 
+    /// Contains information about all types.
+    pub ty_env: TypeEnvironment,
+
     /// Contains the blocks that are children of the "root" block.
     pub root_block_body: Vec<AstToken>,
     pub root_block_id: BlockId,
@@ -97,6 +100,7 @@ impl<'a> ParseTokenIter<'a> {
             iter: TokenIter::new(<&mut [LexToken]>::default()),
             block_id: start_block_id,
             file_pos: FilePosition::default(),
+            ty_env: TypeEnvironment::default(),
             root_block_body: Vec::default(),
             root_block_id,
         }
@@ -351,7 +355,7 @@ impl<'a> ParseTokenIter<'a> {
         ExprParser::parse(self, stop_conds)
     }
 
-    pub fn parse_type(&mut self, generics: Option<&Generics>) -> LangResult<Ty> {
+    pub fn parse_type(&mut self, generics: Option<&Generics>) -> LangResult<TypeId> {
         self.parse_type_with_path(generics, LangPathBuilder::default())
     }
 
@@ -359,7 +363,7 @@ impl<'a> ParseTokenIter<'a> {
         &mut self,
         generics: Option<&Generics>,
         path_builder: LangPathBuilder,
-    ) -> LangResult<Ty> {
+    ) -> LangResult<TypeId> {
         TypeParser::parse(self, generics, path_builder)
     }
 
@@ -380,15 +384,19 @@ impl<'a> ParseTokenIter<'a> {
     ) -> LangResult<Var> {
         // TODO: Handle file_pos.
 
+        warn!("parse_var ({}), file_pos: {:#?}", ident, file_pos);
+
         let (ty, ty_file_pos) = if let Some(next_token) = self.peek_skip_space() {
             match next_token.kind {
                 LexTokenKind::Sym(Sym::Colon) if parse_type => {
                     self.next_skip_space(); // Skip the colon.
-                    let ty = self.parse_type(generics)?;
-                    let ty_file_pos = *ty.file_pos().unwrap();
+                    let type_id = self.parse_type(generics)?;
+                    let ty_file_pos = self.ty_env.file_pos(type_id).copied().unwrap();
+
+                    warn!("parse_var 2 ({}), ty_file_pos: {:#?}", ident, ty_file_pos);
 
                     file_pos.set_end(&ty_file_pos)?;
-                    (Some(ty), Some(ty_file_pos))
+                    (Some(type_id), Some(ty_file_pos))
                 }
                 _ => (None, None),
             }

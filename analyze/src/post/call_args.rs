@@ -167,7 +167,7 @@ impl<'a> Visitor for CallArgs<'a> {
         }
     }
 
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseContext) {
         // Function calls on variables containing fn pointers does currently not
         // support named arguments (since the names of the parameters isn't know
         // in those cases).
@@ -178,26 +178,32 @@ impl<'a> Visitor for CallArgs<'a> {
         // If this is a function contained in a ADT/trait (method), one needs to
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
-        let func_res = if let Some(adt_ty) = &fn_call.method_adt {
+        let func_res = if let Some(adt_type_id) = &fn_call.method_adt {
+            let adt_ty = match self.analyze_context.ty_env.ty(*adt_type_id) {
+                Ok(adt_ty) => adt_ty.clone(),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
             let full_path = match adt_ty {
                 Ty::CompoundType(inner_ty, generics, ..) => match inner_ty {
-                    InnerTy::Struct(path)
-                    | InnerTy::Enum(path)
-                    | InnerTy::Union(path)
-                    | InnerTy::Trait(path) => {
+                    InnerTy::Struct(mut path)
+                    | InnerTy::Enum(mut path)
+                    | InnerTy::Union(mut path)
+                    | InnerTy::Trait(mut path) => {
                         // TODO: Is this needed? Just want to make sure that the
                         //       generics are as up-to-date as possible.
-                        let mut path_clone = path.clone();
-
-                        let mut last_part = path_clone.pop().unwrap();
+                        let mut last_part = path.pop().unwrap();
                         last_part.1 = Some(generics.clone());
-                        path_clone.push(last_part);
+                        path.push(last_part);
 
-                        path_clone
+                        path
                     }
                     _ => {
                         let err = self.analyze_context.err(format!(
-                            "Bad inner type for func call method_structure: {:#?}",
+                            "Bad inner type for func call method_adt: {:#?}",
                             fn_call
                         ));
                         self.errors.push(err);
@@ -206,7 +212,7 @@ impl<'a> Visitor for CallArgs<'a> {
                 },
                 _ => {
                     let err = self.analyze_context.err(format!(
-                        "method structure not valid type for func call: {:#?}",
+                        "method_adt not valid type for func call: {:#?}",
                         fn_call
                     ));
                     self.errors.push(err);
@@ -267,16 +273,30 @@ impl<'a> Visitor for CallArgs<'a> {
         }
     }
 
-    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {
+    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &mut TraverseContext) {
         match adt_init.kind {
             AdtKind::Struct => (),
             AdtKind::Union => return,
             AdtKind::Enum | AdtKind::Unknown => unreachable!("{:#?}", adt_init.kind),
         }
 
-        let generics = if let Some(Ty::CompoundType(_, generics, _)) = adt_init.ret_type.as_ref() {
+        let ret_type_id = if let Some(ret_type_id) = &adt_init.ret_type {
+            *ret_type_id
+        } else {
+            unreachable!("Adt init type not compound: {:#?}", adt_init);
+        };
+
+        let ret_ty = match self.analyze_context.ty_env.ty(ret_type_id) {
+            Ok(ret_ty) => ret_ty.clone(),
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
+        let generics = if let Ty::CompoundType(_, generics, _) = ret_ty {
             if generics.len_types() > 0 {
-                Some(generics.clone())
+                Some(generics)
             } else {
                 None
             }

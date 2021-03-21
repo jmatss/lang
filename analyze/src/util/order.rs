@@ -9,7 +9,7 @@ use common::{
     traverser::{AstTraverser, TraverseContext},
     ty::ty::Ty,
     visitor::Visitor,
-    BlockId,
+    BlockId, TypeId,
 };
 use log::debug;
 use std::{
@@ -197,22 +197,30 @@ impl<'a> ReferenceCollector<'a> {
         }
     }
 
-    fn collect_member_references(&mut self, adt_path: &LangPath, members: &[Rc<RefCell<Var>>]) {
+    fn collect_member_references(
+        &mut self,
+        adt_path: &LangPath,
+        members: &[Rc<RefCell<Var>>],
+    ) -> LangResult<()> {
         let mut local_references = HashSet::default();
 
         for member in members {
-            if let Some(ty) = &member.borrow().ty {
-                if let Some(paths) = ty.get_adt_and_trait_paths(self.full_paths) {
-                    for path in paths {
-                        if &path != adt_path {
-                            local_references.insert(path);
-                        }
+            if let Some(type_id) = &member.borrow().ty {
+                let adt_and_trait_paths = self
+                    .analyze_context
+                    .ty_env
+                    .get_adt_and_trait_paths(*type_id, self.full_paths)?;
+
+                for path in adt_and_trait_paths {
+                    if &path != adt_path {
+                        local_references.insert(path);
                     }
                 }
             }
         }
 
         self.references.insert(adt_path.clone(), local_references);
+        Ok(())
     }
 
     fn adt_path(&self, adt: &Rc<RefCell<Adt>>, id: BlockId) -> LangResult<LangPath> {
@@ -246,7 +254,7 @@ impl<'a> Visitor for ReferenceCollector<'a> {
         }
     }
 
-    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Struct(adt), ..) = ast_token {
             let adt_path = match self.adt_path(adt, ctx.block_id) {
                 Ok(adt_path) => adt_path,
@@ -259,7 +267,7 @@ impl<'a> Visitor for ReferenceCollector<'a> {
         }
     }
 
-    fn visit_enum(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_enum(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Enum(adt), ..) = ast_token {
             let adt_path = match self.adt_path(adt, ctx.block_id) {
                 Ok(adt_path) => adt_path,
@@ -272,7 +280,7 @@ impl<'a> Visitor for ReferenceCollector<'a> {
         }
     }
 
-    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Union(adt), ..) = ast_token {
             let adt_path = match self.adt_path(adt, ctx.block_id) {
                 Ok(adt_path) => adt_path,
@@ -281,11 +289,13 @@ impl<'a> Visitor for ReferenceCollector<'a> {
                     return;
                 }
             };
-            self.collect_member_references(&adt_path, &adt.borrow().members);
+            if let Err(err) = self.collect_member_references(&adt_path, &adt.borrow().members) {
+                self.errors.push(err);
+            }
         }
     }
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Implement(ident, ..), ..) = ast_token {
             self.cur_adt_name = ident.clone();
         }
@@ -295,19 +305,29 @@ impl<'a> Visitor for ReferenceCollector<'a> {
     //       visited. The first if check is impls should be included, but how
     //       is that enforces? If `self.include_impls` is true, from what I can
     //       tell types outside of impls might be used??
-    fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
+    fn visit_type(&mut self, type_id: &mut TypeId, _ctx: &mut TraverseContext) {
         if self.include_impls {
-            if let Some(mut references) = ty.get_adt_and_trait_paths(self.full_paths) {
-                // Do not add references to itself.
-                references.remove(&self.cur_adt_name);
+            let mut references = match self
+                .analyze_context
+                .ty_env
+                .get_adt_and_trait_paths(*type_id, self.full_paths)
+            {
+                Ok(paths) => paths,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
-                match self.references.entry(self.cur_adt_name.clone()) {
-                    Entry::Occupied(mut o) => {
-                        o.get_mut().extend(references);
-                    }
-                    Entry::Vacant(v) => {
-                        v.insert(references);
-                    }
+            // Do not add references to itself.
+            references.remove(&self.cur_adt_name);
+
+            match self.references.entry(self.cur_adt_name.clone()) {
+                Entry::Occupied(mut o) => {
+                    o.get_mut().extend(references);
+                }
+                Entry::Vacant(v) => {
+                    v.insert(references);
                 }
             }
         }

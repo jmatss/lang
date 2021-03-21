@@ -9,6 +9,7 @@ use common::{
     },
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
     type_info::TypeInfo,
+    TypeId,
 };
 use either::Either;
 use inkwell::{
@@ -47,7 +48,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let file_pos = expr.file_pos().cloned();
 
         let any_value = match expr {
-            Expr::Lit(lit, ty_opt, ..) => self.compile_lit(lit, ty_opt, file_pos),
+            Expr::Lit(lit, type_id_opt, ..) => self.compile_lit(lit, type_id_opt, file_pos),
             Expr::FnCall(fn_call) => self.compile_fn_call(fn_call),
             Expr::FnPtr(..) => self.compile_fn_ptr(expr),
             Expr::BuiltInCall(built_in_call) => self.compile_built_in_call(built_in_call),
@@ -58,14 +59,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 _ => panic!("Tried to compile AdtInit for kind: {:?}", adt_init.kind),
             },
             Expr::ArrayInit(array_init) => self.compile_array_init(array_init),
-            Expr::Type(ty, ..) => {
+            Expr::Type(type_id, ..) => {
                 // TODO: Does something need to be done here? Does a proper value
                 //       need to be returned? For now just return a dummy value.
                 // Returns a "null" value of the given type. For now, this lets
                 // one "store types" in variables in a hacky way. In the future
                 // it should be possible to store types in variables without
                 // having to init them with a value.
-                Ok(match self.compile_type(&ty, file_pos)? {
+                Ok(match self.compile_type(*type_id, file_pos)? {
                     AnyTypeEnum::ArrayType(ty) => ty.const_zero().into(),
                     AnyTypeEnum::FloatType(ty) => ty.const_zero().into(),
                     AnyTypeEnum::IntType(ty) => ty.const_zero().into(),
@@ -89,7 +90,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub fn compile_lit(
         &mut self,
         lit: &Lit,
-        ty_opt: &Option<Ty>,
+        type_id_opt: &Option<TypeId>,
         file_pos: Option<FilePosition>,
     ) -> LangResult<AnyValueEnum<'ctx>> {
         match lit {
@@ -132,13 +133,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 self.context.bool_type().const_zero(),
             )),
 
-            Lit::Integer(int_lit, radix) => Ok(AnyValueEnum::IntValue(
-                self.compile_lit_int(int_lit, ty_opt, *radix, file_pos)?,
-            )),
+            Lit::Integer(int_lit, radix) => Ok(AnyValueEnum::IntValue(self.compile_lit_int(
+                int_lit,
+                type_id_opt,
+                *radix,
+                file_pos,
+            )?)),
 
-            Lit::Float(float_lit) => Ok(AnyValueEnum::FloatValue(
-                self.compile_lit_float(float_lit, ty_opt, file_pos)?,
-            )),
+            Lit::Float(float_lit) => Ok(AnyValueEnum::FloatValue(self.compile_lit_float(
+                float_lit,
+                type_id_opt,
+                file_pos,
+            )?)),
         }
     }
 
@@ -147,21 +153,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_lit_int(
         &mut self,
         lit: &str,
-        gen_ty_opt: &Option<Ty>,
+        type_id_opt: &Option<TypeId>,
         radix: u32,
         file_pos: Option<FilePosition>,
     ) -> LangResult<IntValue<'ctx>> {
         // TODO: Where should the integer literal conversion be made?
-
-        let inner_ty = match gen_ty_opt {
-            Some(Ty::CompoundType(inner_ty, ..)) => inner_ty.clone(),
-            None => InnerTy::default_int(),
-            _ => {
-                return Err(self.err(
-                    format!("Literal integer type invalid: {:#?}", gen_ty_opt),
-                    file_pos,
-                ));
-            }
+        let inner_ty = if let Some(type_id) = type_id_opt {
+            self.analyze_context.ty_env.get_inner(*type_id)?.clone()
+        } else {
+            InnerTy::default_int()
         };
 
         Ok(match inner_ty {
@@ -207,7 +207,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
             _ => {
                 return Err(self.err(
-                    format!("Invalid literal integer type: {:?}", gen_ty_opt),
+                    format!("Invalid literal integer type: {:?}", type_id_opt),
                     file_pos,
                 ))
             }
@@ -218,18 +218,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn compile_lit_float(
         &mut self,
         lit: &str,
-        gen_ty_opt: &Option<Ty>,
+        type_id_opt: &Option<TypeId>,
         file_pos: Option<FilePosition>,
     ) -> LangResult<FloatValue<'ctx>> {
-        let inner_ty = match gen_ty_opt {
-            Some(Ty::CompoundType(inner_ty, ..)) => inner_ty.clone(),
-            None => InnerTy::default_float(),
-            _ => {
-                return Err(self.err(
-                    format!("Literal float type invalid: {:#?}", gen_ty_opt),
-                    file_pos,
-                ));
-            }
+        let inner_ty = if let Some(type_id) = type_id_opt {
+            self.analyze_context.ty_env.get_inner(*type_id)?.clone()
+        } else {
+            InnerTy::default_float()
         };
 
         Ok(match inner_ty {
@@ -237,7 +232,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             InnerTy::F64 => self.context.f64_type().const_float(lit.parse()?),
             _ => {
                 return Err(self.err(
-                    format!("Invalid literal float type: {:?}", gen_ty_opt),
+                    format!("Invalid literal float type: {:?}", type_id_opt),
                     file_pos,
                 ))
             }
@@ -287,7 +282,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     ));
                 }
             }
-        } else if let Some(fn_value) = self.module.get_function(&fn_call.full_name()?) {
+        } else if let Some(fn_value) = self
+            .module
+            .get_function(&fn_call.full_name(&self.analyze_context.ty_env)?)
+        {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
             // functions are supported to be compatible with C code.
@@ -295,7 +293,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Wrong amount of args given when calling func \"{}\". Expected: {}, got: {}",
-                        &fn_call.full_name()?,
+                        &fn_call.full_name(&self.analyze_context.ty_env)?,
                         fn_value.count_params(),
                         fn_call.arguments.len()
                     ),
@@ -309,7 +307,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 format!(
                     "Unable to find function with name {} to call (full name: {:#?}).",
                     &fn_call.name,
-                    &fn_call.full_name()
+                    &fn_call.full_name(&self.analyze_context.ty_env)
                 ),
                 fn_call.file_pos,
             ));
@@ -370,13 +368,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // Gets the size of a specified type. The size is returned as a
             // unsigned 32 bit integer.
             "size" => {
-                if let Some(ty_arg) = built_in_call
+                if let Some(arg_type_id) = built_in_call
                     .generics
                     .as_ref()
                     .map(|gs| gs.iter_types().next())
                     .flatten()
                 {
-                    let ty = self.compile_type(ty_arg, Some(file_pos))?;
+                    let ty = self.compile_type(*arg_type_id, Some(file_pos))?;
 
                     if let Some(size) = ty.size_of() {
                         Ok(size.const_cast(self.context.i32_type(), false).into())
@@ -407,18 +405,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     if let Expr::Var(var) = &value {
                         let name = var.name.clone();
 
-                        let mut expr = Expr::Lit(
-                            Lit::String(name),
-                            Some(Ty::Pointer(
-                                Box::new(Ty::CompoundType(
-                                    InnerTy::U8,
-                                    Generics::empty(),
-                                    TypeInfo::None,
-                                )),
-                                TypeInfo::None,
-                            )),
-                            Some(file_pos),
-                        );
+                        let u8_type_id = self.analyze_context.ty_env.id(&Ty::CompoundType(
+                            InnerTy::U8,
+                            Generics::empty(),
+                            TypeInfo::None,
+                        ))?;
+                        let ptr_type_id = self
+                            .analyze_context
+                            .ty_env
+                            .id(&Ty::Pointer(u8_type_id, TypeInfo::None))?;
+
+                        let mut expr =
+                            Expr::Lit(Lit::String(name), Some(ptr_type_id), Some(file_pos));
 
                         self.compile_expr(&mut expr, ExprTy::RValue)
                     } else {
@@ -437,13 +435,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             // Creates a null/empty value of the specified type.
             "null" => {
-                if let Some(ty_arg) = built_in_call
+                if let Some(arg_type_id) = built_in_call
                     .generics
                     .as_ref()
                     .map(|gs| gs.iter_types().next())
                     .flatten()
                 {
-                    let ty = self.compile_type(ty_arg, Some(file_pos))?;
+                    let ty = self.compile_type(*arg_type_id, Some(file_pos))?;
                     self.compile_null(ty, Some(file_pos))
                 } else {
                     unreachable!("Argument count check in Analyze.");
@@ -531,7 +529,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         struct_init: &mut AdtInit,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let full_name = struct_init.full_name()?;
+        let full_name = struct_init.full_name(&self.analyze_context.ty_env)?;
 
         let struct_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
             inner

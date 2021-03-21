@@ -304,9 +304,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 LexTokenKind::Sym(symbol @ Sym::As) | LexTokenKind::Sym(symbol @ Sym::Of) => {
                     if let Some(op) = crate::token::get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
-                        let ty_expr = self.iter.parse_type(None)?;
-                        let ty_expr_file_pos = ty_expr.file_pos().cloned();
-                        let expr = Expr::Type(ty_expr, ty_expr_file_pos);
+                        let type_id = self.iter.parse_type(None)?;
+                        let type_id_file_pos = self.iter.ty_env.file_pos(type_id).copied();
+                        let expr = Expr::Type(type_id, type_id_file_pos);
 
                         if let Some(expr_file_pos) = expr.file_pos() {
                             file_pos.set_end(expr_file_pos)?;
@@ -711,9 +711,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                                 // identifier and parse as type.
                                 self.iter.rewind_to_pos(pos);
 
-                                let ty = self.iter.parse_type_with_path(None, path_builder)?;
-                                let ty_file_pos = ty.file_pos().cloned();
-                                return Ok(Expr::Type(ty, ty_file_pos));
+                                let type_id = self.iter.parse_type_with_path(None, path_builder)?;
+                                let type_id_file_pos = self.iter.ty_env.file_pos(type_id).copied();
+                                return Ok(Expr::Type(type_id, type_id_file_pos));
                             }
 
                             _ => (),
@@ -731,16 +731,16 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         let mut adt_path = path_builder.build();
                         adt_path.pop(); // Remove the name of the enum variant.
 
-                        let enum_ty = Ty::CompoundType(
+                        let enum_type_id = self.iter.ty_env.id(&Ty::CompoundType(
                             InnerTy::Enum(adt_path),
                             Generics::empty(),
                             TypeInfo::Default(file_pos.to_owned()),
-                        );
+                        ))?;
                         let enum_access =
                             UnOperator::EnumAccess(ident.into(), self.iter.current_block_id());
                         let un_op = UnOp::new(
                             enum_access,
-                            Box::new(Expr::Type(enum_ty, Some(file_pos.to_owned()))),
+                            Box::new(Expr::Type(enum_type_id, Some(file_pos.to_owned()))),
                             Some(file_pos.to_owned()),
                         );
 

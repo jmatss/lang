@@ -64,6 +64,14 @@ impl LangPath {
         }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            parts: Vec::with_capacity(0),
+            resolved: false,
+            file_pos: None,
+        }
+    }
+
     pub fn set_resolved(&mut self, resolved: bool) {
         self.resolved = resolved;
     }

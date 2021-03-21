@@ -13,12 +13,13 @@ use common::{
     file::{FileId, FileInfo},
     token::ast::AstToken,
     traverser::AstTraverser,
+    ty::environment::TypeEnvironment,
 };
 use context::AnalyzeContext;
 use decl::{
     adt::DeclTypeAnalyzer, block::BlockAnalyzer, func::DeclFnAnalyzer, var::DeclVarAnalyzer,
 };
-use log::debug;
+use log::{debug, info};
 use mid::{
     defer::DeferAnalyzer, generics::GenericsAnalyzer, method::MethodAnalyzer,
     path_resolver::PathResolver,
@@ -29,7 +30,7 @@ use post::{
     traits_generic::TraitsGenericAnalyzer, union_init_arg::UnionInitArg,
 };
 use pre::indexing::IndexingAnalyzer;
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, time::Instant};
 use ty::{
     context::TypeContext, generic_adt_creator::GenericAdtCreator,
     generic_collector::GenericCollector, generic_fn_creator::GenericFnCreator,
@@ -67,31 +68,42 @@ use ty::{
 /// the "call_args" since it needs to access structs, functions and methods.
 pub fn analyze(
     ast_root: &mut AstToken,
+    ty_env: TypeEnvironment,
     file_info: HashMap<FileId, FileInfo>,
 ) -> Result<AnalyzeContext, Vec<LangError>> {
-    let analyze_context = RefCell::new(AnalyzeContext::new(file_info));
+    let analyze_context = match AnalyzeContext::new(ty_env, file_info) {
+        Ok(analyze_context) => RefCell::new(analyze_context),
+        Err(err) => return Err(vec![err]),
+    };
 
+    let timer = Instant::now();
     debug!("Running IndexingAnalyzer");
     let mut indexing_analyzer = IndexingAnalyzer::new();
     AstTraverser::new()
         .add_visitor(&mut indexing_analyzer)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running BlockAnalyzer");
     let mut block_analyzer = BlockAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut block_analyzer)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running DeclTypeAnalyzer");
     let mut decl_type_analyzer = DeclTypeAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut decl_type_analyzer)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running DeclVarAnalyzer, running DeclFuncAnalyzer");
     let mut decl_var_analyzer = DeclVarAnalyzer::new(&analyze_context);
     let mut decl_fn_analyzer = DeclFnAnalyzer::new(&analyze_context);
@@ -100,127 +112,168 @@ pub fn analyze(
         .add_visitor(&mut decl_var_analyzer)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
     debug!("Lookup tables after decl step:");
     analyze_context.borrow().debug_print();
 
+    let timer = Instant::now();
     debug!("Running MethodAnalyzer");
     let mut method_analyzer = MethodAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut method_analyzer)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running PathResolver");
     let mut path_resolver = PathResolver::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut path_resolver)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("running GenericsAnalyzer");
     let mut generics_analyzer = GenericsAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut generics_analyzer)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running DeferAnalyzer");
     let mut defer_analyzer = DeferAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut defer_analyzer)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
     let mut analyze_context = analyze_context.replace(AnalyzeContext::default());
     let mut type_context = TypeContext::new(&mut analyze_context);
 
+    let timer = Instant::now();
     debug!("Running TypeInferencer");
     let mut type_inferencer = TypeInferencer::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut type_inferencer)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
-    debug!("Running TypeSolver");
+    /*
+    let timer = Instant::now();
+    debug!("Running TypeSolver solving");
+    ty::solver::solve_all(&mut type_context)?;
+    info!("Elapsed: {:?}", timer.elapsed());
+    */
+
+    let timer = Instant::now();
+    debug!("Running TypeSolver replacing");
     let mut type_solver = TypeSolver::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut type_solver)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running FnGenericsCheck");
     let mut fn_generics_check = FnGenericsCheck::new(&type_context.analyze_context);
     AstTraverser::new()
         .add_visitor(&mut fn_generics_check)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running TraitsFnAnalyzer");
     let mut traits_fn_analyze = TraitsFnAnalyzer::new(&type_context.analyze_context);
     AstTraverser::new()
         .add_visitor(&mut traits_fn_analyze)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running GenericCollector");
     let mut generic_collector = GenericCollector::new(&mut type_context);
     AstTraverser::new()
         .add_visitor(&mut generic_collector)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
     let generic_methods = generic_collector.generic_methods;
     let generic_structs = generic_collector.generic_adts;
 
+    let timer = Instant::now();
     debug!("Running GenericFnCreator");
     let mut generic_fn_creator = GenericFnCreator::new(&mut type_context, generic_methods);
     AstTraverser::new()
         .add_visitor(&mut generic_fn_creator)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running GenericAdtCreator");
     let mut generic_adt_creator = GenericAdtCreator::new(&mut type_context, generic_structs);
     AstTraverser::new()
         .add_visitor(&mut generic_adt_creator)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running GenericTysSolvedChecker");
-    let mut generic_solved_checker = GenericTysSolvedChecker::new();
+    let mut generic_solved_checker =
+        GenericTysSolvedChecker::new(&mut type_context.analyze_context.ty_env);
     AstTraverser::new()
         .add_visitor(&mut generic_solved_checker)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running UnionInitArg");
     let mut union_init_args = UnionInitArg::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut union_init_args)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running CallArgs");
     let mut call_args = CallArgs::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut call_args)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running ExhaustAnalyzer");
     let mut exhaust_analyze = ExhaustAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut exhaust_analyze)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
+    let timer = Instant::now();
     debug!("Running TraitsGenericAnalyzer");
     let mut traits_generic_analyze = TraitsGenericAnalyzer::new(&analyze_context);
     AstTraverser::new()
         .add_visitor(&mut traits_generic_analyze)
         .traverse_token(ast_root)
         .take_errors()?;
+    info!("Elapsed: {:?}", timer.elapsed());
 
     clean_up(&mut analyze_context);
 

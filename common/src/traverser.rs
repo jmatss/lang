@@ -8,9 +8,8 @@ use crate::{
         op::{Op, UnOperator},
         stmt::Stmt,
     },
-    ty::ty::Ty,
     visitor::Visitor,
-    BlockId,
+    BlockId, TypeId,
 };
 use std::{cell::RefCell, rc::Rc};
 
@@ -40,6 +39,11 @@ pub struct TraverseContext {
     //       Ex. if this is a type, should the information about what this type
     //       is assigned to also be here?
     pub file_pos: FilePosition,
+
+    /// Flag to indicate if the traverse should stop traversing. This will be
+    /// set from one of the visitors and this traverser will check this flag
+    /// before every new visit.
+    pub stop: bool,
 }
 
 impl<'a> Default for AstTraverser<'a> {
@@ -59,6 +63,7 @@ impl<'a> AstTraverser<'a> {
                 copy_nr: None,
                 block_id: 0,
                 file_pos: FilePosition::default(),
+                stop: false,
             },
         }
     }
@@ -99,7 +104,10 @@ impl<'a> AstTraverser<'a> {
     pub fn traverse_token(&mut self, ast_token: &mut AstToken) -> &mut Self {
         self.traverse_token_priv(ast_token);
         for v in self.visitors.iter_mut() {
-            v.visit_end(&self.traverse_context);
+            if self.traverse_context.stop {
+                return self;
+            }
+            v.visit_end(&mut self.traverse_context);
         }
         self
     }
@@ -111,7 +119,10 @@ impl<'a> AstTraverser<'a> {
         }
 
         for v in self.visitors.iter_mut() {
-            v.visit_token(ast_token, &self.traverse_context);
+            if self.traverse_context.stop {
+                return self;
+            }
+            v.visit_token(ast_token, &mut self.traverse_context);
         }
 
         match &mut ast_token {
@@ -131,7 +142,10 @@ impl<'a> AstTraverser<'a> {
             AstToken::EOF => {
                 debug!("Visiting EOF");
                 for v in self.visitors.iter_mut() {
-                    v.visit_eof(ast_token, &self.traverse_context);
+                    if self.traverse_context.stop {
+                        return self;
+                    }
+                    v.visit_eof(ast_token, &mut self.traverse_context);
                 }
             }
         }
@@ -153,7 +167,10 @@ impl<'a> AstTraverser<'a> {
 
         debug!("Visiting block -- {:#?}", ast_token);
         for v in self.visitors.iter_mut() {
-            v.visit_block(ast_token, &self.traverse_context);
+            if self.traverse_context.stop {
+                return;
+            }
+            v.visit_block(ast_token, &mut self.traverse_context);
         }
 
         match &mut ast_token {
@@ -161,7 +178,10 @@ impl<'a> AstTraverser<'a> {
                 BlockHeader::Default => {
                     debug!("Visiting default block");
                     for v in self.visitors.iter_mut() {
-                        v.visit_default_block(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_default_block(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::Fn(func) => {
@@ -182,21 +202,24 @@ impl<'a> AstTraverser<'a> {
                     // TODO: Iterate through the `generics`.
                     if let Some(params) = &mut func.borrow_mut().parameters {
                         for param in params {
-                            if let Some(ty) = &mut param.borrow_mut().ty {
-                                self.traverse_type(ty);
+                            if let Some(type_id) = &mut param.borrow_mut().ty {
+                                self.traverse_type(type_id);
                             }
                             if let Some(value) = &mut param.borrow_mut().value {
                                 self.traverse_expr(value);
                             }
 
-                            // Iterate through the parametersa of functions as
+                            // Iterate through the parameters of functions as
                             // variable declarations. One have to temporary wrap
                             // them in a `Stmt::VariableDecl` for it to work
-                            // smootyly.
+                            // smoothly.
                             let file_pos = param.borrow().file_pos.to_owned();
                             let mut var_decl = Stmt::VariableDecl(Rc::clone(param), file_pos);
                             for v in self.visitors.iter_mut() {
-                                v.visit_var_decl(&mut var_decl, &self.traverse_context);
+                                if self.traverse_context.stop {
+                                    return;
+                                }
+                                v.visit_var_decl(&mut var_decl, &mut self.traverse_context);
                             }
                         }
                     }
@@ -213,7 +236,10 @@ impl<'a> AstTraverser<'a> {
 
                     debug!("Visiting func");
                     for v in self.visitors.iter_mut() {
-                        v.visit_fn(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_fn(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::Struct(struct_) => {
@@ -255,7 +281,10 @@ impl<'a> AstTraverser<'a> {
 
                     debug!("Visiting struct");
                     for v in self.visitors.iter_mut() {
-                        v.visit_struct(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_struct(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::Enum(enum_) => {
@@ -280,7 +309,10 @@ impl<'a> AstTraverser<'a> {
 
                     debug!("Visiting enum");
                     for v in self.visitors.iter_mut() {
-                        v.visit_enum(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_enum(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::Union(union) => {
@@ -315,6 +347,9 @@ impl<'a> AstTraverser<'a> {
                     if let Some(impls) = &mut union.borrow_mut().implements {
                         for tys in impls.values_mut() {
                             for ty in tys {
+                                if self.traverse_context.stop {
+                                    return;
+                                }
                                 self.traverse_type(ty);
                             }
                         }
@@ -322,7 +357,10 @@ impl<'a> AstTraverser<'a> {
 
                     debug!("Visiting union");
                     for v in self.visitors.iter_mut() {
-                        v.visit_union(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_union(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::Trait(_) => {
@@ -330,25 +368,37 @@ impl<'a> AstTraverser<'a> {
 
                     debug!("Visiting trait");
                     for v in self.visitors.iter_mut() {
-                        v.visit_trait(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_trait(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::Implement(..) => {
                     debug!("Visiting impl");
                     for v in self.visitors.iter_mut() {
-                        v.visit_impl(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_impl(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::Anonymous => {
                     debug!("Visiting anon");
                     for v in self.visitors.iter_mut() {
-                        v.visit_anon(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_anon(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::If => {
                     debug!("Visiting if");
                     for v in self.visitors.iter_mut() {
-                        v.visit_if(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_if(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::IfCase(expr_opt) => {
@@ -357,14 +407,20 @@ impl<'a> AstTraverser<'a> {
                     }
                     debug!("Visiting if case");
                     for v in self.visitors.iter_mut() {
-                        v.visit_if_case(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_if_case(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::Match(expr) => {
                     self.traverse_expr(expr);
                     debug!("Visiting match");
                     for v in self.visitors.iter_mut() {
-                        v.visit_match(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_match(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::MatchCase(expr_opt) => {
@@ -373,7 +429,10 @@ impl<'a> AstTraverser<'a> {
                     }
                     debug!("Visiting match case");
                     for v in self.visitors.iter_mut() {
-                        v.visit_match_case(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_match_case(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::For(var, expr) => {
@@ -384,7 +443,10 @@ impl<'a> AstTraverser<'a> {
                     self.traverse_expr(expr);
                     debug!("Visiting for");
                     for v in self.visitors.iter_mut() {
-                        v.visit_for(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_for(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::While(expr_opt) => {
@@ -393,7 +455,10 @@ impl<'a> AstTraverser<'a> {
                     }
                     debug!("Visiting while");
                     for v in self.visitors.iter_mut() {
-                        v.visit_while(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_while(ast_token, &mut self.traverse_context);
                     }
                 }
                 BlockHeader::Test(func) => {
@@ -422,7 +487,10 @@ impl<'a> AstTraverser<'a> {
 
                     debug!("Visiting test");
                     for v in self.visitors.iter_mut() {
-                        v.visit_test(ast_token, &self.traverse_context);
+                        if self.traverse_context.stop {
+                            return;
+                        }
+                        v.visit_test(ast_token, &mut self.traverse_context);
                     }
                 }
             },
@@ -454,7 +522,10 @@ impl<'a> AstTraverser<'a> {
             Expr::Lit(..) => {
                 debug!("Visiting lit");
                 for v in self.visitors.iter_mut() {
-                    v.visit_lit(expr, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_lit(expr, &mut self.traverse_context);
                 }
             }
             Expr::Var(var) => {
@@ -464,7 +535,10 @@ impl<'a> AstTraverser<'a> {
 
                 debug!("Visiting var");
                 for v in self.visitors.iter_mut() {
-                    v.visit_var(var, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_var(var, &mut self.traverse_context);
                 }
             }
             Expr::FnCall(fn_call) => {
@@ -484,7 +558,10 @@ impl<'a> AstTraverser<'a> {
 
                 debug!("Visiting fn call");
                 for v in self.visitors.iter_mut() {
-                    v.visit_fn_call(fn_call, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_fn_call(fn_call, &mut self.traverse_context);
                 }
             }
             Expr::FnPtr(fn_ptr) => {
@@ -500,7 +577,10 @@ impl<'a> AstTraverser<'a> {
 
                 debug!("Visiting fn ptr");
                 for v in self.visitors.iter_mut() {
-                    v.visit_fn_ptr(expr, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_fn_ptr(expr, &mut self.traverse_context);
                 }
             }
             Expr::BuiltInCall(built_in_call) => {
@@ -516,7 +596,10 @@ impl<'a> AstTraverser<'a> {
 
                 debug!("Visiting built in call");
                 for v in self.visitors.iter_mut() {
-                    v.visit_built_in_call(built_in_call, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_built_in_call(built_in_call, &mut self.traverse_context);
                 }
             }
             Expr::AdtInit(adt_init) => {
@@ -532,7 +615,10 @@ impl<'a> AstTraverser<'a> {
 
                 debug!("Visiting ADT init");
                 for v in self.visitors.iter_mut() {
-                    v.visit_adt_init(adt_init, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_adt_init(adt_init, &mut self.traverse_context);
                 }
             }
             Expr::ArrayInit(array_init) => {
@@ -541,7 +627,10 @@ impl<'a> AstTraverser<'a> {
                 }
                 debug!("Visiting array init");
                 for v in self.visitors.iter_mut() {
-                    v.visit_array_init(array_init, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_array_init(array_init, &mut self.traverse_context);
                 }
             }
             Expr::Op(Op::BinOp(bin_op)) => {
@@ -550,7 +639,10 @@ impl<'a> AstTraverser<'a> {
 
                 debug!("Visiting bin op");
                 for v in self.visitors.iter_mut() {
-                    v.visit_bin_op(bin_op, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_bin_op(bin_op, &mut self.traverse_context);
                 }
             }
             Expr::Op(Op::UnOp(un_op)) => {
@@ -565,7 +657,10 @@ impl<'a> AstTraverser<'a> {
 
                 debug!("Visiting un op");
                 for v in self.visitors.iter_mut() {
-                    v.visit_un_op(un_op, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_un_op(un_op, &mut self.traverse_context);
                 }
             }
             Expr::Type(ty, ..) => self.traverse_type(ty),
@@ -574,12 +669,15 @@ impl<'a> AstTraverser<'a> {
         self.traverse_context.file_pos = old_pos;
 
         if let Ok(ty) = expr.get_expr_type_mut() {
-            self.traverse_type(ty)
+            self.traverse_type(ty);
         }
 
         debug!("Visiting expr -- {:#?}", expr);
         for v in self.visitors.iter_mut() {
-            v.visit_expr(expr, &self.traverse_context)
+            if self.traverse_context.stop {
+                return;
+            }
+            v.visit_expr(expr, &mut self.traverse_context);
         }
 
         self.traverse_context.file_pos = old_pos;
@@ -598,66 +696,96 @@ impl<'a> AstTraverser<'a> {
                 }
                 debug!("Visiting return");
                 for v in self.visitors.iter_mut() {
-                    v.visit_return(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_return(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::Yield(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting yield");
                 for v in self.visitors.iter_mut() {
-                    v.visit_yield(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_yield(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::Break(_) => {
                 debug!("Visiting break");
                 for v in self.visitors.iter_mut() {
-                    v.visit_break(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_break(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::Continue(_) => {
                 debug!("Visiting continue");
                 for v in self.visitors.iter_mut() {
-                    v.visit_continue(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_continue(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::Use(..) => {
                 debug!("Visiting use");
                 for v in self.visitors.iter_mut() {
-                    v.visit_use(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_use(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::Module(..) => {
                 debug!("Visiting package");
                 for v in self.visitors.iter_mut() {
-                    v.visit_package(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_package(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::Increment(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting increment");
                 for v in self.visitors.iter_mut() {
-                    v.visit_inc(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_inc(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::Decrement(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting decrement");
                 for v in self.visitors.iter_mut() {
-                    v.visit_dec(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_dec(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::Defer(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting defer");
                 for v in self.visitors.iter_mut() {
-                    v.visit_defer(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_defer(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::DeferExec(expr) => {
                 self.traverse_expr(expr);
                 debug!("Visiting defer exec");
                 for v in self.visitors.iter_mut() {
-                    v.visit_defer_exec(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_defer_exec(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::Assignment(_, lhs, rhs, _) => {
@@ -665,7 +793,10 @@ impl<'a> AstTraverser<'a> {
                 self.traverse_expr(rhs);
                 debug!("Visiting assignment");
                 for v in self.visitors.iter_mut() {
-                    v.visit_assignment(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_assignment(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::VariableDecl(var, _) => {
@@ -680,18 +811,24 @@ impl<'a> AstTraverser<'a> {
                 }
 
                 if let Some(ty) = &mut var.borrow_mut().ty {
-                    self.traverse_type(ty)
+                    self.traverse_type(ty);
                 }
 
                 debug!("Visiting var decl");
                 for v in self.visitors.iter_mut() {
-                    v.visit_var_decl(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_var_decl(stmt, &mut self.traverse_context);
                 }
             }
             Stmt::ExternalDecl(..) => {
                 debug!("Visiting extern decl");
                 for v in self.visitors.iter_mut() {
-                    v.visit_extern_decl(stmt, &self.traverse_context)
+                    if self.traverse_context.stop {
+                        return;
+                    }
+                    v.visit_extern_decl(stmt, &mut self.traverse_context);
                 }
             }
         }
@@ -700,24 +837,32 @@ impl<'a> AstTraverser<'a> {
 
         debug!("Visiting stmt -- {:#?}", stmt);
         for v in self.visitors.iter_mut() {
-            v.visit_stmt(stmt, &self.traverse_context)
+            if self.traverse_context.stop {
+                return;
+            }
+            v.visit_stmt(stmt, &mut self.traverse_context);
         }
 
         self.traverse_context.file_pos = old_pos;
     }
 
-    pub fn traverse_type(&mut self, ty: &mut Ty) {
+    pub fn traverse_type(&mut self, id: &mut TypeId) {
         // TODO: Does the FilePosition need to be updated?
 
-        debug!("Visiting type -- {:#?}", ty);
+        debug!("Visiting type -- {:#?}", id);
         for v in self.visitors.iter_mut() {
-            v.visit_type(ty, &self.traverse_context)
+            if self.traverse_context.stop {
+                return;
+            }
+            v.visit_type(id, &mut self.traverse_context);
         }
 
-        if let Some(exprs) = ty.get_exprs_mut() {
+        /*
+        if let Some(exprs) = id.get_exprs_mut() {
             for expr in exprs {
                 self.traverse_expr(expr);
             }
         }
+        */
     }
 }

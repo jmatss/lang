@@ -61,12 +61,12 @@ impl<'a> Visitor for DeclVarAnalyzer<'a> {
         }
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         self.analyze_context.borrow_mut().file_pos =
             ast_token.file_pos().cloned().unwrap_or_default();
     }
 
-    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseContext) {
         if let Stmt::VariableDecl(var, ..) = stmt {
             let mut analyze_context = self.analyze_context.borrow_mut();
 
@@ -90,7 +90,7 @@ impl<'a> Visitor for DeclVarAnalyzer<'a> {
         }
     }
 
-    fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {
+    fn visit_var(&mut self, var: &mut Var, ctx: &mut TraverseContext) {
         if self
             .analyze_context
             .borrow()

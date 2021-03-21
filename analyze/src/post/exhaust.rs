@@ -42,11 +42,11 @@ impl<'a> ExhaustAnalyzer<'a> {
     }
 
     fn exhaust_enum(
-        &mut self,
+        &self,
         full_path: &LangPath,
         block_id: BlockId,
-        match_cases: &mut Vec<AstToken>,
-        ctx: &TraverseContext,
+        match_cases: &[AstToken],
+        ctx: &mut TraverseContext,
     ) -> LangResult<()> {
         // Gather all names of the members for the enum into a hash set.
         let enum_ = self.analyze_context.get_adt(full_path, block_id)?;
@@ -98,7 +98,7 @@ impl<'a> ExhaustAnalyzer<'a> {
         }
     }
 
-    fn exhaust_int(&mut self, inner_ty: &InnerTy, ctx: &TraverseContext) -> LangResult<()> {
+    fn exhaust_int(&mut self, inner_ty: &InnerTy, ctx: &mut TraverseContext) -> LangResult<()> {
         // TODO: Implement, currently unable to do it unless every case expr is
         //       hardcoded, but then they would need to cover all possible ints
         //       for a specific bit size, which is unfeasible.
@@ -120,9 +120,17 @@ impl<'a> Visitor for ExhaustAnalyzer<'a> {
     /// Currently supported types:
     ///   ints
     ///   enums
-    fn visit_match(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_match(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Match(match_expr), _, _, match_cases) = ast_token {
-            let match_case_ty = match match_expr.get_expr_type() {
+            let type_id = match match_expr.get_expr_type() {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            let match_case_ty = match self.analyze_context.ty_env.ty(type_id) {
                 Ok(ty) => ty,
                 Err(err) => {
                     self.errors.push(err);
@@ -130,7 +138,7 @@ impl<'a> Visitor for ExhaustAnalyzer<'a> {
                 }
             };
 
-            match &match_case_ty {
+            match match_case_ty {
                 Ty::CompoundType(InnerTy::Enum(partial_path), ..) => {
                     let full_path = match self
                         .analyze_context

@@ -12,7 +12,7 @@ use common::{
     traverser::TraverseContext,
     ty::ty::Ty,
     visitor::Visitor,
-    BlockId,
+    BlockId, TypeId,
 };
 use log::debug;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -29,7 +29,7 @@ pub struct GenericAdtCreator<'a, 'tctx> {
     ///
     /// The key is the name of the ADT and the values are the unique types
     /// of the ADT with the generics implemented.
-    generic_adts: HashMap<LangPath, Vec<Ty>>,
+    generic_adts: HashMap<LangPath, Vec<TypeId>>,
 
     errors: Vec<LangError>,
 }
@@ -37,7 +37,7 @@ pub struct GenericAdtCreator<'a, 'tctx> {
 impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
     pub fn new(
         type_context: &'a mut TypeContext<'tctx>,
-        generic_adts: HashMap<LangPath, Vec<Ty>>,
+        generic_adts: HashMap<LangPath, Vec<TypeId>>,
     ) -> Self {
         debug!("generic_adts: {:#?}", generic_adts);
 
@@ -81,7 +81,7 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
                 }
             };
 
-            for gen_adt_ty in &generic_adt_tys {
+            for gen_adt_type_id in &generic_adt_tys {
                 // Create a new instance of the ADT. This new instance will
                 // replace all generic "placeholders" with the actual generics
                 // implementations/instances.
@@ -93,12 +93,23 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
                 // block that will be tied to this new ADT.
                 new_adt.methods.clear();
 
-                let generics = if let Ty::CompoundType(_, generics, ..) = gen_adt_ty {
+                let gen_adt_ty = if let Ok(gen_adt_ty) = self
+                    .type_context
+                    .analyze_context
+                    .ty_env
+                    .ty(*gen_adt_type_id)
+                {
+                    gen_adt_ty.clone()
+                } else {
+                    panic!("{:?}", gen_adt_type_id);
+                };
+
+                let generics = if let Ty::CompoundType(_, generics, ..) = &gen_adt_ty {
                     generics.clone()
                 } else {
                     let err = self.type_context.analyze_context.err(format!(
                         "Generic instance type not compound: {:#?}",
-                        gen_adt_ty
+                        gen_adt_type_id
                     ));
                     self.errors.push(err);
                     return None;
@@ -118,9 +129,14 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
                 for member in &mut new_adt.members {
                     let mut new_member = member.borrow().clone();
 
-                    if let Some(ty) = &mut new_member.ty {
-                        ty.replace_generics_impl(&generics);
-                        ty.replace_self(&old_path, gen_adt_ty);
+                    if let Some(type_id) = &mut new_member.ty {
+                        let ty_env = &mut self.type_context.analyze_context.ty_env;
+                        if let Err(err) = ty_env.replace_generics_impl(*type_id, &generics) {
+                            self.errors.push(err);
+                        }
+                        if let Err(err) = ty_env.replace_self(*type_id, &old_path, &gen_adt_ty) {
+                            self.errors.push(err);
+                        }
                     }
 
                     *member = Rc::new(RefCell::new(new_member));
@@ -201,13 +217,24 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
         old_impl_token: &mut AstToken,
     ) -> Option<usize> {
         if let Some(generic_adt_tys) = self.generic_adts.get(old_path).cloned() {
-            for (new_idx, gen_adt_ty) in generic_adt_tys.iter().enumerate() {
+            for (new_idx, gen_adt_type_id) in generic_adt_tys.iter().enumerate() {
+                let gen_adt_ty = if let Ok(gen_adt_ty) = self
+                    .type_context
+                    .analyze_context
+                    .ty_env
+                    .ty(*gen_adt_type_id)
+                {
+                    gen_adt_ty.clone()
+                } else {
+                    panic!("{:?}", gen_adt_type_id);
+                };
+
                 let generics = if let Ty::CompoundType(_, generics, ..) = &gen_adt_ty {
                     generics.clone()
                 } else {
                     let err = self.type_context.analyze_context.err(format!(
                         "Generic instance type not compound: {:#?}",
-                        gen_adt_ty
+                        gen_adt_type_id
                     ));
                     self.errors.push(err);
                     return None;
@@ -246,7 +273,7 @@ impl<'a, 'tctx> GenericAdtCreator<'a, 'tctx> {
                     Rc::clone(&new_adt),
                     &generics,
                     old_path,
-                    gen_adt_ty,
+                    &gen_adt_ty,
                 );
 
                 let mut traverser = AstTraverser::new();
@@ -310,7 +337,7 @@ impl<'a, 'tctx> Visitor for GenericAdtCreator<'a, 'tctx> {
     //       to find another better way to do this. Will probably have to
     //       implement some helper functions to modify the AST, remove/add etc.
     /// Create new ADTs for generic implementations.
-    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Default, _, parent_id, body) = &mut ast_token {
             let mut i = 0;
 

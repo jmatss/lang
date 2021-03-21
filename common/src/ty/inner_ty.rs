@@ -4,6 +4,8 @@ use crate::{
 };
 use std::fmt::Display;
 
+use super::environment::TypeEnvironment;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum InnerTy {
     Struct(LangPath),
@@ -65,6 +67,17 @@ impl InnerTy {
             | InnerTy::Union(ident)
             | InnerTy::Trait(ident)
             | InnerTy::UnknownIdent(ident, ..) => Some(ident.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_ident_mut(&mut self) -> Option<&mut LangPath> {
+        match self {
+            InnerTy::Struct(ident)
+            | InnerTy::Enum(ident)
+            | InnerTy::Union(ident)
+            | InnerTy::Trait(ident)
+            | InnerTy::UnknownIdent(ident, ..) => Some(ident),
             _ => None,
         }
     }
@@ -219,7 +232,7 @@ impl InnerTy {
         }
     }
 
-    pub fn contains_inner_ty(&self, inner_ty: &InnerTy) -> bool {
+    pub fn contains_inner_ty_shallow(&self, inner_ty: &InnerTy) -> bool {
         match (self, inner_ty) {
             (InnerTy::Struct(_), InnerTy::Struct(_))
             | (InnerTy::Enum(_), InnerTy::Enum(_))
@@ -246,6 +259,16 @@ impl InnerTy {
             | (InnerTy::UnknownInt(_, _), InnerTy::UnknownInt(_, _))
             | (InnerTy::UnknownFloat(_), InnerTy::UnknownFloat(_)) => true,
             _ => false,
+        }
+    }
+
+    pub fn to_string_debug(&self) -> String {
+        match self {
+            InnerTy::Unknown(_) => "unknown".into(),
+            InnerTy::UnknownInt(_, _) => "unknown_int".into(),
+            InnerTy::UnknownFloat(_) => "unknown_float".into(),
+            InnerTy::UnknownIdent(path, ..) => format!("unknown_ident({})", path),
+            _ => self.to_string(),
         }
     }
 }

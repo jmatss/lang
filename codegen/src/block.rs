@@ -12,8 +12,8 @@ use common::{
         block::{Adt, BlockHeader, Fn},
         expr::{Expr, Var},
     },
-    ty::{inner_ty::InnerTy, ty::Ty},
-    util, BlockId,
+    ty::{environment::TypeEnvironment, inner_ty::InnerTy, ty::Ty},
+    util, BlockId, TypeId,
 };
 use inkwell::{
     basic_block::BasicBlock,
@@ -87,21 +87,25 @@ enum CodeGenTy {
 }
 
 impl CodeGenTy {
-    fn new(ty: &Ty, file_pos: Option<FilePosition>) -> LangResult<Self> {
+    fn new(
+        ty_env: &TypeEnvironment,
+        type_id: TypeId,
+        file_pos: Option<FilePosition>,
+    ) -> LangResult<Self> {
         // TODO: Add more types.
-        match ty {
+        match ty_env.ty(type_id)? {
             Ty::CompoundType(inner_ty, ..) => match inner_ty {
                 InnerTy::Enum(_) => Ok(CodeGenTy::Enum(file_pos)),
                 _ if inner_ty.is_int() => Ok(CodeGenTy::Int(file_pos)),
                 _ => Err(LangError::new(
-                    format!("Invalid type when creating CodeGenTy: {:#?}", ty),
+                    format!("Invalid type when creating CodeGenTy: {:#?}", type_id),
                     LangErrorKind::GeneralError,
                     file_pos,
                 )),
             },
 
             _ => Err(LangError::new(
-                format!("Invalid type when creating CodeGenTy: {:#?}", ty),
+                format!("Invalid type when creating CodeGenTy: {:#?}", type_id),
                 LangErrorKind::GeneralError,
                 file_pos,
             )),
@@ -293,7 +297,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             LangPath::default()
         };
 
-        let fn_name = if let Some(adt_ty) = &func.method_adt {
+        let fn_name = if let Some(adt_type_id) = &func.method_adt {
+            let adt_ty = self.analyze_context.ty_env.ty(*adt_type_id)?;
             if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
                 util::to_method_name(
@@ -410,7 +415,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             LangPath::default()
         };
 
-        let fn_name = if let Some(adt_ty) = &func.method_adt {
+        let fn_name = if let Some(adt_type_id) = &func.method_adt {
+            let adt_ty = self.analyze_context.ty_env.ty(*adt_type_id)?;
             if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
                 let last_part = adt_path.last().unwrap();
@@ -431,9 +437,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             for param in params {
                 let param = param.borrow();
 
-                if let Some(param_type_struct) = &param.ty {
-                    let any_type =
-                        self.compile_type(&param_type_struct, param.file_pos.to_owned())?;
+                if let Some(param_type_id) = &param.ty {
+                    let any_type = self.compile_type(*param_type_id, param.file_pos.to_owned())?;
                     let basic_type = CodeGen::any_into_basic_type(any_type)?;
                     inner_types.push(basic_type);
                 } else {
@@ -454,8 +459,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // Get the return type of the function and create a "codegen" function
         // with a return type of this type. If no `ret_type` is set, this is
         // a function that returns void, create a void function.
-        let fn_type = if let Some(ret_type) = &func.ret_type {
-            match self.compile_type(&ret_type, file_pos)? {
+        let fn_type = if let Some(ret_type_id) = &func.ret_type {
+            match self.compile_type(*ret_type_id, file_pos)? {
                 AnyTypeEnum::ArrayType(ty) => ty.fn_type(param_types.as_slice(), func.is_var_arg),
                 AnyTypeEnum::FloatType(ty) => ty.fn_type(param_types.as_slice(), func.is_var_arg),
                 AnyTypeEnum::FunctionType(ty) => ty,
@@ -712,7 +717,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             )
         })?;
 
-        let codegen_ty = CodeGenTy::new(&expr.get_expr_type()?, file_pos)?;
+        let codegen_ty = CodeGenTy::new(
+            &self.analyze_context.ty_env,
+            expr.get_expr_type()?,
+            file_pos,
+        )?;
 
         let mut cases = Vec::default();
         let mut blocks_without_branch = Vec::default();
@@ -874,8 +883,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let member = member.borrow();
             let member_file_pos = member.file_pos.to_owned();
 
-            if let Some(member_type_struct) = &member.ty {
-                let any_type = self.compile_type(&member_type_struct, member_file_pos)?;
+            if let Some(member_type_id) = &member.ty {
+                let any_type = self.compile_type(*member_type_id, member_file_pos)?;
                 let basic_type = CodeGen::any_into_basic_type(any_type)?;
                 member_types.push(basic_type);
             } else {
@@ -909,7 +918,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // The type of the whole `enum_` will be Enum(ident). This type will be
         // set for the members as well. Only the given literal values of the members
         // will be the inner type.
-        let (ty, file_pos) = if let Some(member) = &enum_.members.first() {
+        let (type_id, file_pos) = if let Some(member) = &enum_.members.first() {
             let member = member.borrow();
             let member_file_pos = member.file_pos.to_owned();
 
@@ -931,7 +940,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             ));
         };
 
-        let any_ty = self.compile_type(&ty, file_pos)?;
+        let any_ty = self.compile_type(type_id, file_pos)?;
         let basic_ty = CodeGen::any_into_basic_type(any_ty)?;
 
         let packed = false;
@@ -960,8 +969,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let member = member.borrow();
             let member_file_pos = member.file_pos.to_owned();
 
-            if let Some(member_type_struct) = &member.ty {
-                let any_type = self.compile_type(&member_type_struct, member_file_pos)?;
+            if let Some(member_type_id) = &member.ty {
+                let any_type = self.compile_type(*member_type_id, member_file_pos)?;
 
                 let size = self
                     .target_machine

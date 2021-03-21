@@ -55,7 +55,7 @@ impl Visitor for IndexingAnalyzer {
         }
     }
 
-    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
+    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &mut TraverseContext) {
         if let Expr::Op(Op::BinOp(bin_op)) = expr {
             match bin_op.operator {
                 // Struct or union access.

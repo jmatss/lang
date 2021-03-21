@@ -1,6 +1,6 @@
 use crate::AnalyzeContext;
 use common::{
-    error::LangError,
+    error::{LangError, LangResult},
     path::LangPathPart,
     token::{
         ast::AstToken,
@@ -49,12 +49,16 @@ impl<'a> TraitsFnAnalyzer<'a> {
     /// to the trait method names that they implement. This information will be used
     /// to verify that any function call on the generic type is valid according to
     /// the "where" clause.
-    fn store_generic_trait_method_names(&mut self, adt: Ref<Adt>, block_id: BlockId) {
+    fn store_generic_trait_method_names(
+        &mut self,
+        adt: Ref<Adt>,
+        block_id: BlockId,
+    ) -> LangResult<()> {
         let implements = if let Some(implements) = &adt.implements {
             implements
         } else {
             self.generic_trait_method_names = None;
-            return;
+            return Ok(());
         };
 
         let mut generic_trait_method_names: HashMap<String, HashSet<String>> = HashMap::default();
@@ -66,7 +70,8 @@ impl<'a> TraitsFnAnalyzer<'a> {
         // values are the names of methods for the traits that the generic
         // implements.
         for (gen_name, trait_tys) in implements {
-            for trait_ty in trait_tys {
+            for trait_type_id in trait_tys {
+                let trait_ty = self.analyze_context.ty_env.ty(*trait_type_id)?;
                 let trait_name = if let Ty::CompoundType(InnerTy::Trait(trait_name), ..) = trait_ty
                 {
                     trait_name
@@ -103,6 +108,7 @@ impl<'a> TraitsFnAnalyzer<'a> {
         }
 
         self.generic_trait_method_names = Some(generic_trait_method_names);
+        Ok(())
     }
 
     /// Checks that the generic with name `generic_name` implements a trait
@@ -126,7 +132,7 @@ impl<'a> Visitor for TraitsFnAnalyzer<'a> {
         }
     }
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Implement(impl_path, ..), ..) = ast_token {
             let full_impl_path = match self.analyze_context.get_module(ctx.block_id) {
                 Ok(Some(mut full_impl_path)) => {
@@ -154,21 +160,38 @@ impl<'a> Visitor for TraitsFnAnalyzer<'a> {
                 }
             };
 
-            self.store_generic_trait_method_names(adt.borrow(), ctx.block_id);
+            if let Err(err) = self.store_generic_trait_method_names(adt.borrow(), ctx.block_id) {
+                self.errors.push(err);
+            }
         }
     }
 
     /// Check any function call in which the `method_adt` is a generic.
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, _ctx: &TraverseContext) {
-        if let Some(method_adt) = &fn_call.method_adt {
-            if !method_adt.is_generic() {
-                return;
-            }
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, _ctx: &mut TraverseContext) {
+        if let Some(method_adt_type_id) = &fn_call.method_adt {
+            match self.analyze_context.ty_env.is_generic(*method_adt_type_id) {
+                Ok(true) => (),
+                Ok(false) => return,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
-            let generic_name = method_adt.get_generic_ident().unwrap();
+            let generic_name = match self
+                .analyze_context
+                .ty_env
+                .get_generic_ident(*method_adt_type_id)
+            {
+                Ok(name) => name,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
             let method_name = &fn_call.name;
 
-            if !self.is_valid_method(&generic_name, method_name) {
+            if !self.is_valid_method(generic_name, method_name) {
                 let err = self.analyze_context.err(format!(
                     "Used method named \"{0}\" on value with the generic type \"{1}\". \
                     No trait enforced on \"{1}\" contains a method with that name.\n\

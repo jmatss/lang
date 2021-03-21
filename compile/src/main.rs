@@ -150,8 +150,10 @@ fn main() -> LangResult<()> {
         debug!("\nAST after parsing:\n{:#?}", ast_root);
     }
 
+    let ty_env = std::mem::take(&mut parser.ty_env);
+
     let analyze_timer = Instant::now();
-    let analyze_context = match analyze(&mut ast_root, file_info) {
+    let mut analyze_context = match analyze(&mut ast_root, ty_env, file_info) {
         Ok(analyze_context) => analyze_context,
         Err(errs) => {
             for e in errs {
@@ -175,7 +177,7 @@ fn main() -> LangResult<()> {
     let module = context.create_module(&opts.module_name);
     match generator::generate(
         &mut ast_root,
-        &analyze_context,
+        &mut analyze_context,
         &context,
         &builder,
         &module,

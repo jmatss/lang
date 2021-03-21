@@ -32,7 +32,7 @@ impl<'a> Visitor for UnionInitArg<'a> {
         }
     }
 
-    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, _ctx: &TraverseContext) {
+    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, _ctx: &mut TraverseContext) {
         if let AdtKind::Union = adt_init.kind {
         } else {
             return;

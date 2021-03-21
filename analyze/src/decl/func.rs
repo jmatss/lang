@@ -213,15 +213,36 @@ impl<'a> DeclFnAnalyzer<'a> {
 
             let generics = Generics::new();
 
+            let type_id = match self
+                .analyze_context
+                .borrow_mut()
+                .ty_env
+                .id(&Ty::CompoundType(inner_ty, generics, TypeInfo::None))
+            {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
             // TODO: Will `TypeInfo::None` work? Does this need some sort of type
             //       info?
-            let ty = if func.modifiers.contains(&Modifier::This) {
-                Ty::CompoundType(inner_ty, generics, TypeInfo::None)
+            let type_id = if func.modifiers.contains(&Modifier::This) {
+                type_id
             } else if func.modifiers.contains(&Modifier::ThisPointer) {
-                Ty::Pointer(
-                    Box::new(Ty::CompoundType(inner_ty, generics, TypeInfo::None)),
-                    TypeInfo::None,
-                )
+                match self
+                    .analyze_context
+                    .borrow_mut()
+                    .ty_env
+                    .id(&Ty::Pointer(type_id, TypeInfo::None))
+                {
+                    Ok(ptr_type_id) => ptr_type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                }
             } else {
                 let err = self.analyze_context.borrow().err(format!(
                     "Non static function did not contain \"this\" or \"this ptr\" reference. ADT name: {}, func: {:#?}.",
@@ -233,7 +254,7 @@ impl<'a> DeclFnAnalyzer<'a> {
 
             let var = Rc::new(RefCell::new(Var::new(
                 THIS_VAR_NAME.into(),
-                Some(ty),
+                Some(type_id),
                 None,
                 None,
                 None,
@@ -280,7 +301,7 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
         }
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         self.analyze_context.borrow_mut().file_pos =
             ast_token.file_pos().cloned().unwrap_or_default();
     }
@@ -288,9 +309,7 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
     /// Marks the functions in this implement block with the name of the implement
     /// block. This lets one differentiate between functions and methods by checking
     /// the `method_struct` field in "Function"s.
-    fn visit_impl(&mut self, mut ast_token: &mut AstToken, ctx: &TraverseContext) {
-        let analyze_context = self.analyze_context.borrow();
-
+    fn visit_impl(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseContext) {
         // TODO: This won't work for all cases. The `impl_path` doesn't consider
         //       the module path or "use"s.
 
@@ -306,42 +325,54 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
         let last_part = partial_path.pop().unwrap();
         partial_path.push(LangPathPart(last_part.0, None));
 
-        let inner_ty = if let Ok(full_path) =
-            analyze_context.calculate_adt_full_path(impl_path, ctx.block_id)
-        {
-            if analyze_context.is_struct(&full_path, ctx.block_id) {
-                InnerTy::Struct(full_path)
-            } else if analyze_context.is_enum(&full_path, ctx.block_id) {
-                InnerTy::Enum(full_path)
-            } else if analyze_context.is_union(&full_path, ctx.block_id) {
-                InnerTy::Union(full_path)
+        let inner_ty = {
+            let analyze_context = self.analyze_context.borrow();
+
+            if let Ok(full_path) = analyze_context.calculate_adt_full_path(impl_path, ctx.block_id)
+            {
+                if analyze_context.is_struct(&full_path, ctx.block_id) {
+                    InnerTy::Struct(full_path)
+                } else if analyze_context.is_enum(&full_path, ctx.block_id) {
+                    InnerTy::Enum(full_path)
+                } else if analyze_context.is_union(&full_path, ctx.block_id) {
+                    InnerTy::Union(full_path)
+                } else {
+                    unreachable!("full_path: {:#?}", full_path);
+                }
+            } else if let Ok(full_path) =
+                analyze_context.calculate_trait_full_path(impl_path, ctx.block_id)
+            {
+                InnerTy::Trait(full_path)
             } else {
-                unreachable!("full_path: {:#?}", full_path);
+                let err = analyze_context.err_adt(
+                    format!("Unable to find ADT with path: {}", partial_path),
+                    &partial_path,
+                );
+                self.errors.push(err);
+                return;
             }
-        } else if let Ok(full_path) =
-            analyze_context.calculate_trait_full_path(impl_path, ctx.block_id)
-        {
-            InnerTy::Trait(full_path)
-        } else {
-            let err = analyze_context.err_adt(
-                format!("Unable to find ADT with path: {}", partial_path),
-                &partial_path,
-            );
-            self.errors.push(err);
-            return;
         };
 
-        // TODO: Will `TypeInfo::None` work? Does this need some sort of type
-        //       info?
-        let impl_ty = Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None);
+        let impl_type_id = match self
+            .analyze_context
+            .borrow_mut()
+            .ty_env
+            .id(&Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None))
+        {
+            Ok(impl_type_id) => impl_type_id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
 
         for mut body_token in body {
             if body_token.is_skippable() {
                 // skip
             } else if let AstToken::Block(BlockHeader::Fn(func), ..) = &mut body_token {
-                func.borrow_mut().method_adt = Some(impl_ty.clone());
+                func.borrow_mut().method_adt = Some(impl_type_id);
             } else {
-                let err = analyze_context.err(format!(
+                let err = self.analyze_context.borrow().err(format!(
                     "AST token in impl block with name \"{}\" not a function: {:?}",
                     impl_path, body_token
                 ));
@@ -350,10 +381,16 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
         }
     }
 
-    fn visit_fn(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_fn(&mut self, mut ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
         if let AstToken::Block(BlockHeader::Fn(func), _, func_id, ..) = &mut ast_token {
-            let adt_ty = if let Some(adt_ty) = func.borrow().method_adt.clone() {
-                Some(adt_ty)
+            let adt_ty = if let Some(adt_type_id) = func.borrow().method_adt.clone() {
+                match self.analyze_context.borrow_mut().ty_env.ty(adt_type_id) {
+                    Ok(adt_ty) => Some(adt_ty.clone()),
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                }
             } else {
                 None
             };
@@ -382,7 +419,7 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
         }
     }
 
-    fn visit_extern_decl(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {
+    fn visit_extern_decl(&mut self, stmt: &mut Stmt, _ctx: &mut TraverseContext) {
         let mut analyze_context = self.analyze_context.borrow_mut();
 
         if let Stmt::ExternalDecl(func, ..) = stmt {
