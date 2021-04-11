@@ -238,8 +238,8 @@ impl<'a> ParseTokenIter<'a> {
                     self.next_block(BlockHeader::Anonymous)?
                 }
 
-                LexTokenKind::Comment(msg, is_single) => {
-                    AstToken::Comment(msg, is_single, self.file_pos.to_owned())
+                LexTokenKind::Comment(msg, comment_type) => {
+                    AstToken::Comment(msg, comment_type, self.file_pos.to_owned())
                 }
 
                 LexTokenKind::Sym(Sym::Increment) => {

@@ -1,9 +1,10 @@
+use log::debug;
+
 use common::{
     error::{LangError, LangErrorKind, LangResult},
     file::{FileId, FileInfo, FilePosition},
-    token::lit::Lit,
+    token::{ast::CommentType, lit::Lit},
 };
-use log::debug;
 
 use crate::{
     char_iter::CharIter,
@@ -598,7 +599,7 @@ impl<'a> LexTokenIter<'a> {
         self.column += (n + comment_str.chars().count()) as u64;
         self.offset += (n + comment_str.len()) as u64;
 
-        LexTokenKind::Comment(comment_str, true)
+        LexTokenKind::Comment(comment_str, CommentType::SingleLine)
     }
 
     /// Lexes a multi line comment until the matching "CommentMultiLineEnd" is
@@ -686,7 +687,7 @@ impl<'a> LexTokenIter<'a> {
         self.column = column_count_line as u64;
         self.offset += byte_count as u64;
 
-        LexTokenKind::Comment(comment.iter().collect(), false)
+        LexTokenKind::Comment(comment.iter().collect(), CommentType::MultiLine)
     }
 
     /// Used when returing errors to include current line/column number.

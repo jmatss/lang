@@ -1,4 +1,7 @@
-use common::{file::FilePosition, token::lit::Lit};
+use common::{
+    file::FilePosition,
+    token::{ast::CommentType, lit::Lit},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LexToken {
@@ -22,7 +25,7 @@ pub enum LexTokenKind {
     Lit(Lit),
     Kw(Kw),
     Sym(Sym),
-    Comment(String, bool), // (true => single line), (false => multi line)
+    Comment(String, CommentType),
     EOF,
 }
 

@@ -7,11 +7,16 @@ pub enum AstToken {
     Expr(Expr),
     Stmt(Stmt),
     Block(BlockHeader, FilePosition, BlockId, Vec<AstToken>),
-    /// (true => single line), (false => multi line)
-    Comment(String, bool, FilePosition),
+    Comment(String, CommentType, FilePosition),
     /// Will be set for removed tokens, should be ignored when visited.
     Empty,
     EOF,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommentType {
+    SingleLine,
+    MultiLine,
 }
 
 impl AstToken {
