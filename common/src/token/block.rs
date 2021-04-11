@@ -5,7 +5,12 @@ use super::{
     stmt::Modifier,
 };
 
-use crate::{path::LangPath, ty::generics::Generics, util, TypeId};
+use crate::{
+    ctx::{ty_ctx::TyCtx, },
+    path::LangPath,
+    ty::generics::Generics,
+    util, TypeId,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockHeader {
@@ -452,9 +457,9 @@ impl Fn {
 
     /// Returns the "half name" which is the name that does NOT contain anything
     /// related to the structure but will contain function generics (if any).
-    pub fn half_name(&self) -> String {
+    pub fn half_name(&self, ty_ctx: &TyCtx) -> String {
         if let Some(generics) = &self.generics {
-            util::to_generic_name(&self.name, generics)
+            util::to_generic_name(ty_ctx, &self.name, generics)
         } else {
             self.name.clone()
         }

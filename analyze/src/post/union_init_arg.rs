@@ -1,29 +1,26 @@
-use crate::AnalyzeContext;
 use common::{
+    ctx::traverse_ctx::TraverseCtx,
     error::LangError,
     token::{block::AdtKind, expr::AdtInit},
-    traverser::TraverseContext,
-    visitor::Visitor,
+    traverse::visitor::Visitor,
 };
 
 /// Makes sure that all union initializations are correct. A union construction
 /// must have exactly one argument, and that argument must be named. The union
 /// will then be initialized for the type of the specified named member.
-pub struct UnionInitArg<'a> {
-    analyze_context: &'a AnalyzeContext,
+pub struct UnionInitArg {
     errors: Vec<LangError>,
 }
 
-impl<'a> UnionInitArg<'a> {
-    pub fn new(analyze_context: &'a AnalyzeContext) -> Self {
+impl UnionInitArg {
+    pub fn new() -> Self {
         Self {
-            analyze_context,
             errors: Vec::default(),
         }
     }
 }
 
-impl<'a> Visitor for UnionInitArg<'a> {
+impl Visitor for UnionInitArg {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -32,14 +29,14 @@ impl<'a> Visitor for UnionInitArg<'a> {
         }
     }
 
-    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, _ctx: &mut TraverseContext) {
+    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &mut TraverseCtx) {
         if let AdtKind::Union = adt_init.kind {
         } else {
             return;
         }
 
         if adt_init.arguments.len() != 1 {
-            let err = self.analyze_context.err(format!(
+            let err = ctx.ast_ctx.err(format!(
                 "Expected one argument for union init: {:#?}",
                 adt_init
             ));

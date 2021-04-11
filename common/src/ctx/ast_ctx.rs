@@ -1,47 +1,41 @@
-use crate::{block::BlockInfo, decl};
-use common::{
-    error::{
-        LangError,
-        LangErrorKind::{self, AnalyzeError},
-        LangResult,
-    },
+use std::{
+    cell::{RefCell, RefMut},
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    rc::Rc,
+};
+
+use log::Level;
+
+use crate::{
+    error::{LangError, LangErrorKind, LangResult},
     file::{FileId, FileInfo, FilePosition},
     path::LangPath,
     token::{
         block::{Adt, AdtKind, BuiltIn, Fn, Trait},
         expr::Var,
     },
-    ty::environment::TypeEnvironment,
     BlockId, TypeId,
 };
-use log::{debug, log_enabled, Level};
-use std::{
-    cell::{RefCell, RefMut},
-    collections::{HashMap, HashSet},
-    fmt::{Debug, Display},
-    hash::Hash,
-    rc::Rc,
-};
+
+use super::{block_ctx::BlockCtx, ty_ctx::TyCtx};
 
 #[derive(Debug)]
-pub struct AnalyzeContext {
-    /// A environment containing information about all types in this code.
-    pub ty_env: TypeEnvironment,
-
+pub struct AstCtx {
     /// Contains all declarations that have been seen traversing down to this
     /// part of the code. The BlockId represent the outer scope for a item.
     /// For variables it will be the scope in which they are declared in and for
     /// the rest, the BlockId will be the parent block.
     /// A `Adt` represents either a struct, union or enum.
-    pub(super) variables: HashMap<(String, BlockId), Rc<RefCell<Var>>>,
-    pub(super) fns: HashMap<(LangPath, BlockId), Rc<RefCell<Fn>>>,
-    pub(super) adts: HashMap<(LangPath, BlockId), Rc<RefCell<Adt>>>,
-    pub(super) traits: HashMap<(LangPath, BlockId), Rc<RefCell<Trait>>>,
+    pub variables: HashMap<(String, BlockId), Rc<RefCell<Var>>>,
+    pub fns: HashMap<(LangPath, BlockId), Rc<RefCell<Fn>>>,
+    pub adts: HashMap<(LangPath, BlockId), Rc<RefCell<Adt>>>,
+    pub traits: HashMap<(LangPath, BlockId), Rc<RefCell<Trait>>>,
 
     /// Contains all built-in "fns".
-    pub(super) built_ins: HashMap<&'static str, BuiltIn>,
+    pub built_ins: HashMap<&'static str, BuiltIn>,
 
-    pub block_info: HashMap<BlockId, BlockInfo>,
+    pub block_ctxs: HashMap<BlockId, BlockCtx>,
 
     /// Mapping file IDs to the corresponding file information. This can be used
     /// to find the filename and directory for file IDs stored in "FilePosition"s.
@@ -52,28 +46,19 @@ pub struct AnalyzeContext {
     pub file_pos: FilePosition,
 }
 
-impl Default for AnalyzeContext {
-    fn default() -> Self {
-        Self::new(TypeEnvironment::default(), HashMap::default()).unwrap()
-    }
-}
-
-impl AnalyzeContext {
+impl AstCtx {
     pub fn new(
-        mut ty_env: TypeEnvironment,
+        built_ins: HashMap<&'static str, BuiltIn>,
         file_info: HashMap<FileId, FileInfo>,
     ) -> LangResult<Self> {
-        let built_ins = decl::built_in::init_built_ins(&mut ty_env)?;
         Ok(Self {
-            ty_env,
-
             variables: HashMap::default(),
             fns: HashMap::default(),
             adts: HashMap::default(),
             traits: HashMap::default(),
 
             built_ins,
-            block_info: HashMap::default(),
+            block_ctxs: HashMap::default(),
 
             file_info,
             file_pos: FilePosition::default(),
@@ -81,7 +66,7 @@ impl AnalyzeContext {
     }
 
     pub fn debug_print(&self) {
-        debug!("Block Info:\n{:#?}", self.block_info);
+        debug!("Block Info:\n{:#?}", self.block_ctxs);
         debug!("Variables:\n{:#?}", self.variables);
         debug!("Functions:\n{:#?}", self.fns);
         debug!("ADTs:\n{:#?}", self.adts);
@@ -91,7 +76,7 @@ impl AnalyzeContext {
 
     /// Returns the parent block ID for the block with ID `id`.
     pub fn get_parent_id(&self, id: BlockId) -> LangResult<BlockId> {
-        if let Some(block_info) = self.block_info.get(&id) {
+        if let Some(block_info) = self.block_ctxs.get(&id) {
             Ok(block_info.parent_id)
         } else {
             Err(self.err(format!(
@@ -103,7 +88,7 @@ impl AnalyzeContext {
 
     /// Returns the root block ID for the block with ID `id`.
     pub fn get_root_id(&self, id: BlockId) -> LangResult<BlockId> {
-        if let Some(block_info) = self.block_info.get(&id) {
+        if let Some(block_info) = self.block_ctxs.get(&id) {
             if block_info.is_root_block {
                 Ok(block_info.block_id)
             } else {
@@ -119,7 +104,7 @@ impl AnalyzeContext {
 
     /// Given a block ID `id`, returns the module for the block.
     pub fn get_module(&self, id: BlockId) -> LangResult<Option<LangPath>> {
-        if let Some(block_info) = self.block_info.get(&id) {
+        if let Some(block_info) = self.block_ctxs.get(&id) {
             Ok(block_info.module.clone())
         } else {
             Err(self.err(format!(
@@ -131,7 +116,7 @@ impl AnalyzeContext {
 
     /// Given a block ID `id`, returns the "use" statements for the block.
     pub fn get_uses(&self, id: BlockId) -> LangResult<&HashSet<LangPath>> {
-        if let Some(block_info) = self.block_info.get(&id) {
+        if let Some(block_info) = self.block_ctxs.get(&id) {
             Ok(&block_info.uses)
         } else {
             Err(self.err(format!(
@@ -152,6 +137,7 @@ impl AnalyzeContext {
     ///     with ID `id`.
     fn calculate_full_path<T>(
         &self,
+        ty_ctx: &TyCtx,
         path: &LangPath,
         id: BlockId,
         map: &HashMap<(LangPath, BlockId), T>,
@@ -159,14 +145,14 @@ impl AnalyzeContext {
     where
         T: std::fmt::Debug,
     {
-        let mut err = match self.get_decl_scope(path, id, map) {
+        let mut err = match self.get_decl_scope(ty_ctx, path, id, map) {
             Ok(_) => return Ok(path.clone()),
             Err(err) => err,
         };
 
         if let Some(module) = self.get_module(id)? {
             let module_path = module.join(path, module.file_pos().cloned());
-            if self.get_decl_scope(&module_path, id, map).is_ok() {
+            if self.get_decl_scope(ty_ctx, &module_path, id, map).is_ok() {
                 return Ok(module_path);
             }
         }
@@ -178,7 +164,7 @@ impl AnalyzeContext {
                 potential_use_path.pop();
 
                 let combined_path = potential_use_path.join(path, path.file_pos().cloned());
-                match self.get_decl_scope(&combined_path, id, map) {
+                match self.get_decl_scope(ty_ctx, &combined_path, id, map) {
                     Ok(_) => return Ok(combined_path),
                     Err(_) => continue,
                 }
@@ -192,34 +178,53 @@ impl AnalyzeContext {
         Err(err)
     }
 
-    pub fn calculate_fn_full_path(&self, path: &LangPath, id: BlockId) -> LangResult<LangPath> {
-        self.calculate_full_path(path, id, &self.fns)
+    pub fn calculate_fn_full_path(
+        &self,
+        ty_ctx: &TyCtx,
+        path: &LangPath,
+        id: BlockId,
+    ) -> LangResult<LangPath> {
+        self.calculate_full_path(ty_ctx, path, id, &self.fns)
     }
 
-    pub fn calculate_adt_full_path(&self, path: &LangPath, id: BlockId) -> LangResult<LangPath> {
-        self.calculate_full_path(path, id, &self.adts)
+    pub fn calculate_adt_full_path(
+        &self,
+        ty_ctx: &TyCtx,
+        path: &LangPath,
+        id: BlockId,
+    ) -> LangResult<LangPath> {
+        self.calculate_full_path(ty_ctx, path, id, &self.adts)
     }
 
-    pub fn calculate_trait_full_path(&self, path: &LangPath, id: BlockId) -> LangResult<LangPath> {
-        self.calculate_full_path(path, id, &self.traits)
+    pub fn calculate_trait_full_path(
+        &self,
+        ty_ctx: &TyCtx,
+        path: &LangPath,
+        id: BlockId,
+    ) -> LangResult<LangPath> {
+        self.calculate_full_path(ty_ctx, path, id, &self.traits)
     }
 
     /// Given a name of a declaration `path` and a block scope `id`, returns
     /// the block in which the sought after declaration was declared.
-    fn get_decl_scope<K, T>(
+    fn get_decl_scope<T>(
         &self,
-        path: &K,
+        ty_ctx: &TyCtx,
+        path: &LangPath,
         id: BlockId,
-        map: &HashMap<(K, BlockId), T>,
+        map: &HashMap<(LangPath, BlockId), T>,
     ) -> LangResult<BlockId>
     where
-        K: Clone + Debug + Display + Eq + Hash,
         T: std::fmt::Debug,
     {
         if map.get(&(path.clone(), id)).is_some() {
             Ok(id)
-        } else if id == BlockInfo::DEFAULT_BLOCK_ID {
-            let mut err_msg = format!("Unable to find decl for \"{}\".", path);
+        } else if id == BlockCtx::DEFAULT_BLOCK_ID {
+            let mut err_msg = format!(
+                "Unable to find decl for \"{}\" ({:#?}).",
+                ty_ctx.ty_env.to_string_path(ty_ctx, path),
+                path
+            );
             if log_enabled!(Level::Debug) {
                 err_msg.push_str(&format!("\nmap: {:#?}", map))
             }
@@ -230,7 +235,7 @@ impl AnalyzeContext {
             let parent_id = self.get_parent_id(id)?;
 
             if id != parent_id {
-                self.get_decl_scope(path, parent_id, map)
+                self.get_decl_scope(ty_ctx, path, parent_id, map)
             } else {
                 Err(self.err(format!(
                     "Block with id {} is its own parent in block info.",
@@ -240,129 +245,191 @@ impl AnalyzeContext {
         }
     }
 
+    // TODO: See if possible to merge with `get_decl_scope()`
     /// Given a name of a variable `ident` and a block scope `id`, returns
     /// the block in which the sought after variable was declared.
     pub fn get_var_decl_scope(&self, ident: &str, id: BlockId) -> LangResult<BlockId> {
-        self.get_decl_scope(&ident.to_string(), id, &self.variables)
+        // old impl:
+        // self.get_decl_scope(&ident.to_string(), id, &self.variables)
+
+        if self.variables.get(&(ident.into(), id)).is_some() {
+            Ok(id)
+        } else if id == BlockCtx::DEFAULT_BLOCK_ID {
+            let mut err_msg = format!("Unable to find decl for \"{}\".", ident);
+            if log_enabled!(Level::Debug) {
+                err_msg.push_str(&format!("\nvariables: {:#?}", self.variables))
+            }
+            Err(self.err(err_msg))
+        } else {
+            // Unable to find declaration in the current block scope. See
+            // recursively if the declaration exists in a parent scope.
+            let parent_id = self.get_parent_id(id)?;
+
+            if id != parent_id {
+                self.get_var_decl_scope(ident, parent_id)
+            } else {
+                Err(self.err(format!(
+                    "Block with id {} is its own parent in block info.",
+                    id
+                )))
+            }
+        }
     }
 
     /// Given a name of a function `path` and a block scope `id`, returns
     /// the block in which the sought after function was declared.
-    pub fn get_fn_decl_scope(&self, path: &LangPath, id: BlockId) -> LangResult<BlockId> {
-        self.get_decl_scope(path, id, &self.fns)
+    pub fn get_fn_decl_scope(
+        &self,
+        ty_ctx: &TyCtx,
+        path: &LangPath,
+        id: BlockId,
+    ) -> LangResult<BlockId> {
+        self.get_decl_scope(ty_ctx, path, id, &self.fns)
     }
 
     /// Given a name of a ADT `path` and a block scope `id`, returns the block
     // in which the sought after ADT was declared.
-    pub fn get_adt_decl_scope(&self, path: &LangPath, id: BlockId) -> LangResult<BlockId> {
-        self.get_decl_scope(path, id, &self.adts)
+    pub fn get_adt_decl_scope(
+        &self,
+        ty_ctx: &TyCtx,
+        path: &LangPath,
+        id: BlockId,
+    ) -> LangResult<BlockId> {
+        self.get_decl_scope(ty_ctx, path, id, &self.adts)
     }
 
     /// Given a name of a interface `path` and a block scope `id`, returns
     /// the block in which the sought after interface was declared.
-    pub fn get_trait_decl_scope(&self, path: &LangPath, id: BlockId) -> LangResult<BlockId> {
-        self.get_decl_scope(path, id, &self.traits)
+    pub fn get_trait_decl_scope(
+        &self,
+        ty_ctx: &TyCtx,
+        path: &LangPath,
+        id: BlockId,
+    ) -> LangResult<BlockId> {
+        self.get_decl_scope(ty_ctx, path, id, &self.traits)
     }
 
-    /// Given a name of a declaration `name` and the block in which this
-    /// declaration was declared, `decl_block_id`, returns a reference to the
+    /// Given a name of a declaration `name`, returns a reference to the
     /// declaration in the AST.
-    fn get<'a, K, T>(
+    /// The assumption is that all declarations (ADTs/Traits/Functions) are
+    /// declared in the default block.
+    fn get<'a, T>(
         &self,
-        name: &K,
-        decl_block_id: BlockId,
-        map: &'a HashMap<(K, BlockId), Rc<RefCell<T>>>,
-    ) -> LangResult<Rc<RefCell<T>>>
-    where
-        K: Clone + Debug + Display + Eq + Hash,
-    {
+        ty_ctx: &TyCtx,
+        name: &LangPath,
+        map: &'a HashMap<(LangPath, BlockId), Rc<RefCell<T>>>,
+    ) -> LangResult<Rc<RefCell<T>>> {
+        let decl_block_id = BlockCtx::DEFAULT_BLOCK_ID;
         let key = (name.clone(), decl_block_id);
 
         if let Some(item) = map.get(&key) {
             Ok(Rc::clone(item))
         } else {
             Err(self.err(format!(
-                "Unable to find decl with name \"{}\" in decl block ID {}.",
-                name, decl_block_id
+                "Unable to find decl with name \"{}\" ({:#?}) in decl block ID {}.\nMap keys:\n{:#?}",
+                ty_ctx.ty_env.to_string_path(ty_ctx, name),
+                name,
+                decl_block_id,
+                map.keys()
             )))
         }
     }
 
-    /// Given a name of a declaration `name` and the block in which this
-    /// declaration was declared, `decl_block_id`, returns a mutable reference
+    /// Given a name of a declaration `name`, returns a mutable reference
     /// to the declaration in the AST.
-    fn get_mut<'a, K, T>(
+    /// The assumption is that all declarations (ADTs/Traits) are declared in
+    /// the default block.
+    fn get_mut<'a, T>(
         &self,
-        name: &K,
-        decl_block_id: BlockId,
-        map: &'a HashMap<(K, BlockId), Rc<RefCell<T>>>,
-    ) -> LangResult<RefMut<'a, T>>
-    where
-        K: Clone + Debug + Display + Eq + Hash,
-    {
+        ty_ctx: &TyCtx,
+        name: &LangPath,
+        map: &'a HashMap<(LangPath, BlockId), Rc<RefCell<T>>>,
+    ) -> LangResult<RefMut<'a, T>> {
+        let decl_block_id = BlockCtx::DEFAULT_BLOCK_ID;
         let key = (name.clone(), decl_block_id);
 
         if let Some(item) = map.get(&key) {
             Ok(item.borrow_mut())
         } else {
             Err(self.err(format!(
-                "Unable to find decl with name \"{}\" in decl block ID {}.",
-                name, decl_block_id
+                "Unable to find decl with name \"{}\" ({:#?}) in decl block ID {}.\nMap keys:\n{:#?}",
+                ty_ctx.ty_env.to_string_path(ty_ctx, name),
+                name,
+                decl_block_id,
+                map.keys()
             )))
         }
     }
 
-    /// Checks if there exists a struct with name `path` in the scope of `id`.
-    pub fn is_struct(&self, path: &LangPath, id: BlockId) -> bool {
-        if let Ok(adt) = self.get_adt(path, id) {
+    /// Checks if there exists a struct with name `path.
+    pub fn is_struct(&self, ty_ctx: &TyCtx, path: &LangPath) -> bool {
+        if let Ok(adt) = self.get_adt(ty_ctx, path) {
             matches!(adt.borrow().kind, AdtKind::Struct)
         } else {
             false
         }
     }
 
-    /// Checks if there exists a union with name `path` in the scope of `id`.
-    pub fn is_union(&self, path: &LangPath, id: BlockId) -> bool {
-        if let Ok(adt) = self.get_adt(path, id) {
+    /// Checks if there exists a union with name `path`.
+    pub fn is_union(&self, ty_ctx: &TyCtx, path: &LangPath) -> bool {
+        if let Ok(adt) = self.get_adt(ty_ctx, path) {
             matches!(adt.borrow().kind, AdtKind::Union)
         } else {
             false
         }
     }
 
-    /// Checks if there exists a enum with name `path` in the scope of `id`.
-    pub fn is_enum(&self, path: &LangPath, id: BlockId) -> bool {
-        if let Ok(adt) = self.get_adt(path, id) {
+    /// Checks if there exists a enum with name `path`.
+    pub fn is_enum(&self, ty_ctx: &TyCtx, path: &LangPath) -> bool {
+        if let Ok(adt) = self.get_adt(ty_ctx, path) {
             matches!(adt.borrow().kind, AdtKind::Enum)
         } else {
             false
         }
     }
 
-    /// Checks if there exists a union with name `path` in the scope of `id`.
-    pub fn is_trait(&self, path: &LangPath, id: BlockId) -> bool {
-        self.get_trait(path, id).is_ok()
+    /// Checks if there exists a union with name `path`.
+    pub fn is_trait(&self, ty_ctx: &TyCtx, path: &LangPath) -> bool {
+        self.get_trait(ty_ctx, path).is_ok()
     }
 
+    // TODO: Merge with `get()`.
     /// Given a name of a variable `ident` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
     pub fn get_var(&self, ident: &str, id: BlockId) -> LangResult<Rc<RefCell<Var>>> {
         let decl_block_id = self.get_var_decl_scope(ident, id)?;
-        self.get(&ident.to_string(), decl_block_id, &self.variables)
+        let key = (ident.into(), decl_block_id);
+
+        if let Some(item) = self.variables.get(&key) {
+            Ok(Rc::clone(item))
+        } else {
+            Err(self.err(format!(
+                "Unable to find var decl with name \"{}\" in decl block ID {}.",
+                ident, decl_block_id
+            )))
+        }
     }
 
     /// Given a name of a variable `ident` and a block scope `id`, returns
     /// a mutable reference to the declaration in the AST.
     pub fn get_var_mut(&self, ident: &str, id: BlockId) -> LangResult<RefMut<Var>> {
         let decl_block_id = self.get_var_decl_scope(ident, id)?;
-        self.get_mut(&ident.to_string(), decl_block_id, &self.variables)
+        let key = (ident.into(), decl_block_id);
+
+        if let Some(item) = self.variables.get(&key) {
+            Ok(item.borrow_mut())
+        } else {
+            Err(self.err(format!(
+                "Unable to find var decl with name \"{}\" in decl block ID {}.",
+                ident, decl_block_id
+            )))
+        }
     }
 
     /// Given a name of a function `path` and a block scope `id`, returns
     /// a reference to the declaration in the AST.
-    pub fn get_fn(&self, path: &LangPath, id: BlockId) -> LangResult<Rc<RefCell<Fn>>> {
-        let decl_block_id = self.get_fn_decl_scope(path, id)?;
-        self.get(path, decl_block_id, &self.fns)
+    pub fn get_fn(&self, ty_env: &TyCtx, path: &LangPath) -> LangResult<Rc<RefCell<Fn>>> {
+        self.get(ty_env, path, &self.fns)
     }
 
     pub fn get_built_in(&self, ident: &str) -> LangResult<&BuiltIn> {
@@ -376,25 +443,28 @@ impl AnalyzeContext {
 
     /// Given a name of a ADT `ident` and a block scope `id`; returns a reference
     /// to the declaration in the AST.
-    pub fn get_adt(&self, path: &LangPath, id: BlockId) -> LangResult<Rc<RefCell<Adt>>> {
-        let decl_block_id = self.get_adt_decl_scope(path, id)?;
-        self.get(path, decl_block_id, &self.adts)
+    pub fn get_adt(&self, ty_ctx: &TyCtx, path: &LangPath) -> LangResult<Rc<RefCell<Adt>>> {
+        self.get(ty_ctx, path, &self.adts)
     }
 
     /// Given a partial path of a ADT `path` and a block scope `id`; tries to find
     /// the declaration of a ADT. If unable to find a ADT with path `path`, this
     /// function will look at the "use" statements for the current block to see
     /// if able to resolve the ADT.
-    pub fn get_adt_partial(&self, path: &LangPath, id: BlockId) -> LangResult<Rc<RefCell<Adt>>> {
-        let real_path = self.calculate_full_path(path, id, &self.adts)?;
-        self.get_adt(&real_path, id)
+    pub fn get_adt_partial(
+        &self,
+        ty_ctx: &TyCtx,
+        path: &LangPath,
+        id: BlockId,
+    ) -> LangResult<Rc<RefCell<Adt>>> {
+        let real_path = self.calculate_full_path(ty_ctx, path, id, &self.adts)?;
+        self.get_adt(ty_ctx, &real_path)
     }
 
-    /// Given a name of a trait `path` and a block scope `id`, returns
-    /// a reference to the declaration in the AST.
-    pub fn get_trait(&self, path: &LangPath, id: BlockId) -> LangResult<Rc<RefCell<Trait>>> {
-        let decl_block_id = self.get_trait_decl_scope(path, id)?;
-        self.get(path, decl_block_id, &self.traits)
+    /// Given a name of a trait `path`, returns a reference to the declaration in
+    /// the AST.
+    pub fn get_trait(&self, ty_ctx: &TyCtx, path: &LangPath) -> LangResult<Rc<RefCell<Trait>>> {
+        self.get(ty_ctx, path, &self.traits)
     }
 
     /// Given a partial path of a trait `path` and a block scope `id`; tries to find
@@ -403,22 +473,23 @@ impl AnalyzeContext {
     /// if able to resolve the trait.
     pub fn get_trait_partial(
         &self,
+        ty_ctx: &TyCtx,
         path: &LangPath,
         id: BlockId,
     ) -> LangResult<Rc<RefCell<Trait>>> {
-        let real_path = self.calculate_full_path(path, id, &self.adts)?;
-        self.get_trait(&real_path, id)
+        let real_path = self.calculate_full_path(ty_ctx, path, id, &self.adts)?;
+        self.get_trait(ty_ctx, &real_path)
     }
 
-    /// Given a name of a ADT `adt_name`, a name of a method `method_name` and a
-    /// block scope `id`, returns a reference to the declaration in the AST.
+    /// Given a name of a ADT `adt_name`, a name of a method `method_name`;
+    /// returns a reference to the declaration in the AST.
     pub fn get_method(
         &self,
+        ty_ctx: &TyCtx,
         adt_name: &LangPath,
         method_name: &str,
-        id: BlockId,
     ) -> LangResult<Rc<RefCell<Fn>>> {
-        let adt = self.get_adt(adt_name, id)?;
+        let adt = self.get_adt(ty_ctx, adt_name)?;
         let adt = adt.borrow();
 
         if let Some(method) = adt.methods.get(method_name) {
@@ -426,19 +497,20 @@ impl AnalyzeContext {
         } else {
             Err(self.err(format!(
                 "Unable to find method named \"{}\" in ADT \"{:#?}\".",
-                &method_name, &adt,
+                &method_name,
+                &adt.methods.keys(),
             )))
         }
     }
 
-    /// Given a name of a trait `trait_name` and a block scope `id`, returns names
-    /// of all methods declared for the trait.
+    /// Given a name of a trait `trait_name`; returns names of all methods declared
+    /// for the trait.
     pub fn get_trait_method_names(
         &self,
+        ty_ctx: &TyCtx,
         trait_name: &LangPath,
-        id: BlockId,
     ) -> LangResult<Vec<String>> {
-        let trait_ = self.get_trait(trait_name, id)?;
+        let trait_ = self.get_trait(ty_ctx, trait_name)?;
         let trait_ = trait_.borrow();
 
         Ok(trait_
@@ -448,17 +520,17 @@ impl AnalyzeContext {
             .collect())
     }
 
-    /// Inserts the given method `method` into the ADT with name `adt_name` that can
-    /// be found from the block id `id`. This ADT can be a struct, enum or union.
+    /// Inserts the given method `method` into the ADT with name `adt_name`.
+    /// This ADT can be a struct, enum or union.
     pub fn insert_method(
         &mut self,
+        ty_ctx: &TyCtx,
         adt_name: &LangPath,
         method: Rc<RefCell<Fn>>,
-        id: BlockId,
     ) -> LangResult<()> {
-        let method_name = method.borrow().half_name();
+        let method_name = method.borrow().half_name(ty_ctx);
 
-        let adt = self.get_adt(adt_name, id)?;
+        let adt = self.get_adt(ty_ctx, adt_name)?;
         let mut adt = adt.borrow_mut();
 
         adt.methods.insert(method_name, Rc::clone(&method));
@@ -466,32 +538,31 @@ impl AnalyzeContext {
         Ok(())
     }
 
-    /// Removes the method with name `method_name` from the ADT with name `adt_name`
-    /// that can be found from the block id `id`.
+    /// Removes the method with name `method_name` from the ADT with name `adt_name`.
     /// Returns true if the method was removed, returns false if no method with
     /// that name exists for the ADT. Returns error if the ADT can't be found.
     pub fn remove_method(
         &mut self,
+        ty_ctx: &TyCtx,
         adt_name: &LangPath,
         method_name: &str,
-        id: BlockId,
     ) -> LangResult<bool> {
-        let adt = self.get_adt(adt_name, id)?;
+        let adt = self.get_adt(ty_ctx, adt_name)?;
         let mut adt = adt.borrow_mut();
 
         Ok(adt.methods.remove(method_name).is_some())
     }
 
-    /// Finds the ADT with the name `adt_name` in a scope containing the block
-    /// with ID `id` and returns the member with name `member_name`.
+    /// Finds the ADT with the name `adt_name` and returns the member with name
+    /// `member_name`.
     pub fn get_adt_member(
         &self,
+        ty_ctx: &TyCtx,
         adt_name: &LangPath,
         member_name: &str,
-        id: BlockId,
         file_pos: Option<FilePosition>,
     ) -> LangResult<Rc<RefCell<Var>>> {
-        let adt = self.get_adt(adt_name, id)?;
+        let adt = self.get_adt(ty_ctx, adt_name)?;
         let adt = adt.borrow();
 
         if let Some(member) = adt
@@ -504,7 +575,8 @@ impl AnalyzeContext {
             Err(LangError::new(
                 format!(
                     "Unable to find member with name \"{}\" in ADT \"{}\".",
-                    &member_name, &adt_name
+                    &member_name,
+                    ty_ctx.ty_env.to_string_path(ty_ctx, adt_name),
                 ),
                 LangErrorKind::GeneralError,
                 file_pos,
@@ -512,16 +584,16 @@ impl AnalyzeContext {
         }
     }
 
-    /// Finds the ADT with the name `adt_name` in a scope containing the block
-    /// with ID `id` and returns the index of the member with name `member_name`.
+    /// Finds the ADT with the name `adt_name` and returns the index of the member
+    /// with name `member_name`.
     pub fn get_adt_member_index(
         &self,
+        ty_ctx: &TyCtx,
         adt_name: &LangPath,
         member_name: &str,
-        id: BlockId,
     ) -> LangResult<u64> {
         if let Some(idx) = self
-            .get_adt(adt_name, id)?
+            .get_adt(ty_ctx, adt_name)?
             .borrow()
             .member_index(member_name)
         {
@@ -529,7 +601,8 @@ impl AnalyzeContext {
         } else {
             Err(self.err(format!(
                 "Unable to find member with name \"{}\" in ADT \"{}\".",
-                &member_name, &adt_name
+                &member_name,
+                ty_ctx.ty_env.to_string_path(ty_ctx, adt_name),
             )))
         }
     }
@@ -593,29 +666,28 @@ impl AnalyzeContext {
         Ok(self.get_param(func, param_name)?.0)
     }
 
-    /// Finds the ADT with the name `adt_path` in a scope containing the block
-    /// with ID `id` and returns the index of the parameter with name
-    /// `param_name` in the method with name `method_name`.
+    /// Finds the ADT with the name `adt_path` and returns the index of the
+    /// parameter with name `param_name` in the method with name `method_name`.
     pub fn get_method_param_idx(
         &self,
+        ty_ctx: &TyCtx,
         adt_path: &LangPath,
         method_name: &str,
         param_name: &str,
-        id: BlockId,
     ) -> LangResult<usize> {
-        let method = self.get_method(adt_path, method_name, id)?;
+        let method = self.get_method(ty_ctx, adt_path, method_name)?;
         self.get_param_idx(method, param_name)
     }
 
-    /// Finds the function with the path `fn_path` in a scope containing the block
-    /// with ID `id` and returns the index of the parameter with name `param_name`.
+    /// Finds the function with the path `fn_path` and returns the index of the
+    /// parameter with name `param_name`.
     pub fn get_fn_param_idx(
         &self,
+        ty_ctx: &TyCtx,
         fn_path: &LangPath,
         param_name: &str,
-        id: BlockId,
     ) -> LangResult<usize> {
-        let func = self.get_fn(fn_path, id)?;
+        let func = self.get_fn(ty_ctx, fn_path)?;
         self.get_param_idx(func, param_name)
     }
 
@@ -633,29 +705,28 @@ impl AnalyzeContext {
         }
     }
 
-    /// Finds the ADT with the name `adt_path` in a scope containing the block
-    /// with ID `id` and returns the type of the parameter with name `param_name`
-    /// in the method with name `method_name`.
+    /// Finds the ADT with the name `adt_path` and returns the type of the parameter
+    /// with name `param_name` in the method with name `method_name`.
     pub fn get_method_param_type(
         &self,
+        ty_ctx: &TyCtx,
         adt_path: &LangPath,
         method_name: &str,
         idx: usize,
-        id: BlockId,
     ) -> LangResult<TypeId> {
-        let method = self.get_method(adt_path, method_name, id)?;
+        let method = self.get_method(ty_ctx, adt_path, method_name)?;
         self.get_param_type(method, idx)
     }
 
-    /// Finds the function with the path `fn_path` in a scope containing the block
-    /// with ID `id` and returns the type of the parameter with name `param_name`.
+    /// Finds the function with the path `fn_path` and returns the type of the
+    /// parameter with name `param_name`.
     pub fn get_fn_param_type(
         &self,
+        ty_ctx: &TyCtx,
         fn_path: &LangPath,
         idx: usize,
-        id: BlockId,
     ) -> LangResult<TypeId> {
-        let func = self.get_fn(fn_path, id)?;
+        let func = self.get_fn(ty_ctx, fn_path)?;
         self.get_param_type(func, idx)
     }
 
@@ -665,7 +736,7 @@ impl AnalyzeContext {
     /// the same identifier as the `err_path`. If atleast one ADT matches,
     /// information is added to the error message informing the user about the
     /// ADT(s) with a similar name.
-    pub fn err_adt(&self, mut err_msg: String, err_path: &LangPath) -> LangError {
+    pub fn err_adt(&self, ty_ctx: &TyCtx, mut err_msg: String, err_path: &LangPath) -> LangError {
         let mut adt_suggestions = Vec::default();
         let end_ident = &err_path.last().unwrap().0;
 
@@ -679,7 +750,7 @@ impl AnalyzeContext {
             err_msg.push_str("\nFound potential ADTs in inaccessable modules:\n - ");
             let suggestions = adt_suggestions
                 .into_iter()
-                .map(|p| p.to_string())
+                .map(|p| ty_ctx.ty_env.to_string_path(ty_ctx, &p))
                 .collect::<Vec<_>>()
                 .join("\n - ");
             err_msg.push_str(&suggestions);
@@ -694,7 +765,7 @@ impl AnalyzeContext {
     /// the same identifier as the `err_path`. If atleast one trait matches,
     /// information is added to the error message informing the user about the
     /// trait(s) with a similar name.
-    pub fn err_trait(&self, mut err_msg: String, err_path: &LangPath) -> LangError {
+    pub fn err_trait(&self, ty_ctx: &TyCtx, mut err_msg: String, err_path: &LangPath) -> LangError {
         let mut adt_suggestions = Vec::default();
         let end_ident = &err_path.last().unwrap().0;
 
@@ -708,7 +779,7 @@ impl AnalyzeContext {
             err_msg.push_str("\nFound potential traits in inaccessable modules:\n - ");
             let suggestions = adt_suggestions
                 .into_iter()
-                .map(|p| p.to_string())
+                .map(|p| ty_ctx.ty_env.to_string_path(ty_ctx, &p))
                 .collect::<Vec<_>>()
                 .join("\n - ");
             err_msg.push_str(&suggestions);
@@ -719,6 +790,6 @@ impl AnalyzeContext {
 
     /// Used when returing errors to include current line/column number.
     pub fn err(&self, msg: String) -> LangError {
-        LangError::new(msg, AnalyzeError, Some(self.file_pos))
+        LangError::new(msg, LangErrorKind::AnalyzeError, Some(self.file_pos))
     }
 }

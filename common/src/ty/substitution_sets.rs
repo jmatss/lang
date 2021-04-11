@@ -1,15 +1,17 @@
-use log::{debug, warn};
 use std::{
+    cmp::Ordering,
     collections::{hash_map::Entry, HashMap, HashSet},
     fmt::Debug,
 };
 
 use crate::{
+    ctx::{
+        ty_ctx::TyCtx,
+        ty_env::{SolveCond, TyEnv},
+    },
     error::{LangError, LangErrorKind, LangResult},
     TypeId,
 };
-
-use super::environment::TypeEnvironment;
 
 type NodeId = usize;
 
@@ -32,7 +34,7 @@ struct Node {
 ///
 /// At the end of the inference step, one can fetch the type that is to be used
 /// from the root node of the sets.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SubstitutionSets {
     ty_to_id: HashMap<TypeId, NodeId>,
     id_to_node: HashMap<NodeId, Node>,
@@ -42,13 +44,19 @@ pub struct SubstitutionSets {
     node_id: NodeId,
 }
 
-impl SubstitutionSets {
-    pub fn new() -> Self {
+impl Default for SubstitutionSets {
+    fn default() -> Self {
         Self {
             ty_to_id: HashMap::default(),
             id_to_node: HashMap::default(),
             node_id: 0,
         }
+    }
+}
+
+impl SubstitutionSets {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn new_node(&mut self, type_id: TypeId) -> NodeId {
@@ -96,11 +104,11 @@ impl SubstitutionSets {
     /// the type with the highest precedence in the set.
     pub fn union(
         &mut self,
-        ty_env: &TypeEnvironment,
+        ty_ctx: &TyCtx,
         type_id_a: TypeId,
         type_id_b: TypeId,
     ) -> LangResult<TypeId> {
-        compatible(ty_env, type_id_a, type_id_b)?;
+        compatible(ty_ctx, type_id_a, type_id_b)?;
 
         let id_a = if let Some(id) = self.ty_to_id.get(&type_id_a) {
             *id
@@ -124,16 +132,16 @@ impl SubstitutionSets {
 
         // TODO: Balancing.
         let new_root_id = if root_id_a != root_id_b {
-            let new_root_id_a = self.infer_root(ty_env, root_id_a, id_a)?;
-            let new_root_id_b = self.infer_root(ty_env, root_id_b, id_b)?;
+            let new_root_id_a = self.infer_root(ty_ctx, root_id_a, id_a)?;
+            let new_root_id_b = self.infer_root(ty_ctx, root_id_b, id_b)?;
 
-            self.infer_root_with_start(ty_env, new_root_id_a, new_root_id_b, type_id_a, type_id_b)?
+            self.infer_root_with_start(ty_ctx, new_root_id_a, new_root_id_b, type_id_a, type_id_b)?
         } else {
             // Both types are in the same set with the same root. Changing the
             // root for `a` will then affect the root for `b`, so need to take
             // that into consideration.
-            let new_root_id = self.infer_root(ty_env, root_id_a, id_a)?;
-            self.infer_root(ty_env, new_root_id, id_b)?
+            let new_root_id = self.infer_root(ty_ctx, root_id_a, id_a)?;
+            self.infer_root(ty_ctx, new_root_id, id_b)?
         };
 
         Ok(self.id_to_node.get(&new_root_id).unwrap().type_id)
@@ -152,15 +160,10 @@ impl SubstitutionSets {
     }
 
     /// See `infer_root_with_start()`.
-    fn infer_root(
-        &mut self,
-        ty_env: &TypeEnvironment,
-        id_a: NodeId,
-        id_b: NodeId,
-    ) -> LangResult<NodeId> {
+    fn infer_root(&mut self, ty_ctx: &TyCtx, id_a: NodeId, id_b: NodeId) -> LangResult<NodeId> {
         let type_id_a = self.id_to_node.get(&id_a).unwrap().type_id;
         let type_id_b = self.id_to_node.get(&id_b).unwrap().type_id;
-        self.infer_root_with_start(ty_env, id_a, id_b, type_id_a, type_id_b)
+        self.infer_root_with_start(ty_ctx, id_a, id_b, type_id_a, type_id_b)
     }
 
     /// Given two node ids `id_a` and `id_b`, figures out which of the two nodes
@@ -177,7 +180,7 @@ impl SubstitutionSets {
     /// how the types "relates" to each other.
     fn infer_root_with_start(
         &mut self,
-        ty_env: &TypeEnvironment,
+        ty_ctx: &TyCtx,
         id_a: NodeId,
         id_b: NodeId,
         start_type_id_a: TypeId,
@@ -187,18 +190,18 @@ impl SubstitutionSets {
         let type_id_b = self.id_to_node.get(&id_b).unwrap().type_id;
 
         compatible_with_start(
-            ty_env,
+            ty_ctx,
             type_id_a,
             type_id_b,
             start_type_id_a,
             start_type_id_b,
         )?;
 
-        // TODO: Remove
-        let tmp_prec = ty_env.precedence(Some(self), type_id_a, type_id_b)?;
-        warn!("prec: {}", tmp_prec);
-
-        let new_root_id = if tmp_prec { id_a } else { id_b };
+        let new_root_id = match ty_ctx.ty_env.precedence(Some(self), type_id_a, type_id_b)? {
+            Ordering::Less => id_a,
+            Ordering::Greater => id_b,
+            Ordering::Equal => unreachable!("type_id_a: {}, type_id_b: {}", type_id_a, type_id_a),
+        };
 
         if let Some(node_a) = self.id_to_node.get_mut(&id_a) {
             node_a.parent_id = new_root_id;
@@ -214,10 +217,16 @@ impl SubstitutionSets {
     /// become the new root of its set. This will happen if this type is fully
     /// solvable while the current root isn't.
     /// Returns the type ID of the new root type.
-    pub fn promote(&mut self, ty_env: &TypeEnvironment, type_id: TypeId) -> LangResult<TypeId> {
-        if ty_env.is_solved(Some(self), type_id).unwrap_or(false)
-            && self.ty_to_id.contains_key(&type_id)
-        {
+    pub fn promote(&mut self, ty_ctx: &TyCtx, type_id: TypeId) -> LangResult<TypeId> {
+        let check_inf = true;
+        let solve_cond = SolveCond::new().excl_unknown();
+        let is_solved = ty_ctx
+            .ty_env
+            .is_solved(self, type_id, check_inf, solve_cond)
+            .unwrap_or(false);
+        let is_in_ty_env = self.ty_to_id.contains_key(&type_id);
+
+        if is_solved && is_in_ty_env {
             let node_id = *self.ty_to_id.get(&type_id).unwrap();
             let root_node_id = self.find_root(node_id).unwrap();
 
@@ -225,22 +234,7 @@ impl SubstitutionSets {
                 return Ok(type_id);
             }
 
-            let tmp_root_type_id = self.id_to_node.get(&root_node_id).unwrap().type_id;
-            warn!(
-                "Promoting: {} ({}), root: {} ({})",
-                ty_env.to_string_debug(type_id)?,
-                type_id,
-                ty_env.to_string_debug(tmp_root_type_id)?,
-                tmp_root_type_id,
-            );
-
-            let new_node_id = self.infer_root(ty_env, node_id, root_node_id)?;
-
-            warn!(
-                "new root ty: {}",
-                ty_env.to_string_debug(self.id_to_node.get(&new_node_id).unwrap().type_id)?
-            );
-
+            let new_node_id = self.infer_root(ty_ctx, node_id, root_node_id)?;
             Ok(self.id_to_node.get(&new_node_id).unwrap().type_id)
         } else {
             self.inferred_type(type_id)
@@ -299,7 +293,7 @@ impl SubstitutionSets {
         self.ty_to_id.keys().cloned().collect::<HashSet<_>>()
     }
 
-    pub fn debug_print(&self, ty_env: &TypeEnvironment) {
+    pub fn debug_print(&self, ty_env: &TyEnv) {
         let mut root_to_children: HashMap<NodeId, HashSet<NodeId>> = HashMap::new();
 
         for id in self.id_to_node.keys() {
@@ -356,50 +350,53 @@ impl SubstitutionSets {
             }
         }
 
-        warn!("{}", s);
         debug!("{}", s);
     }
 }
 
 /// See `compatible_with_start()`.
-fn compatible(ty_env: &TypeEnvironment, type_id_a: TypeId, type_id_b: TypeId) -> LangResult<()> {
-    compatible_with_start(ty_env, type_id_a, type_id_b, type_id_a, type_id_b)
+fn compatible(ty_ctx: &TyCtx, type_id_a: TypeId, type_id_b: TypeId) -> LangResult<()> {
+    compatible_with_start(ty_ctx, type_id_a, type_id_b, type_id_a, type_id_b)
 }
 
 /// Checks if the types `type_id_a` and `type_id_b` are compatible and tries to
 /// put together a decent error message. `start_type_id_a` and `start_type_id_b`
 /// are only used in the case where a error happens to add some context to the error.
 fn compatible_with_start(
-    ty_env: &TypeEnvironment,
+    ty_ctx: &TyCtx,
     type_id_a: TypeId,
     type_id_b: TypeId,
     start_type_id_a: TypeId,
     start_type_id_b: TypeId,
 ) -> LangResult<()> {
-    if ty_env.is_compatible(type_id_a, type_id_b)? {
+    if ty_ctx.ty_env.is_compatible(type_id_a, type_id_b)? {
         Ok(())
     } else {
         let mut msg = format!(
-            "Found unsolvable type constraint. Tried to map the types:\n  1. {} ({:?})\n  2. {} ({:?})",
-            ty_env.to_string_debug(type_id_a)?,
-            ty_env.file_pos(type_id_a),
-            ty_env.to_string_debug(type_id_b)?,
-            ty_env.file_pos(type_id_b),
+            "Found unsolvable type constraint. Tried to map the types:\n  1. {} ({} -- {:?})\n  2. {} ({} -- {:?})",
+            ty_ctx.ty_env.to_string_type_id(ty_ctx, type_id_a)?,
+            type_id_a,
+            ty_ctx.ty_env.file_pos(type_id_a),
+            ty_ctx.ty_env.to_string_type_id(ty_ctx, type_id_b)?,
+            type_id_b,
+            ty_ctx.ty_env.file_pos(type_id_b),
         );
 
         if type_id_a != start_type_id_a {
             msg.push_str(&format!(
-                "\nThe first type (1) was inferred from the type: {} ({:?})",
-                ty_env.to_string_debug(start_type_id_a)?,
-                ty_env.file_pos(start_type_id_a),
+                "\nThe first type (1) was inferred from the type: {} ({} -- {:?})",
+                ty_ctx.ty_env.to_string_type_id(ty_ctx, start_type_id_a)?,
+                start_type_id_a,
+                ty_ctx.ty_env.file_pos(start_type_id_a),
             ));
         }
 
         if type_id_b != start_type_id_b {
             msg.push_str(&format!(
-                "\nThe second type (2) was inferred from the type: {} ({:?})",
-                ty_env.to_string_debug(start_type_id_b)?,
-                ty_env.file_pos(start_type_id_b),
+                "\nThe second type (2) was inferred from the type: {} ({} -- {:?})",
+                ty_ctx.ty_env.to_string_type_id(ty_ctx, start_type_id_b)?,
+                start_type_id_b,
+                ty_ctx.ty_env.file_pos(start_type_id_b),
             ));
         }
 

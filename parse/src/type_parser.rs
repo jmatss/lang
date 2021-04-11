@@ -1,5 +1,5 @@
-use crate::parser::{ParseTokenIter, DEFAULT_ASSIGN_STOP_CONDS};
 use common::{
+    ctx::{ty_ctx::TyCtx, ty_env::TyEnv},
     error::LangResult,
     file::FilePosition,
     path::LangPathBuilder,
@@ -8,12 +8,13 @@ use common::{
         generics::{Generics, GenericsKind},
         inner_ty::InnerTy,
         ty::Ty,
+        type_info::TypeInfo,
     },
-    type_info::TypeInfo,
     TypeId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
-use log::warn;
+
+use crate::parser::{ParseTokenIter, DEFAULT_ASSIGN_STOP_CONDS};
 
 pub struct TypeParser<'a, 'b> {
     iter: &'a mut ParseTokenIter<'b>,
@@ -29,16 +30,12 @@ impl<'a, 'b> TypeParser<'a, 'b> {
         iter: &'a mut ParseTokenIter<'b>,
         generics: Option<&'a Generics>,
         path_builder: LangPathBuilder,
-    ) -> LangResult<TypeId> {
+    ) -> LangResult<(TypeId, FilePosition)> {
         Self::new(iter, generics).parse_type_with_path(path_builder)
     }
 
-    fn parse_type(&mut self) -> LangResult<TypeId> {
+    fn parse_type(&mut self) -> LangResult<(TypeId, FilePosition)> {
         self.parse_type_with_path(LangPathBuilder::default())
-    }
-
-    fn env_file_pos(&self, id: TypeId) -> Option<FilePosition> {
-        self.iter.ty_env.file_pos(id).copied()
     }
 
     /// Valid type formats:
@@ -57,10 +54,11 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     ///   C                     Lang
     ///   uint32_t *(*x)[]      x: {[{u32}]}
     ///   char *x               x: {char}
-    fn parse_type_with_path(&mut self, mut path_builder: LangPathBuilder) -> LangResult<TypeId> {
+    fn parse_type_with_path(
+        &mut self,
+        mut path_builder: LangPathBuilder,
+    ) -> LangResult<(TypeId, FilePosition)> {
         let mut file_pos = self.iter.peek_file_pos()?;
-
-        warn!("file_pos atm: {:#?}", file_pos);
 
         if let Some(lex_token) = self.iter.next_skip_space() {
             match lex_token.kind {
@@ -74,10 +72,10 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                         // This is a module/name space ident, call this function
                         // recursively to parse the whole type.
                         self.iter.next_skip_space();
-                        let type_id = self.parse_type_with_path(path_builder)?;
-                        file_pos.set_end(&self.env_file_pos(type_id).unwrap())?;
+                        let (type_id, ty_file_pos) = self.parse_type_with_path(path_builder)?;
+                        file_pos.set_end(&ty_file_pos)?;
 
-                        Ok(type_id)
+                        Ok((type_id, file_pos))
                     } else {
                         // This is ident that represents a name of a type/ADT.
                         let generics = match self.parse_type_generics(GenericsKind::Impl)? {
@@ -97,17 +95,34 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                                 panic!("TODO: Generic decl in type has generics itself.");
                             }
 
+                            let unique_id = self.iter.ty_env.new_unique_id();
                             let type_info = TypeInfo::Generic(file_pos);
-                            self.iter.ty_env.id(&Ty::Generic(ident.clone(), type_info))
+                            Ok((
+                                self.iter.ty_env.id(&Ty::Generic(
+                                    ident.clone(),
+                                    unique_id,
+                                    type_info,
+                                ))?,
+                                file_pos,
+                            ))
                         } else {
+                            // TODO: Remove need for this.
+                            let empty_ty_ctx = TyCtx::new(TyEnv::default());
                             let inner_ty = InnerTy::ident_to_type(
-                                &path_builder.build().full_name(),
+                                &self
+                                    .iter
+                                    .ty_env
+                                    .to_string_path(&empty_ty_ctx, &path_builder.build()),
                                 self.iter.current_block_id(),
                             );
                             let type_info = TypeInfo::Default(file_pos);
-                            self.iter
-                                .ty_env
-                                .id(&Ty::CompoundType(inner_ty, generics, type_info))
+
+                            Ok((
+                                self.iter
+                                    .ty_env
+                                    .id(&Ty::CompoundType(inner_ty, generics, type_info))?,
+                                file_pos,
+                            ))
                         }
                     }
                 }
@@ -116,20 +131,20 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                 LexTokenKind::Sym(Sym::CurlyBracketBegin) => {
                     self.iter.rewind_skip_space()?; // Rewind the CurlyBracketBegin.
 
-                    let type_id = self.parse_type_pointer()?;
-                    file_pos.set_end(&self.env_file_pos(type_id).unwrap())?;
+                    let (type_id, ty_file_pos) = self.parse_type_pointer()?;
+                    file_pos.set_end(&ty_file_pos)?;
 
-                    Ok(type_id)
+                    Ok((type_id, ty_file_pos))
                 }
 
                 // Array/slice.
                 LexTokenKind::Sym(Sym::SquareBracketBegin) => {
                     self.iter.rewind_skip_space()?; // Rewind the SquareBracketBegin.
 
-                    let type_id = self.parse_type_array()?;
-                    file_pos.set_end(&self.env_file_pos(type_id).unwrap())?;
+                    let (type_id, ty_file_pos) = self.parse_type_array()?;
+                    file_pos.set_end(&ty_file_pos)?;
 
-                    Ok(type_id)
+                    Ok((type_id, file_pos))
                 }
 
                 // Function pointer.
@@ -162,11 +177,9 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                         if let Some(lex_token) = self.iter.peek_skip_space_line() {
                             if let LexTokenKind::Sym(Sym::Arrow) = lex_token.kind {
                                 self.iter.next_skip_space_line(); // Consume the arrow.
+                                let (ret_type_id, ret_file_pos) = self.iter.parse_type(None)?;
 
-                                let ret_type_id = self.iter.parse_type(None)?;
-
-                                let ret_file_pos = self.env_file_pos(ret_type_id);
-                                (Some(ret_type_id), ret_file_pos)
+                                (Some(ret_type_id), Some(ret_file_pos))
                             } else {
                                 (None, None)
                             }
@@ -182,11 +195,14 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                         file_pos.set_end(&ret_ty_file_pos)?;
                     }
 
-                    self.iter.ty_env.id(&Ty::Fn(
-                        gens,
-                        params,
-                        ret_type_id,
-                        TypeInfo::Default(file_pos),
+                    Ok((
+                        self.iter.ty_env.id(&Ty::Fn(
+                            gens,
+                            params,
+                            ret_type_id,
+                            TypeInfo::Default(file_pos),
+                        ))?,
+                        file_pos,
                     ))
                 }
 
@@ -209,9 +225,12 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     }
 
                     if let Expr::BuiltInCall(..) = expr {
-                        self.iter
-                            .ty_env
-                            .id(&Ty::Expr(Box::new(expr), TypeInfo::Default(file_pos)))
+                        Ok((
+                            self.iter
+                                .ty_env
+                                .id(&Ty::Expr(Box::new(expr), TypeInfo::Default(file_pos)))?,
+                            file_pos,
+                        ))
                     } else {
                         Err(self.iter.err(
                             format!("\"At\"(@) in type NOT built-in call, was: {:#?}", expr),
@@ -278,9 +297,9 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     cur_file_pos
                 }
                 GenericsKind::Impl => {
-                    let type_id = self.parse_type()?;
+                    let (type_id, cur_file_pos) = self.parse_type()?;
                     generics.insert_type(type_id);
-                    self.env_file_pos(type_id).unwrap()
+                    cur_file_pos
                 }
                 GenericsKind::Empty => file_pos.to_owned(),
             };
@@ -379,10 +398,9 @@ impl<'a, 'b> TypeParser<'a, 'b> {
         }
 
         loop {
-            let type_id = self.parse_type()?;
+            let (type_id, ty_file_pos) = self.parse_type()?;
             type_ids.push(type_id);
 
-            let ty_file_pos = self.env_file_pos(type_id).unwrap();
             file_pos.set_end(&ty_file_pos)?;
 
             if let Some(lex_token) = self.iter.next_skip_space() {
@@ -450,20 +468,23 @@ impl<'a, 'b> TypeParser<'a, 'b> {
 
     /// Parses a pointer type.
     ///   {X}       // Pointer to type (is the {X} syntax be weird/ambiguous?)
-    fn parse_type_pointer(&mut self) -> LangResult<TypeId> {
+    fn parse_type_pointer(&mut self) -> LangResult<(TypeId, FilePosition)> {
         let mut file_pos = self.iter.peek_file_pos()?;
 
         self.iter.next_skip_space(); // Consume the CurlyBracketBegin.
-        let type_id = self.parse_type()?;
+        let (type_id, ty_file_pos) = self.parse_type()?;
 
         // At this point the token should be a "CurlyBracketEnd" since this is
         // the end of the pointer.
         if let Some(lex_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Sym(Sym::CurlyBracketEnd) = lex_token.kind {
                 file_pos.set_end(&lex_token.file_pos)?;
-                self.iter
-                    .ty_env
-                    .id(&Ty::Pointer(type_id, TypeInfo::Default(file_pos)))
+                Ok((
+                    self.iter
+                        .ty_env
+                        .id(&Ty::Pointer(type_id, TypeInfo::Default(file_pos)))?,
+                    file_pos,
+                ))
             } else {
                 Err(self.iter.err(
                     format!(
@@ -477,7 +498,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             // TODO: Where to fetch file_pos from?
             Err(self.iter.err(
                 "Received None at end of pointer type.".into(),
-                self.iter.ty_env.file_pos(type_id).cloned(),
+                Some(ty_file_pos),
             ))
         }
     }
@@ -486,11 +507,13 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     ///   [X]       // Array of type X with unknown size (slice).
     ///   [X: 3]    // Array of type X with size 3.
     ///   [X: _]    // Array of type X with infered size.
-    fn parse_type_array(&mut self) -> LangResult<TypeId> {
+    fn parse_type_array(&mut self) -> LangResult<(TypeId, FilePosition)> {
         let mut file_pos = self.iter.peek_file_pos()?;
 
         self.iter.next_skip_space(); // Consume the SquareBracketBegin.
-        let arr_type_id = self.parse_type()?;
+        let (arr_type_id, arr_ty_file_pos) = self.parse_type()?;
+
+        file_pos.set_end(&arr_ty_file_pos)?;
 
         // At this point the token can either be a "Colon" to indicate that this
         // array type has a size specificed or it can be a "SquareBracketEnd"
@@ -543,9 +566,14 @@ impl<'a, 'b> TypeParser<'a, 'b> {
         if let Some(next_token) = self.iter.next_skip_space() {
             if let LexTokenKind::Sym(Sym::SquareBracketEnd) = next_token.kind {
                 file_pos.set_end(&next_token.file_pos)?;
-                self.iter
-                    .ty_env
-                    .id(&Ty::Array(arr_type_id, size, TypeInfo::Default(file_pos)))
+                Ok((
+                    self.iter.ty_env.id(&Ty::Array(
+                        arr_type_id,
+                        size,
+                        TypeInfo::Default(file_pos),
+                    ))?,
+                    file_pos,
+                ))
             } else {
                 Err(self.iter.err(
                     format!(

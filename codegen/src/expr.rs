@@ -1,4 +1,10 @@
-use crate::generator::CodeGen;
+use either::Either;
+use inkwell::{
+    types::{AnyTypeEnum, BasicType, BasicTypeEnum},
+    values::{AnyValueEnum, FloatValue, IntValue},
+    AddressSpace, IntPredicate,
+};
+
 use common::{
     error::LangResult,
     file::FilePosition,
@@ -7,16 +13,11 @@ use common::{
         expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall},
         lit::Lit,
     },
-    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
-    type_info::TypeInfo,
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
     TypeId,
 };
-use either::Either;
-use inkwell::{
-    types::{AnyTypeEnum, BasicType, BasicTypeEnum},
-    values::{AnyValueEnum, FloatValue, IntValue},
-    AddressSpace, IntPredicate,
-};
+
+use crate::generator::CodeGen;
 
 #[derive(Debug, Copy, Clone)]
 pub enum ExprTy {
@@ -159,7 +160,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> LangResult<IntValue<'ctx>> {
         // TODO: Where should the integer literal conversion be made?
         let inner_ty = if let Some(type_id) = type_id_opt {
-            self.analyze_context.ty_env.get_inner(*type_id)?.clone()
+            self.analyze_ctx.ty_ctx.ty_env.get_inner(*type_id)?.clone()
         } else {
             InnerTy::default_int()
         };
@@ -207,7 +208,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
             _ => {
                 return Err(self.err(
-                    format!("Invalid literal integer type: {:?}", type_id_opt),
+                    format!(
+                        "Invalid literal integer type. Type ID: {:?}, inner_ty: {:?}",
+                        type_id_opt, inner_ty
+                    ),
                     file_pos,
                 ))
             }
@@ -222,7 +226,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         file_pos: Option<FilePosition>,
     ) -> LangResult<FloatValue<'ctx>> {
         let inner_ty = if let Some(type_id) = type_id_opt {
-            self.analyze_context.ty_env.get_inner(*type_id)?.clone()
+            self.analyze_ctx.ty_ctx.ty_env.get_inner(*type_id)?.clone()
         } else {
             InnerTy::default_float()
         };
@@ -256,7 +260,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let fn_ptr = if fn_call.is_fn_ptr_call {
             let var_name = &fn_call.name;
             let decl_id = self
-                .analyze_context
+                .analyze_ctx
+                .ast_ctx
                 .get_var_decl_scope(var_name, self.cur_block_id)?;
 
             let key = (var_name.clone(), decl_id);
@@ -284,7 +289,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         } else if let Some(fn_value) = self
             .module
-            .get_function(&fn_call.full_name(&self.analyze_context.ty_env)?)
+            .get_function(&fn_call.full_name(&self.analyze_ctx.ty_ctx)?)
         {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
@@ -293,7 +298,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Wrong amount of args given when calling func \"{}\". Expected: {}, got: {}",
-                        &fn_call.full_name(&self.analyze_context.ty_env)?,
+                        &fn_call.full_name(&self.analyze_ctx.ty_ctx)?,
                         fn_value.count_params(),
                         fn_call.arguments.len()
                     ),
@@ -307,7 +312,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 format!(
                     "Unable to find function with name {} to call (full name: {:#?}).",
                     &fn_call.name,
-                    &fn_call.full_name(&self.analyze_context.ty_env)
+                    &fn_call.full_name(&self.analyze_ctx.ty_ctx)
                 ),
                 fn_call.file_pos,
             ));
@@ -336,18 +341,29 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let partial_path = fn_ptr
             .module
             .clone_push(&fn_ptr.name, fn_ptr.generics.as_ref());
-        let full_path = self
-            .analyze_context
-            .calculate_fn_full_path(&partial_path, self.cur_block_id)?;
+        let full_path = self.analyze_ctx.ast_ctx.calculate_fn_full_path(
+            &self.analyze_ctx.ty_ctx,
+            &partial_path,
+            self.cur_block_id,
+        )?;
 
-        if let Some(fn_value) = self.module.get_function(&full_path.to_string()) {
+        if let Some(fn_value) = self.module.get_function(
+            &self
+                .analyze_ctx
+                .ty_ctx
+                .ty_env
+                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+        ) {
             let fn_ptr = fn_value.as_global_value().as_pointer_value();
             Ok(fn_ptr.into())
         } else {
             Err(self.err(
                 format!(
                     "Unable to find function with full name {} (compiling fn pointer).",
-                    &full_path
+                    self.analyze_ctx
+                        .ty_ctx
+                        .ty_env
+                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path)
                 ),
                 fn_ptr.file_pos.to_owned(),
             ))
@@ -379,7 +395,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     if let Some(size) = ty.size_of() {
                         Ok(size.const_cast(self.context.i32_type(), false).into())
                     } else {
-                        Err(self.analyze_context.err(format!(
+                        Err(self.analyze_ctx.ast_ctx.err(format!(
                             "Tried to take @size non sized type: {:#?}",
                             built_in_call
                         )))
@@ -405,13 +421,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     if let Expr::Var(var) = &value {
                         let name = var.name.clone();
 
-                        let u8_type_id = self.analyze_context.ty_env.id(&Ty::CompoundType(
+                        let u8_type_id = self.analyze_ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
                             InnerTy::U8,
                             Generics::empty(),
                             TypeInfo::None,
                         ))?;
                         let ptr_type_id = self
-                            .analyze_context
+                            .analyze_ctx
+                            .ty_ctx
                             .ty_env
                             .id(&Ty::Pointer(u8_type_id, TypeInfo::None))?;
 
@@ -487,7 +504,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             // Gets the filename of the file that this built-in call is in.
             "file" => {
-                if let Some(file_info) = self.analyze_context.file_info.get(&file_pos.file_nr) {
+                if let Some(file_info) = self.analyze_ctx.ast_ctx.file_info.get(&file_pos.file_nr) {
                     let filename = file_info.filename.clone();
                     self.compile_lit(&Lit::String(filename), &None, Some(file_pos))
                 } else {
@@ -529,7 +546,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         struct_init: &mut AdtInit,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let full_name = struct_init.full_name(&self.analyze_context.ty_env)?;
+        let full_name = struct_init.full_name(&self.analyze_ctx.ty_ctx)?;
 
         let struct_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
             inner
@@ -613,17 +630,29 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let partial_path = union_init
             .module
             .clone_push(&union_init.name, union_init.generics.as_ref());
-        let full_path = self
-            .analyze_context
-            .calculate_adt_full_path(&partial_path, self.cur_block_id)?;
+        let full_path = self.analyze_ctx.ast_ctx.calculate_adt_full_path(
+            &self.analyze_ctx.ty_ctx,
+            &partial_path,
+            self.cur_block_id,
+        )?;
 
-        let union_type = if let Some(inner) = self.module.get_struct_type(&full_path.to_string()) {
+        let union_type = if let Some(inner) = self.module.get_struct_type(
+            &self
+                .analyze_ctx
+                .ty_ctx
+                .ty_env
+                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+        ) {
             inner
         } else {
             return Err(self.err(
                 format!(
                     "Unable to get union with name \"{}\". Union init: {:#?}",
-                    full_path, union_init
+                    self.analyze_ctx
+                        .ty_ctx
+                        .ty_env
+                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+                    union_init
                 ),
                 union_init.file_pos,
             ));
@@ -633,10 +662,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let any_value = self.compile_expr(&mut arg.value, ExprTy::RValue)?;
         let basic_value = CodeGen::any_into_basic_value(any_value)?;
 
-        let tag_idx = self.analyze_context.get_adt_member_index(
+        let tag_idx = self.analyze_ctx.ast_ctx.get_adt_member_index(
+            &self.analyze_ctx.ty_ctx,
             &full_path,
             &arg.name.as_ref().unwrap(),
-            self.cur_block_id,
         )?;
         let tag = self.context.i8_type().const_int(tag_idx, false);
 

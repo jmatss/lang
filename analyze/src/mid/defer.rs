@@ -1,22 +1,17 @@
-use crate::AnalyzeContext;
+use std::collections::{hash_map::Entry, HashMap};
+
 use common::{
+    ctx::{ast_ctx::AstCtx, traverse_ctx::TraverseCtx},
     error::LangError,
     token::{ast::AstToken, block::BlockHeader, expr::Expr, stmt::Stmt},
-    traverser::TraverseContext,
-    visitor::Visitor,
+    traverse::visitor::Visitor,
     BlockId,
-};
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
 };
 
 /// Iterates through all "Defer" stmts and inserts new "DeferExec" stmts in the
 /// AST where needed. This will for example be before branching away from the
 /// current block or if the block is ending.
-pub struct DeferAnalyzer<'a> {
-    analyze_context: &'a RefCell<AnalyzeContext>,
-
+pub struct DeferAnalyzer {
     /// Contains defer-statements for a specific block. Expressions will be added
     /// to this map continuously during "defer analyzing" when the statement is
     /// seen. This ensures that only the defers that have been "initialized"/"seen"
@@ -26,10 +21,9 @@ pub struct DeferAnalyzer<'a> {
     errors: Vec<LangError>,
 }
 
-impl<'a> DeferAnalyzer<'a> {
-    pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
+impl DeferAnalyzer {
+    pub fn new() -> Self {
         Self {
-            analyze_context,
             defer_stmts: HashMap::default(),
             errors: Vec::default(),
         }
@@ -75,23 +69,22 @@ impl<'a> DeferAnalyzer<'a> {
     /// evaluates to true.
     /// The defers will be returned in reverse order in the result vector with
     /// the "newest" defers at the start of the returned vector.
-    fn get_defers<F>(&mut self, id: BlockId, pred: F) -> Option<Vec<Expr>>
+    fn get_defers<F>(&mut self, ast_ctx: &AstCtx, id: BlockId, pred: F) -> Option<Vec<Expr>>
     where
         F: Fn(bool) -> bool,
     {
-        let analyze_context = self.analyze_context.borrow();
         let mut defers = Vec::new();
 
         let mut cur_id = id;
-        while let Some(cur_block_info) = analyze_context.block_info.get(&cur_id) {
+        while let Some(cur_block_ctx) = ast_ctx.block_ctxs.get(&cur_id) {
             if let Some(cur_defers) = self.defer_stmts.get(&cur_id) {
                 for defer in cur_defers.iter().rev() {
                     defers.push(defer.clone());
                 }
             }
-            cur_id = cur_block_info.parent_id;
+            cur_id = cur_block_ctx.parent_id;
 
-            if pred(cur_block_info.is_branchable_block) {
+            if pred(cur_block_ctx.is_branchable_block) {
                 break;
             }
         }
@@ -105,24 +98,24 @@ impl<'a> DeferAnalyzer<'a> {
 
     /// Given a block ID `id`, returns every deferred expression declared in the
     /// block with ID `id`. It does NOT look at any parents.
-    fn get_defers_curr_block(&mut self, id: BlockId) -> Option<Vec<Expr>> {
-        self.get_defers(id, |_| true)
+    fn get_defers_curr_block(&mut self, ast_ctx: &AstCtx, id: BlockId) -> Option<Vec<Expr>> {
+        self.get_defers(ast_ctx, id, |_| true)
     }
 
     /// Given a block ID `id`, returns every deferred expression for this block
     /// AND all its parent blocks.
-    fn get_defers_all_parents(&mut self, id: BlockId) -> Option<Vec<Expr>> {
-        self.get_defers(id, |_| false)
+    fn get_defers_all_parents(&mut self, ast_ctx: &AstCtx, id: BlockId) -> Option<Vec<Expr>> {
+        self.get_defers(ast_ctx, id, |_| false)
     }
 
     /// Given a block ID `id`, returns every deferred expression for this block
     /// and all parent blocks up to the first "branchable" block (ex. "while"
     /// and "for" blocks).
-    fn get_defers_until_branchable(&mut self, id: BlockId) -> Option<Vec<Expr>> {
-        self.get_defers(id, |x| x)
+    fn get_defers_until_branchable(&mut self, ast_ctx: &AstCtx, id: BlockId) -> Option<Vec<Expr>> {
+        self.get_defers(ast_ctx, id, |x| x)
     }
 
-    fn traverse_block(&mut self, mut ast_token: &mut AstToken) {
+    fn traverse_block(&mut self, ast_ctx: &AstCtx, mut ast_token: &mut AstToken) {
         if let AstToken::Block(block_header, _, id, body) = &mut ast_token {
             let mut i = 0;
             while i < body.len() {
@@ -137,7 +130,7 @@ impl<'a> DeferAnalyzer<'a> {
                     // This is a branch out of the current function, return all
                     // "outstanding" defers and add them before this return.
                     AstToken::Stmt(Stmt::Return(..)) => {
-                        if let Some(defers) = self.get_defers_all_parents(*id) {
+                        if let Some(defers) = self.get_defers_all_parents(ast_ctx, *id) {
                             self.insert_defers_into_ast(&mut i, body, defers);
                         }
                     }
@@ -147,23 +140,22 @@ impl<'a> DeferAnalyzer<'a> {
                     AstToken::Stmt(Stmt::Yield(..))
                     | AstToken::Stmt(Stmt::Break(..))
                     | AstToken::Stmt(Stmt::Continue(..)) => {
-                        if let Some(defers) = self.get_defers_until_branchable(*id) {
+                        if let Some(defers) = self.get_defers_until_branchable(ast_ctx, *id) {
                             self.insert_defers_into_ast(&mut i, body, defers);
                         }
                     }
 
                     // For all other tokens, traverse recursively so that the
                     // defers are introduced in the correct scope.
-                    _ => self.traverse_block(child_token),
+                    _ => self.traverse_block(ast_ctx, child_token),
                 }
                 i += 1;
             }
 
-            let analyze_context = self.analyze_context.borrow();
-            let block_info = if let Some(block_info) = analyze_context.block_info.get(id) {
-                block_info
+            let block_ctx = if let Some(block_ctx) = ast_ctx.block_ctxs.get(id) {
+                block_ctx
             } else {
-                let err = analyze_context.err(format!(
+                let err = ast_ctx.err(format!(
                     "Unable to find block info for block with ID: {}",
                     id
                 ));
@@ -173,7 +165,7 @@ impl<'a> DeferAnalyzer<'a> {
 
             // The end of the blocks scope has been reached. Any defers declared
             // in this scope should be executed at this point.
-            if !block_info.all_children_contains_returns {
+            if !block_ctx.all_children_contains_returns {
                 match block_header {
                     BlockHeader::Anonymous
                     | BlockHeader::If
@@ -182,7 +174,7 @@ impl<'a> DeferAnalyzer<'a> {
                     | BlockHeader::MatchCase(_)
                     | BlockHeader::For(_, _)
                     | BlockHeader::While(_) => {
-                        if let Some(defers) = self.get_defers_curr_block(*id) {
+                        if let Some(defers) = self.get_defers_curr_block(ast_ctx, *id) {
                             self.push_defers_into_ast(body, defers);
                         }
                     }
@@ -193,7 +185,7 @@ impl<'a> DeferAnalyzer<'a> {
     }
 }
 
-impl<'a> Visitor for DeferAnalyzer<'a> {
+impl Visitor for DeferAnalyzer {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -202,7 +194,7 @@ impl<'a> Visitor for DeferAnalyzer<'a> {
         }
     }
 
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
-        self.traverse_block(ast_token);
+    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
+        self.traverse_block(&ctx.ast_ctx, ast_token);
     }
 }

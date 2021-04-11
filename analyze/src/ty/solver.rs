@@ -1,306 +1,225 @@
-use super::context::TypeContext;
+use std::collections::{HashMap, HashSet};
+
+use log::debug;
+
 use common::{
+    ctx::{traverse_ctx::TraverseCtx, ty_env::SolveCond},
     error::{LangError, LangResult},
+    path::LangPathPart,
     token::op::UnOperator,
     token::{ast::AstToken, expr::FnCall, op::UnOp},
-    traverser::TraverseContext,
+    traverse::visitor::Visitor,
     ty::ty::Ty,
-    visitor::Visitor,
-    BlockId, TypeId,
+    TypeId,
 };
-use log::{debug, warn};
 
-/// Tried to solve all types in the type system. If unable to solve all types,
+/// Tries to solve all types in the type system. If unable to solve all types,
 /// a error will be returned.
 ///
 /// Types containing "Generic" types are NOT solved by this function, they are
 /// counted as solved at this stage. All logic related to generic types are
 /// done after this step.
-pub(crate) fn solve_all(type_context: &mut TypeContext) -> Result<(), Vec<LangError>> {
-    let all_unsolvables = solve_solvable(type_context).map_err(|e| vec![e])?;
-    warn!("All unsolvable: {:#?}", all_unsolvables);
-    solve_unsolvable(type_context, all_unsolvables)
+pub(crate) fn solve_all(ctx: &mut TraverseCtx) -> LangResult<()> {
+    let unsolvables = solve_solvable(ctx, SolveCond::new().excl_gen_inst())?;
+
+    if let Some(unsolvables) = solve_unsolvable(ctx, unsolvables)? {
+        let mut err_msg = "Unable to solve type system.".to_string();
+
+        for (type_id, child_type_ids) in unsolvables {
+            let inf_type_id = ctx.ty_ctx.inferred_type(type_id)?;
+
+            err_msg.push_str(&format!(
+                "\nUnable to solve type {} ({}). Got back unsolved: {} ({}). ty:\n{:#?}",
+                type_id,
+                ctx.ty_ctx.ty_env.to_string_type_id(&ctx.ty_ctx, type_id)?,
+                inf_type_id,
+                ctx.ty_ctx
+                    .ty_env
+                    .to_string_type_id(&ctx.ty_ctx, inf_type_id)?,
+                ctx.ty_ctx.ty_env.ty(inf_type_id)
+            ));
+
+            if !child_type_ids.is_empty() {
+                let dependant_str = child_type_ids
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                err_msg.push_str(&format!("\n  (dependant on type IDs: {})", dependant_str))
+            }
+        }
+
+        Err(ctx.ast_ctx.err(err_msg))
+    } else {
+        Ok(())
+    }
 }
 
 /// This function handles the initial solving of the types. It goes through
-/// all types in the substitution sets and tries to solve them. Any found
-/// unsolved types will be returned in the resulting vector.
-fn solve_solvable(type_context: &mut TypeContext) -> LangResult<Vec<(BlockId, TypeId)>> {
-    let mut all_unsolvables = type_context.solve_all()?;
+/// all types in the substitution sets and tries to solve them.
+///
+/// This function creates and returns a map of all types in the type environment.
+/// The keys of the map are the type IDs and the values are all unsolvable types
+/// that are contained in the specific key type ID.
+///
+/// Since the "parent" type might be needed to solve the children correctly,
+/// this map will be used to ensure that the parent continues being considered
+/// unsolved until all its chilren are solved.
+fn solve_solvable(
+    ctx: &mut TraverseCtx,
+    solve_cond: SolveCond,
+) -> LangResult<HashMap<TypeId, HashSet<TypeId>>> {
+    ctx.ty_ctx.solve_all(ctx.ast_ctx)?;
 
-    let mut all_nested_unsolvables = Vec::default();
-    for (root_id, unsolvable_type_id) in all_unsolvables.iter() {
-        let nested_unsolvables = type_context
-            .analyze_context
-            .ty_env
-            .get_unsolvable(*unsolvable_type_id)?;
+    let mut unsolvables = HashMap::default();
+    for type_id in ctx.ty_ctx.ty_env.all_types() {
+        let mut nested_unsolvables = ctx.ty_ctx.ty_env.get_unsolvable(type_id, solve_cond)?;
 
-        let mut nested_unsolvables = nested_unsolvables
-            .into_iter()
-            .map(|ty| (*root_id, ty))
-            .collect::<Vec<_>>();
-
-        all_nested_unsolvables.append(&mut nested_unsolvables);
+        if nested_unsolvables.contains(&type_id) {
+            nested_unsolvables.remove(&type_id);
+            unsolvables.insert(type_id, nested_unsolvables);
+        } else if !nested_unsolvables.is_empty() {
+            unsolvables.insert(type_id, nested_unsolvables);
+        }
     }
-
-    all_unsolvables.append(&mut all_nested_unsolvables);
-    Ok(all_unsolvables)
+    Ok(unsolvables)
 }
 
-/// This function will do a more thorough solve of the unsolved types looping
-/// over them (potentially) multiple types until on of two points are reached:
-///  1. Success. The given `unsolved_tys` is empty, all of them have been solved.
+/// This function will do a more thorough solve of the types given in `unsolvables`.
+/// It will loop over them (potentially) multiple types until on of two points
+/// are reached:
+///   1. Success. All of the types in `unsolvables` have been solved.
 /// or
-///  2. Failure. No progress was made looping over all unsolved types. This
-///     means the type system doesn't contain enough information to be solved.
+///   2. Failure. No progress was made looping over all unsolved types. This
+///      means the type system doesn't contain enough information to solve all
+///      types. Returns a map of all unsolvable types and their children.
 fn solve_unsolvable(
-    type_context: &mut TypeContext,
-    mut all_unsolvables: Vec<(BlockId, TypeId)>,
-) -> Result<(), Vec<LangError>> {
-    let mut errors = Vec::default();
-
-    if all_unsolvables.is_empty() {
-        return Ok(());
+    ctx: &mut TraverseCtx,
+    mut unsolvables: HashMap<TypeId, HashSet<TypeId>>,
+) -> LangResult<Option<HashMap<TypeId, HashSet<TypeId>>>> {
+    if unsolvables.is_empty() {
+        return Ok(None);
     }
 
-    loop {
-        let mut i = 0;
-        let start_len = all_unsolvables.len();
+    // All unsolvable types will be iterated through for every SolveCond found
+    // in `solve_conds`. It starts using the SolveCond from the start of the array
+    // which should be the "weakest" solve condition and will then, if unable to
+    // solve all types with this condition, continue using the next SolveCond
+    // in the vector. This continues until either all types are solved or until
+    // all SolveCond's have been tried and the type system isn't solvable.
+    let solve_conds = [SolveCond::new().excl_gen_inst(), SolveCond::new()];
 
-        warn!("start unsolvable -- start len: {}", start_len);
+    for solve_cond in solve_conds.iter() {
+        let mut solved_this_iteration = HashSet::new();
+        let start_len = unsolvables.len();
 
-        while i < all_unsolvables.len() {
-            let (root_id, type_id) = all_unsolvables.get(i).unwrap();
+        debug!(
+            "start unsolvable -- start len: {}, solve_cond: {:?}",
+            start_len, solve_cond
+        );
 
-            warn!("++before unsolvable solve ++ type_id: {}", type_id);
-            let inf_type_id = match type_context.solve(*type_id, *root_id) {
-                Ok(inf_type_id) => inf_type_id,
-                Err(err) => {
-                    errors.push(err);
-                    i += 1;
-                    continue;
+        for (type_id, child_type_ids) in unsolvables.iter() {
+            debug!("solve unsolvable -- type_id: {}", type_id);
+
+            ctx.ty_ctx.solve(ctx.ast_ctx, *type_id)?;
+            let inf_type_id = ctx.ty_ctx.inferred_type(*type_id)?;
+
+            let check_inf = true;
+            let is_solved = ctx.ty_ctx.ty_env.is_solved(
+                &ctx.ty_ctx.sub_sets,
+                inf_type_id,
+                check_inf,
+                *solve_cond,
+            )?;
+            if is_solved {
+                let mut all_children_solved = true;
+                for child_type_id in child_type_ids {
+                    let child_is_solved = ctx.ty_ctx.ty_env.is_solved(
+                        &ctx.ty_ctx.sub_sets,
+                        *child_type_id,
+                        check_inf,
+                        *solve_cond,
+                    )?;
+
+                    if !child_is_solved {
+                        all_children_solved = false;
+                        break;
+                    }
                 }
-            };
 
-            let sub_sets = type_context.substitutions.get(root_id);
+                debug!(
+                    "solve unsolvable -- type_id: {}, all_children_solved: {}",
+                    type_id, all_children_solved
+                );
 
-            warn!(
-                "++before unsolvable is_solve ++ type_id: {}, inf_type_id: {}",
-                type_id, inf_type_id
-            );
-            let is_solved = match type_context
-                .analyze_context
-                .ty_env
-                .is_solved(sub_sets, inf_type_id)
-            {
-                Ok(res) => res,
-                Err(err) => {
-                    errors.push(err);
-                    false
+                if all_children_solved {
+                    solved_this_iteration.insert(*type_id);
                 }
-            };
-            warn!("++after unsolvable is_solve ++");
-            let contains_generic = match type_context
-                .analyze_context
-                .ty_env
-                .contains_generic_shallow(inf_type_id)
-            {
-                Ok(res) => res,
-                Err(err) => {
-                    errors.push(err);
-                    false
-                }
-            };
-            let contains_any = match type_context
-                .analyze_context
-                .ty_env
-                .contains_any_shallow(inf_type_id)
-            {
-                Ok(res) => res,
-                Err(err) => {
-                    errors.push(err);
-                    false
-                }
-            };
-
-            warn!("unsolvable -- type_id: {}, inf_type_id: {}, is_solved: {}, contains_generic: {}, contains any: {}",
-            type_id, inf_type_id, is_solved, contains_generic, contains_any);
-
-            if is_solved || contains_generic || contains_any {
-                all_unsolvables.swap_remove(i);
-            } else {
-                i += 1;
             }
         }
 
-        warn!("end unsolvable -- end len: {}", all_unsolvables.len());
-
-        // No unsolved type was solved after a whole traversal of all unsolved
-        // types. There is no way to solve these types, report error and break.
-        if start_len == all_unsolvables.len() {
-            let mut err_msg = "Unable to solve type system.".to_string();
-
-            for (root_id, unsolved_type_id) in all_unsolvables {
-                let inf_type_id = match type_context.inferred_type(unsolved_type_id, root_id) {
-                    Ok(inf_type_id) => inf_type_id,
-                    Err(err) => {
-                        errors.push(err);
-                        continue;
-                    }
-                };
-
-                err_msg.push_str(&format!(
-                    "\n(block ID {}) Unable to resolve type {:#?}\nGot back unsolved: {:#?}.",
-                    root_id, unsolved_type_id, inf_type_id
-                ));
+        // Remove the types that was solved in this iteration.
+        if !solved_this_iteration.is_empty() {
+            for solved_type_id in solved_this_iteration {
+                unsolvables.remove(&solved_type_id);
             }
-
-            let err = type_context.analyze_context.err(err_msg);
-            errors.push(err);
-            break;
         }
 
         // No unsolved types left, all of them have been solved, success!
-        if all_unsolvables.is_empty() {
+        // Do a early, no need to iterate through all `solve_conds`.
+        if unsolvables.is_empty() {
             break;
         }
     }
 
-    if errors.is_empty() {
-        Ok(())
+    if unsolvables.is_empty() {
+        Ok(None)
     } else {
-        Err(errors)
+        Ok(Some(unsolvables))
     }
 }
 
 /// Iterates through all types in the token and replaces them with their correctly
 /// solved types.
-pub struct TypeSolver<'a, 'tctx> {
-    type_context: &'a mut TypeContext<'tctx>,
+pub struct TypeSolver {
     errors: Vec<LangError>,
 }
 
-impl<'a, 'tctx> TypeSolver<'a, 'tctx> {
-    pub fn new(type_context: &'a mut TypeContext<'tctx>) -> Self {
+impl TypeSolver {
+    pub fn new() -> Self {
         Self {
-            type_context,
             errors: Vec::default(),
         }
     }
 
-    /// Replaced the type `ty` with the preferred inferred type.
-    fn subtitute_type(&mut self, type_id: &mut TypeId, block_id: BlockId) -> LangResult<()> {
-        warn!("START SUBSTITUTE");
-        let root_id = self.type_context.analyze_context.get_root_id(block_id)?;
-        let inf_type_id = self.type_context.solve(*type_id, root_id)?;
-
-        // Converts any "UnknownInt" to i32 and "UnknownFloat" to f32.
-        self.type_context
-            .analyze_context
+    fn end_debug_print(&self, ctx: &mut TraverseCtx) {
+        let mut all_type_ids = ctx
+            .ty_ctx
             .ty_env
-            .convert_defaults(inf_type_id)?;
+            .all_types()
+            .into_iter()
+            .collect::<Vec<_>>();
+        all_type_ids.sort_unstable();
 
-        let sub_sets = self.type_context.substitutions.get(&root_id);
-        if let Some(sub_sets) = sub_sets {
-            sub_sets.debug_print(&self.type_context.analyze_context.ty_env);
-        } else {
-            warn!("cur sub_sets None.");
+        let mut all_types_string = String::new();
+        for type_id in all_type_ids {
+            all_types_string.push_str(&format!(
+                "\ntype_id: {} - {:?}",
+                type_id,
+                ctx.ty_ctx.ty_env.to_string_type_id(&ctx.ty_ctx, type_id)
+            ));
         }
 
-        let is_solved = self
-            .type_context
-            .analyze_context
-            .ty_env
-            .is_solved(sub_sets, inf_type_id)?;
-
-        let contains_generic = self
-            .type_context
-            .analyze_context
-            .ty_env
-            .contains_generic_shallow(inf_type_id)?;
-
-        let contains_any = self
-            .type_context
-            .analyze_context
-            .ty_env
-            .contains_any_shallow(inf_type_id)?;
-
-        if !(is_solved || contains_generic || contains_any) {
-            let ty = self.type_context.analyze_context.ty_env.ty(*type_id)?;
-
-            let ty_str = self
-                .type_context
-                .analyze_context
-                .ty_env
-                .to_string_debug(*type_id)?;
-
-            let inferred_ty = self.type_context.analyze_context.ty_env.ty(inf_type_id)?;
-
-            let inferred_ty_str = self
-                .type_context
-                .analyze_context
-                .ty_env
-                .to_string_debug(inf_type_id)?;
-
-            let file_pos = self.type_context.analyze_context.ty_env.file_pos(*type_id);
-
-            let inferred_file_pos = self
-                .type_context
-                .analyze_context
-                .ty_env
-                .file_pos(inf_type_id);
-
-            warn!(
-                "Unable to solve type:\n  {:?} ({} - {:?}).\nEnded up with inferred type:\n{:?} ({} - {:?})\n-- solved_type_id: {} --\nis_solved: {}, contains_generic: {}, contains_any: {}",
-                ty,
-                type_id,
-                file_pos,
-                inferred_ty_str,
-                inf_type_id,
-                inferred_file_pos,
-                inf_type_id,
-                is_solved,
-                contains_generic,
-                contains_any
-            );
-
-            return Err(self.type_context.analyze_context.err(format!(
-                "Unable to solve type:\n  {:?} ({} - {:?}).\nEnded up with inferred type:\n{:?} ({} - {:?})\n--\nis_solved: {}, contains_generic: {}, contains_any: {}",
-                inferred_ty,
-                type_id,
-                file_pos,
-                inferred_ty_str,
-                inf_type_id,
-                inferred_file_pos,
-                is_solved,
-                contains_generic,
-                contains_any
-            )));
-        }
-
-        let inf_ty = self
-            .type_context
-            .analyze_context
-            .ty_env
-            .ty(inf_type_id)?
-            .clone();
-
-        self.type_context
-            .analyze_context
-            .ty_env
-            .update(*type_id, inf_ty)?;
-
-        warn!(
-            "solve -- old_type_id: {}, new_type_id: {}",
-            type_id, inf_type_id
+        debug!(
+            "Type solving done.\nforwards: {:#?}\nall types: {}\nsubs:",
+            ctx.ty_ctx.ty_env.get_forwards(),
+            all_types_string
         );
-
-        //*type_id = inferred_type_id;
-        Ok(())
+        ctx.ty_ctx.pretty_print_subs();
     }
 }
 
-impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
+impl Visitor for TypeSolver {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -309,64 +228,56 @@ impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
         }
     }
 
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseContext) {
-        debug!("AST: {:#?}", &ast_token);
-        if self.errors.is_empty() {
-            if let Err(err) = self.type_context.promote_all() {
-                if !self.errors.contains(&err) {
-                    self.errors.push(err);
-                }
-                ctx.stop = true;
-                return;
-            }
-        }
+    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
+        debug!("before solving -- AST: {:#?}", &ast_token);
 
-        if let Err(errs) = solve_all(self.type_context) {
-            for err in errs {
-                if !self.errors.contains(&err) {
-                    self.errors.push(err);
-                }
-            }
-            self.type_context.pretty_print_subs();
-            let mut s = String::new();
-            for type_id in self.type_context.analyze_context.ty_env.all_types() {
-                s.push_str(&format!(
-                    "\nType ID: {}\nTy: {:#?}",
-                    type_id,
-                    self.type_context.analyze_context.ty_env.ty(type_id)
-                ));
-            }
-            warn!("abc123{}", s);
+        if let Err(err) = solve_all(ctx) {
+            self.errors.push(err);
+            self.end_debug_print(ctx);
+
             ctx.stop = true;
+            return;
         }
 
-        if self.errors.is_empty() {
-            if let Err(err) = self.type_context.promote_all() {
+        if let Err(err) = ctx.ty_ctx.convert_defaults() {
+            self.errors.push(err);
+            self.end_debug_print(ctx);
+
+            ctx.stop = true;
+            return;
+        }
+    }
+
+    fn visit_end(&mut self, ctx: &mut TraverseCtx) {
+        self.end_debug_print(ctx);
+    }
+
+    fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
+        let inf_type_id = match ctx.ty_ctx.inferred_type(*type_id) {
+            Ok(inf_type_id) => inf_type_id,
+            Err(err) => {
                 if !self.errors.contains(&err) {
                     self.errors.push(err);
                 }
-                ctx.stop = true;
                 return;
             }
-        }
-    }
+        };
 
-    fn visit_end(&mut self, _ctx: &mut TraverseContext) {
-        debug!("Type solving done.\nSubs:",);
-        self.type_context.pretty_print_subs();
-    }
-
-    fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseContext) {
-        if let Err(err) = self.subtitute_type(type_id, ctx.block_id) {
-            if !self.errors.contains(&err) {
-                self.errors.push(err);
+        if *type_id != inf_type_id {
+            match ctx.ty_ctx.ty_env.forward(*type_id, inf_type_id) {
+                Ok(_) => *type_id = inf_type_id,
+                Err(err) => {
+                    if !self.errors.contains(&err) {
+                        self.errors.push(err);
+                    }
+                }
             }
         }
     }
 
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, _ctx: &mut TraverseContext) {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
         if let Some(adt_type_id) = &mut fn_call.method_adt {
-            let adt_ty = match self.type_context.analyze_context.ty_env.ty(*adt_type_id) {
+            let adt_ty = match ctx.ty_ctx.ty_env.ty(*adt_type_id) {
                 Ok(adt_ty) => adt_ty,
                 Err(err) => {
                     self.errors.push(err);
@@ -375,15 +286,19 @@ impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
             };
 
             // TODO: Fix this, seems very random to fix this here.
-            // The `method_structure` might possible be a pointer to the
-            // structure, need to get the actual structure type in that case.
+            // The `method_adt` might possible be a pointer to the ADT.
+            // In that case we need to "dereference" the pointer and get the
+            // actual ADT type.
             if let Ty::Pointer(actual_adt_type_id, ..) = adt_ty {
-                *adt_type_id = *actual_adt_type_id;
+                match ctx.ty_ctx.inferred_type(*actual_adt_type_id) {
+                    Ok(inf_adt_type_id) => *adt_type_id = inf_adt_type_id,
+                    Err(err) => self.errors.push(err),
+                }
             }
         }
     }
 
-    fn visit_un_op(&mut self, un_op: &mut UnOp, ctx: &mut TraverseContext) {
+    fn visit_un_op(&mut self, un_op: &mut UnOp, ctx: &mut TraverseCtx) {
         // TODO: Move this logic to somewhere else so that this whole function
         //       `visit_un_op()` can be removed. It doesn't feel like it should
         //       be in this file.
@@ -399,20 +314,15 @@ impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
                 }
             };
 
-            let inferred_type_id = match self.type_context.inferred_type(type_id, ctx.block_id) {
-                Ok(inferred_type_id) => inferred_type_id,
+            let inf_type_id = match ctx.ty_ctx.inferred_type(type_id) {
+                Ok(inf_type_id) => inf_type_id,
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
             };
 
-            let inferred_ty = match self
-                .type_context
-                .analyze_context
-                .ty_env
-                .ty(inferred_type_id)
-            {
+            let inf_ty = match ctx.ty_ctx.ty_env.ty(inf_type_id) {
                 Ok(ty) => ty.clone(),
                 Err(err) => {
                     self.errors.push(err);
@@ -420,14 +330,16 @@ impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
                 }
             };
 
-            match inferred_ty {
+            match inf_ty {
                 Ty::CompoundType(inner_ty, ..) if inner_ty.is_adt() => {
-                    let old_name = inner_ty.get_ident().unwrap();
+                    let mut path_excluding_gens = inner_ty.get_ident().unwrap();
+                    let last_part = path_excluding_gens.pop().unwrap();
+                    path_excluding_gens.push(LangPathPart(last_part.0, None));
 
-                    let idx = match self.type_context.analyze_context.get_adt_member_index(
-                        &old_name,
+                    let idx = match ctx.ast_ctx.get_adt_member_index(
+                        &ctx.ty_ctx,
+                        &path_excluding_gens,
                         member_name,
-                        ctx.block_id,
                     ) {
                         Ok(idx) => idx,
                         Err(err) => {
@@ -440,10 +352,10 @@ impl<'a, 'tctx> Visitor for TypeSolver<'a, 'tctx> {
                 }
 
                 _ => {
-                    let err = self.type_context.analyze_context.err(format!(
+                    let err = ctx.ast_ctx.err(format!(
                         "Expression that was ADT accessed wasn't ADT or compound, was: {:#?}. \
                         Value inferred type ID: {}, inferred ty: {:#?}",
-                        un_op.value, inferred_type_id, inferred_ty
+                        un_op.value, inf_type_id, inf_ty
                     ));
                     self.errors.push(err);
                 }

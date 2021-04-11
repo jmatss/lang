@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 
 use common::{
+    ctx::ty_env::TyEnv,
     error::LangResult,
     token::{block::BuiltIn, expr::Var},
-    ty::{environment::TypeEnvironment, generics::Generics, inner_ty::InnerTy, ty::Ty},
-    type_info::TypeInfo,
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
 };
 
 /// Stores information about all built-in functions into a hashmap.
-pub fn init_built_ins(ty_env: &mut TypeEnvironment) -> LangResult<HashMap<&'static str, BuiltIn>> {
+pub fn init_built_ins(ty_env: &mut TyEnv) -> LangResult<HashMap<&'static str, BuiltIn>> {
     let mut built_ins = HashMap::with_capacity(9);
 
-    let any_type_id = ty_env.id(&Ty::Any(TypeInfo::BuiltIn))?;
+    let unique_id = ty_env.new_unique_id();
+    let any_type_id = ty_env.id(&Ty::Any(unique_id, TypeInfo::BuiltIn))?;
     let u32_type_id = ty_env.id(&Ty::CompoundType(
         InnerTy::U32,
         Generics::empty(),

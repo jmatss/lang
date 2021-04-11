@@ -1,4 +1,5 @@
 use crate::{
+    ctx::ty_ctx::TyCtx,
     path::{LangPath, LangPathPart},
     ty::generics::Generics,
 };
@@ -6,6 +7,7 @@ use crate::{
 /// Concatenates a ADT name and a method name to create the name that will
 /// be used to refer to this function. The name is concatenated with a dash.
 pub fn to_method_name(
+    ty_ctx: &TyCtx,
     adt_path: &LangPath,
     adt_generics: Option<&Generics>,
     method_name: &str,
@@ -14,10 +16,10 @@ pub fn to_method_name(
     let mut adt_path_clone = adt_path.clone();
     let last_part = adt_path_clone.pop().unwrap();
     adt_path_clone.push(LangPathPart(last_part.0, adt_generics.cloned()));
-    let adt_generic_name = adt_path_clone.full_name();
+    let adt_generic_name = ty_ctx.ty_env.to_string_path(ty_ctx, &adt_path_clone);
 
     let method_generic_name = if let Some(method_generics) = method_generics {
-        to_generic_name(&method_name, method_generics)
+        to_generic_name(ty_ctx, &method_name, method_generics)
     } else {
         method_name.into()
     };
@@ -37,11 +39,15 @@ pub fn to_var_name(name: &str, copy_nr: usize) -> String {
 /// Example A struct with two generics K and V:
 ///    TestStruct<K,V>
 /// This would be the exact format, case sensitive, no spaces etc.
-pub fn to_generic_name(old_name: &str, generics: &Generics) -> String {
+pub fn to_generic_name(ty_ctx: &TyCtx, old_name: &str, generics: &Generics) -> String {
     if generics.is_empty_types() {
         old_name.to_owned()
     } else {
-        format!("{}{}", old_name, generics.to_string())
+        format!(
+            "{}{}",
+            old_name,
+            ty_ctx.ty_env.to_string_generics(ty_ctx, generics).unwrap()
+        )
     }
 }
 

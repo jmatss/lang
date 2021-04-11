@@ -1,8 +1,6 @@
-use std::{collections::HashMap, fmt::Display, hash::Hash};
+use std::{collections::HashMap, hash::Hash};
 
-use crate::{error::LangResult, TypeId};
-
-use super::environment::TypeEnvironment;
+use crate::{ctx::ty_env::TyEnv, error::LangResult, TypeId};
 
 /// Used to indicate what kind this "Generics" is.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -137,7 +135,7 @@ impl Generics {
         self.types.iter_mut()
     }
 
-    pub fn is_solved(&self, ty_env: &mut TypeEnvironment) -> LangResult<bool> {
+    pub fn is_solved(&self, ty_env: &mut TyEnv) -> LangResult<bool> {
         let mut solved = true;
 
         for type_id in &self.types {
@@ -151,13 +149,21 @@ impl Generics {
 
         Ok(solved)
     }
+
+    pub fn to_string(&self, ty_env: &TyEnv) -> String {
+        let result = self
+            .types
+            .iter()
+            .map(|ty| ty.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("<{}>", result)
+    }
 }
 
 impl Hash for Generics {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        for name in &self.names {
-            name.hash(state);
-        }
+        // Ignore names since they might not be set in some instances.
         for ty in &self.types {
             ty.hash(state);
         }
@@ -166,7 +172,7 @@ impl Hash for Generics {
 
 impl PartialEq for Generics {
     fn eq(&self, other: &Self) -> bool {
-        if self.len() != other.len() {
+        if self.len_types() != other.len_types() {
             return false;
         }
 
@@ -187,18 +193,5 @@ impl PartialEq for Generics {
         }
 
         true
-    }
-}
-
-impl Display for Generics {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let result = self
-            .types
-            .iter()
-            .map(|ty| ty.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-
-        write!(f, "<{}>", result)
     }
 }

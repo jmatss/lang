@@ -1,10 +1,8 @@
 use crate::{
+    ctx::ty_env::SolveCond,
     path::{LangPath, LangPathPart},
-    BlockId,
+    BlockId, UniqueId,
 };
-use std::fmt::Display;
-
-use super::environment::TypeEnvironment;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum InnerTy {
@@ -31,9 +29,8 @@ pub enum InnerTy {
     U128,
 
     /// This is used during the type inference stage. Every expr must have a type,
-    /// so this is used for expr that doesn't have a known type. The string will
-    /// be a arbitrary unique ID.
-    Unknown(String),
+    /// so this is used for expr that doesn't have a known type.
+    Unknown(UniqueId),
 
     /// This is used during the type inference stage. This type will be given to
     /// found identifier type. This can be ex. the name of a struct/interface/enum.
@@ -41,23 +38,23 @@ pub enum InnerTy {
     UnknownIdent(LangPath, BlockId),
 
     /// A int type used during type inferece. It is known that it is of a int
-    /// type, but the bit size isn't known.
-    /// The first String is the unique ID and the second u32 is the radix.
-    UnknownInt(String, u32),
+    /// type, but the bit size isn't known. The `u32` is the radix.
+    UnknownInt(UniqueId, u32),
 
     /// A float type used during type inferece. It is known that it is of a float
     /// type, but the bit size isn't known.
-    UnknownFloat(String),
+    UnknownFloat(UniqueId),
 }
 
 #[allow(clippy::match_like_matches_macro)]
 impl InnerTy {
-    pub fn is_solved(&self) -> bool {
+    pub fn is_solved(&self, solve_cond: SolveCond) -> bool {
         self.is_primitive()
             || self.is_string()
             || self.is_adt()
             || self.is_trait()
-            || matches!(self, InnerTy::UnknownInt(..) | InnerTy::UnknownFloat(..))
+            || (solve_cond.can_solve_default()
+                && matches!(self, InnerTy::UnknownInt(..) | InnerTy::UnknownFloat(..)))
     }
 
     pub fn get_ident(&self) -> Option<LangPath> {
@@ -260,51 +257,5 @@ impl InnerTy {
             | (InnerTy::UnknownFloat(_), InnerTy::UnknownFloat(_)) => true,
             _ => false,
         }
-    }
-
-    pub fn to_string_debug(&self) -> String {
-        match self {
-            InnerTy::Unknown(_) => "unknown".into(),
-            InnerTy::UnknownInt(_, _) => "unknown_int".into(),
-            InnerTy::UnknownFloat(_) => "unknown_float".into(),
-            InnerTy::UnknownIdent(path, ..) => format!("unknown_ident({})", path),
-            _ => self.to_string(),
-        }
-    }
-}
-
-impl Display for InnerTy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            InnerTy::Struct(path)
-            | InnerTy::Enum(path)
-            | InnerTy::Union(path)
-            | InnerTy::Trait(path) => return write!(f, "{}", path.to_string()),
-            _ => (),
-        }
-
-        let result = match self {
-            InnerTy::Void => "void",
-            InnerTy::Character => "char",
-            InnerTy::String => "String",
-            InnerTy::Boolean => "bool",
-            InnerTy::I8 => "i8",
-            InnerTy::U8 => "u8",
-            InnerTy::I16 => "i16",
-            InnerTy::U16 => "u16",
-            InnerTy::I32 => "i32",
-            InnerTy::U32 => "u32",
-            InnerTy::F32 => "f32",
-            InnerTy::I64 => "i64",
-            InnerTy::U64 => "u64",
-            InnerTy::F64 => "f64",
-            InnerTy::I128 => "i128",
-            InnerTy::U128 => "u128",
-            _ => unreachable!(
-                "Invalid type when calling `to_string` on inner type: {:?}",
-                self
-            ),
-        };
-        write!(f, "{}", result)
     }
 }

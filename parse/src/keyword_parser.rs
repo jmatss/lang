@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use common::{
     error::LangResult,
-    file::{self, FilePosition},
+    file::FilePosition,
     token::{
         ast::AstToken,
         block::{Adt, BlockHeader, Fn, Trait},
@@ -14,12 +14,11 @@ use common::{
         generics::{Generics, GenericsKind},
         inner_ty::InnerTy,
         ty::Ty,
+        type_info::TypeInfo,
     },
-    type_info::TypeInfo,
     TypeId,
 };
 use lex::token::{Kw, LexTokenKind, Sym};
-use log::warn;
 
 use crate::parser::{ParseTokenIter, DEFAULT_STOP_CONDS, KEYWORD_STOP_CONDS};
 
@@ -587,11 +586,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         file_pos.set_end(&var_file_pos)?;
 
-        warn!(
-            "var_decl ({}), var_file_pos: {:#?}, file_pos: {:#?}",
-            ident, var_file_pos, file_pos
-        );
-
         let parse_type = true;
         let parse_value = true;
         let var = Rc::new(RefCell::new(self.iter.parse_var(
@@ -755,9 +749,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             if let LexTokenKind::Sym(Sym::Arrow) = lex_token.kind {
                 self.iter.next_skip_space_line(); // Consume the arrow.
 
-                let ret_type_id = self.iter.parse_type(None)?;
-                let ret_type_id_file_pos = self.iter.ty_env.file_pos(ret_type_id).copied();
-                (Some(ret_type_id), ret_type_id_file_pos)
+                let (ret_type_id, ret_file_pos) = self.iter.parse_type(None)?;
+                (Some(ret_type_id), Some(ret_file_pos))
             } else {
                 (None, None)
             }
@@ -1174,7 +1167,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
             let mut types = Vec::default();
             loop {
-                let type_id = self.iter.parse_type(generics)?;
+                let (type_id, _) = self.iter.parse_type(generics)?;
                 types.push(type_id);
 
                 // TODO: Should trailing commas be allowed?

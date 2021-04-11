@@ -1,25 +1,20 @@
-use std::{
-    cell::{RefCell, RefMut},
-    collections::{hash_map::Entry, HashMap, HashSet},
-};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
-use crate::{block::BlockInfo, AnalyzeContext};
+use log::debug;
+
 use common::{
+    ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx, traverse_ctx::TraverseCtx},
     error::{LangError, LangErrorKind},
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader, stmt::Stmt},
-    traverser::TraverseContext,
-    visitor::Visitor,
+    traverse::visitor::Visitor,
     BlockId,
 };
-use log::debug;
 
 /// Visits all blocks and gathers information related to them. It will add
 /// "BlockInfo"s into the analyze context containing information about block
 /// parent, specific branch statements the block contains etc.
-pub struct BlockAnalyzer<'a> {
-    analyze_context: &'a RefCell<AnalyzeContext>,
-
+pub struct BlockAnalyzer {
     /// Will contain the current module/nameSpace for the block that is being
     /// analyzed.
     module: Option<LangPath>,
@@ -37,10 +32,9 @@ pub struct BlockAnalyzer<'a> {
     errors: Vec<LangError>,
 }
 
-impl<'a, 'a_ctx> BlockAnalyzer<'a> {
-    pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
+impl BlockAnalyzer {
+    pub fn new() -> Self {
         Self {
-            analyze_context,
             module: None,
             uses: HashMap::default(),
             is_first_stmt: true,
@@ -70,18 +64,18 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
     /// only the "use a" will be contained in the returned set.
     /// The "use b" will not be contained in the uses since it hasn't been
     /// traversed yet.
-    fn get_uses(&self, analyze_context: &RefMut<AnalyzeContext>, id: BlockId) -> HashSet<LangPath> {
+    fn get_uses(&self, ast_ctx: &mut AstCtx, id: BlockId) -> HashSet<LangPath> {
         let mut uses = HashSet::default();
 
         let mut cur_id = id;
-        while let Some(cur_block_info) = analyze_context.block_info.get(&cur_id) {
+        while let Some(cur_block_info) = ast_ctx.block_ctxs.get(&cur_id) {
             if let Some(cur_uses) = self.uses.get(&cur_id) {
                 for path in cur_uses.iter() {
                     uses.insert(path.clone());
                 }
             }
 
-            if cur_id == BlockInfo::DEFAULT_BLOCK_ID {
+            if cur_id == BlockCtx::DEFAULT_BLOCK_ID {
                 break;
             }
 
@@ -111,26 +105,21 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
 
     /// Sets the information about if a statement exists in `block_info`.
     /// Also gathers information about "mod" and "use" statements for blocks.
-    fn analyze_stmt(
-        &mut self,
-        analyze_context: &mut RefMut<AnalyzeContext>,
-        stmt: &Stmt,
-        id: usize,
-    ) {
-        let file_pos = analyze_context.file_pos.to_owned();
-        let block_info = analyze_context.block_info.get_mut(&id).unwrap();
+    fn analyze_stmt(&mut self, ast_ctx: &mut AstCtx, stmt: &Stmt, id: usize) {
+        let file_pos = ast_ctx.file_pos.to_owned();
+        let block_ctx = ast_ctx.block_ctxs.get_mut(&id).unwrap();
 
         match stmt {
-            Stmt::Return(..) => block_info.contains_return = true,
-            Stmt::Yield(..) => block_info.contains_yield = true,
-            Stmt::Break(..) => block_info.contains_break = true,
-            Stmt::Continue(..) => block_info.contains_continue = true,
-            Stmt::Defer(..) => block_info.contains_defer = true,
+            Stmt::Return(..) => block_ctx.contains_return = true,
+            Stmt::Yield(..) => block_ctx.contains_yield = true,
+            Stmt::Break(..) => block_ctx.contains_break = true,
+            Stmt::Continue(..) => block_ctx.contains_continue = true,
+            Stmt::Defer(..) => block_ctx.contains_defer = true,
 
             // Add the use to the current block. Also add it to the `self.uses`
             // so that it can be found from the child blocks as well.
             Stmt::Use(path) => {
-                match self.uses.entry(block_info.block_id) {
+                match self.uses.entry(block_ctx.block_id) {
                     Entry::Occupied(mut o) => {
                         o.get_mut().insert(path.clone());
                     }
@@ -141,18 +130,18 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
                     }
                 }
 
-                block_info.add_use(path.clone());
+                block_ctx.add_use(path.clone());
             }
 
             // Module statements are only allowed in the default block (top
             // level of a file) and there can be max one statement per file.
             // It must also be the first statement in the file.
             Stmt::Module(path) => {
-                if block_info.block_id != BlockInfo::DEFAULT_BLOCK_ID {
+                if block_ctx.block_id != BlockCtx::DEFAULT_BLOCK_ID {
                     let err = LangError::new(
                         format!(
                             "Module statement found in non default block with ID {}. Stmt: {:#?}",
-                            block_info.block_id, stmt
+                            block_ctx.block_id, stmt
                         ),
                         LangErrorKind::AnalyzeError,
                         Some(file_pos),
@@ -163,7 +152,7 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
                     let err = LangError::new(
                         format!(
                             "Module already set for block with ID {}.\nPrevious mod: {:#?}, new: {:#?}",
-                            block_info.block_id, self.module, stmt
+                            block_ctx.block_id, self.module, stmt
                         ),
                         LangErrorKind::AnalyzeError,
                         Some(file_pos),
@@ -196,13 +185,8 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
     }
 
     // TODO: Do this borrowing of analyze_context in a less ugly way.
-    fn analyze_block(
-        &mut self,
-        analyze_context: &mut RefMut<AnalyzeContext>,
-        ast_token: &AstToken,
-        parent_id: usize,
-    ) {
-        analyze_context.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
+    fn analyze_block(&mut self, ast_ctx: &mut AstCtx, ast_token: &AstToken, parent_id: usize) {
+        ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
         if let AstToken::Block(ref header, file_pos, id, body) = &ast_token {
             let is_root_block = self.is_root(header);
@@ -215,20 +199,20 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
             //      the "use"s that have been seen/traversed.
             //      These values might be updated when statements in this block
             //      is traversed further down in this function.
-            let mut block_info = BlockInfo::new(
+            let mut block_ctx = BlockCtx::new(
                 *id,
                 file_pos.to_owned(),
                 is_root_block,
                 is_branchable_block,
                 self.module.clone(),
-                self.get_uses(analyze_context, parent_id),
+                self.get_uses(ast_ctx, parent_id),
             );
 
-            if *id != BlockInfo::DEFAULT_BLOCK_ID {
-                block_info.parent_id = parent_id;
+            if *id != BlockCtx::DEFAULT_BLOCK_ID {
+                block_ctx.parent_id = parent_id;
             }
 
-            analyze_context.block_info.insert(*id, block_info);
+            ast_ctx.block_ctxs.insert(*id, block_ctx);
 
             // When iterating through all tokens, look at the If and Ifcases
             // and keep track if all their children contains return statements.
@@ -249,14 +233,14 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
                     | AstToken::Block(BlockHeader::While(..), _, child_id, _)
                     | AstToken::Block(BlockHeader::Test(_), _, child_id, _)
                     | AstToken::Block(BlockHeader::Anonymous, _, child_id, _) => {
-                        self.analyze_block(analyze_context, child_token, *id);
+                        self.analyze_block(ast_ctx, child_token, *id);
 
-                        if let Some(child_block_info) = analyze_context.block_info.get(&child_id) {
+                        if let Some(child_block_info) = ast_ctx.block_ctxs.get(&child_id) {
                             if !child_block_info.all_children_contains_returns {
                                 all_children_contains_returns = false;
                             }
                         } else {
-                            let err = analyze_context.err(format!(
+                            let err = ast_ctx.err(format!(
                                 "Unable to get block info for ID {} when in ID {}.",
                                 child_id, id
                             ));
@@ -272,11 +256,11 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
                     | AstToken::Block(BlockHeader::Union(_), ..)
                     | AstToken::Block(BlockHeader::Trait(_), ..)
                     | AstToken::Block(BlockHeader::Implement(..), ..) => {
-                        self.analyze_block(analyze_context, child_token, *id);
+                        self.analyze_block(ast_ctx, child_token, *id);
                     }
 
                     AstToken::Stmt(ref stmt) => {
-                        self.analyze_stmt(analyze_context, stmt, *id);
+                        self.analyze_stmt(ast_ctx, stmt, *id);
                     }
 
                     // Reset the "mod" statement when the end of the file is reached.
@@ -299,7 +283,7 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
             // Set the flag to indicate if all children contains return statements
             // for the current block. If this block doesn't have any children,
             // the value will be set to true if this block itself contains a return.
-            let block_info = analyze_context.block_info.get_mut(id).unwrap();
+            let block_info = ast_ctx.block_ctxs.get_mut(id).unwrap();
             block_info.all_children_contains_returns = if child_count > 0 {
                 all_children_contains_returns
             } else {
@@ -309,7 +293,7 @@ impl<'a, 'a_ctx> BlockAnalyzer<'a> {
     }
 }
 
-impl<'a> Visitor for BlockAnalyzer<'a> {
+impl Visitor for BlockAnalyzer {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -321,19 +305,15 @@ impl<'a> Visitor for BlockAnalyzer<'a> {
     /// All traversing is done from the default block, no other visit function
     /// will be used. The reason being that this needs to be called recursively
     /// on blocks, which currently isn't possible to do with the regular traverser.
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
-        let mut analyze_context = self.analyze_context.borrow_mut();
-        self.analyze_block(&mut analyze_context, ast_token, usize::MAX);
+    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
+        self.analyze_block(&mut ctx.ast_ctx, ast_token, usize::MAX);
     }
 
-    fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
+    fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
         self.is_first_stmt = true;
     }
 
-    fn visit_end(&mut self, _ctx: &mut TraverseContext) {
-        debug!(
-            "BLOCK_INFO --\n{:#?}",
-            self.analyze_context.borrow_mut().block_info
-        );
+    fn visit_end(&mut self, ctx: &mut TraverseCtx) {
+        debug!("BLOCK_CTX --\n{:#?}", ctx.ast_ctx.block_ctxs);
     }
 }

@@ -30,7 +30,7 @@ fn main() -> i32
     ts3.instance_method(90)
 
     var static_res_i = TestStruct::static_method(i)
-    var static_res_f = TestStruct<f64>::static_method(f)
+    var static_res_f = TestStruct<f64>::static_method(789.)
 
     return 0
 }

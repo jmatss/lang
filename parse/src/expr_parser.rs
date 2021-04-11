@@ -11,8 +11,8 @@ use common::{
         generics::{Generics, GenericsKind},
         inner_ty::InnerTy,
         ty::Ty,
+        type_info::TypeInfo,
     },
-    type_info::TypeInfo,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 use log::debug;
@@ -304,9 +304,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 LexTokenKind::Sym(symbol @ Sym::As) | LexTokenKind::Sym(symbol @ Sym::Of) => {
                     if let Some(op) = crate::token::get_if_expr_op(&symbol) {
                         self.shunt_operator(op)?;
-                        let type_id = self.iter.parse_type(None)?;
-                        let type_id_file_pos = self.iter.ty_env.file_pos(type_id).copied();
-                        let expr = Expr::Type(type_id, type_id_file_pos);
+                        let (type_id, ty_file_pos) = self.iter.parse_type(None)?;
+                        let expr = Expr::Type(type_id, Some(ty_file_pos));
 
                         if let Some(expr_file_pos) = expr.file_pos() {
                             file_pos.set_end(expr_file_pos)?;
@@ -609,9 +608,14 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         mut file_pos: FilePosition,
         mut path_builder: LangPathBuilder,
     ) -> LangResult<Expr> {
-        let generics = self.parse_generic_impls(&mut file_pos);
+        let gens_opt = self.parse_generic_impls(&mut file_pos);
 
-        path_builder.add_path(ident).file_pos(file_pos.to_owned());
+        if let Some(gens) = &gens_opt {
+            path_builder.add_path_gen(ident, gens);
+        } else {
+            path_builder.add_path(ident);
+        }
+        path_builder.file_pos(file_pos.to_owned());
 
         let pos = self.iter.pos();
 
@@ -639,7 +643,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         ident.into(),
                         module,
                         arguments,
-                        generics,
+                        gens_opt,
                         Some(file_pos),
                     )))
                 }
@@ -662,7 +666,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         ident.into(),
                         module,
                         arguments,
-                        generics,
+                        gens_opt,
                         Some(file_pos),
                         AdtKind::Unknown,
                     )))
@@ -711,9 +715,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                                 // identifier and parse as type.
                                 self.iter.rewind_to_pos(pos);
 
-                                let type_id = self.iter.parse_type_with_path(None, path_builder)?;
-                                let type_id_file_pos = self.iter.ty_env.file_pos(type_id).copied();
-                                return Ok(Expr::Type(type_id, type_id_file_pos));
+                                let (type_id, ty_file_pos) =
+                                    self.iter.parse_type_with_path(None, path_builder)?;
+                                return Ok(Expr::Type(type_id, Some(ty_file_pos)));
                             }
 
                             _ => (),
@@ -755,7 +759,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             parse_type,
                             parse_value,
                             is_const,
-                            generics.as_ref(),
+                            gens_opt.as_ref(),
                             file_pos,
                         )?;
 

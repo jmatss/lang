@@ -1,5 +1,14 @@
-use crate::{expr::ExprTy, generator::CodeGen};
+use inkwell::{
+    basic_block::BasicBlock,
+    builder::Builder,
+    module::Linkage,
+    types::AnyTypeEnum,
+    values::{AggregateValue, AnyValueEnum, FunctionValue, IntValue, PointerValue},
+};
+use log::debug;
+
 use common::{
+    ctx::ty_env::TyEnv,
     error::{
         LangError,
         LangErrorKind::{self, CodeGenError},
@@ -12,17 +21,11 @@ use common::{
         block::{Adt, BlockHeader, Fn},
         expr::{Expr, Var},
     },
-    ty::{environment::TypeEnvironment, inner_ty::InnerTy, ty::Ty},
+    ty::{inner_ty::InnerTy, ty::Ty},
     util, BlockId, TypeId,
 };
-use inkwell::{
-    basic_block::BasicBlock,
-    builder::Builder,
-    module::Linkage,
-    types::AnyTypeEnum,
-    values::{AggregateValue, AnyValueEnum, FunctionValue, IntValue, PointerValue},
-};
-use log::debug;
+
+use crate::{expr::ExprTy, generator::CodeGen};
 
 /// Contains information related to branches in either a if-statement or a
 /// match-statement. This will then be sent around to all if-cases so that
@@ -87,11 +90,7 @@ enum CodeGenTy {
 }
 
 impl CodeGenTy {
-    fn new(
-        ty_env: &TypeEnvironment,
-        type_id: TypeId,
-        file_pos: Option<FilePosition>,
-    ) -> LangResult<Self> {
+    fn new(ty_env: &TyEnv, type_id: TypeId, file_pos: Option<FilePosition>) -> LangResult<Self> {
         // TODO: Add more types.
         match ty_env.ty(type_id)? {
             Ty::CompoundType(inner_ty, ..) => match inner_ty {
@@ -291,17 +290,18 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         func_id: BlockId,
         body: &mut [AstToken],
     ) -> LangResult<()> {
-        let module = if let Some(module) = self.analyze_context.get_module(self.cur_block_id)? {
+        let module = if let Some(module) = self.analyze_ctx.ast_ctx.get_module(self.cur_block_id)? {
             module
         } else {
             LangPath::default()
         };
 
         let fn_name = if let Some(adt_type_id) = &func.method_adt {
-            let adt_ty = self.analyze_context.ty_env.ty(*adt_type_id)?;
+            let adt_ty = self.analyze_ctx.ty_ctx.ty_env.ty(*adt_type_id)?;
             if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
                 util::to_method_name(
+                    &self.analyze_ctx.ty_ctx,
                     &adt_path.last().cloned().unwrap().into(),
                     Some(adt_gens),
                     &func.name,
@@ -316,13 +316,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let full_path = module.clone_push(&fn_name, func.generics.as_ref());
 
-        let fn_val = if let Some(fn_val) = self.module.get_function(&full_path.full_name()) {
+        let fn_val = if let Some(fn_val) = self.module.get_function(
+            &self
+                .analyze_ctx
+                .ty_ctx
+                .ty_env
+                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+        ) {
             fn_val
         } else {
             return Err(self.err(
                 format!(
                     "Unable to find function with name \"{}\".",
-                    &full_path.full_name()
+                    self.analyze_ctx
+                        .ty_ctx
+                        .ty_env
+                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path)
                 ),
                 Some(file_pos.to_owned()),
             ));
@@ -409,20 +418,26 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> LangResult<FunctionValue<'ctx>> {
         debug!("compile_fn_proto: {:#?}", func);
 
-        let module = if let Some(module) = self.analyze_context.get_module(self.cur_block_id)? {
+        let module = if let Some(module) = self.analyze_ctx.ast_ctx.get_module(self.cur_block_id)? {
             module
         } else {
             LangPath::default()
         };
 
         let fn_name = if let Some(adt_type_id) = &func.method_adt {
-            let adt_ty = self.analyze_context.ty_env.ty(*adt_type_id)?;
+            let adt_ty = self.analyze_ctx.ty_ctx.ty_env.ty(*adt_type_id)?;
             if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
                 let last_part = adt_path.last().unwrap();
-                let short_adt_path = LangPath::new(vec![last_part.clone()], None);
+                let adt_path_without_gens = LangPath::new(vec![last_part.clone()], None);
 
-                util::to_method_name(&short_adt_path, Some(adt_gens), &func.name, None)
+                util::to_method_name(
+                    &self.analyze_ctx.ty_ctx,
+                    &adt_path_without_gens,
+                    Some(adt_gens),
+                    &func.name,
+                    None,
+                )
             } else {
                 unreachable!("method call on non compund type: {:#?}", func);
             }
@@ -445,7 +460,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     return Err(self.err(
                         format!(
                             "Bad type for parameter with name\"{}\" in function \"{}\".",
-                            &param.name, &full_path
+                            &param.name,
+                            self.analyze_ctx
+                                .ty_ctx
+                                .ty_env
+                                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path)
                         ),
                         param.file_pos.to_owned(),
                     ));
@@ -476,9 +495,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .fn_type(param_types.as_slice(), func.is_var_arg)
         };
 
-        Ok(self
-            .module
-            .add_function(&full_path.full_name(), fn_type, linkage_opt))
+        Ok(self.module.add_function(
+            &self
+                .analyze_ctx
+                .ty_ctx
+                .ty_env
+                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+            fn_type,
+            linkage_opt,
+        ))
     }
 
     fn compile_anon(
@@ -517,9 +542,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // If all paths in this block doesn't branch away, it needs to branch
         // to a merge block. Otherwise, if all paths branches away, no merge
         // block should be created.
-        if let Some(block_info) = self.analyze_context.block_info.get(&id) {
+        if let Some(block_ctx) = self.analyze_ctx.ast_ctx.block_ctxs.get(&id) {
             self.cur_basic_block =
-                if !block_info.all_children_contains_returns || !block_info.contains_return {
+                if !block_ctx.all_children_contains_returns || !block_ctx.contains_return {
                     let merge_block = self.context.append_basic_block(cur_func, "anon.merge");
                     self.merge_blocks.insert(id, merge_block);
 
@@ -590,8 +615,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // branch away. The merge block will NOT be created if all if-cases
         // contains a return instruction. This is because there is no possiblity
         // to end up in the merge block in that case, so it would just be empty.
-        let merge_block_opt = if let Some(block_info) = self.analyze_context.block_info.get(&id) {
-            if !block_info.all_children_contains_returns {
+        let merge_block_opt = if let Some(block_ctx) = self.analyze_ctx.ast_ctx.block_ctxs.get(&id)
+        {
+            if !block_ctx.all_children_contains_returns {
                 let merge_block = self
                     .context
                     .insert_basic_block_after(prev_block, "if.merge");
@@ -718,7 +744,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         })?;
 
         let codegen_ty = CodeGenTy::new(
-            &self.analyze_context.ty_env,
+            &self.analyze_ctx.ty_ctx.ty_env,
             expr.get_expr_type()?,
             file_pos,
         )?;
@@ -891,7 +917,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Bad type for struct \"{}\" member \"{}\".",
-                        &full_path, &member.name
+                        self.analyze_ctx
+                            .ty_ctx
+                            .ty_env
+                            .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+                        &member.name
                     ),
                     member_file_pos,
                 ));
@@ -899,7 +929,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         let packed = false;
-        let struct_ty = self.context.opaque_struct_type(&full_path.full_name());
+        let struct_ty = self.context.opaque_struct_type(
+            &self
+                .analyze_ctx
+                .ty_ctx
+                .ty_env
+                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+        );
         struct_ty.set_body(member_types.as_ref(), packed);
 
         Ok(())
@@ -928,14 +964,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "No default value set for first member in enum \"{}\".",
-                        &full_path
+                        self.analyze_ctx
+                            .ty_ctx
+                            .ty_env
+                            .to_string_path(&self.analyze_ctx.ty_ctx, &full_path)
                     ),
                     member_file_pos,
                 ));
             }
         } else {
             return Err(self.err(
-                format!("Unable to find first member in enum \"{}\".", &full_path),
+                format!(
+                    "Unable to find first member in enum \"{}\".",
+                    self.analyze_ctx
+                        .ty_ctx
+                        .ty_env
+                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path)
+                ),
                 None,
             ));
         };
@@ -944,7 +989,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let basic_ty = CodeGen::any_into_basic_type(any_ty)?;
 
         let packed = false;
-        let enum_ty = self.context.opaque_struct_type(&full_path.full_name());
+        let enum_ty = self.context.opaque_struct_type(
+            &self
+                .analyze_ctx
+                .ty_ctx
+                .ty_env
+                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+        );
         enum_ty.set_body(&[basic_ty], packed);
 
         Ok(())
@@ -984,7 +1035,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Bad type for union \"{}\" member \"{}\".",
-                        &full_path, &member.name
+                        self.analyze_ctx
+                            .ty_ctx
+                            .ty_env
+                            .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+                        &member.name
                     ),
                     member_file_pos,
                 ));
@@ -995,7 +1050,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let member_ty = self.context.i8_type().array_type(largest_size as u32);
 
         let packed = false;
-        let union_ty = self.context.opaque_struct_type(&full_path.full_name());
+        let union_ty = self.context.opaque_struct_type(
+            &self
+                .analyze_ctx
+                .ty_ctx
+                .ty_env
+                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+        );
         union_ty.set_body(&[tag_ty.into(), member_ty.into()], packed);
 
         Ok(())

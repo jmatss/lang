@@ -153,8 +153,8 @@ fn main() -> LangResult<()> {
     let ty_env = std::mem::take(&mut parser.ty_env);
 
     let analyze_timer = Instant::now();
-    let mut analyze_context = match analyze(&mut ast_root, ty_env, file_info) {
-        Ok(analyze_context) => analyze_context,
+    let mut analyze_ctx = match analyze(&mut ast_root, ty_env, file_info) {
+        Ok(analyze_ctx) => analyze_ctx,
         Err(errs) => {
             for e in errs {
                 eprintln!("[ERROR] {}", e);
@@ -168,7 +168,7 @@ fn main() -> LangResult<()> {
     } else if opts.ast {
         println!("\nAST after analyze:\n{:#?}", ast_root);
     }
-    analyze_context.debug_print();
+    analyze_ctx.ast_ctx.debug_print();
 
     let generate_timer = Instant::now();
     let target_machine = compiler::setup_target()?;
@@ -177,7 +177,7 @@ fn main() -> LangResult<()> {
     let module = context.create_module(&opts.module_name);
     match generator::generate(
         &mut ast_root,
-        &mut analyze_context,
+        &mut analyze_ctx,
         &context,
         &builder,
         &module,
@@ -191,7 +191,7 @@ fn main() -> LangResult<()> {
     }
 
     println!("Generating complete ({:?}).", generate_timer.elapsed());
-    if opts.dump {
+    if opts.llvm {
         println!("\n## LLVM IR before optimization ##");
         module.print_to_stderr();
     }
@@ -201,7 +201,7 @@ fn main() -> LangResult<()> {
     compiler::compile(target_machine, &module, &opts.output_file, opts.optimize)?;
     println!("Compiling complete ({:?}).", compile_timer.elapsed());
 
-    if opts.dump && opts.optimize {
+    if opts.llvm && opts.optimize {
         println!("\n## LLVM IR after optimization ##");
         module.print_to_stderr();
     }
@@ -217,7 +217,7 @@ struct Options {
     output_file: String,
     module_name: String,
     optimize: bool,
-    dump: bool,
+    llvm: bool,
     ast: bool,
 }
 
@@ -303,7 +303,7 @@ fn parse_opts() -> Options {
         output_file: matches.value_of("output").unwrap().into(),
         module_name: matches.value_of("module").unwrap().into(),
         optimize: matches.is_present("optimize"),
-        dump: matches.is_present("dump"),
+        llvm: matches.is_present("llvm"),
         ast: matches.is_present("ast"),
     }
 }

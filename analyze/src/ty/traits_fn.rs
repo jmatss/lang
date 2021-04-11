@@ -1,5 +1,11 @@
-use crate::AnalyzeContext;
+use std::{
+    cell::Ref,
+    collections::{hash_map::Entry, HashMap, HashSet},
+    iter::FromIterator,
+};
+
 use common::{
+    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangResult},
     path::LangPathPart,
     token::{
@@ -7,23 +13,14 @@ use common::{
         block::{Adt, BlockHeader},
         expr::FnCall,
     },
-    traverser::TraverseContext,
+    traverse::visitor::Visitor,
     ty::{inner_ty::InnerTy, ty::Ty},
-    visitor::Visitor,
-    BlockId,
-};
-use std::{
-    cell::Ref,
-    collections::{hash_map::Entry, HashMap, HashSet},
-    iter::FromIterator,
 };
 
 /// Goes through all function calls done on variables with a generic type and
 /// makes sure that the function names can be found in traits required on the
 /// generic type in a "where" clause.
-pub struct TraitsFnAnalyzer<'a> {
-    analyze_context: &'a AnalyzeContext,
-
+pub struct TraitsFnAnalyzer {
     /// Contains a map mapping names of generics to names of methods that the
     /// specific generic implements (according to the "while" clause).
     /// This map will be set everytime a `implement` block is seen. It will
@@ -36,10 +33,9 @@ pub struct TraitsFnAnalyzer<'a> {
     errors: Vec<LangError>,
 }
 
-impl<'a> TraitsFnAnalyzer<'a> {
-    pub fn new(analyze_context: &'a AnalyzeContext) -> Self {
+impl TraitsFnAnalyzer {
+    pub fn new() -> Self {
         Self {
-            analyze_context,
             generic_trait_method_names: None,
             errors: Vec::default(),
         }
@@ -51,8 +47,8 @@ impl<'a> TraitsFnAnalyzer<'a> {
     /// the "where" clause.
     fn store_generic_trait_method_names(
         &mut self,
+        ctx: &TraverseCtx,
         adt: Ref<Adt>,
-        block_id: BlockId,
     ) -> LangResult<()> {
         let implements = if let Some(implements) = &adt.implements {
             implements
@@ -71,12 +67,12 @@ impl<'a> TraitsFnAnalyzer<'a> {
         // implements.
         for (gen_name, trait_tys) in implements {
             for trait_type_id in trait_tys {
-                let trait_ty = self.analyze_context.ty_env.ty(*trait_type_id)?;
-                let trait_name = if let Ty::CompoundType(InnerTy::Trait(trait_name), ..) = trait_ty
+                let trait_ty = ctx.ty_ctx.ty_env.ty(*trait_type_id)?;
+                let trait_path = if let Ty::CompoundType(InnerTy::Trait(trait_name), ..) = trait_ty
                 {
                     trait_name
                 } else {
-                    let err = self.analyze_context.err(format!(
+                    let err = ctx.ast_ctx.err(format!(
                         "Non trait type used in \"where\" clause for struct \"{}\", \
                                 enforced on the generic type \"{}\". Found type: {:#?}",
                         &adt.name, gen_name, trait_ty
@@ -85,9 +81,9 @@ impl<'a> TraitsFnAnalyzer<'a> {
                     continue;
                 };
 
-                let trait_method_names = match self
-                    .analyze_context
-                    .get_trait_method_names(trait_name, block_id)
+                let trait_method_names = match ctx
+                    .ast_ctx
+                    .get_trait_method_names(&ctx.ty_ctx, &trait_path.without_gens())
                 {
                     Ok(trait_method_names) => trait_method_names,
                     Err(err) => {
@@ -123,7 +119,7 @@ impl<'a> TraitsFnAnalyzer<'a> {
     }
 }
 
-impl<'a> Visitor for TraitsFnAnalyzer<'a> {
+impl Visitor for TraitsFnAnalyzer {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -132,9 +128,9 @@ impl<'a> Visitor for TraitsFnAnalyzer<'a> {
         }
     }
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseContext) {
+    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Implement(impl_path, ..), ..) = ast_token {
-            let full_impl_path = match self.analyze_context.get_module(ctx.block_id) {
+            let full_impl_path = match ctx.ast_ctx.get_module(ctx.block_id) {
                 Ok(Some(mut full_impl_path)) => {
                     let impl_ident = impl_path.last().unwrap().0.clone();
                     full_impl_path.push(LangPathPart(impl_ident, None));
@@ -152,7 +148,7 @@ impl<'a> Visitor for TraitsFnAnalyzer<'a> {
                 }
             };
 
-            let adt = match self.analyze_context.get_adt(&full_impl_path, ctx.block_id) {
+            let adt = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, &full_impl_path) {
                 Ok(adt) => adt,
                 Err(err) => {
                     self.errors.push(err);
@@ -160,16 +156,16 @@ impl<'a> Visitor for TraitsFnAnalyzer<'a> {
                 }
             };
 
-            if let Err(err) = self.store_generic_trait_method_names(adt.borrow(), ctx.block_id) {
+            if let Err(err) = self.store_generic_trait_method_names(&ctx, adt.borrow()) {
                 self.errors.push(err);
             }
         }
     }
 
     /// Check any function call in which the `method_adt` is a generic.
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, _ctx: &mut TraverseContext) {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
         if let Some(method_adt_type_id) = &fn_call.method_adt {
-            match self.analyze_context.ty_env.is_generic(*method_adt_type_id) {
+            match ctx.ty_ctx.ty_env.is_generic(*method_adt_type_id) {
                 Ok(true) => (),
                 Ok(false) => return,
                 Err(err) => {
@@ -178,11 +174,7 @@ impl<'a> Visitor for TraitsFnAnalyzer<'a> {
                 }
             };
 
-            let generic_name = match self
-                .analyze_context
-                .ty_env
-                .get_generic_ident(*method_adt_type_id)
-            {
+            let generic_name = match ctx.ty_ctx.ty_env.get_generic_ident(*method_adt_type_id) {
                 Ok(name) => name,
                 Err(err) => {
                     self.errors.push(err);
@@ -192,7 +184,7 @@ impl<'a> Visitor for TraitsFnAnalyzer<'a> {
             let method_name = &fn_call.name;
 
             if !self.is_valid_method(generic_name, method_name) {
-                let err = self.analyze_context.err(format!(
+                let err = ctx.ast_ctx.err(format!(
                     "Used method named \"{0}\" on value with the generic type \"{1}\". \
                     No trait enforced on \"{1}\" contains a method with that name.\n\
                     At position: {2:#?}",

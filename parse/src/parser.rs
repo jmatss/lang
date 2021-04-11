@@ -1,8 +1,7 @@
-use crate::{
-    expr_parser::ExprParser, keyword_parser::KeyworkParser, token::get_if_stmt_op,
-    type_parser::TypeParser,
-};
+use log::debug;
+
 use common::{
+    ctx::{block_ctx::BlockCtx, ty_env::TyEnv},
     error::{LangError, LangErrorKind::ParseError, LangResult},
     file::FilePosition,
     iter::TokenIter,
@@ -13,14 +12,15 @@ use common::{
         expr::{Argument, Expr, Var},
         stmt::Stmt,
     },
-    ty::{
-        environment::TypeEnvironment,
-        generics::{Generics, GenericsKind},
-    },
+    ty::generics::{Generics, GenericsKind},
     BlockId, TypeId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
-use log::{debug, warn};
+
+use crate::{
+    expr_parser::ExprParser, keyword_parser::KeyworkParser, token::get_if_stmt_op,
+    type_parser::TypeParser,
+};
 
 /// The common stop conditions used when parsing expressions.
 pub const DEFAULT_STOP_CONDS: [Sym; 4] = [
@@ -78,11 +78,10 @@ pub struct ParseTokenIter<'a> {
     file_pos: FilePosition,
 
     /// Contains information about all types.
-    pub ty_env: TypeEnvironment,
+    pub ty_env: TyEnv,
 
-    /// Contains the blocks that are children of the "root" block.
-    pub root_block_body: Vec<AstToken>,
-    pub root_block_id: BlockId,
+    /// Contains the blocks that are children of the "default" block.
+    pub block_body: Vec<AstToken>,
 }
 
 impl<'a> Default for ParseTokenIter<'a> {
@@ -93,29 +92,27 @@ impl<'a> Default for ParseTokenIter<'a> {
 
 impl<'a> ParseTokenIter<'a> {
     pub fn new() -> Self {
-        let root_block_id = 0;
         let start_block_id = 1;
 
         Self {
             iter: TokenIter::new(<&mut [LexToken]>::default()),
             block_id: start_block_id,
             file_pos: FilePosition::default(),
-            ty_env: TypeEnvironment::default(),
-            root_block_body: Vec::default(),
-            root_block_id,
+            ty_env: TyEnv::default(),
+            block_body: Vec::default(),
         }
     }
 
     /// Called when all files have been parsed and one wants to get the new whole
     /// AST. When this function is called, a EOF is added to the end of the AST.
     pub fn take_root_block(&mut self) -> AstToken {
-        self.root_block_body.push(AstToken::EOF);
+        self.block_body.push(AstToken::EOF);
 
         AstToken::Block(
             BlockHeader::Default,
             FilePosition::default(),
-            self.root_block_id,
-            std::mem::take(&mut self.root_block_body),
+            BlockCtx::DEFAULT_BLOCK_ID,
+            std::mem::take(&mut self.block_body),
         )
     }
 
@@ -145,10 +142,10 @@ impl<'a> ParseTokenIter<'a> {
         loop {
             match self.next_token() {
                 Ok(AstToken::EOF) => {
-                    self.root_block_body.push(AstToken::EOF);
+                    self.block_body.push(AstToken::EOF);
                     break;
                 }
-                Ok(parse_token) => self.root_block_body.push(parse_token),
+                Ok(parse_token) => self.block_body.push(parse_token),
                 Err(e) => errors.push(e),
             }
         }
@@ -355,7 +352,10 @@ impl<'a> ParseTokenIter<'a> {
         ExprParser::parse(self, stop_conds)
     }
 
-    pub fn parse_type(&mut self, generics: Option<&Generics>) -> LangResult<TypeId> {
+    pub fn parse_type(
+        &mut self,
+        generics: Option<&Generics>,
+    ) -> LangResult<(TypeId, FilePosition)> {
         self.parse_type_with_path(generics, LangPathBuilder::default())
     }
 
@@ -363,7 +363,7 @@ impl<'a> ParseTokenIter<'a> {
         &mut self,
         generics: Option<&Generics>,
         path_builder: LangPathBuilder,
-    ) -> LangResult<TypeId> {
+    ) -> LangResult<(TypeId, FilePosition)> {
         TypeParser::parse(self, generics, path_builder)
     }
 
@@ -383,17 +383,11 @@ impl<'a> ParseTokenIter<'a> {
         mut file_pos: FilePosition,
     ) -> LangResult<Var> {
         // TODO: Handle file_pos.
-
-        warn!("parse_var ({}), file_pos: {:#?}", ident, file_pos);
-
         let (ty, ty_file_pos) = if let Some(next_token) = self.peek_skip_space() {
             match next_token.kind {
                 LexTokenKind::Sym(Sym::Colon) if parse_type => {
                     self.next_skip_space(); // Skip the colon.
-                    let type_id = self.parse_type(generics)?;
-                    let ty_file_pos = self.ty_env.file_pos(type_id).copied().unwrap();
-
-                    warn!("parse_var 2 ({}), ty_file_pos: {:#?}", ident, ty_file_pos);
+                    let (type_id, ty_file_pos) = self.parse_type(generics)?;
 
                     file_pos.set_end(&ty_file_pos)?;
                     (Some(type_id), Some(ty_file_pos))
@@ -528,6 +522,12 @@ impl<'a> ParseTokenIter<'a> {
                 } else {
                     self.parse_expr(&[Sym::Comma, end_symbol.clone()])?
                 };
+
+                if let Some(name_file_pos) = &mut name_file_pos {
+                    if let Some(expr_file_pos) = expr.file_pos() {
+                        name_file_pos.set_end(&expr_file_pos)?;
+                    }
+                }
                 let arg = Argument::new(name, name_file_pos, expr);
 
                 arguments.push(arg);

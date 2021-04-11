@@ -7,10 +7,11 @@ use super::{
     stmt::Modifier,
 };
 use crate::{
+    ctx::{ty_ctx::TyCtx, ty_env::TyEnv},
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
     path::{LangPath, LangPathPart},
-    ty::{environment::TypeEnvironment, generics::Generics, ty::Ty},
+    ty::{generics::Generics, ty::Ty},
     util, BlockId, TypeId,
 };
 
@@ -460,9 +461,9 @@ impl FnCall {
 
     /// Returns the "full name" which is the name containing possible ADT
     /// and generics as well.
-    pub fn full_name(&self, ty_env: &TypeEnvironment) -> LangResult<String> {
+    pub fn full_name(&self, ty_ctx: &TyCtx) -> LangResult<String> {
         if let Some(adt_type_id) = &self.method_adt {
-            let adt_ty = ty_env.ty(*adt_type_id)?;
+            let adt_ty = ty_ctx.ty_env.ty(*adt_type_id)?;
             let (adt_path, adt_generics) =
                 if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
                     if inner_ty.is_adt() {
@@ -484,6 +485,7 @@ impl FnCall {
                 };
 
             Ok(util::to_method_name(
+                ty_ctx,
                 &adt_path,
                 adt_generics,
                 &self.name,
@@ -491,15 +493,15 @@ impl FnCall {
             ))
         } else {
             let fn_path = self.module.clone_push(&self.name, self.generics.as_ref());
-            Ok(fn_path.full_name())
+            Ok(ty_ctx.ty_env.to_string_path(ty_ctx, &fn_path))
         }
     }
 
     /// Returns the "half name" which is the name that does NOT contain anything
     /// related to the structure but will contain function generics (if any).
-    pub fn half_name(&self) -> String {
+    pub fn half_name(&self, ty_ctx: &TyCtx) -> String {
         if let Some(generics) = &self.generics {
-            util::to_generic_name(&self.name, generics)
+            util::to_generic_name(ty_ctx, &self.name, generics)
         } else {
             self.name.clone()
         }
@@ -534,13 +536,13 @@ impl FnPtr {
 
     /// Returns the "full name" which is the name containing possible ADT
     /// and generics as well.
-    pub fn full_name(&self) -> LangResult<String> {
+    pub fn full_name(&self, ty_ctx: &TyCtx) -> LangResult<String> {
         let fn_name_part = LangPathPart(self.name.clone(), self.generics.clone());
         let full_path = self
             .module
             .join(&LangPath::new(vec![fn_name_part], None), None);
 
-        Ok(full_path.full_name())
+        Ok(ty_ctx.ty_env.to_string_path(ty_ctx, &full_path))
     }
 }
 
@@ -604,7 +606,7 @@ impl AdtInit {
     /// Returns the generics. If generics was set at the struct init call, this
     /// function will replace the types of the types parsed during type inference
     /// with type specified at the init call.
-    pub fn generics(&mut self, ty_env: &TypeEnvironment) -> Option<Generics> {
+    pub fn generics(&mut self, ty_env: &TyEnv) -> Option<Generics> {
         let ret_ty = ty_env.ty(self.ret_type.unwrap()).ok()?;
         let ty_generics = if let Ty::CompoundType(_, ty_generics, _) = ret_ty {
             ty_generics
@@ -626,15 +628,15 @@ impl AdtInit {
 
     /// Returns the "full name" which is the name containing possible generics
     /// as well.
-    pub fn full_name(&mut self, ty_env: &TypeEnvironment) -> LangResult<String> {
-        let adt_init_generics = if let Some(generics) = self.generics(ty_env) {
+    pub fn full_name(&mut self, ty_ctx: &TyCtx) -> LangResult<String> {
+        let adt_init_generics = if let Some(generics) = self.generics(&ty_ctx.ty_env) {
             Some(generics)
         } else {
             None
         };
 
         if let Some(adt_type_id) = &self.ret_type {
-            let adt_ty = ty_env.ty(*adt_type_id)?;
+            let adt_ty = ty_ctx.ty_env.ty(*adt_type_id)?;
             if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
                 let generics = if let Some(adt_init_generics) = adt_init_generics {
                     adt_init_generics
@@ -650,7 +652,7 @@ impl AdtInit {
                 let new_adt_name = LangPathPart(self.name.clone(), Some(generics));
                 let new_adt_path = adt_path.join(&LangPath::new(vec![new_adt_name], None), None);
 
-                Ok(new_adt_path.full_name())
+                Ok(ty_ctx.ty_env.to_string_path(ty_ctx, &new_adt_path))
             } else {
                 Err(LangError::new(
                     format!("Unable to get full name for ADT init: {:#?}", self),

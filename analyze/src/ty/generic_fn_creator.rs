@@ -1,22 +1,19 @@
-use crate::block::BlockInfo;
+use std::{collections::HashMap, rc::Rc};
 
-use super::{context::TypeContext, generic_replace::GenericsReplacer};
+use log::debug;
+
 use common::{
+    ctx::traverse_ctx::TraverseCtx,
     error::LangError,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader},
-    traverser::AstTraverser,
-    traverser::TraverseContext,
+    traverse::{traverser::AstTraverser, visitor::Visitor},
     ty::generics::Generics,
-    visitor::Visitor,
 };
-use log::debug;
-use std::{collections::HashMap, rc::Rc};
 
-pub struct GenericFnCreator<'a, 'tctx> {
-    /// Needed to look up structures and types.
-    type_context: &'a mut TypeContext<'tctx>,
+use super::generic_replace::GenericsReplacer;
 
+pub struct GenericFnCreator {
     /// The first string is the path of the ADT and the second string is the name
     /// of the method.
     generic_methods: HashMap<LangPath, HashMap<String, Vec<Generics>>>,
@@ -26,26 +23,24 @@ pub struct GenericFnCreator<'a, 'tctx> {
 
 /// Iterate throughall functions that take generic parameters. Creates new instances
 /// of them replacing the generics with actual implementations.
-impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
-    pub fn new(
-        type_context: &'a mut TypeContext<'tctx>,
-        generic_methods: HashMap<LangPath, HashMap<String, Vec<Generics>>>,
-    ) -> Self {
+impl GenericFnCreator {
+    pub fn new(generic_methods: HashMap<LangPath, HashMap<String, Vec<Generics>>>) -> Self {
         debug!("generic_methods: {:#?}", generic_methods);
 
         Self {
-            type_context,
             generic_methods,
             errors: Vec::default(),
         }
     }
 
-    fn create_method_instance(&mut self, adt_path: &LangPath, impl_body: &mut Vec<AstToken>) {
+    fn create_method_instance(
+        &mut self,
+        ctx: &mut TraverseCtx,
+        adt_path: &LangPath,
+        impl_body: &mut Vec<AstToken>,
+    ) {
         if let Some(generic_methods) = self.generic_methods.get(adt_path).cloned() {
             let mut idx = 0;
-
-            // TODO: Don't hardcode default block.
-            let block_id = BlockInfo::DEFAULT_BLOCK_ID;
 
             while idx < impl_body.len() {
                 // TODO: Change so that every method doesn't need to be cloned.
@@ -73,10 +68,9 @@ impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
                     for method_generics in generic_methods.get(&method_name).unwrap() {
                         let mut new_method = method.clone();
 
-                        let mut generics_replacer =
-                            GenericsReplacer::new_func(&mut self.type_context, method_generics);
+                        let mut generics_replacer = GenericsReplacer::new_func(method_generics);
 
-                        if let Err(mut err) = AstTraverser::new()
+                        if let Err(mut err) = AstTraverser::from_ctx(ctx)
                             .add_visitor(&mut generics_replacer)
                             .set_deep_copy(true)
                             .set_deep_copy_nr(idx)
@@ -96,11 +90,7 @@ impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
                         };
 
                         // Insert the method into the structure.
-                        if let Err(err) = self
-                            .type_context
-                            .analyze_context
-                            .insert_method(adt_path, func, block_id)
-                        {
+                        if let Err(err) = ctx.ast_ctx.insert_method(&ctx.ty_ctx, adt_path, func) {
                             self.errors.push(err);
                             return;
                         }
@@ -115,11 +105,10 @@ impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
                     // the method, `idx` will point to the old method with no generic
                     // impls, it should be removed.
                     // Remove it from both the structure and the AST.
-                    if let Err(err) = self.type_context.analyze_context.remove_method(
-                        adt_path,
-                        &method_name,
-                        block_id,
-                    ) {
+                    if let Err(err) = ctx
+                        .ast_ctx
+                        .remove_method(&ctx.ty_ctx, adt_path, &method_name)
+                    {
                         self.errors.push(err);
                         return;
                     }
@@ -129,11 +118,10 @@ impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
                     // If the method has generics, but isn't in the `generic_methods`
                     // map, it means that it is a method that isn't used anywhere
                     // in the code base; remove it.
-                    if let Err(err) = self.type_context.analyze_context.remove_method(
-                        adt_path,
-                        &method_name,
-                        block_id,
-                    ) {
+                    if let Err(err) = ctx
+                        .ast_ctx
+                        .remove_method(&ctx.ty_ctx, adt_path, &method_name)
+                    {
                         self.errors.push(err);
                         return;
                     }
@@ -147,7 +135,7 @@ impl<'a, 'tctx> GenericFnCreator<'a, 'tctx> {
     }
 }
 
-impl<'a, 'tctx> Visitor for GenericFnCreator<'a, 'tctx> {
+impl Visitor for GenericFnCreator {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -156,7 +144,7 @@ impl<'a, 'tctx> Visitor for GenericFnCreator<'a, 'tctx> {
         }
     }
 
-    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
+    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Default, .., body) = &mut ast_token {
             let mut i = 0;
 
@@ -172,7 +160,7 @@ impl<'a, 'tctx> Visitor for GenericFnCreator<'a, 'tctx> {
                     let adt_path = adt_path.clone();
 
                     if self.generic_methods.contains_key(&adt_path) {
-                        self.create_method_instance(&adt_path, impl_body);
+                        self.create_method_instance(ctx, &adt_path, impl_body);
                     }
 
                     // Go through the methods in the impl block one more time.
@@ -184,7 +172,7 @@ impl<'a, 'tctx> Visitor for GenericFnCreator<'a, 'tctx> {
                     while idx < impl_body.len() {
                         let method = impl_body.get(idx).unwrap();
 
-                        if let AstToken::Block(BlockHeader::Fn(func), _, id, _) = method {
+                        if let AstToken::Block(BlockHeader::Fn(func), ..) = method {
                             let contains_gens_decl = func
                                 .borrow()
                                 .generics
@@ -194,10 +182,10 @@ impl<'a, 'tctx> Visitor for GenericFnCreator<'a, 'tctx> {
                             let contains_gens_impl = func.borrow().generics.is_some();
 
                             if contains_gens_decl && !contains_gens_impl {
-                                if let Err(err) = self.type_context.analyze_context.remove_method(
+                                if let Err(err) = ctx.ast_ctx.remove_method(
+                                    &ctx.ty_ctx,
                                     &adt_path,
                                     &func.borrow().name,
-                                    *id,
                                 ) {
                                     self.errors.push(err);
                                     return;
@@ -217,6 +205,6 @@ impl<'a, 'tctx> Visitor for GenericFnCreator<'a, 'tctx> {
     }
 
     // TODO: Implement similar generic logic as for structs.
-    fn visit_trait(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseContext) {}
-    fn visit_enum(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseContext) {}
+    fn visit_trait(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {}
+    fn visit_enum(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {}
 }

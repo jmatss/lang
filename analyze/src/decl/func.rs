@@ -1,5 +1,7 @@
-use crate::{block::BlockInfo, AnalyzeContext};
+use std::{cell::RefCell, rc::Rc};
+
 use common::{
+    ctx::{block_ctx::BlockCtx, traverse_ctx::TraverseCtx},
     error::LangError,
     path::{LangPath, LangPathPart},
     token::expr::Var,
@@ -9,35 +11,34 @@ use common::{
         stmt::Modifier,
         stmt::Stmt,
     },
-    traverser::TraverseContext,
-    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
-    type_info::TypeInfo,
-    visitor::Visitor,
+    traverse::visitor::Visitor,
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
     BlockId,
 };
-
-use std::{cell::RefCell, rc::Rc};
 
 /// Gathers information about all function/method declarations found in the AST
 /// and inserts them into the `analyze_context`. This includes external function
 /// declarations, functions and methods (in implement block).
-pub struct DeclFnAnalyzer<'a> {
-    analyze_context: &'a RefCell<AnalyzeContext>,
+pub struct DeclFnAnalyzer {
     errors: Vec<LangError>,
 }
 
-impl<'a> DeclFnAnalyzer<'a> {
-    pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
+impl DeclFnAnalyzer {
+    pub fn new() -> Self {
         Self {
-            analyze_context,
             errors: Vec::default(),
         }
     }
 
-    fn analyze_fn_header(&mut self, func: &mut Rc<RefCell<Fn>>, fn_id: BlockId) {
+    fn analyze_fn_header(
+        &mut self,
+        ctx: &mut TraverseCtx,
+        func: &mut Rc<RefCell<Fn>>,
+        fn_id: BlockId,
+    ) {
         // The function will be added in the scope of its parent, so fetch the
         // block id for the parent.
-        let parent_id = match self.analyze_context.borrow().get_parent_id(fn_id) {
+        let parent_id = match ctx.ast_ctx.get_parent_id(fn_id) {
             Ok(parent_id) => parent_id,
             Err(err) => {
                 self.errors.push(err);
@@ -45,7 +46,7 @@ impl<'a> DeclFnAnalyzer<'a> {
             }
         };
 
-        let full_path = match self.analyze_context.borrow().get_module(fn_id) {
+        let full_path = match ctx.ast_ctx.get_module(fn_id) {
             Ok(module_opt) => {
                 let module = if let Some(module) = module_opt {
                     module
@@ -64,7 +65,10 @@ impl<'a> DeclFnAnalyzer<'a> {
 
         // If true: Function already declared somewhere, make sure that the
         // current declaration and the previous one matches.
-        if let Ok(prev_func) = self.analyze_context.borrow().get_fn(&full_path, parent_id) {
+        if let Ok(prev_func) = ctx
+            .ast_ctx
+            .get_fn(&ctx.ty_ctx, &full_path)
+        {
             let func = func.borrow();
 
             let empty_vec = Vec::new();
@@ -91,7 +95,7 @@ impl<'a> DeclFnAnalyzer<'a> {
                     cur_func_params.len(),
                     prev_func_params.len(),
                 );
-                let err = self.analyze_context.borrow().err(err_msg);
+                let err = ctx.ast_ctx.err(err_msg);
                 self.errors.push(err);
             } else {
                 for (i, (cur_param, prev_param)) in cur_func_params
@@ -108,7 +112,7 @@ impl<'a> DeclFnAnalyzer<'a> {
                             Parameter at position {}. Prev name: {:?}, current name: {:?}.",
                             &func.name, i, &cur_param.name, &prev_param.name
                         );
-                        let err = self.analyze_context.borrow().err(err_msg);
+                        let err = ctx.ast_ctx.err(err_msg);
                         self.errors.push(err);
                     }
                     if cur_param.ty != prev_param.ty {
@@ -123,7 +127,7 @@ impl<'a> DeclFnAnalyzer<'a> {
                             Prev type: {:?}, current type: {:?}",
                             &func.name, i, &param_name, cur_param.ty, prev_param.ty
                         );
-                        let err = self.analyze_context.borrow().err(err_msg);
+                        let err = ctx.ast_ctx.err(err_msg);
                         self.errors.push(err);
                     }
                 }
@@ -136,37 +140,28 @@ impl<'a> DeclFnAnalyzer<'a> {
 
         // Add the function into decl lookup maps.
         let key = (full_path, parent_id);
-        self.analyze_context
-            .borrow_mut()
-            .fns
-            .insert(key, Rc::clone(func));
+        ctx.ast_ctx.fns.insert(key, Rc::clone(func));
 
         // Add the parameters as variables in the function scope decl lookup.
         if let Some(params) = &func.borrow().parameters {
             for param in params {
                 let param_key = (param.borrow().name.clone(), fn_id);
-                self.analyze_context
-                    .borrow_mut()
-                    .variables
-                    .insert(param_key, Rc::clone(param));
+                ctx.ast_ctx.variables.insert(param_key, Rc::clone(param));
             }
         }
     }
 
     fn analyze_method_header(
         &mut self,
+        ctx: &mut TraverseCtx,
         adt_path: &LangPath,
         func: &mut Rc<RefCell<Fn>>,
         func_id: BlockId,
     ) {
         // The given `ident` might be a ADT or Trait. Therefore the logic below is
         // duplicated, first checking Traits and then checking the same for ADTs.
-        let (decl_id, inner_ty) = if self.analyze_context.borrow().is_trait(adt_path, func_id) {
-            let decl_id = match self
-                .analyze_context
-                .borrow()
-                .get_trait_decl_scope(adt_path, func_id)
-            {
+        let (decl_id, inner_ty) = if ctx.ast_ctx.is_trait(&ctx.ty_ctx, adt_path) {
+            let decl_id = match ctx.ast_ctx.get_trait_decl_scope(&ctx.ty_ctx, adt_path, func_id) {
                 Ok(decl_id) => decl_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -176,19 +171,19 @@ impl<'a> DeclFnAnalyzer<'a> {
 
             (decl_id, InnerTy::Trait(adt_path.clone()))
         } else {
-            let decl_id = match self
-                .analyze_context
-                .borrow()
-                .get_adt_decl_scope(adt_path, func_id)
-            {
-                Ok(decl_id) => decl_id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+            let decl_id =
+                match ctx
+                    .ast_ctx
+                    .get_adt_decl_scope(&ctx.ty_ctx, adt_path, func_id)
+                {
+                    Ok(decl_id) => decl_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
-            let inner_ty = match self.analyze_context.borrow().get_adt(adt_path, func_id) {
+            let inner_ty = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, adt_path,) {
                 Ok(adt) => match adt.borrow().kind {
                     AdtKind::Struct => InnerTy::Struct(adt_path.clone()),
                     AdtKind::Union => InnerTy::Union(adt_path.clone()),
@@ -213,30 +208,25 @@ impl<'a> DeclFnAnalyzer<'a> {
 
             let generics = Generics::new();
 
-            let type_id = match self
-                .analyze_context
-                .borrow_mut()
-                .ty_env
-                .id(&Ty::CompoundType(inner_ty, generics, TypeInfo::None))
-            {
-                Ok(type_id) => type_id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+            let type_id =
+                match ctx
+                    .ty_ctx
+                    .ty_env
+                    .id(&Ty::CompoundType(inner_ty, generics, TypeInfo::None))
+                {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
             // TODO: Will `TypeInfo::None` work? Does this need some sort of type
             //       info?
             let type_id = if func.modifiers.contains(&Modifier::This) {
                 type_id
             } else if func.modifiers.contains(&Modifier::ThisPointer) {
-                match self
-                    .analyze_context
-                    .borrow_mut()
-                    .ty_env
-                    .id(&Ty::Pointer(type_id, TypeInfo::None))
-                {
+                match ctx.ty_ctx.ty_env.id(&Ty::Pointer(type_id, TypeInfo::None)) {
                     Ok(ptr_type_id) => ptr_type_id,
                     Err(err) => {
                         self.errors.push(err);
@@ -244,9 +234,10 @@ impl<'a> DeclFnAnalyzer<'a> {
                     }
                 }
             } else {
-                let err = self.analyze_context.borrow().err(format!(
+                let err = ctx.ast_ctx.err(format!(
                     "Non static function did not contain \"this\" or \"this ptr\" reference. ADT name: {}, func: {:#?}.",
-                    adt_path, func
+                    &ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &adt_path), 
+                    func
                 ));
                 self.errors.push(err);
                 return;
@@ -270,10 +261,9 @@ impl<'a> DeclFnAnalyzer<'a> {
         }
 
         // Insert this method into `methods` in the analyze context.
-        if let Err(err) =
-            self.analyze_context
-                .borrow_mut()
-                .insert_method(adt_path, Rc::clone(func), decl_id)
+        if let Err(err) = ctx
+            .ast_ctx
+            .insert_method(&ctx.ty_ctx, adt_path, Rc::clone(func))
         {
             self.errors.push(err);
             return;
@@ -283,16 +273,13 @@ impl<'a> DeclFnAnalyzer<'a> {
         if let Some(params) = &mut func.borrow_mut().parameters {
             for param in params {
                 let param_key = (param.borrow().name.clone(), func_id);
-                self.analyze_context
-                    .borrow_mut()
-                    .variables
-                    .insert(param_key, Rc::clone(param));
+                ctx.ast_ctx.variables.insert(param_key, Rc::clone(param));
             }
         }
     }
 }
 
-impl<'a> Visitor for DeclFnAnalyzer<'a> {
+impl Visitor for DeclFnAnalyzer {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -301,15 +288,14 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
         }
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
-        self.analyze_context.borrow_mut().file_pos =
-            ast_token.file_pos().cloned().unwrap_or_default();
+    fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
+        ctx.ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
     }
 
     /// Marks the functions in this implement block with the name of the implement
     /// block. This lets one differentiate between functions and methods by checking
     /// the `method_struct` field in "Function"s.
-    fn visit_impl(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseContext) {
+    fn visit_impl(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         // TODO: This won't work for all cases. The `impl_path` doesn't consider
         //       the module path or "use"s.
 
@@ -326,26 +312,28 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
         partial_path.push(LangPathPart(last_part.0, None));
 
         let inner_ty = {
-            let analyze_context = self.analyze_context.borrow();
-
-            if let Ok(full_path) = analyze_context.calculate_adt_full_path(impl_path, ctx.block_id)
-            {
-                if analyze_context.is_struct(&full_path, ctx.block_id) {
+            if let Ok(full_path) = ctx.ast_ctx.calculate_adt_full_path(&ctx.ty_ctx, impl_path, ctx.block_id) {
+                if ctx.ast_ctx.is_struct(&ctx.ty_ctx, &full_path) {
                     InnerTy::Struct(full_path)
-                } else if analyze_context.is_enum(&full_path, ctx.block_id) {
+                } else if ctx.ast_ctx.is_enum(&ctx.ty_ctx, &full_path) {
                     InnerTy::Enum(full_path)
-                } else if analyze_context.is_union(&full_path, ctx.block_id) {
+                } else if ctx.ast_ctx.is_union(&ctx.ty_ctx, &full_path) {
                     InnerTy::Union(full_path)
                 } else {
                     unreachable!("full_path: {:#?}", full_path);
                 }
-            } else if let Ok(full_path) =
-                analyze_context.calculate_trait_full_path(impl_path, ctx.block_id)
+            } else if let Ok(full_path) = ctx
+                .ast_ctx
+                .calculate_trait_full_path(&ctx.ty_ctx, impl_path, ctx.block_id)
             {
                 InnerTy::Trait(full_path)
             } else {
-                let err = analyze_context.err_adt(
-                    format!("Unable to find ADT with path: {}", partial_path),
+                let err = ctx.ast_ctx.err_adt(
+                    &ctx.ty_ctx,
+                    format!(
+                        "Unable to find ADT with path: {}",
+                        ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &partial_path)
+                    ),
                     &partial_path,
                 );
                 self.errors.push(err);
@@ -353,18 +341,18 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
             }
         };
 
-        let impl_type_id = match self
-            .analyze_context
-            .borrow_mut()
-            .ty_env
-            .id(&Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None))
-        {
-            Ok(impl_type_id) => impl_type_id,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
+        let impl_type_id =
+            match ctx
+                .ty_ctx
+                .ty_env
+                .id(&Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None))
+            {
+                Ok(impl_type_id) => impl_type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
         for mut body_token in body {
             if body_token.is_skippable() {
@@ -372,19 +360,20 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
             } else if let AstToken::Block(BlockHeader::Fn(func), ..) = &mut body_token {
                 func.borrow_mut().method_adt = Some(impl_type_id);
             } else {
-                let err = self.analyze_context.borrow().err(format!(
+                let err = ctx.ast_ctx.err(format!(
                     "AST token in impl block with name \"{}\" not a function: {:?}",
-                    impl_path, body_token
+                    ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, impl_path),
+                    body_token
                 ));
                 self.errors.push(err);
             }
         }
     }
 
-    fn visit_fn(&mut self, mut ast_token: &mut AstToken, _ctx: &mut TraverseContext) {
+    fn visit_fn(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Fn(func), _, func_id, ..) = &mut ast_token {
-            let adt_ty = if let Some(adt_type_id) = func.borrow().method_adt.clone() {
-                match self.analyze_context.borrow_mut().ty_env.ty(adt_type_id) {
+            let adt_ty = if let Some(adt_type_id) = func.borrow().method_adt {
+                match ctx.ty_ctx.ty_env.ty(adt_type_id) {
                     Ok(adt_ty) => Some(adt_ty.clone()),
                     Err(err) => {
                         self.errors.push(err);
@@ -402,7 +391,7 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
                         | InnerTy::Enum(path)
                         | InnerTy::Union(path)
                         | InnerTy::Trait(path) => {
-                            self.analyze_method_header(&path, func, *func_id);
+                            self.analyze_method_header(ctx, &path, func, *func_id);
                         }
 
                         _ => unreachable!(
@@ -414,14 +403,12 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
                     unreachable!("Method method_structure not CompoundType: {:#?}", func);
                 }
             } else {
-                self.analyze_fn_header(func, *func_id);
+                self.analyze_fn_header(ctx, func, *func_id);
             }
         }
     }
 
-    fn visit_extern_decl(&mut self, stmt: &mut Stmt, _ctx: &mut TraverseContext) {
-        let mut analyze_context = self.analyze_context.borrow_mut();
-
+    fn visit_extern_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::ExternalDecl(func, ..) = stmt {
             // TODO: Should probably check that if there are multiple extern
             //       declarations of a function that they have the same
@@ -430,9 +417,9 @@ impl<'a> Visitor for DeclFnAnalyzer<'a> {
             let key = {
                 let func = func.borrow();
                 let path = func.module.clone_push(&func.name, None);
-                (path, BlockInfo::DEFAULT_BLOCK_ID)
+                (path, BlockCtx::DEFAULT_BLOCK_ID)
             };
-            analyze_context.fns.insert(key, Rc::clone(func));
+            ctx.ast_ctx.fns.insert(key, Rc::clone(func));
         }
     }
 }
