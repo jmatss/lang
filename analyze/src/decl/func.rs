@@ -65,10 +65,7 @@ impl DeclFnAnalyzer {
 
         // If true: Function already declared somewhere, make sure that the
         // current declaration and the previous one matches.
-        if let Ok(prev_func) = ctx
-            .ast_ctx
-            .get_fn(&ctx.ty_ctx, &full_path)
-        {
+        if let Ok(prev_func) = ctx.ast_ctx.get_fn(&ctx.ty_ctx, &full_path) {
             let func = func.borrow();
 
             let empty_vec = Vec::new();
@@ -161,7 +158,10 @@ impl DeclFnAnalyzer {
         // The given `ident` might be a ADT or Trait. Therefore the logic below is
         // duplicated, first checking Traits and then checking the same for ADTs.
         let (decl_id, inner_ty) = if ctx.ast_ctx.is_trait(&ctx.ty_ctx, adt_path) {
-            let decl_id = match ctx.ast_ctx.get_trait_decl_scope(&ctx.ty_ctx, adt_path, func_id) {
+            let decl_id = match ctx
+                .ast_ctx
+                .get_trait_decl_scope(&ctx.ty_ctx, adt_path, func_id)
+            {
                 Ok(decl_id) => decl_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -171,19 +171,18 @@ impl DeclFnAnalyzer {
 
             (decl_id, InnerTy::Trait(adt_path.clone()))
         } else {
-            let decl_id =
-                match ctx
-                    .ast_ctx
-                    .get_adt_decl_scope(&ctx.ty_ctx, adt_path, func_id)
-                {
-                    Ok(decl_id) => decl_id,
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
-                };
+            let decl_id = match ctx
+                .ast_ctx
+                .get_adt_decl_scope(&ctx.ty_ctx, adt_path, func_id)
+            {
+                Ok(decl_id) => decl_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
-            let inner_ty = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, adt_path,) {
+            let inner_ty = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, adt_path) {
                 Ok(adt) => match adt.borrow().kind {
                     AdtKind::Struct => InnerTy::Struct(adt_path.clone()),
                     AdtKind::Union => InnerTy::Union(adt_path.clone()),
@@ -235,8 +234,9 @@ impl DeclFnAnalyzer {
                 }
             } else {
                 let err = ctx.ast_ctx.err(format!(
-                    "Non static function did not contain \"this\" or \"this ptr\" reference. ADT name: {}, func: {:#?}.",
-                    &ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &adt_path), 
+                    "Non static function did not contain \"this\" or \"this ptr\" reference. \
+                    ADT name: {}, func: {:#?}.",
+                    &ctx.ty_ctx.to_string_path(&adt_path),
                     func
                 ));
                 self.errors.push(err);
@@ -312,7 +312,10 @@ impl Visitor for DeclFnAnalyzer {
         partial_path.push(LangPathPart(last_part.0, None));
 
         let inner_ty = {
-            if let Ok(full_path) = ctx.ast_ctx.calculate_adt_full_path(&ctx.ty_ctx, impl_path, ctx.block_id) {
+            if let Ok(full_path) =
+                ctx.ast_ctx
+                    .calculate_adt_full_path(&ctx.ty_ctx, impl_path, ctx.block_id)
+            {
                 if ctx.ast_ctx.is_struct(&ctx.ty_ctx, &full_path) {
                     InnerTy::Struct(full_path)
                 } else if ctx.ast_ctx.is_enum(&ctx.ty_ctx, &full_path) {
@@ -322,9 +325,9 @@ impl Visitor for DeclFnAnalyzer {
                 } else {
                     unreachable!("full_path: {:#?}", full_path);
                 }
-            } else if let Ok(full_path) = ctx
-                .ast_ctx
-                .calculate_trait_full_path(&ctx.ty_ctx, impl_path, ctx.block_id)
+            } else if let Ok(full_path) =
+                ctx.ast_ctx
+                    .calculate_trait_full_path(&ctx.ty_ctx, impl_path, ctx.block_id)
             {
                 InnerTy::Trait(full_path)
             } else {
@@ -332,7 +335,7 @@ impl Visitor for DeclFnAnalyzer {
                     &ctx.ty_ctx,
                     format!(
                         "Unable to find ADT with path: {}",
-                        ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &partial_path)
+                        ctx.ty_ctx.to_string_path(&partial_path)
                     ),
                     &partial_path,
                 );
@@ -362,7 +365,7 @@ impl Visitor for DeclFnAnalyzer {
             } else {
                 let err = ctx.ast_ctx.err(format!(
                     "AST token in impl block with name \"{}\" not a function: {:?}",
-                    ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, impl_path),
+                    ctx.ty_ctx.to_string_path(impl_path),
                     body_token
                 ));
                 self.errors.push(err);

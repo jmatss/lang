@@ -174,7 +174,7 @@ impl Visitor for PathResolver {
                     &ctx.ty_ctx,
                     format!(
                         "Unable to find full path for type defined in impl block: {}",
-                        ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &path)
+                        ctx.ty_ctx.to_string_path(&path)
                     ),
                     path,
                 );

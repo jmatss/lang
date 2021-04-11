@@ -86,9 +86,7 @@ impl TraitsGenericAnalyzer {
                     let err = ctx.ast_ctx.err(format!(
                         "ADT \"{0}\" has \"where\" clause for type \"{1}\" which isn't a ADT. \
                         The type \"{1}\" can therefore not implement the required traits:{2}.",
-                        ctx.ty_ctx
-                            .ty_env
-                            .to_string_path(&ctx.ty_ctx, &adt_path_with_gens),
+                        ctx.ty_ctx.to_string_path(&adt_path_with_gens),
                         gen_type_id.to_string(),
                         trait_names,
                     ));
@@ -100,18 +98,18 @@ impl TraitsGenericAnalyzer {
 
             for trait_type_id in trait_tys {
                 let trait_ty = ctx.ty_ctx.ty_env.ty(*trait_type_id)?;
-                let trait_name =
-                    if let Ty::CompoundType(InnerTy::Trait(trait_name), ..) = trait_ty {
-                        trait_name
-                    } else {
-                        let err = ctx.ast_ctx.err(format!(
+                let trait_name = if let Ty::CompoundType(InnerTy::Trait(trait_name), ..) = trait_ty
+                {
+                    trait_name
+                } else {
+                    let err = ctx.ast_ctx.err(format!(
                         "Generic with name \"{}\" on ADT \"{}\" implements non trait type: {:#?}",
                         gen_name,
-                        ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &adt_path_with_gens),
+                        ctx.ty_ctx.to_string_path(&adt_path_with_gens),
                         trait_type_id
                     ));
-                        return Err(err);
-                    };
+                    return Err(err);
+                };
 
                 let trait_ = ctx.ast_ctx.get_trait(&ctx.ty_ctx, trait_name)?;
 
@@ -122,15 +120,14 @@ impl TraitsGenericAnalyzer {
                         if let Some(struct_method) = gen_struct_methods.get(&method_name) {
                             struct_method
                         } else {
-                            let err =
-                                ctx.ast_ctx.err(format!(
+                            let err = ctx.ast_ctx.err(format!(
                                 "Struct \"{0}\" requires that its generic type \"{1}\" implements \
                             the trait \"{2}\". The type \"{3}\" is used as generic \"{1}\", \
                             but it does NOT implement the function \"{4}\" from the trait \"{2}\".",
-                                ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &adt_path_with_gens),
+                                ctx.ty_ctx.to_string_path(&adt_path_with_gens),
                                 gen_name,
-                                ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &trait_name),
-                                ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &generic_adt_name),
+                                ctx.ty_ctx.to_string_path(&trait_name),
+                                ctx.ty_ctx.to_string_path(&generic_adt_name),
                                 method_name
                             ));
                             return Err(err);
@@ -143,11 +140,10 @@ impl TraitsGenericAnalyzer {
 
                     // Make the check to ensure that the trait method are correctly implemented.
                     if let Err(cmp_errors) = struct_method_borrow.trait_cmp(trait_method) {
-                        let err_msg_start =
-                            format!(
+                        let err_msg_start = format!(
                             "Struct \"{}\"s impl of trait \"{}\"s method \"{}\" is incorrect.\n",
-                            ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &adt_path_with_gens),
-                            ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &trait_name),
+                            ctx.ty_ctx.to_string_path(&adt_path_with_gens),
+                            ctx.ty_ctx.to_string_path(&trait_name),
                             method_name,
                         );
                         let err_msg_end = format!(

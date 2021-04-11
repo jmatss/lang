@@ -116,7 +116,7 @@ impl TypeInferencer {
                     gen_impls.len_types(),
                     adt_gen_names.len(),
                     inner_ty.get_ident(),
-                    ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &fn_call_path),
+                    ctx.ty_ctx.to_string_path(&fn_call_path),
                     adt_gen_names
                 ));
                 return Err(err);
@@ -160,7 +160,7 @@ impl Visitor for TypeInferencer {
             all_types_string.push_str(&format!(
                 "\ntype_id: {} - {:?}",
                 type_id,
-                ctx.ty_ctx.ty_env.to_string_type_id(&ctx.ty_ctx, type_id)
+                ctx.ty_ctx.to_string_type_id(type_id)
             ));
         }
 
@@ -836,7 +836,7 @@ impl Visitor for TypeInferencer {
         if fn_ptr_gens.len() != fn_gen_names.len() {
             let err = ctx.ast_ctx.err(format!(
                 "Function pointer to \"{}\" has incorrect amount of generics. Expected: {}, got: {}",
-                ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &full_path),
+                ctx.ty_ctx.to_string_path( &full_path),
                 fn_gen_names.len(),
                 fn_ptr_gens.len()
             ));
@@ -901,7 +901,7 @@ impl Visitor for TypeInferencer {
                 let err = ctx.ast_ctx.err(format!(
                     "Bad function signature for function pointer, fn_path: {}. \
                     fn_ty: {:#?}, new_fn_ty: {:#?}. Function pointer pos: {:#?}",
-                    ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &full_path),
+                    ctx.ty_ctx.to_string_path(&full_path),
                     fn_type_id,
                     new_fn_type_id,
                     fn_ptr.file_pos
@@ -2084,8 +2084,14 @@ impl Visitor for TypeInferencer {
                     }
                 };
 
-                let expr_type_id = match ctx.ty_ctx.get_expr_type(expr_opt.as_ref()) {
-                    Ok(expr_ty) => expr_ty,
+                let expr = if let Some(expr) = expr_opt {
+                    expr
+                } else {
+                    unreachable!("expr None -- stmt: {:#?}", stmt);
+                };
+
+                let expr_type_id = match expr.get_expr_type() {
+                    Ok(expr_type_id) => expr_type_id,
                     Err(err) => {
                         self.errors.push(err);
                         return;
@@ -2180,15 +2186,16 @@ impl Visitor for TypeInferencer {
 
             // No way to do type inference of rhs on var decl with no init value.
             let rhs_type_id_opt = if var.value.is_some() {
-                match ctx
-                    .ty_ctx
-                    .get_expr_type(var.value.clone().map(|x| *x).as_ref())
-                {
-                    Ok(rhs_ty) => Some(rhs_ty),
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
+                if let Some(a) = var.value.clone().map(|x| *x).as_ref() {
+                    match a.get_expr_type() {
+                        Ok(rhs_ty) => Some(rhs_ty),
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
                     }
+                } else {
+                    unreachable!("expr var value None -- var: {:#?}", var);
                 }
             } else {
                 None

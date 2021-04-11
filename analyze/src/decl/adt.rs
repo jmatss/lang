@@ -60,7 +60,7 @@ impl DeclTypeAnalyzer {
         if let Ok(prev_adt) = ctx.ast_ctx.get_adt(&ctx.ty_ctx, &adt_full_path) {
             let err = ctx.ast_ctx.err(format!(
                 "A ADT with name \"{}\" already defined.",
-                ctx.ty_ctx.ty_env.to_string_path(ctx.ty_ctx, &adt_full_path)
+                ctx.ty_ctx.to_string_path(&adt_full_path)
             ));
             self.errors.push(err);
             return;
@@ -136,9 +136,7 @@ impl Visitor for DeclTypeAnalyzer {
             if let Ok(prev_trait) = ctx.ast_ctx.get_trait(&ctx.ty_ctx, &trait_full_path) {
                 let err = ctx.ast_ctx.err(format!(
                     "A trait with name \"{}\" already defined.",
-                    &ctx.ty_ctx
-                        .ty_env
-                        .to_string_path(&ctx.ty_ctx, &trait_full_path)
+                    &ctx.ty_ctx.to_string_path(&trait_full_path)
                 ));
                 self.errors.push(err);
             } else {

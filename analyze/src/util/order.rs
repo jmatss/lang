@@ -137,8 +137,8 @@ pub fn order_step2(
 
             if prev_references_cur && cur_references_prev {
                 return Err(CyclicDependencyError(
-                    ty_ctx.ty_env.to_string_path(ty_ctx, cur_ident),
-                    ty_ctx.ty_env.to_string_path(ty_ctx, prev_ident),
+                    ty_ctx.to_string_path(cur_ident),
+                    ty_ctx.to_string_path(prev_ident),
                 ));
             } else if prev_references_cur {
                 // Can't insert the "current" ident before the "previous" since

@@ -31,11 +31,9 @@ pub(crate) fn solve_all(ctx: &mut TraverseCtx) -> LangResult<()> {
             err_msg.push_str(&format!(
                 "\nUnable to solve type {} ({}). Got back unsolved: {} ({}). ty:\n{:#?}",
                 type_id,
-                ctx.ty_ctx.ty_env.to_string_type_id(&ctx.ty_ctx, type_id)?,
+                ctx.ty_ctx.to_string_type_id(type_id)?,
                 inf_type_id,
-                ctx.ty_ctx
-                    .ty_env
-                    .to_string_type_id(&ctx.ty_ctx, inf_type_id)?,
+                ctx.ty_ctx.to_string_type_id(inf_type_id)?,
                 ctx.ty_ctx.ty_env.ty(inf_type_id)
             ));
 
@@ -206,7 +204,7 @@ impl TypeSolver {
             all_types_string.push_str(&format!(
                 "\ntype_id: {} - {:?}",
                 type_id,
-                ctx.ty_ctx.ty_env.to_string_type_id(&ctx.ty_ctx, type_id)
+                ctx.ty_ctx.to_string_type_id(type_id)
             ));
         }
 

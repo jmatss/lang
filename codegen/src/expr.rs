@@ -347,23 +347,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.cur_block_id,
         )?;
 
-        if let Some(fn_value) = self.module.get_function(
-            &self
-                .analyze_ctx
-                .ty_ctx
-                .ty_env
-                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
-        ) {
+        if let Some(fn_value) = self
+            .module
+            .get_function(&self.analyze_ctx.ty_ctx.to_string_path(&full_path))
+        {
             let fn_ptr = fn_value.as_global_value().as_pointer_value();
             Ok(fn_ptr.into())
         } else {
             Err(self.err(
                 format!(
                     "Unable to find function with full name {} (compiling fn pointer).",
-                    self.analyze_ctx
-                        .ty_ctx
-                        .ty_env
-                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path)
+                    self.analyze_ctx.ty_ctx.to_string_path(&full_path)
                 ),
                 fn_ptr.file_pos.to_owned(),
             ))
@@ -636,22 +630,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.cur_block_id,
         )?;
 
-        let union_type = if let Some(inner) = self.module.get_struct_type(
-            &self
-                .analyze_ctx
-                .ty_ctx
-                .ty_env
-                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
-        ) {
+        let union_type = if let Some(inner) = self
+            .module
+            .get_struct_type(&self.analyze_ctx.ty_ctx.to_string_path(&full_path))
+        {
             inner
         } else {
             return Err(self.err(
                 format!(
                     "Unable to get union with name \"{}\". Union init: {:#?}",
-                    self.analyze_ctx
-                        .ty_ctx
-                        .ty_env
-                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+                    self.analyze_ctx.ty_ctx.to_string_path(&full_path),
                     union_init
                 ),
                 union_init.file_pos,

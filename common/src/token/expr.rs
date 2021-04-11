@@ -493,7 +493,7 @@ impl FnCall {
             ))
         } else {
             let fn_path = self.module.clone_push(&self.name, self.generics.as_ref());
-            Ok(ty_ctx.ty_env.to_string_path(ty_ctx, &fn_path))
+            Ok(ty_ctx.to_string_path(&fn_path))
         }
     }
 
@@ -542,7 +542,7 @@ impl FnPtr {
             .module
             .join(&LangPath::new(vec![fn_name_part], None), None);
 
-        Ok(ty_ctx.ty_env.to_string_path(ty_ctx, &full_path))
+        Ok(ty_ctx.to_string_path(&full_path))
     }
 }
 
@@ -652,7 +652,7 @@ impl AdtInit {
                 let new_adt_name = LangPathPart(self.name.clone(), Some(generics));
                 let new_adt_path = adt_path.join(&LangPath::new(vec![new_adt_name], None), None);
 
-                Ok(ty_ctx.ty_env.to_string_path(ty_ctx, &new_adt_path))
+                Ok(ty_ctx.to_string_path(&new_adt_path))
             } else {
                 Err(LangError::new(
                     format!("Unable to get full name for ADT init: {:#?}", self),

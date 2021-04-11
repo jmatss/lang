@@ -316,22 +316,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let full_path = module.clone_push(&fn_name, func.generics.as_ref());
 
-        let fn_val = if let Some(fn_val) = self.module.get_function(
-            &self
-                .analyze_ctx
-                .ty_ctx
-                .ty_env
-                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
-        ) {
+        let fn_val = if let Some(fn_val) = self
+            .module
+            .get_function(&self.analyze_ctx.ty_ctx.to_string_path(&full_path))
+        {
             fn_val
         } else {
             return Err(self.err(
                 format!(
                     "Unable to find function with name \"{}\".",
-                    self.analyze_ctx
-                        .ty_ctx
-                        .ty_env
-                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path)
+                    self.analyze_ctx.ty_ctx.to_string_path(&full_path)
                 ),
                 Some(file_pos.to_owned()),
             ));
@@ -461,10 +455,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         format!(
                             "Bad type for parameter with name\"{}\" in function \"{}\".",
                             &param.name,
-                            self.analyze_ctx
-                                .ty_ctx
-                                .ty_env
-                                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path)
+                            self.analyze_ctx.ty_ctx.to_string_path(&full_path)
                         ),
                         param.file_pos.to_owned(),
                     ));
@@ -496,11 +487,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         Ok(self.module.add_function(
-            &self
-                .analyze_ctx
-                .ty_ctx
-                .ty_env
-                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+            &self.analyze_ctx.ty_ctx.to_string_path(&full_path),
             fn_type,
             linkage_opt,
         ))
@@ -917,10 +904,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Bad type for struct \"{}\" member \"{}\".",
-                        self.analyze_ctx
-                            .ty_ctx
-                            .ty_env
-                            .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+                        self.analyze_ctx.ty_ctx.to_string_path(&full_path),
                         &member.name
                     ),
                     member_file_pos,
@@ -929,13 +913,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         let packed = false;
-        let struct_ty = self.context.opaque_struct_type(
-            &self
-                .analyze_ctx
-                .ty_ctx
-                .ty_env
-                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
-        );
+        let struct_ty = self
+            .context
+            .opaque_struct_type(&self.analyze_ctx.ty_ctx.to_string_path(&full_path));
         struct_ty.set_body(member_types.as_ref(), packed);
 
         Ok(())
@@ -964,10 +944,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "No default value set for first member in enum \"{}\".",
-                        self.analyze_ctx
-                            .ty_ctx
-                            .ty_env
-                            .to_string_path(&self.analyze_ctx.ty_ctx, &full_path)
+                        self.analyze_ctx.ty_ctx.to_string_path(&full_path)
                     ),
                     member_file_pos,
                 ));
@@ -976,10 +953,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return Err(self.err(
                 format!(
                     "Unable to find first member in enum \"{}\".",
-                    self.analyze_ctx
-                        .ty_ctx
-                        .ty_env
-                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path)
+                    self.analyze_ctx.ty_ctx.to_string_path(&&full_path)
                 ),
                 None,
             ));
@@ -989,13 +963,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let basic_ty = CodeGen::any_into_basic_type(any_ty)?;
 
         let packed = false;
-        let enum_ty = self.context.opaque_struct_type(
-            &self
-                .analyze_ctx
-                .ty_ctx
-                .ty_env
-                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
-        );
+        let enum_ty = self
+            .context
+            .opaque_struct_type(&self.analyze_ctx.ty_ctx.to_string_path(&full_path));
         enum_ty.set_body(&[basic_ty], packed);
 
         Ok(())
@@ -1035,10 +1005,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Bad type for union \"{}\" member \"{}\".",
-                        self.analyze_ctx
-                            .ty_ctx
-                            .ty_env
-                            .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+                        self.analyze_ctx.ty_ctx.to_string_path(&full_path),
                         &member.name
                     ),
                     member_file_pos,
@@ -1050,13 +1017,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let member_ty = self.context.i8_type().array_type(largest_size as u32);
 
         let packed = false;
-        let union_ty = self.context.opaque_struct_type(
-            &self
-                .analyze_ctx
-                .ty_ctx
-                .ty_env
-                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
-        );
+        let union_ty = self
+            .context
+            .opaque_struct_type(&self.analyze_ctx.ty_ctx.to_string_path(&full_path));
         union_ty.set_body(&[tag_ty.into(), member_ty.into()], packed);
 
         Ok(())

@@ -97,9 +97,7 @@ impl Visitor for GenericsAnalyzer {
             } else {
                 let err = ctx.ast_ctx.err(format!(
                     "Unable to find ADT/Trait for impl block with name \"{}\".",
-                    &ctx.ty_ctx
-                        .ty_env
-                        .to_string_path(&ctx.ty_ctx, &full_impl_path),
+                    &ctx.ty_ctx.to_string_path(&full_impl_path),
                 ));
                 self.errors.push(err);
                 return;

@@ -16,7 +16,7 @@ pub fn to_method_name(
     let mut adt_path_clone = adt_path.clone();
     let last_part = adt_path_clone.pop().unwrap();
     adt_path_clone.push(LangPathPart(last_part.0, adt_generics.cloned()));
-    let adt_generic_name = ty_ctx.ty_env.to_string_path(ty_ctx, &adt_path_clone);
+    let adt_generic_name = ty_ctx.to_string_path(&adt_path_clone);
 
     let method_generic_name = if let Some(method_generics) = method_generics {
         to_generic_name(ty_ctx, &method_name, method_generics)
@@ -46,7 +46,7 @@ pub fn to_generic_name(ty_ctx: &TyCtx, old_name: &str, generics: &Generics) -> S
         format!(
             "{}{}",
             old_name,
-            ty_ctx.ty_env.to_string_generics(ty_ctx, generics).unwrap()
+            ty_ctx.to_string_generics(generics).unwrap()
         )
     }
 }

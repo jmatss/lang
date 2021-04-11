@@ -1585,32 +1585,23 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return Err(self.err(
                 format!(
                     "Member of enum \"{}\" has no value set, member: {:#?}",
-                    self.analyze_ctx
-                        .ty_ctx
-                        .ty_env
-                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+                    self.analyze_ctx.ty_ctx.to_string_path(&full_path),
                     member
                 ),
                 None,
             ));
         };
 
-        let enum_ty = if let Some(enum_ty) = self.module.get_struct_type(
-            &self
-                .analyze_ctx
-                .ty_ctx
-                .ty_env
-                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
-        ) {
+        let enum_ty = if let Some(enum_ty) = self
+            .module
+            .get_struct_type(&self.analyze_ctx.ty_ctx.to_string_path(&full_path))
+        {
             enum_ty
         } else {
             return Err(self.err(
                 format!(
                     "Unable to find enum with name \"{}\" in codegen module.",
-                    self.analyze_ctx
-                        .ty_ctx
-                        .ty_env
-                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+                    self.analyze_ctx.ty_ctx.to_string_path(&full_path),
                 ),
                 None,
             ));
@@ -1618,10 +1609,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         debug!(
             "Compiling enum access -- enum_name: {}, member_name: {}, basic_value: {:#?}",
-            self.analyze_ctx
-                .ty_ctx
-                .ty_env
-                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+            self.analyze_ctx.ty_ctx.to_string_path(&full_path),
             member_name,
             basic_value
         );

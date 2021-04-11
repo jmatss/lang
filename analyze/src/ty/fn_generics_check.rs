@@ -47,9 +47,7 @@ impl Visitor for FnGenericsCheck {
                     let err = ctx.ast_ctx.err(format!(
                         "Unable to get path for ADT with type ID: {}, ty: {:?}",
                         adt_type_id,
-                        ctx.ty_ctx
-                            .ty_env
-                            .to_string_type_id(&ctx.ty_ctx, *adt_type_id),
+                        ctx.ty_ctx.to_string_type_id(*adt_type_id),
                     ));
                     self.errors.push(err);
                     return;
@@ -86,7 +84,7 @@ impl Visitor for FnGenericsCheck {
                             ADT: {}, method name: {}, file_pos: {:#?}",
                             generic_impls.len(),
                             fn_call_generics.len_types(),
-                            ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &adt_path),
+                            ctx.ty_ctx.to_string_path(&adt_path),
                             fn_call.name,
                             fn_call.file_pos
                         ));
@@ -98,7 +96,7 @@ impl Visitor for FnGenericsCheck {
                     let err = ctx.ast_ctx.err(format!(
                         "Function declaration specifies generics, but no generics were given when \
                         calling the function. ADT: {}, method name: {}, file_pos: {:#?}",
-                        ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &adt_path),
+                        ctx.ty_ctx.to_string_path(&adt_path),
                         fn_call.name,
                         fn_call.file_pos
                     ));

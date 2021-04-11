@@ -334,7 +334,7 @@ impl Visitor for GenericAdtCreator {
             all_types_string.push_str(&format!(
                 "\ntype_id: {} - {:?}",
                 type_id,
-                ctx.ty_ctx.ty_env.to_string_type_id(&ctx.ty_ctx, type_id)
+                ctx.ty_ctx.to_string_type_id(type_id)
             ));
         }
 

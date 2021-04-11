@@ -4,14 +4,14 @@ use either::Either;
 
 use crate::{
     ctx::ty_env::SolveCond,
-    error::{LangError, LangErrorKind, LangResult},
+    error::LangResult,
     path::{LangPath, LangPathPart},
-    token::{block::Fn, expr::Expr},
+    token::block::Fn,
     ty::{
         generics::Generics, inner_ty::InnerTy, substitution_sets::SubstitutionSets, ty::Ty,
         type_info::TypeInfo,
     },
-    TypeId,
+    util, TypeId,
 };
 
 use super::{ast_ctx::AstCtx, ty_env::TyEnv};
@@ -1146,16 +1146,202 @@ impl<'a> TyCtx {
         Ok(())
     }
 
-    // TODO: Is it possible to move this function to "Expr" in some way?
-    pub fn get_expr_type(&self, expr_opt: Option<&Expr>) -> LangResult<TypeId> {
-        if let Some(expr) = expr_opt {
-            expr.get_expr_type()
-        } else {
-            Err(LangError::new(
-                "expr opt set to None.".into(),
-                LangErrorKind::AnalyzeError,
-                None,
-            ))
+    // TODO: This currently doesn't print the inferred type, so might look weird.
+    pub fn to_string_type_id(&self, type_id: TypeId) -> LangResult<String> {
+        let mut result = String::new();
+
+        let inf_type_id = self.inferred_type(type_id)?;
+        match self.ty_env.ty(inf_type_id)? {
+            Ty::CompoundType(inner_ty, gens, ..) => {
+                result.push_str(&self.to_string_inner_ty(inner_ty));
+                // The generics are generated from the `inner_ty` LangPath.
+                /*
+                if !gens.is_empty() {
+                    let type_ids = gens.iter_types().cloned().collect::<Vec<_>>();
+                    result.push('<');
+                    result.push_str(&self.to_string_list(&type_ids)?);
+                    result.push('>');
+                }
+                */
+            }
+
+            Ty::Pointer(type_id_i, ..) => {
+                result.push('{');
+                result.push_str(&self.to_string_type_id(*type_id_i)?);
+                result.push('}');
+            }
+
+            Ty::Fn(gen_type_ids, params, ret_type_id_opt, ..) => {
+                result.push_str("fn");
+
+                if !gen_type_ids.is_empty() {
+                    result.push('<');
+                    result.push_str(&self.to_string_list(&gen_type_ids)?);
+                    result.push('>');
+                }
+
+                result.push('(');
+                if !params.is_empty() {
+                    result.push_str(&self.to_string_list(&params)?);
+                }
+                result.push(')');
+
+                if let Some(ret_type_id) = ret_type_id_opt {
+                    result.push_str("->");
+                    result.push_str(&self.to_string_type_id(*ret_type_id)?);
+                }
+            }
+
+            Ty::Expr(expr, ..) => {
+                if let Ok(type_id_i) = expr.get_expr_type() {
+                    result.push_str(&self.to_string_type_id(type_id_i)?);
+                } else {
+                    panic!("Expr type None.");
+                }
+            }
+
+            Ty::Array(type_id_i, dim_opt, ..) => {
+                result.push('[');
+                result.push_str(&self.to_string_type_id(*type_id_i)?);
+                result.push(']');
+
+                // TODO: Dimension.
+                /*
+                if let Some(dim) = dim_opt {
+                    result.push(':');
+                    result.push_str(&dim.as_ref().to_string());
+                }
+                */
+            }
+
+            Ty::Generic(gen_ident, id, ..) => {
+                result.push_str(&format!("gen({}-{})", gen_ident, id));
+            }
+            Ty::GenericInstance(gen_ident, id, ..) => {
+                result.push_str(&format!("genInst({}-{})", gen_ident, id));
+            }
+
+            Ty::Any(id, ..) => result.push_str(&format!("any({})", id)),
+
+            // TODO: Can these be solved in a better way? Currently only print
+            //       the type ID for the ADT because otherwise it can cause a
+            //       infinite loop.
+            Ty::UnknownAdtMember(adt_type_id, member_name, ..) => {
+                result.push_str("adtMember(");
+                //result.push_str(&self.to_string_type_id(ty_ctx, *adt_type_id)?);
+                result.push_str(&format!("typeId({})", adt_type_id));
+                result.push('.');
+                result.push_str(member_name);
+                result.push(')');
+            }
+            Ty::UnknownAdtMethod(adt_type_id, method_name, ..) => {
+                result.push_str("adtMethod(");
+                //result.push_str(&self.to_string_type_id(ty_ctx, *adt_type_id)?);
+                result.push_str(&format!("typeId({})", adt_type_id));
+                result.push('.');
+                result.push_str(method_name);
+                result.push(')');
+            }
+            Ty::UnknownMethodArgument(adt_type_id, method_name, _, name_or_idx, ..) => {
+                result.push_str("adtMethodArg(");
+                //result.push_str(&self.to_string_type_id(ty_ctx, *adt_type_id)?);
+                result.push_str(&format!("typeId({})", adt_type_id));
+                result.push('.');
+                result.push_str(method_name);
+                result.push('.');
+                match name_or_idx {
+                    Either::Left(name) => result.push_str(name),
+                    Either::Right(idx) => result.push_str(&idx.to_string()),
+                }
+                result.push(')');
+            }
+            Ty::UnknownMethodGeneric(adt_type_id, method_name, name_or_idx, ..) => {
+                result.push_str("adtMethodGen(");
+                //result.push_str(&self.to_string_type_id(ty_ctx, *adt_type_id)?);
+                result.push_str(&format!("typeId({})", adt_type_id));
+                result.push('.');
+                result.push_str(method_name);
+                result.push('.');
+                match name_or_idx {
+                    Either::Left(idx) => result.push_str(&idx.to_string()),
+                    Either::Right(name) => result.push_str(name),
+                }
+                result.push(')');
+            }
+
+            Ty::UnknownArrayMember(arr_type_id, ..) => {
+                result.push_str("arr(");
+                result.push_str(&self.to_string_type_id(*arr_type_id)?);
+                result.push(')')
+            }
         }
+
+        Ok(result)
+    }
+
+    pub fn to_string_inner_ty(&self, inner_ty: &InnerTy) -> String {
+        match inner_ty {
+            InnerTy::Void => "void".into(),
+            InnerTy::Character => "char".into(),
+            InnerTy::String => "String".into(),
+            InnerTy::Boolean => "bool".into(),
+            InnerTy::I8 => "i8".into(),
+            InnerTy::U8 => "u8".into(),
+            InnerTy::I16 => "i16".into(),
+            InnerTy::U16 => "u16".into(),
+            InnerTy::I32 => "i32".into(),
+            InnerTy::U32 => "u32".into(),
+            InnerTy::F32 => "f32".into(),
+            InnerTy::I64 => "i64".into(),
+            InnerTy::U64 => "u64".into(),
+            InnerTy::F64 => "f64".into(),
+            InnerTy::I128 => "i128".into(),
+            InnerTy::U128 => "u128".into(),
+
+            InnerTy::Struct(path)
+            | InnerTy::Enum(path)
+            | InnerTy::Union(path)
+            | InnerTy::Trait(path) => self.to_string_path(path),
+
+            InnerTy::Unknown(_) => "unknown".into(),
+            InnerTy::UnknownInt(_, _) => "unknown_int".into(),
+            InnerTy::UnknownFloat(_) => "unknown_float".into(),
+            InnerTy::UnknownIdent(path, ..) => {
+                format!("unknown_ident({})", self.to_string_path(path))
+            }
+        }
+    }
+
+    pub fn to_string_generics(&self, generics: &Generics) -> LangResult<String> {
+        let type_ids = generics.iter_types().copied().collect::<Vec<_>>();
+        Ok(format!("<{}>", self.to_string_list(&type_ids)?))
+    }
+
+    pub fn to_string_path(&self, path: &LangPath) -> String {
+        const SEP: &str = "::";
+        path.parts
+            .iter()
+            .map(|path_part| self.to_string_path_part(path_part))
+            .collect::<Vec<_>>()
+            .join(SEP)
+    }
+
+    pub fn to_string_path_part(&self, path_part: &LangPathPart) -> String {
+        if let Some(generics) = &path_part.1 {
+            util::to_generic_name(&self, &path_part.0, generics)
+        } else {
+            path_part.0.clone()
+        }
+    }
+
+    pub fn to_string_list(&self, ids: &[TypeId]) -> LangResult<String> {
+        let mut result_vec = Vec::default();
+        for type_id in ids {
+            result_vec.push(self.to_string_type_id(*type_id)?);
+        }
+
+        let mut result = String::new();
+        result.push_str(&result_vec.join(","));
+        Ok(result)
     }
 }

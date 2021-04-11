@@ -430,15 +430,16 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let last_part = full_path.pop().unwrap();
                         full_path.push(LangPathPart(last_part.0, Some(generics)));
 
-                        if let Some(struct_type) =
-                            self.module.get_struct_type(&self.analyze_ctx.ty_ctx.ty_env.to_string_path(&self.analyze_ctx.ty_ctx, &full_path))
+                        if let Some(struct_type) = self
+                            .module
+                            .get_struct_type(&self.analyze_ctx.ty_ctx.to_string_path(&full_path))
                         {
                             struct_type.clone().into()
                         } else {
                             return Err(self.err(
                                 format!(
                                     "Unable to find custom struct type with name: {}",
-                                    self.analyze_ctx.ty_ctx.ty_env.to_string_path(&self.analyze_ctx.ty_ctx, &full_path)
+                                    self.analyze_ctx.ty_ctx.to_string_path(&full_path)
                                 ),
                                 file_pos,
                             ));
@@ -448,8 +449,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let last_part = full_path.pop().unwrap();
                         full_path.push(LangPathPart(last_part.0, Some(generics)));
 
-                        if let Some(struct_type) =
-                            self.module.get_struct_type(&self.analyze_ctx.ty_ctx.ty_env.to_string_path(&self.analyze_ctx.ty_ctx, &full_path))
+                        if let Some(struct_type) = self
+                            .module
+                            .get_struct_type(&self.analyze_ctx.ty_ctx.to_string_path(&full_path))
                         {
                             struct_type.clone().into()
                         } else {
@@ -488,10 +490,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     _ => {
                         return Err(self.err(
                             format!(
-                                "Invalid inner type during type codegen. Type ID: {}, ty: {:?}, inner type: {:#}",
+                                "Invalid inner type during type codegen. \
+                                Type ID: {}, ty: {:?}, inner type: {:#}",
                                 &type_id,
-                                self.analyze_ctx.ty_ctx.ty_env.to_string_type_id(&self.analyze_ctx.ty_ctx, type_id)?,
-                                self.analyze_ctx.ty_ctx.ty_env.to_string_inner_ty(&self.analyze_ctx.ty_ctx, &inner_ty),
+                                self.analyze_ctx.ty_ctx.to_string_type_id(type_id)?,
+                                self.analyze_ctx.ty_ctx.to_string_inner_ty(&inner_ty),
                             ),
                             file_pos,
                         ))
@@ -509,8 +512,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     inf_type_id,
                     self.analyze_ctx
                         .ty_ctx
-                        .ty_env
-                        .to_string_type_id(&self.analyze_ctx.ty_ctx, inf_type_id)?,
+                        .to_string_type_id(inf_type_id)?,
                 ),
                     file_pos,
                 ))

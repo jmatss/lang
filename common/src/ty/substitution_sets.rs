@@ -374,10 +374,10 @@ fn compatible_with_start(
     } else {
         let mut msg = format!(
             "Found unsolvable type constraint. Tried to map the types:\n  1. {} ({} -- {:?})\n  2. {} ({} -- {:?})",
-            ty_ctx.ty_env.to_string_type_id(ty_ctx, type_id_a)?,
+            ty_ctx.to_string_type_id(type_id_a)?,
             type_id_a,
             ty_ctx.ty_env.file_pos(type_id_a),
-            ty_ctx.ty_env.to_string_type_id(ty_ctx, type_id_b)?,
+            ty_ctx.to_string_type_id(type_id_b)?,
             type_id_b,
             ty_ctx.ty_env.file_pos(type_id_b),
         );
@@ -385,7 +385,7 @@ fn compatible_with_start(
         if type_id_a != start_type_id_a {
             msg.push_str(&format!(
                 "\nThe first type (1) was inferred from the type: {} ({} -- {:?})",
-                ty_ctx.ty_env.to_string_type_id(ty_ctx, start_type_id_a)?,
+                ty_ctx.to_string_type_id(start_type_id_a)?,
                 start_type_id_a,
                 ty_ctx.ty_env.file_pos(start_type_id_a),
             ));
@@ -394,7 +394,7 @@ fn compatible_with_start(
         if type_id_b != start_type_id_b {
             msg.push_str(&format!(
                 "\nThe second type (2) was inferred from the type: {} ({} -- {:?})",
-                ty_ctx.ty_env.to_string_type_id(ty_ctx, start_type_id_b)?,
+                ty_ctx.to_string_type_id(start_type_id_b)?,
                 start_type_id_b,
                 ty_ctx.ty_env.file_pos(start_type_id_b),
             ));

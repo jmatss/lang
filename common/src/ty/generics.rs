@@ -149,16 +149,6 @@ impl Generics {
 
         Ok(solved)
     }
-
-    pub fn to_string(&self, ty_env: &TyEnv) -> String {
-        let result = self
-            .types
-            .iter()
-            .map(|ty| ty.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        format!("<{}>", result)
-    }
 }
 
 impl Hash for Generics {

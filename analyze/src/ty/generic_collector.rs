@@ -247,7 +247,7 @@ impl GenericCollector {
             let err = ctx.ast_ctx.err(format!(
                 "Func call for method \"{}\" on struct \"{}\"has generics, but func decl doesn't.",
                 &method_name,
-                ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &old_path)
+                ctx.ty_ctx.to_string_path(&old_path)
             ));
             Err(err)
         }
@@ -572,9 +572,7 @@ impl GenericCollector {
                     } else {
                         unreachable!(
                             "method_adt_path: {}, method_call_name: {}",
-                            ctx.ty_ctx
-                                .ty_env
-                                .to_string_path(&ctx.ty_ctx, &method_adt_path),
+                            ctx.ty_ctx.to_string_path(&method_adt_path),
                             method_call_name,
                         );
                     }
@@ -693,9 +691,7 @@ impl GenericCollector {
                     } else {
                         unreachable!(
                             "method_adt_path: {}, method_call_name: {}",
-                            ctx.ty_ctx
-                                .ty_env
-                                .to_string_path(&ctx.ty_ctx, &method_adt_path),
+                            ctx.ty_ctx.to_string_path(&method_adt_path),
                             method_call_name,
                         );
                     }
@@ -811,7 +807,7 @@ impl GenericCollector {
                     "Cyclic dependency between method \"{}\" and \"{}\" in ADT \"{}\".",
                     cyc_err.0,
                     cyc_err.1,
-                    ty_ctx.ty_env.to_string_path(ty_ctx, &adt_path)
+                    ty_ctx.to_string_path(&adt_path)
                 ),
                 LangErrorKind::GeneralError,
                 None,
@@ -830,7 +826,7 @@ impl GenericCollector {
 
             while i < type_ids.len() {
                 let type_id = *type_ids.get(i).unwrap();
-                let ty_string = ctx.ty_ctx.ty_env.to_string_type_id(&ctx.ty_ctx, type_id)?;
+                let ty_string = ctx.ty_ctx.to_string_type_id(type_id)?;
 
                 if seen_ty_strings.contains(&ty_string) {
                     type_ids.swap_remove(i);

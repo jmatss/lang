@@ -222,7 +222,7 @@ impl AstCtx {
         } else if id == BlockCtx::DEFAULT_BLOCK_ID {
             let mut err_msg = format!(
                 "Unable to find decl for \"{}\" ({:#?}).",
-                ty_ctx.ty_env.to_string_path(ty_ctx, path),
+                ty_ctx.to_string_path(path),
                 path
             );
             if log_enabled!(Level::Debug) {
@@ -327,7 +327,7 @@ impl AstCtx {
         } else {
             Err(self.err(format!(
                 "Unable to find decl with name \"{}\" ({:#?}) in decl block ID {}.\nMap keys:\n{:#?}",
-                ty_ctx.ty_env.to_string_path(ty_ctx, name),
+                ty_ctx.to_string_path(name),
                 name,
                 decl_block_id,
                 map.keys()
@@ -353,7 +353,7 @@ impl AstCtx {
         } else {
             Err(self.err(format!(
                 "Unable to find decl with name \"{}\" ({:#?}) in decl block ID {}.\nMap keys:\n{:#?}",
-                ty_ctx.ty_env.to_string_path(ty_ctx, name),
+                ty_ctx.to_string_path(name),
                 name,
                 decl_block_id,
                 map.keys()
@@ -576,7 +576,7 @@ impl AstCtx {
                 format!(
                     "Unable to find member with name \"{}\" in ADT \"{}\".",
                     &member_name,
-                    ty_ctx.ty_env.to_string_path(ty_ctx, adt_name),
+                    ty_ctx.to_string_path(adt_name),
                 ),
                 LangErrorKind::GeneralError,
                 file_pos,
@@ -602,7 +602,7 @@ impl AstCtx {
             Err(self.err(format!(
                 "Unable to find member with name \"{}\" in ADT \"{}\".",
                 &member_name,
-                ty_ctx.ty_env.to_string_path(ty_ctx, adt_name),
+                ty_ctx.to_string_path(adt_name),
             )))
         }
     }
@@ -750,7 +750,7 @@ impl AstCtx {
             err_msg.push_str("\nFound potential ADTs in inaccessable modules:\n - ");
             let suggestions = adt_suggestions
                 .into_iter()
-                .map(|p| ty_ctx.ty_env.to_string_path(ty_ctx, &p))
+                .map(|p| ty_ctx.to_string_path(&p))
                 .collect::<Vec<_>>()
                 .join("\n - ");
             err_msg.push_str(&suggestions);
@@ -779,7 +779,7 @@ impl AstCtx {
             err_msg.push_str("\nFound potential traits in inaccessable modules:\n - ");
             let suggestions = adt_suggestions
                 .into_iter()
-                .map(|p| ty_ctx.ty_env.to_string_path(ty_ctx, &p))
+                .map(|p| ty_ctx.to_string_path(&p))
                 .collect::<Vec<_>>()
                 .join("\n - ");
             err_msg.push_str(&suggestions);

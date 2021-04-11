@@ -1,5 +1,5 @@
 use common::{
-    ctx::{ty_ctx::TyCtx, ty_env::TyEnv},
+    ctx::ty_ctx::TyCtx,
     error::LangResult,
     file::FilePosition,
     path::LangPathBuilder,
@@ -77,7 +77,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
 
                         Ok((type_id, file_pos))
                     } else {
-                        // This is ident that represents a name of a type/ADT.
+                        // This is a ident that represents a name of a type/ADT.
                         let generics = match self.parse_type_generics(GenericsKind::Impl)? {
                             (generics, Some(file_pos_last)) => {
                                 file_pos.set_end(&file_pos_last)?;
@@ -107,14 +107,16 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                             ))
                         } else {
                             // TODO: Remove need for this.
-                            let empty_ty_ctx = TyCtx::new(TyEnv::default());
+                            let ty_env = std::mem::take(&mut self.iter.ty_env);
+                            let mut tmp_ty_ctx = TyCtx::new(ty_env);
+
                             let inner_ty = InnerTy::ident_to_type(
-                                &self
-                                    .iter
-                                    .ty_env
-                                    .to_string_path(&empty_ty_ctx, &path_builder.build()),
+                                &tmp_ty_ctx.to_string_path(&path_builder.build()),
                                 self.iter.current_block_id(),
                             );
+
+                            self.iter.ty_env = std::mem::take(&mut tmp_ty_ctx.ty_env);
+
                             let type_info = TypeInfo::Default(file_pos);
 
                             Ok((
