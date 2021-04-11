@@ -1,6 +1,15 @@
-use super::context::TypeContext;
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    rc::Rc,
+};
+
+use either::Either;
+use log::debug;
+
 use common::{
-    error::LangError,
+    ctx::traverse_ctx::TraverseCtx,
+    error::{LangError, LangResult},
     file::FilePosition,
     path::LangPath,
     token::{
@@ -12,18 +21,9 @@ use common::{
         stmt::Modifier,
         stmt::Stmt,
     },
-    traverser::TraverseContext,
-    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
-    type_info::TypeInfo,
-    visitor::Visitor,
-    BlockId, TypeId,
-};
-use either::Either;
-use log::debug;
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
-    rc::Rc,
+    traverse::visitor::Visitor,
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
+    TypeId,
 };
 
 /// Infers types for exprs that doesn't have a type explicitly set.
@@ -34,9 +34,7 @@ use std::{
 /// types to expressions and populates the "substitution" sets in "TypeContext"
 /// that will be used to convert those temp types to "real" ones.
 /// That conversion is done in another step by the "TypeSolver".
-pub struct TypeInferencer<'a, 'b> {
-    type_context: &'a mut TypeContext<'b>,
-
+pub struct TypeInferencer {
     /// Keep a copy of the current function which body is being traversed.
     /// This will let the statements/exprs etc. inside the function know
     /// about the types of the parameters and the return type.
@@ -46,64 +44,44 @@ pub struct TypeInferencer<'a, 'b> {
     /// as the type in the match cases.
     cur_match_expr: Option<Expr>,
 
-    /// A id used when creating temporary "Unknown" types. This ID will be given
-    /// so that they can be identified uniquely. It will be increment for every
-    /// new type.
-    type_id: usize,
-
     errors: Vec<LangError>,
 }
 
-impl<'a, 'b> TypeInferencer<'a, 'b> {
-    pub fn new(type_context: &'a mut TypeContext<'b>) -> Self {
+impl TypeInferencer {
+    pub fn new() -> Self {
         Self {
-            type_context,
             cur_func: None,
             cur_match_expr: None,
-            type_id: 0,
             errors: Vec::default(),
         }
-    }
-
-    /// Creates a new unknown identifier that will be given to a unkown type.
-    /// The new string will containg information about the position of the type
-    /// in a file and a free text to give the unknown type some more context for
-    /// readability.
-    fn new_unknown_ident(&mut self, text: &str) -> TypeId {
-        let file_nr = self.type_context.analyze_context.file_pos.file_nr;
-        let line_nr = self.type_context.analyze_context.file_pos.line_start;
-        let column_nr = self.type_context.analyze_context.file_pos.column_start;
-        let offset = self.type_context.analyze_context.file_pos.offset;
-        let length = self.type_context.analyze_context.file_pos.length;
-
-        let type_ident = format!(
-            "ID:{}-F:{}-R:{}-C:{}-O:{}-L:{}-{}",
-            self.type_id, file_nr, line_nr, column_nr, offset, length, text
-        );
-        self.type_id += 1;
-        type_ident
     }
 
     /// Helper function to insert a new constraint and store a potential error
     /// in `self.errors()`. Use this function do it in a single line func call
     /// instead of having to check for errors every time.
-    fn insert_constraint(&mut self, ty_a: &Ty, ty_b: &Ty, root_id: BlockId) {
-        if let Err(err) = self.type_context.insert_constraint(ty_a, ty_b, root_id) {
+    fn insert_constraint(&mut self, ctx: &mut TraverseCtx, type_id_a: TypeId, type_id_b: TypeId) {
+        if let Err(err) = ctx.ty_ctx.insert_constraint(type_id_a, type_id_b) {
             self.errors.push(err);
         }
     }
 
+    /// Updates the vector `generic_types` with names declared on the ADT and
+    /// returnes the updated Generics. This Generics can be used to replace the
+    /// old one.
     fn combine_generics(
         &mut self,
+        ctx: &mut TraverseCtx,
         inner_ty: &InnerTy,
-        generic_types: &mut Generics,
+        gen_impls: &Generics,
         fn_call_path: &LangPath,
-        id: BlockId,
-    ) {
-        let generic_names = if let Some(ident) = inner_ty.get_ident() {
-            if let Ok(adt) = self.type_context.analyze_context.get_adt(&ident, id) {
-                if let Some(generics) = &adt.borrow().generics {
-                    generics.iter_names().cloned().collect::<Vec<_>>()
+    ) -> LangResult<Generics> {
+        let adt_gen_names = if let Some(adt_path) = inner_ty.get_ident() {
+            if let Ok(adt) =
+                ctx.ast_ctx
+                    .get_adt_partial(&ctx.ty_ctx, &adt_path.without_gens(), ctx.block_id)
+            {
+                if let Some(adt_gens) = &adt.borrow().generics {
+                    adt_gens.iter_names().cloned().collect::<Vec<_>>()
                 } else {
                     Vec::default()
                 }
@@ -114,41 +92,48 @@ impl<'a, 'b> TypeInferencer<'a, 'b> {
             Vec::default()
         };
 
-        let mut generics = Generics::new();
+        let mut new_gens = Generics::new();
 
-        // If the generics impls have been specified, use those
-        // to populate the Generics.
-        // Else if no generic implements have been specified,
-        // create new "GenericInstance"s.
-        if generic_types.len_types() > 0 {
-            if generic_names.len() != generic_types.len_types() {
-                let err = self.type_context.analyze_context.err(format!(
-                    "Wrong amount of generics for static call. Func call: {}, generic_names: {:#?}",
-                    fn_call_path, generic_names
+        // If no generic implements have been specified, create new "GenericInstance"s.
+        // Else if the generics impls have been specified, use those to populate
+        // the Generics.
+        if gen_impls.is_empty() {
+            for gen_name in adt_gen_names {
+                let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                let gen_type_id = ctx.ty_ctx.ty_env.id(&Ty::GenericInstance(
+                    gen_name.clone(),
+                    unique_id,
+                    TypeInfo::None,
+                ))?;
+
+                new_gens.insert(gen_name.clone(), gen_type_id);
+            }
+        } else {
+            if adt_gen_names.len() != gen_impls.len_types() {
+                let err = ctx.ast_ctx.err(format!(
+                    "Wrong amount of generics on ADT for static call. Found: {}, expected: {}.\n\
+                    Adt name: {:?}\nMethod name: {}\nAdt generic names: {:?}",
+                    gen_impls.len_types(),
+                    adt_gen_names.len(),
+                    inner_ty.get_ident(),
+                    ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &fn_call_path),
+                    adt_gen_names
                 ));
-                self.errors.push(err);
-                return;
+                return Err(err);
             }
 
-            generic_names
+            adt_gen_names
                 .iter()
                 .cloned()
-                .zip(generic_types.iter_types().cloned())
-                .for_each(|(gen_name, gen_ty)| generics.insert(gen_name, gen_ty));
-        } else {
-            for gen_name in generic_names {
-                let unknown_ident = self.new_unknown_ident(&format!("generic_{}", gen_name));
-                let gen_ty = Ty::GenericInstance(gen_name.clone(), unknown_ident, TypeInfo::None);
-
-                generics.insert(gen_name.clone(), gen_ty);
-            }
+                .zip(gen_impls.iter_types().cloned())
+                .for_each(|(gen_name, gen_ty)| new_gens.insert(gen_name, gen_ty));
         }
 
-        *generic_types = generics;
+        Ok(new_gens)
     }
 }
 
-impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
+impl Visitor for TypeInferencer {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -157,45 +142,74 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.type_context.analyze_context.file_pos =
-            ast_token.file_pos().cloned().unwrap_or_default();
+    fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
+        ctx.ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
     }
 
-    fn visit_end(&mut self, _ctx: &TraverseContext) {
+    fn visit_end(&mut self, ctx: &mut TraverseCtx) {
+        let mut all_type_ids = ctx
+            .ty_ctx
+            .ty_env
+            .all_types()
+            .into_iter()
+            .collect::<Vec<_>>();
+        all_type_ids.sort_unstable();
+
+        let mut all_types_string = String::new();
+        for type_id in all_type_ids {
+            all_types_string.push_str(&format!(
+                "\ntype_id: {} - {:?}",
+                type_id,
+                ctx.ty_ctx.ty_env.to_string_type_id(&ctx.ty_ctx, type_id)
+            ));
+        }
+
         debug!(
-            "Type inference done.\nSubs: {}",
-            self.type_context.pretty_print_subs()
+            "Type inference done.\nforwards: {:#?}\nall types: {}\nsubs:",
+            ctx.ty_ctx.ty_env.get_forwards(),
+            all_types_string
         );
+        ctx.ty_ctx.pretty_print_subs();
     }
 
     /// Assigns a "Unknown" type for every expression that doesn't have a type
     /// explicitly set. This new type will then be temporarilty used during this
     /// stage and should be converted/subtituted into a "real" type before this
     /// analyzing step is done.
-    fn visit_lit(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
-        let (lit, ty_opt, type_info) = if let Expr::Lit(lit, ty_opt, file_pos) = expr {
+    fn visit_lit(&mut self, expr: &mut Expr, ctx: &mut TraverseCtx) {
+        let (lit, type_id_opt, type_info) = if let Expr::Lit(lit, type_id_opt, file_pos) = expr {
             let type_info = TypeInfo::Lit(file_pos.to_owned());
-            (lit, ty_opt, type_info)
+            (lit, type_id_opt, type_info)
         } else {
             unreachable!()
         };
 
-        if ty_opt.is_some() {
+        if type_id_opt.is_some() {
             return;
         }
 
         let inner_ty = match lit {
             Lit::String(_) => {
+                let u8_ty = Ty::CompoundType(InnerTy::U8, Generics::empty(), type_info.clone());
+                let u8_type_id = match ctx.ty_ctx.ty_env.id(&u8_ty) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                let ptr_ty = Ty::Pointer(u8_type_id, type_info);
+                let ptr_type_id = match ctx.ty_ctx.ty_env.id(&ptr_ty) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
                 // TODO: Have a custom struct "String" instead of "*u8"?
-                *ty_opt = Some(Ty::Pointer(
-                    Box::new(Ty::CompoundType(
-                        InnerTy::U8,
-                        Generics::empty(),
-                        type_info.clone(),
-                    )),
-                    type_info,
-                ));
+                *type_id_opt = Some(ptr_type_id);
 
                 return;
             }
@@ -203,20 +217,33 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             Lit::Char(_) => InnerTy::Character,
             Lit::Bool(_) => InnerTy::Boolean,
             Lit::Integer(_, radix) => {
-                InnerTy::UnknownInt(self.new_unknown_ident("int_literal"), *radix)
+                let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                InnerTy::UnknownInt(unique_id, *radix)
             }
-            Lit::Float(_) => InnerTy::UnknownFloat(self.new_unknown_ident("float_literal")),
+            Lit::Float(_) => {
+                let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                InnerTy::UnknownFloat(unique_id)
+            }
         };
 
-        *ty_opt = Some(Ty::CompoundType(inner_ty, Generics::empty(), type_info));
+        let type_id =
+            match ctx
+                .ty_ctx
+                .ty_env
+                .id(&Ty::CompoundType(inner_ty, Generics::empty(), type_info))
+            {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+        *type_id_opt = Some(type_id);
     }
 
-    fn visit_var(&mut self, var: &mut Var, ctx: &TraverseContext) {
-        let var_decl = match self
-            .type_context
-            .analyze_context
-            .get_var(&var.name, ctx.block_id)
-        {
+    fn visit_var(&mut self, var: &mut Var, ctx: &mut TraverseCtx) {
+        let var_decl = match ctx.ast_ctx.get_var(&var.name, ctx.block_id) {
             Ok(var_decl) => var_decl,
             Err(err) => {
                 self.errors.push(err);
@@ -224,31 +251,37 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             }
         };
 
-        let var_decl_ty = if let Some(ty) = var_decl.borrow().ty.clone() {
-            ty
+        let var_decl_type_id = if let Some(type_id) = var_decl.borrow().ty {
+            type_id
         } else {
-            let err = self
-                .type_context
-                .analyze_context
+            let err = ctx
+                .ast_ctx
                 .err(format!("Ret type not set for var decl: {:?}", var_decl));
             self.errors.push(err);
             return;
         };
 
-        let var_ty = if let Some(ty) = &var.ty {
-            ty.clone()
+        let var_type_id = if let Some(type_id) = &var.ty {
+            *type_id
         } else {
-            let new_type = Ty::CompoundType(
-                InnerTy::Unknown(self.new_unknown_ident(&format!("var_use({})", var.name))),
+            let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+            let new_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                InnerTy::Unknown(unique_id),
                 Generics::new(),
                 TypeInfo::VarUse(var.file_pos.unwrap()),
-            );
-            var.ty = Some(new_type.clone());
-            new_type
+            )) {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+            var.ty = Some(new_type_id);
+            new_type_id
         };
 
         // Add type constraint between var "use" and var "decl",
-        self.insert_constraint(&var_decl_ty, &var_ty, ctx.block_id);
+        self.insert_constraint(ctx, var_decl_type_id, var_type_id);
     }
 
     // TODO: Clean up.
@@ -260,17 +293,13 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// tie them together with a constraint. This is done since a Generic can
     /// have multiple differet types depending on the context, which isn't solvable
     /// through the regular type inference logic.
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
         // TODO: Support varargs for fn pointers?
         // TODO: Support named arguments for fn pointers?
 
         let mut fn_ret_ty = if fn_call.is_fn_ptr_call {
             let var_name = fn_call.name.clone();
-            let decl_id = match self
-                .type_context
-                .analyze_context
-                .get_var_decl_scope(&var_name, ctx.block_id)
-            {
+            let decl_id = match ctx.ast_ctx.get_var_decl_scope(&var_name, ctx.block_id) {
                 Ok(decl_id) => decl_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -279,10 +308,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             };
 
             let key = (fn_call.name.clone(), decl_id);
-            let var = match self.type_context.analyze_context.variables.get(&key) {
+            let var = match ctx.ast_ctx.variables.get(&key) {
                 Some(var) => var,
                 None => {
-                    let err = self.type_context.analyze_context.err(
+                    let err = ctx.ast_ctx.err(
                         format!(
                             "Unable to find variable named \"{}\" containing a fn ptr in decl scope {}.",
                             var_name, decl_id
@@ -293,19 +322,27 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
             };
 
-            let (fn_gens, fn_params, fn_ret_ty) = if let Some(ty) = var.borrow().ty.clone() {
-                if let Ty::Fn(gens, params, ret_ty, _) = ty {
+            let (fn_gens, fn_params, fn_ret_ty) = if let Some(fn_type_id) = var.borrow().ty {
+                let fn_ty = match ctx.ty_ctx.ty_env.ty(fn_type_id) {
+                    Ok(ty) => ty.clone(),
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                if let Ty::Fn(gens, params, ret_ty, _) = fn_ty {
                     (gens, params, ret_ty)
                 } else {
-                    let err = self.type_context.analyze_context.err(format!(
+                    let err = ctx.ast_ctx.err(format!(
                         "Variable named \"{}\" expected to contain a fn ptr, but didn't: {:#?}",
-                        var_name, ty
+                        var_name, fn_type_id
                     ));
                     self.errors.push(err);
                     return;
                 }
             } else {
-                let err = self.type_context.analyze_context.err(format!(
+                let err = ctx.ast_ctx.err(format!(
                     "No type set for variable named \"{}\" expected to contain a fn ptr.",
                     var_name
                 ));
@@ -316,18 +353,18 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // Fn pointers doesn't support named arguments, so can zip the args
             // and param types since their indices is always used to map them.
             if fn_call.arguments.len() == fn_params.len() {
-                for (arg, param_ty) in fn_call.arguments.iter().zip(fn_params.iter()) {
-                    let arg_ty = match arg.value.get_expr_type() {
-                        Ok(ty) => ty.clone(),
+                for (arg, param_type_id) in fn_call.arguments.iter().zip(fn_params.iter()) {
+                    let arg_type_id = match arg.value.get_expr_type() {
+                        Ok(type_id) => type_id,
                         Err(err) => {
                             self.errors.push(err);
                             return;
                         }
                     };
-                    self.insert_constraint(&arg_ty, param_ty, ctx.block_id);
+                    self.insert_constraint(ctx, arg_type_id, *param_type_id);
                 }
             } else {
-                let err = self.type_context.analyze_context.err(format!(
+                let err = ctx.ast_ctx.err(format!(
                     "Wrong amount of arguments for fn pointer call.\n\
                     Func call: {:#?}\nfn_params: {:#?}",
                     fn_call, fn_params
@@ -344,10 +381,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             if fn_call_gens.len() == fn_gens.len() {
                 for (fn_call_gen, fn_gen) in fn_call_gens.iter().zip(fn_gens.iter()) {
-                    self.insert_constraint(fn_call_gen, fn_gen, ctx.block_id);
+                    self.insert_constraint(ctx, *fn_call_gen, *fn_gen);
                 }
             } else {
-                let err = self.type_context.analyze_context.err(format!(
+                let err = ctx.ast_ctx.err(format!(
                     "Wrong amount of generics for fn pointer call.\n\
                     Func call: {:#?}\nfn_gens: {:#?}",
                     fn_call, fn_gens
@@ -356,25 +393,31 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 return;
             }
 
-            if let Some(mut ty) = fn_ret_ty {
-                *ty.file_pos_mut().unwrap() = fn_call.file_pos.unwrap();
-                *ty
+            if let Some(type_id) = fn_ret_ty {
+                *ctx.ty_ctx.ty_env.file_pos_mut(type_id).unwrap() = fn_call.file_pos.unwrap();
+                type_id
             } else {
-                Ty::CompoundType(
+                match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
                     InnerTy::Void,
                     Generics::empty(),
                     TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
-                )
+                )) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                }
             }
         } else if fn_call.is_method {
             // Get the "owning" ADT type of this method. If it isn't set explicitly,
             // it should be set as a expression in the first argument with name "this".
-            let mut adt_ty = if let Some(adt_ty) = &fn_call.method_adt {
-                adt_ty.clone()
+            let mut adt_type_id = if let Some(adt_type_id) = &fn_call.method_adt {
+                *adt_type_id
             } else if let Some(first_arg) = fn_call.arguments.first() {
                 if first_arg.name.as_ref().map_or(false, |name| name == "this") {
                     match first_arg.value.get_expr_type() {
-                        Ok(ty) => ty,
+                        Ok(type_id) => type_id,
                         Err(err) => {
                             self.errors.push(err);
                             return;
@@ -397,18 +440,88 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // the ADT and combine the names for the generics found in the ADT
             // declaration with potential generic impls in the ADT init/func call.
             let fn_half_path = fn_call.module.clone_push(&fn_call.name, None);
-            if let Ty::CompoundType(inner_ty, generic_types, ..) = &mut adt_ty {
-                self.combine_generics(inner_ty, generic_types, &fn_half_path, ctx.block_id);
-            } else if let Ty::Pointer(adt_ty_box, ..) = &mut adt_ty {
-                if let Ty::CompoundType(inner_ty, generic_types, ..) = adt_ty_box.as_mut() {
-                    self.combine_generics(inner_ty, generic_types, &fn_half_path, ctx.block_id);
+
+            let mut adt_ty_clone = match ctx.ty_ctx.ty_env.ty(adt_type_id) {
+                Ok(adt_ty) => adt_ty.clone(),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            // Update the generics if necessary. This will combine/check the gens
+            // of this method ADT use and the actual ADT declaration.
+            let gens_was_updated =
+                if let Ty::CompoundType(inner_ty, generic_types, ..) = &mut adt_ty_clone {
+                    match self.combine_generics(ctx, &inner_ty, generic_types, &fn_half_path) {
+                        Ok(combined_gens) => *generic_types = combined_gens,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    }
+                    true
+                } else if let Ty::Pointer(adt_type_id_i, ..) = &mut adt_ty_clone {
+                    let mut adt_ty_i_clone = match ctx.ty_ctx.ty_env.ty(*adt_type_id_i) {
+                        Ok(adt_ty_i) => adt_ty_i.clone(),
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
+
+                    if let Ty::CompoundType(inner_ty, generic_types, ..) = &mut adt_ty_i_clone {
+                        match self.combine_generics(ctx, &inner_ty, generic_types, &fn_half_path) {
+                            Ok(combined_gens) => {
+                                *generic_types = combined_gens;
+                                let new_type_id_i = match ctx.ty_ctx.ty_env.id(&adt_ty_i_clone) {
+                                    Ok(new_type_id_i) => new_type_id_i,
+                                    Err(err) => {
+                                        self.errors.push(err);
+                                        return;
+                                    }
+                                };
+                                *adt_type_id_i = new_type_id_i;
+                            }
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+            if gens_was_updated {
+                match ctx.ty_ctx.ty_env.id(&adt_ty_clone) {
+                    Ok(new_adt_type_id) => {
+                        if adt_type_id != new_adt_type_id {
+                            if let Err(err) =
+                                ctx.ty_ctx.ty_env.forward(adt_type_id, new_adt_type_id)
+                            {
+                                self.errors.push(err);
+                                return;
+                            }
+
+                            // Update the ADT to use in the rest of this function.
+                            adt_type_id = new_adt_type_id;
+                        }
+                    }
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
                 }
             }
 
             // Set the `method_adt` for the function call now that the `method_adt`
             // might have been updated. This call might have no effect if no
             // modifications have been done in the logic above.
-            fn_call.method_adt = Some(adt_ty.clone());
+            fn_call.method_adt = Some(adt_type_id);
 
             let fn_call_gens = fn_call
                 .generics
@@ -430,17 +543,24 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     Either::Right(idx)
                 };
 
-                let arg_ty = Ty::UnknownMethodArgument(
-                    Box::new(adt_ty.clone()),
+                let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                let arg_type_id = match ctx.ty_ctx.ty_env.id(&Ty::UnknownMethodArgument(
+                    adt_type_id,
                     fn_call.name.clone(),
                     fn_call_gens.clone(),
                     position,
-                    self.new_unknown_ident(""),
+                    unique_id,
                     TypeInfo::DefaultOpt(arg.value.file_pos().cloned()),
-                );
+                )) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
-                let arg_expr_ty = match arg.value.get_expr_type() {
-                    Ok(ty) => ty.clone(),
+                let arg_expr_type_id = match arg.value.get_expr_type() {
+                    Ok(type_id) => type_id,
                     Err(err) => {
                         self.errors.push(err);
                         return;
@@ -453,55 +573,68 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 //       some param/args can't be type inferred/checked atm.
                 // Don't add a constraint if the argument has the same type as
                 // the ADT.
-                if arg_expr_ty != adt_ty {
-                    self.insert_constraint(&arg_ty, &arg_expr_ty, ctx.block_id);
+                if arg_expr_type_id != adt_type_id {
+                    self.insert_constraint(ctx, arg_type_id, arg_expr_type_id);
                 }
             }
 
             // Insert constraints between the function call generic type and
             // the method generic types that will be figured out later.
             if let Some(generics) = &fn_call.generics {
-                for (idx, ty) in generics.iter_types().enumerate() {
-                    let unknown_gen_ty = Ty::UnknownMethodGeneric(
-                        Box::new(adt_ty.clone()),
+                for (idx, type_id) in generics.iter_types().enumerate() {
+                    let type_id_file_pos = ctx.ty_ctx.ty_env.file_pos(*type_id).cloned();
+
+                    let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                    let unknown_gen_type_id = match ctx.ty_ctx.ty_env.id(&Ty::UnknownMethodGeneric(
+                        adt_type_id,
                         fn_call.name.clone(),
                         Either::Left(idx),
-                        self.new_unknown_ident(""),
-                        TypeInfo::DefaultOpt(ty.file_pos().cloned()),
-                    );
+                        unique_id,
+                        TypeInfo::DefaultOpt(type_id_file_pos),
+                    )) {
+                        Ok(type_id) => type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
 
-                    self.insert_constraint(&unknown_gen_ty, ty, ctx.block_id);
+                    self.insert_constraint(ctx, unknown_gen_type_id, *type_id);
                 }
             }
+
             // The expected return type of the function call.
-            Ty::UnknownAdtMethod(
-                Box::new(adt_ty),
+            let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+            match ctx.ty_ctx.ty_env.id(&Ty::UnknownAdtMethod(
+                adt_type_id,
                 fn_call.name.clone(),
                 fn_call_gens,
-                self.new_unknown_ident(""),
+                unique_id,
                 TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
-            )
-        } else {
-            let partial_path = fn_call
-                .module
-                .clone_push(&fn_call.name, fn_call.generics.as_ref());
-            let full_path = match self
-                .type_context
-                .analyze_context
-                .calculate_fn_full_path(&partial_path, ctx.block_id)
-            {
-                Ok(full_path) => full_path,
+            )) {
+                Ok(type_id) => type_id,
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
-            };
+            }
+        } else {
+            let partial_path = fn_call
+                .module
+                .clone_push(&fn_call.name, fn_call.generics.as_ref());
+            let full_path =
+                match ctx
+                    .ast_ctx
+                    .calculate_fn_full_path(&ctx.ty_ctx, &partial_path, ctx.block_id)
+                {
+                    Ok(full_path) => full_path,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
-            let func = match self
-                .type_context
-                .analyze_context
-                .get_fn(&full_path, ctx.block_id)
-            {
+            let func = match ctx.ast_ctx.get_fn(&ctx.ty_ctx, &full_path) {
                 Ok(func) => func,
                 Err(err) => {
                     self.errors.push(err);
@@ -522,11 +655,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     // named parameter instead of using the index of its position
                     // in the function call.
                     let inner_idx = if let Some(arg_name) = &arg.name {
-                        match self.type_context.analyze_context.get_fn_param_idx(
-                            &full_path,
-                            &arg_name,
-                            ctx.block_id,
-                        ) {
+                        match ctx
+                            .ast_ctx
+                            .get_fn_param_idx(&ctx.ty_ctx, &full_path, &arg_name)
+                        {
                             Ok(idx) => idx,
                             Err(err) => {
                                 self.errors.push(err);
@@ -537,8 +669,8 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         idx
                     };
 
-                    let arg_ty = match arg.value.get_expr_type() {
-                        Ok(ty) => ty.clone(),
+                    let arg_type_id = match arg.value.get_expr_type() {
+                        Ok(type_id) => type_id,
                         Err(err) => {
                             self.errors.push(err);
                             return;
@@ -549,14 +681,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         continue;
                     }
 
-                    let par_ty = if let Some(ty) = &params
+                    let param_type_id = if let Some(type_id) = &params
                         .get(inner_idx as usize)
-                        .map(|param| param.borrow().ty.clone())
+                        .map(|param| param.borrow().ty)
                         .flatten()
                     {
-                        ty.clone()
+                        *type_id
                     } else {
-                        let err = self.type_context.analyze_context.err(
+                        let err = ctx.ast_ctx.err(
                             format!(
                                 "Type for parameter \"{:?}\" with index {} in function \"{}\" set to None.",
                                 arg.name, inner_idx, func.borrow().name
@@ -566,20 +698,26 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         return;
                     };
 
-                    self.insert_constraint(&arg_ty, &par_ty, ctx.block_id);
+                    self.insert_constraint(ctx, arg_type_id, param_type_id);
                 }
             }
 
             let func = func.borrow();
-            if let Some(mut ty) = func.ret_type.clone() {
-                *ty.file_pos_mut().unwrap() = fn_call.file_pos.unwrap();
-                ty
+            if let Some(type_id) = func.ret_type {
+                *ctx.ty_ctx.ty_env.file_pos_mut(type_id).unwrap() = fn_call.file_pos.unwrap();
+                type_id
             } else {
-                Ty::CompoundType(
+                match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
                     InnerTy::Void,
                     Generics::empty(),
                     TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
-                )
+                )) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                }
             }
         };
 
@@ -587,25 +725,52 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         // "Generic"s doesn't leak out to outside the function. Instead a
         // unique instance of a generic should be used instead. This will allow
         // for multiple different types to be mapped to the same single "Generic".
-        if let Some(gen_tys) = fn_ret_ty.get_generics() {
+        if let Ok(gen_tys) = ctx.ty_ctx.ty_env.get_generics(fn_ret_ty) {
             let mut generics_impl = Generics::new();
 
-            for gen_ty in &gen_tys {
-                if let Ty::Generic(ident, ..) = gen_ty {
-                    let generic_impl = Ty::GenericInstance(
-                        ident.into(),
-                        self.type_id.to_string(),
-                        TypeInfo::DefaultOpt(gen_ty.file_pos().cloned()),
-                    );
-                    self.type_id += 1;
+            for gen_type_id in &gen_tys {
+                let gen_ty = match ctx.ty_ctx.ty_env.ty(*gen_type_id) {
+                    Ok(gen_ty) => gen_ty.clone(),
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
-                    generics_impl.insert(ident.into(), generic_impl);
+                if let Ty::Generic(ident, ..) = gen_ty {
+                    let file_pos = ctx.ty_ctx.ty_env.file_pos(*gen_type_id).cloned();
+
+                    let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                    let generic_impl_type_id = match ctx.ty_ctx.ty_env.id(&Ty::GenericInstance(
+                        ident.clone(),
+                        unique_id,
+                        TypeInfo::DefaultOpt(file_pos),
+                    )) {
+                        Ok(type_id) => type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
+
+                    generics_impl.insert(ident, generic_impl_type_id);
                 } else {
                     unreachable!("Got non generic from `get_generics()`.");
                 }
             }
 
-            fn_ret_ty.replace_generics_impl(&generics_impl)
+            match ctx
+                .ty_ctx
+                .ty_env
+                .replace_gen_impls(fn_ret_ty, &generics_impl)
+            {
+                Ok(Some(new_type_id)) => fn_ret_ty = new_type_id,
+                Ok(None) => (),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            }
         }
 
         // TODO: Is it correct to directly set the return type for the function
@@ -614,7 +779,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         fn_call.ret_type = Some(fn_ret_ty);
     }
 
-    fn visit_fn_ptr(&mut self, expr: &mut Expr, ctx: &TraverseContext) {
+    fn visit_fn_ptr(&mut self, expr: &mut Expr, ctx: &mut TraverseCtx) {
         let fn_ptr = if let Expr::FnPtr(fn_ptr) = expr {
             fn_ptr
         } else {
@@ -630,23 +795,19 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let partial_path = fn_ptr
             .module
             .clone_push(&fn_ptr.name, fn_ptr.generics.as_ref());
-        let full_path = match self
-            .type_context
-            .analyze_context
-            .calculate_fn_full_path(&partial_path, ctx.block_id)
-        {
-            Ok(full_path) => full_path,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
+        let full_path =
+            match ctx
+                .ast_ctx
+                .calculate_fn_full_path(&ctx.ty_ctx, &partial_path, ctx.block_id)
+            {
+                Ok(full_path) => full_path,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
-        let func = match self
-            .type_context
-            .analyze_context
-            .get_fn(&full_path, ctx.block_id)
-        {
+        let func = match ctx.ast_ctx.get_fn(&ctx.ty_ctx, &full_path) {
             Ok(func) => func,
             Err(err) => {
                 self.errors.push(err);
@@ -664,18 +825,18 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         let mut fn_param_tys = if let Some(params) = &func.parameters {
             params
                 .iter()
-                .map(|var| var.borrow().ty.as_ref().unwrap().clone())
+                .map(|var| var.borrow().ty.as_ref().unwrap().to_owned())
                 .collect::<Vec<_>>()
         } else {
             Vec::with_capacity(0)
         };
 
-        let mut fn_ret_ty = func.ret_type.clone();
+        let mut fn_ret_ty = func.ret_type;
 
         if fn_ptr_gens.len() != fn_gen_names.len() {
-            let err = self.type_context.analyze_context.err(format!(
+            let err = ctx.ast_ctx.err(format!(
                 "Function pointer to \"{}\" has incorrect amount of generics. Expected: {}, got: {}",
-                full_path,
+                ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &full_path),
                 fn_gen_names.len(),
                 fn_ptr_gens.len()
             ));
@@ -689,44 +850,72 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         // decls doesn't "leak" outside the scope of the function.
         let mut gens_impl = Generics::new();
         for (gen_name, gen_ty) in fn_gen_names.iter().zip(fn_ptr_gens.iter_types()) {
-            gens_impl.insert(gen_name.clone(), gen_ty.clone());
+            gens_impl.insert(gen_name.clone(), *gen_ty);
         }
 
-        fn_param_tys
-            .iter_mut()
-            .for_each(|ty| ty.replace_generics_impl(&gens_impl));
-        if let Some(ret_ty) = &mut fn_ret_ty {
-            ret_ty.replace_generics_impl(&gens_impl);
+        for fn_param_type_id in &mut fn_param_tys {
+            match ctx
+                .ty_ctx
+                .ty_env
+                .replace_gen_impls(*fn_param_type_id, &gens_impl)
+            {
+                Ok(Some(new_type_id)) => *fn_param_type_id = new_type_id,
+                Ok(None) => (),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            }
         }
 
-        let new_fn_ty = Ty::Fn(
+        if let Some(ret_type_id) = &mut fn_ret_ty {
+            match ctx
+                .ty_ctx
+                .ty_env
+                .replace_gen_impls(*ret_type_id, &gens_impl)
+            {
+                Ok(Some(new_type_id)) => *ret_type_id = new_type_id,
+                Ok(None) => (),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            }
+        }
+
+        let new_fn_type_id = match ctx.ty_ctx.ty_env.id(&Ty::Fn(
             fn_ptr_gens.iter_types().cloned().collect::<Vec<_>>(),
             fn_param_tys,
-            fn_ret_ty.map(Box::new),
+            fn_ret_ty,
             TypeInfo::DefaultOpt(fn_ptr.file_pos),
-        );
+        )) {
+            Ok(type_id) => type_id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
 
-        if let Some(fn_ty) = &fn_ptr.fn_ty {
-            if fn_ty != &new_fn_ty {
-                let err = self.type_context.analyze_context.err(format!(
+        if let Some(fn_type_id) = &fn_ptr.fn_ty {
+            if fn_type_id != &new_fn_type_id {
+                let err = ctx.ast_ctx.err(format!(
                     "Bad function signature for function pointer, fn_path: {}. \
                     fn_ty: {:#?}, new_fn_ty: {:#?}. Function pointer pos: {:#?}",
-                    full_path, fn_ty, new_fn_ty, fn_ptr.file_pos
+                    ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &full_path),
+                    fn_type_id,
+                    new_fn_type_id,
+                    fn_ptr.file_pos
                 ));
                 self.errors.push(err);
                 return;
             }
         } else {
-            fn_ptr.fn_ty = Some(new_fn_ty);
+            fn_ptr.fn_ty = Some(new_fn_type_id);
         }
     }
 
-    fn visit_built_in_call(&mut self, built_in_call: &mut BuiltInCall, _ctx: &TraverseContext) {
-        let built_in = match self
-            .type_context
-            .analyze_context
-            .get_built_in(&built_in_call.name)
-        {
+    fn visit_built_in_call(&mut self, built_in_call: &mut BuiltInCall, ctx: &mut TraverseCtx) {
+        let built_in = match ctx.ast_ctx.get_built_in(&built_in_call.name) {
             Ok(built_in) => built_in.clone(),
             Err(err) => {
                 self.errors.push(err);
@@ -738,7 +927,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
         // Make sure that the amount of arguments are equal to the amount of parameters.
         if built_in_call.arguments.len() != built_in.parameters.len() {
-            let err = self.type_context.analyze_context.err(format!(
+            let err = ctx.ast_ctx.err(format!(
                 "Incorrect amount of arguments given for built-in call to \"{}\". Expected amount: {}, got: {}",
                 &built_in.name,
                 built_in.parameters.len(),
@@ -754,7 +943,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let built_in_gens = if let Some(built_in_gens) = &built_in.generics {
                 built_in_gens
             } else {
-                let err = self.type_context.analyze_context.err(format!(
+                let err = ctx.ast_ctx.err(format!(
                     "Built-in function doesn't have generics, but call has generics. Built-in: {:#?}, call: {:#?}",
                     &built_in,
                     &built_in_call
@@ -766,7 +955,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             let built_in_call_gens = if let Some(built_in_call_gens) = &built_in_call.generics {
                 built_in_call_gens
             } else {
-                let err = self.type_context.analyze_context.err(format!(
+                let err = ctx.ast_ctx.err(format!(
                     "Built-in function have generic parameters, but call doesn't. Built-in: {:#?}, call: {:#?}",
                     &built_in,
                     &built_in_call
@@ -776,7 +965,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             };
 
             if built_in_gens.len() != built_in_call_gens.len() {
-                let err = self.type_context.analyze_context.err(format!(
+                let err = ctx.ast_ctx.err(format!(
                     "Incorrect amount of generic arguments given for built-in call to \"{}\". Expected amount: {}, got: {}",
                     &built_in.name,
                     built_in_gens.len(),
@@ -791,15 +980,26 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 .zip(built_in_call_gens.iter_types())
                 .enumerate()
             {
-                if !built_in_gen.is_compatible(built_in_call_gen) {
-                    let err = self.type_context.analyze_context.err(format!(
-                        "Generic parameter at index {} not compatible. Built-in: {:#?}, call: {:#?}",
-                        idx,
-                        built_in,
-                        built_in_call,
-                    ));
-                    self.errors.push(err);
-                    return;
+                match ctx
+                    .ty_ctx
+                    .ty_env
+                    .is_compatible(*built_in_gen, *built_in_call_gen)
+                {
+                    Ok(true) => (),
+                    Ok(false) => {
+                        let err = ctx.ast_ctx.err(format!(
+                            "Generic parameter at index {} not compatible. Built-in: {:#?}, call: {:#?}",
+                            idx,
+                            built_in,
+                            built_in_call,
+                        ));
+                        self.errors.push(err);
+                        return;
+                    }
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
                 }
             }
         }
@@ -807,10 +1007,18 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         // TODO: Temporary ugly hack to make "@type" to work. Should do this in
         //       a different way and somewhere else.
         if &built_in_call.name == "type" {
-            built_in_call.ret_type = Some(Ty::Expr(
+            let type_id = match ctx.ty_ctx.ty_env.id(&Ty::Expr(
                 Box::new(built_in_call.arguments.first().unwrap().value.clone()),
                 TypeInfo::BuiltInCall(built_in_call.file_pos),
-            ));
+            )) {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            built_in_call.ret_type = Some(type_id);
         }
 
         // TODO: Is it correct to directly set the return type for the function
@@ -823,25 +1031,21 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Adds the correct type for the ADT init and ties the types of the ADT
     /// members with the type of the ADT init arguments.
-    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {
+    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &mut TraverseCtx) {
         let partial_path = adt_init.module.clone_push(&adt_init.name, None);
-        let full_path = match self
-            .type_context
-            .analyze_context
-            .calculate_adt_full_path(&partial_path, ctx.block_id)
-        {
-            Ok(full_path) => full_path,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
+        let full_path =
+            match ctx
+                .ast_ctx
+                .calculate_adt_full_path(&ctx.ty_ctx, &partial_path, ctx.block_id)
+            {
+                Ok(full_path) => full_path,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
-        let adt = match self
-            .type_context
-            .analyze_context
-            .get_adt(&full_path, ctx.block_id)
-        {
+        let adt = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, &full_path) {
             Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);
@@ -865,7 +1069,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // Currently these explicit types must be solved types.
             if let Some(generics_impl) = &adt_init.generics {
                 if generics_decl.len() != generics_impl.len() {
-                    let err = self.type_context.analyze_context.err(format!(
+                    let err = ctx.ast_ctx.err(format!(
                         "Wrong amount of generics for ADT init. ADT init: {:#?}, ADT: {:#?}",
                         adt_init, adt
                     ));
@@ -874,16 +1078,24 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
 
                 for (name, gen_ty) in generics_decl.iter_names().zip(generics_impl.iter_types()) {
-                    generics.insert(name.clone(), gen_ty.clone());
+                    generics.insert(name.clone(), *gen_ty);
                 }
             } else {
                 for generic_name in generics_decl.iter_names() {
-                    let unknown_ident =
-                        self.new_unknown_ident(&format!("generic_{}", generic_name));
-                    let gen_ty =
-                        Ty::GenericInstance(generic_name.clone(), unknown_ident, TypeInfo::None);
+                    let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                    let gen_type_id = match ctx.ty_ctx.ty_env.id(&Ty::GenericInstance(
+                        generic_name.clone(),
+                        unique_id,
+                        TypeInfo::None,
+                    )) {
+                        Ok(type_id) => type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
 
-                    generics.insert(generic_name.clone(), gen_ty);
+                    generics.insert(generic_name.clone(), gen_type_id);
                 }
 
                 adt_init.generics = Some(generics.clone());
@@ -894,19 +1106,31 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             Generics::new()
         };
 
-        match &adt_init.ret_type {
-            Some(Ty::CompoundType(..)) => {
+        match adt_init.ret_type.map(|id| ctx.ty_ctx.ty_env.ty(id)) {
+            Some(Ok(Ty::CompoundType(..))) => {
                 // If the type already is set to a compound, use that
                 // already set type.
             }
+            Some(Err(err)) => {
+                self.errors.push(err);
+                return;
+            }
             _ => {
-                adt_init.ret_type = Some(Ty::CompoundType(
+                let ret_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
                     InnerTy::UnknownIdent(full_path.clone(), ctx.block_id),
                     generics.clone(),
                     TypeInfo::Default(adt_init.file_pos.unwrap()),
-                ));
+                )) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                adt_init.ret_type = Some(ret_type_id);
             }
-        }
+        };
 
         let members = &adt.members;
 
@@ -914,7 +1138,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         match adt.kind {
             AdtKind::Struct => {
                 if members.len() != adt_init.arguments.len() {
-                    let err = self.type_context.analyze_context.err(format!(
+                    let err = ctx.ast_ctx.err(format!(
                         "ADT \"{}\" and ADT init has diff amount of members. ADT#: {:?}, init#: {:?}.",
                         &adt.name,
                         members.len(),
@@ -931,11 +1155,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     // iterator index, get the corrent index of the struct field with
                     // the name `arg.name`.
                     let index: usize = if let Some(arg_name) = &arg.name {
-                        match self.type_context.analyze_context.get_adt_member_index(
-                            &full_path,
-                            arg_name,
-                            ctx.block_id,
-                        ) {
+                        match ctx
+                            .ast_ctx
+                            .get_adt_member_index(&ctx.ty_ctx, &full_path, arg_name)
+                        {
                             Ok(idx) => idx as usize,
                             Err(err) => {
                                 self.errors.push(err);
@@ -953,7 +1176,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     // Add constraints mapping the type of the ADT init argument
                     // to the corresponding actual ADT member type.
                     match arg.value.get_expr_type() {
-                        Ok(arg_ty) => {
+                        Ok(arg_type_id) => {
                             if let Some(member) = members.get(index) {
                                 // Make a copy of the type to allow for multiple
                                 // struct inits with different types for the generics.
@@ -961,13 +1184,27 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
                                 // Get the "actual" type of the member. If it contains
                                 // a generic, it needs to get the actual unknown
-                                // generic type from the `unknown_generics` map.
+                                // generic type from the `generics` map.
                                 // Otherwise reuse the already set type.
-                                let member_type = if let Some(ty) = &mut new_member.ty {
-                                    ty.replace_generics_impl(&generics);
-                                    ty.clone()
+                                let member_type_id = if let Some(member_type_id) =
+                                    &mut new_member.ty
+                                {
+                                    match ctx
+                                        .ty_ctx
+                                        .ty_env
+                                        .replace_gen_impls(*member_type_id, &generics)
+                                    {
+                                        Ok(Some(new_type_id)) => *member_type_id = new_type_id,
+                                        Ok(None) => (),
+                                        Err(err) => {
+                                            self.errors.push(err);
+                                            return;
+                                        }
+                                    }
+
+                                    *member_type_id
                                 } else {
-                                    let err = self.type_context.analyze_context.err(format!(
+                                    let err = ctx.ast_ctx.err(format!(
                                         "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
                                         members.get(index),
                                         &adt.name
@@ -977,29 +1214,29 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                                 };
 
                                 // Bind init member to actual type in struct definition.
-                                self.insert_constraint(&arg_ty, &member_type, ctx.block_id);
+                                self.insert_constraint(ctx, arg_type_id, member_type_id);
 
-                                let arg_file_pos = arg_ty.file_pos().cloned();
+                                let arg_file_pos = ctx.ty_ctx.ty_env.file_pos(arg_type_id).cloned();
 
                                 // Bind type of member to the struct.
-                                let unknown_id = self.new_unknown_ident("");
-                                self.insert_constraint(
-                                    &arg_ty,
-                                    &Ty::UnknownAdtMember(
-                                        Box::new(
-                                            adt_init
-                                                .ret_type
-                                                .clone()
-                                                .expect("Will always be set at this point"),
-                                        ),
+                                let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                                let unknown_type_id =
+                                    match ctx.ty_ctx.ty_env.id(&Ty::UnknownAdtMember(
+                                        adt_init.ret_type.unwrap(),
                                         new_member.name.clone(),
-                                        unknown_id,
+                                        unique_id,
                                         TypeInfo::DefaultOpt(arg_file_pos),
-                                    ),
-                                    ctx.block_id,
-                                );
+                                    )) {
+                                        Ok(type_id) => type_id,
+                                        Err(err) => {
+                                            self.errors.push(err);
+                                            return;
+                                        }
+                                    };
+
+                                self.insert_constraint(ctx, arg_type_id, unknown_type_id);
                             } else {
-                                let err = self.type_context.analyze_context.err(format!(
+                                let err = ctx.ast_ctx.err(format!(
                                     "Unable to get member at index {} in struct \"{:?}\".",
                                     index, &adt.name
                                 ));
@@ -1017,7 +1254,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
             AdtKind::Union => {
                 if adt_init.arguments.len() > 1 {
-                    let err = self.type_context.analyze_context.err(format!(
+                    let err = ctx.ast_ctx.err(format!(
                         "ADT init of union \"{}\" has more than one argument, has#: {}.",
                         &adt.name,
                         adt_init.arguments.len()
@@ -1025,7 +1262,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     self.errors.push(err);
                     return;
                 } else if adt_init.arguments.is_empty() {
-                    let err = self.type_context.analyze_context.err(format!(
+                    let err = ctx.ast_ctx.err(format!(
                         "ADT init of union \"{}\" has no argument, expected one.",
                         &adt.name,
                     ));
@@ -1038,7 +1275,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 let member_name = if let Some(member_name) = &arg_init.name {
                     member_name
                 } else {
-                    let err = self.type_context.analyze_context.err(format!(
+                    let err = ctx.ast_ctx.err(format!(
                         "ADT init of union \"{}\" doesn't have NAMED argument as expected.",
                         &adt.name,
                     ));
@@ -1046,10 +1283,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     return;
                 };
 
-                let member = match self.type_context.analyze_context.get_adt_member(
+                let member = match ctx.ast_ctx.get_adt_member(
+                    &ctx.ty_ctx,
                     &full_path,
                     member_name,
-                    ctx.block_id,
                     adt_init.file_pos,
                 ) {
                     Ok(member) => member,
@@ -1062,16 +1299,22 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 };
 
                 match arg_init.value.get_expr_type() {
-                    Ok(arg_ty) => {
+                    Ok(arg_type_id) => {
                         // Make a copy of the type to allow for multiple
                         // struct inits with different types for the generics.
-                        let mut new_member = member.borrow().clone();
+                        let new_member = member.borrow().clone();
 
-                        let member_type = if let Some(ty) = &mut new_member.ty {
-                            ty.replace_generics_impl(&generics);
-                            ty.clone()
+                        let member_type_id = if let Some(type_id) = &new_member.ty {
+                            match ctx.ty_ctx.ty_env.replace_gen_impls(*type_id, &generics) {
+                                Ok(Some(new_type_id)) => new_type_id,
+                                Ok(None) => *type_id,
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    return;
+                                }
+                            }
                         } else {
-                            let err = self.type_context.analyze_context.err(format!(
+                            let err = ctx.ast_ctx.err(format!(
                                 "Member \"{:?}\" in union \"{:?}\" doesn't have a type set.",
                                 member.borrow(),
                                 &adt.name
@@ -1080,25 +1323,25 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             return;
                         };
 
-                        self.insert_constraint(&arg_ty, &member_type, ctx.block_id);
+                        self.insert_constraint(ctx, arg_type_id, member_type_id);
+
+                        let arg_file_pos = ctx.ty_ctx.ty_env.file_pos(arg_type_id).cloned();
 
                         // Bind type of member arg to the union.
-                        let unknown_id = self.new_unknown_ident("");
-                        self.insert_constraint(
-                            &arg_ty,
-                            &Ty::UnknownAdtMember(
-                                Box::new(
-                                    adt_init
-                                        .ret_type
-                                        .clone()
-                                        .expect("Will always be set at this point"),
-                                ),
-                                new_member.name,
-                                unknown_id,
-                                TypeInfo::DefaultOpt(arg_ty.file_pos().cloned()),
-                            ),
-                            ctx.block_id,
-                        );
+                        let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                        let unknown_type_id = match ctx.ty_ctx.ty_env.id(&Ty::UnknownAdtMember(
+                            adt_init.ret_type.unwrap(),
+                            new_member.name,
+                            unique_id,
+                            TypeInfo::DefaultOpt(arg_file_pos),
+                        )) {
+                            Ok(type_id) => type_id,
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        };
+                        self.insert_constraint(ctx, arg_type_id, unknown_type_id);
                     }
                     Err(err) => {
                         self.errors.push(err);
@@ -1110,26 +1353,31 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         };
     }
 
-    fn visit_array_init(&mut self, array_init: &mut ArrayInit, ctx: &TraverseContext) {
-        let ret_ty = if let Some(ret_ty) = &array_init.ret_type {
-            ret_ty.clone()
+    fn visit_array_init(&mut self, array_init: &mut ArrayInit, ctx: &mut TraverseCtx) {
+        let ret_type_id = if let Some(ret_type_id) = &array_init.ret_type {
+            *ret_type_id
         } else {
-            let new_ty = Ty::CompoundType(
-                InnerTy::Unknown(self.new_unknown_ident("array_init")),
+            let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+            let new_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                InnerTy::Unknown(unique_id),
                 Generics::new(),
                 TypeInfo::Default(array_init.file_pos),
-            );
+            )) {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
-            array_init.ret_type = Some(new_ty.clone());
-            new_ty
+            array_init.ret_type = Some(new_type_id);
+            new_type_id
         };
 
         let mut arg_types = Vec::new();
         for arg in &mut array_init.arguments {
             match arg.value.get_expr_type() {
-                Ok(arg_ty) => {
-                    arg_types.push(arg_ty.clone());
-                }
+                Ok(arg_type_id) => arg_types.push(arg_type_id),
                 Err(err) => {
                     self.errors.push(err);
                     return;
@@ -1138,11 +1386,22 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         }
 
         // TODO: What should the type of the index for the array size be?
-        let array_index_type = Ty::CompoundType(InnerTy::U32, Generics::empty(), TypeInfo::None);
+        let arr_idx_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+            InnerTy::U32,
+            Generics::empty(),
+            TypeInfo::None,
+        )) {
+            Ok(type_id) => type_id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
         let dim = array_init.arguments.len();
         let dim_expr = Expr::Lit(
             Lit::Integer(dim.to_string(), 10),
-            Some(array_index_type),
+            Some(arr_idx_type_id),
             Some(FilePosition::default()),
         );
 
@@ -1152,64 +1411,81 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
         for i in 0..array_init.arguments.len() {
             let left = arg_types.get(i).cloned().unwrap();
 
-            self.insert_constraint(
-                &ret_ty,
-                &Ty::Array(
-                    Box::new(left.clone()),
-                    Some(Box::new(dim_expr.clone())),
-                    TypeInfo::Default(array_init.file_pos),
-                ),
-                ctx.block_id,
-            );
+            let arr_type_id = match ctx.ty_ctx.ty_env.id(&Ty::Array(
+                left,
+                Some(Box::new(dim_expr.clone())),
+                TypeInfo::Default(array_init.file_pos),
+            )) {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            self.insert_constraint(ctx, ret_type_id, arr_type_id);
 
             for j in i + 1..array_init.arguments.len() {
                 let right = arg_types.get(j).cloned().unwrap();
-                self.insert_constraint(&left, &right, ctx.block_id);
+                self.insert_constraint(ctx, left, right);
             }
         }
     }
 
     /// Adds constraints for binary operations. Most of the bin ops requires
     /// that the lhs and rhs has the same type.
-    fn visit_bin_op(&mut self, bin_op: &mut BinOp, ctx: &TraverseContext) {
+    fn visit_bin_op(&mut self, bin_op: &mut BinOp, ctx: &mut TraverseCtx) {
         // The lhs and rhs exprs will already have been traversed and should
         // have been given a "unknown" type if they didn't have a type already.
         // The "ret_type" of this bin op will also be given a ret_type if it
         // doesn't already have a type set.
-        let ret_ty = if let Some(ty) = &bin_op.ret_type {
-            ty.clone()
+        let ret_type_id = if let Some(type_id) = &bin_op.ret_type {
+            *type_id
         } else {
-            let new_ty = Ty::CompoundType(
-                InnerTy::Unknown(self.new_unknown_ident("bin_op")),
+            let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+            let new_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                InnerTy::Unknown(unique_id),
                 Generics::new(),
                 TypeInfo::Default(bin_op.file_pos.unwrap()),
-            );
+            )) {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
-            bin_op.ret_type = Some(new_ty.clone());
-            new_ty
+            bin_op.ret_type = Some(new_type_id);
+            new_type_id
         };
 
-        let lhs_ty = match bin_op.lhs.get_expr_type() {
-            Ok(lhs_ty) => lhs_ty,
+        let lhs_type_id = match bin_op.lhs.get_expr_type() {
+            Ok(lhs_type_id) => lhs_type_id,
             Err(err) => {
                 self.errors.push(err);
                 return;
             }
         };
 
-        let rhs_ty = match bin_op.rhs.get_expr_type() {
-            Ok(rhs_ty) => rhs_ty,
+        let rhs_type_id = match bin_op.rhs.get_expr_type() {
+            Ok(rhs_type_id) => rhs_type_id,
             Err(err) => {
                 self.errors.push(err);
                 return;
             }
         };
 
-        let boolean = Ty::CompoundType(
+        let bool_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
             InnerTy::Boolean,
             Generics::empty(),
             TypeInfo::Default(bin_op.file_pos.unwrap()),
-        );
+        )) {
+            Ok(type_id) => type_id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
 
         match bin_op.operator {
             // The lhs and rhs can be different in these operations, so shouldn't
@@ -1223,25 +1499,28 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     // doesn't have to be the same type (since it should be
                     // casted at this point), but the return type of the bin op
                     // must be the same type as the rhs.
+                    //
                     // Change the type of the bin op directly so that it takes
-                    // precedence during type inferencing.
-                    bin_op.ret_type = Some(rhs_ty.clone());
+                    // precedence during type inferencing. Also need to make sure
+                    // to remove the newly created `ret_type_id` since it won't
+                    // be used (and is therefore not solvable).
+                    ctx.ty_ctx.ty_env.remove(ret_type_id);
+                    bin_op.ret_type = Some(*rhs_ty);
                 } else {
-                    let err = self
-                        .type_context
-                        .analyze_context
+                    let err = ctx
+                        .ast_ctx
                         .err(format!("Rhs of \"as\" not a valid type: {:?}", bin_op.rhs));
                     self.errors.push(err);
                 }
             }
 
             BinOperator::Dot => {
-                self.insert_constraint(&ret_ty, &rhs_ty, ctx.block_id);
+                self.insert_constraint(ctx, ret_type_id, rhs_type_id);
             }
 
             // TODO: What ret type should they have?
             BinOperator::Range | BinOperator::RangeInclusive => {
-                self.insert_constraint(&lhs_ty, &rhs_ty, ctx.block_id);
+                self.insert_constraint(ctx, lhs_type_id, rhs_type_id);
             }
 
             BinOperator::Eq
@@ -1250,14 +1529,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | BinOperator::Gt
             | BinOperator::Lte
             | BinOperator::Gte => {
-                self.insert_constraint(&ret_ty, &boolean, ctx.block_id);
-                self.insert_constraint(&lhs_ty, &rhs_ty, ctx.block_id);
+                self.insert_constraint(ctx, ret_type_id, bool_type_id);
+                self.insert_constraint(ctx, lhs_type_id, rhs_type_id);
             }
 
             BinOperator::BoolAnd | BinOperator::BoolOr => {
-                self.insert_constraint(&ret_ty, &boolean, ctx.block_id);
-                self.insert_constraint(&lhs_ty, &boolean, ctx.block_id);
-                self.insert_constraint(&rhs_ty, &boolean, ctx.block_id);
+                self.insert_constraint(ctx, ret_type_id, bool_type_id);
+                self.insert_constraint(ctx, lhs_type_id, bool_type_id);
+                self.insert_constraint(ctx, rhs_type_id, bool_type_id);
             }
 
             BinOperator::Add
@@ -1270,33 +1549,40 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | BinOperator::BitXor
             | BinOperator::ShiftLeft
             | BinOperator::ShiftRight => {
-                self.insert_constraint(&ret_ty, &lhs_ty, ctx.block_id);
-                self.insert_constraint(&ret_ty, &rhs_ty, ctx.block_id);
-                self.insert_constraint(&lhs_ty, &rhs_ty, ctx.block_id);
+                self.insert_constraint(ctx, ret_type_id, lhs_type_id);
+                self.insert_constraint(ctx, ret_type_id, rhs_type_id);
+                self.insert_constraint(ctx, lhs_type_id, rhs_type_id);
             }
         }
     }
 
-    fn visit_un_op(&mut self, un_op: &mut UnOp, ctx: &TraverseContext) {
+    fn visit_un_op(&mut self, un_op: &mut UnOp, ctx: &mut TraverseCtx) {
         // The expr value of this un op will already have been traversed and should
         // have been given a "unknown" type if it didn't have one type already.
         // The "ret_type" of this un op will also be given a ret_type if it
         // doesn't already have a type set.
-        let ret_ty = if let Some(ty) = &un_op.ret_type {
-            ty.clone()
+        let ret_type_id = if let Some(type_id) = &un_op.ret_type {
+            *type_id
         } else {
-            let new_ty = Ty::CompoundType(
-                InnerTy::Unknown(self.new_unknown_ident("un_op")),
+            let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+            let new_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                InnerTy::Unknown(unique_id),
                 Generics::new(),
                 TypeInfo::Default(un_op.file_pos.unwrap()),
-            );
+            )) {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
-            un_op.ret_type = Some(new_ty.clone());
-            new_ty
+            un_op.ret_type = Some(new_type_id);
+            new_type_id
         };
 
-        let val_ty = match un_op.value.get_expr_type() {
-            Ok(rhs_ty) => rhs_ty,
+        let val_type_id = match un_op.value.get_expr_type() {
+            Ok(val_type_id) => val_type_id,
             Err(err) => {
                 self.errors.push(err);
                 return;
@@ -1310,37 +1596,52 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             | UnOperator::Negative
             | UnOperator::BitComplement
             | UnOperator::BoolNot => {
-                self.insert_constraint(&ret_ty, &val_ty, ctx.block_id);
+                self.insert_constraint(ctx, ret_type_id, val_type_id);
             }
             UnOperator::Deref => {
-                self.insert_constraint(
-                    &Ty::Pointer(Box::new(ret_ty), type_info),
-                    &val_ty,
-                    ctx.block_id,
-                );
+                let ptr_type_id = match ctx.ty_ctx.ty_env.id(&Ty::Pointer(ret_type_id, type_info)) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                self.insert_constraint(ctx, ptr_type_id, val_type_id);
             }
             UnOperator::Address => {
-                self.insert_constraint(
-                    &ret_ty,
-                    &Ty::Pointer(Box::new(val_ty), type_info),
-                    ctx.block_id,
-                );
+                let ptr_type_id = match ctx.ty_ctx.ty_env.id(&Ty::Pointer(val_type_id, type_info)) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                self.insert_constraint(ctx, ret_type_id, ptr_type_id);
             }
             UnOperator::ArrayAccess(_) => {
-                let unknown_id = self.new_unknown_ident("");
-                self.insert_constraint(
-                    &ret_ty,
-                    &Ty::UnknownArrayMember(Box::new(val_ty), unknown_id, type_info),
-                    ctx.block_id,
-                );
+                let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                let unknown_type_id = match ctx.ty_ctx.ty_env.id(&Ty::UnknownArrayMember(
+                    val_type_id,
+                    unique_id,
+                    type_info,
+                )) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                self.insert_constraint(ctx, ret_type_id, unknown_type_id);
             }
             UnOperator::UnionIs(member_name, var_decl) => {
-                let var_decl_ty = if let Stmt::VariableDecl(var, ..) = var_decl.as_ref() {
-                    var.borrow().ty.as_ref().unwrap().clone()
+                let var_decl_type_id = if let Stmt::VariableDecl(var, ..) = var_decl.as_ref() {
+                    *var.borrow().ty.as_ref().unwrap()
                 } else {
-                    let err = self
-                        .type_context
-                        .analyze_context
+                    let err = ctx
+                        .ast_ctx
                         .err(format!("lhs of \"UnionIs\" not a var decl: {:#?}", un_op));
                     self.errors.push(err);
                     return;
@@ -1364,42 +1665,58 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 };
 
                 // Link the type of the new var decl to the type of the member.
-                let unknown_id = self.new_unknown_ident("");
-                self.insert_constraint(
-                    &var_decl_ty,
-                    &Ty::UnknownAdtMember(
-                        Box::new(union_ty),
-                        member_name.clone(),
-                        unknown_id,
-                        type_info.clone(),
-                    ),
-                    ctx.block_id,
-                );
+                let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                let unknown_type_id = match ctx.ty_ctx.ty_env.id(&Ty::UnknownAdtMember(
+                    union_ty,
+                    member_name.clone(),
+                    unique_id,
+                    type_info.clone(),
+                )) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                self.insert_constraint(ctx, var_decl_type_id, unknown_type_id);
+
+                let bool_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                    InnerTy::Boolean,
+                    Generics::empty(),
+                    type_info,
+                )) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
                 // Link the type of the whole expression to a boolean.
-                self.insert_constraint(
-                    &ret_ty,
-                    &Ty::CompoundType(InnerTy::Boolean, Generics::empty(), type_info),
-                    ctx.block_id,
-                );
+                self.insert_constraint(ctx, ret_type_id, bool_type_id);
             }
             UnOperator::AdtAccess(member_name, ..) | UnOperator::EnumAccess(member_name, ..) => {
-                let unknown_id = self.new_unknown_ident("");
-                self.insert_constraint(
-                    &ret_ty,
-                    &Ty::UnknownAdtMember(
-                        Box::new(val_ty),
-                        member_name.clone(),
-                        unknown_id,
-                        type_info,
-                    ),
-                    ctx.block_id,
-                );
+                let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                let unknown_type_id = match ctx.ty_ctx.ty_env.id(&Ty::UnknownAdtMember(
+                    val_type_id,
+                    member_name.clone(),
+                    unique_id,
+                    type_info,
+                )) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                self.insert_constraint(ctx, ret_type_id, unknown_type_id);
             }
         }
     }
 
-    fn visit_fn(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_fn(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Fn(func), ..) = &mut ast_token {
             let func_ref = func.borrow_mut();
 
@@ -1410,14 +1727,22 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 let mut first_arg = first_arg.borrow_mut();
 
                 if &first_arg.name == "this" {
-                    if let Some(adt_ty) = &func_ref.method_adt {
-                        let adt_ty = adt_ty.clone();
-
-                        let ty = if func_ref.modifiers.contains(&Modifier::This) {
-                            adt_ty
+                    if let Some(adt_type_id) = &func_ref.method_adt {
+                        let type_id = if func_ref.modifiers.contains(&Modifier::This) {
+                            *adt_type_id
                         } else if func_ref.modifiers.contains(&Modifier::ThisPointer) {
                             // TODO: What file_pos should this pointer have?
-                            Ty::Pointer(Box::new(adt_ty), TypeInfo::None)
+                            match ctx
+                                .ty_ctx
+                                .ty_env
+                                .id(&Ty::Pointer(*adt_type_id, TypeInfo::None))
+                            {
+                                Ok(type_id) => type_id,
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    return;
+                                }
+                            }
                         } else {
                             // TODO: This should be caught somewhere else earlier.
                             //       Keyword is not allowed to be used as parameter
@@ -1428,7 +1753,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                             );
                         };
 
-                        first_arg.ty = Some(ty);
+                        first_arg.ty = Some(type_id);
                     }
                 }
             }
@@ -1445,7 +1770,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     /// Tie the generics in this specific struct to each other with constraints.
     /// Ties the generics in the struct members, method parameters and method
     /// return types.
-    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Struct(adt), ..) = &ast_token {
             let adt = adt.borrow();
 
@@ -1460,26 +1785,37 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             for member in &adt.members {
                 let member = member.borrow();
 
-                if let Some(ty) = &member.ty {
-                    let inner_generics = if let Some(inner_generics) = ty.get_generics() {
-                        inner_generics
-                    } else {
-                        continue;
+                if let Some(type_id) = &member.ty {
+                    let inner_generics = match ctx.ty_ctx.ty_env.get_generics(*type_id) {
+                        Ok(inner_generics) if inner_generics.is_empty() => continue,
+                        Ok(inner_generics) => inner_generics,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
                     };
 
-                    for gen_ty in inner_generics {
-                        let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                    for gen_type_id in inner_generics {
+                        let gen_ty = match ctx.ty_ctx.ty_env.ty(gen_type_id) {
+                            Ok(ty) => ty.clone(),
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        };
+
+                        let ident = if let Ty::Generic(ident, ..) = gen_ty {
                             ident
                         } else {
-                            unreachable!("gen_ty not generic: {:#?}", gen_ty);
+                            unreachable!("gen_ty not generic: {:#?}", gen_type_id);
                         };
 
                         match generics.entry(ident.clone()) {
                             Entry::Occupied(mut o) => {
-                                o.get_mut().push(gen_ty);
+                                o.get_mut().push(gen_type_id);
                             }
                             Entry::Vacant(v) => {
-                                v.insert(vec![gen_ty]);
+                                v.insert(vec![gen_type_id]);
                             }
                         }
                     }
@@ -1490,26 +1826,37 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 // Gather "Generic" types from method parameters.
                 if let Some(params) = &method.borrow().parameters {
                     for param in params {
-                        if let Some(ty) = param.borrow().ty.as_ref() {
-                            let inner_generics = if let Some(inner_generics) = ty.get_generics() {
-                                inner_generics
-                            } else {
-                                continue;
+                        if let Some(type_id) = param.borrow().ty.as_ref() {
+                            let inner_generics = match ctx.ty_ctx.ty_env.get_generics(*type_id) {
+                                Ok(inner_generics) if inner_generics.is_empty() => continue,
+                                Ok(inner_generics) => inner_generics,
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    return;
+                                }
                             };
 
-                            for gen_ty in inner_generics {
-                                let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                            for gen_type_id in inner_generics {
+                                let gen_ty = match ctx.ty_ctx.ty_env.ty(gen_type_id) {
+                                    Ok(ty) => ty.clone(),
+                                    Err(err) => {
+                                        self.errors.push(err);
+                                        return;
+                                    }
+                                };
+
+                                let ident = if let Ty::Generic(ident, ..) = gen_ty {
                                     ident
                                 } else {
-                                    unreachable!("gen_ty not generic: {:#?}", gen_ty);
+                                    unreachable!("gen_ty not generic: {:#?}", gen_type_id);
                                 };
 
                                 match generics.entry(ident.clone()) {
                                     Entry::Occupied(mut o) => {
-                                        o.get_mut().push(gen_ty);
+                                        o.get_mut().push(gen_type_id);
                                     }
                                     Entry::Vacant(v) => {
-                                        v.insert(vec![gen_ty]);
+                                        v.insert(vec![gen_type_id]);
                                     }
                                 }
                             }
@@ -1518,26 +1865,37 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
 
                 // Gather "Generic" types from method return type.
-                if let Some(ret_ty) = &mut method.borrow().ret_type.as_ref() {
-                    let inner_generics = if let Some(inner_generics) = ret_ty.get_generics() {
-                        inner_generics
-                    } else {
-                        continue;
+                if let Some(ret_type_id) = method.borrow().ret_type.as_ref() {
+                    let inner_generics = match ctx.ty_ctx.ty_env.get_generics(*ret_type_id) {
+                        Ok(inner_generics) if inner_generics.is_empty() => continue,
+                        Ok(inner_generics) => inner_generics,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
                     };
 
-                    for gen_ty in inner_generics {
-                        let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                    for gen_type_id in inner_generics {
+                        let gen_ty = match ctx.ty_ctx.ty_env.ty(gen_type_id) {
+                            Ok(ty) => ty.clone(),
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        };
+
+                        let ident = if let Ty::Generic(ident, ..) = gen_ty {
                             ident
                         } else {
-                            unreachable!("gen_ty not generic: {:#?}", gen_ty);
+                            unreachable!("gen_ty not generic: {:#?}", gen_type_id);
                         };
 
                         match generics.entry(ident.clone()) {
                             Entry::Occupied(mut o) => {
-                                o.get_mut().push(gen_ty);
+                                o.get_mut().push(gen_type_id);
                             }
                             Entry::Vacant(v) => {
-                                v.insert(vec![gen_ty]);
+                                v.insert(vec![gen_type_id]);
                             }
                         }
                     }
@@ -1551,14 +1909,14 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
                     for j in i + 1..ident_generics.len() {
                         let right = ident_generics.get(j).cloned().unwrap();
-                        self.insert_constraint(&left, &right, ctx.block_id);
+                        self.insert_constraint(ctx, left, right);
                     }
                 }
             }
         }
     }
 
-    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Union(adt), ..) = &ast_token {
             let adt = adt.borrow();
 
@@ -1573,15 +1931,26 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             for member in &adt.members {
                 let member = member.borrow();
 
-                if let Some(ty) = &member.ty {
-                    let inner_generics = if let Some(inner_generics) = ty.get_generics() {
-                        inner_generics
-                    } else {
-                        continue;
+                if let Some(type_id) = &member.ty {
+                    let inner_generics = match ctx.ty_ctx.ty_env.get_generics(*type_id) {
+                        Ok(inner_generics) if inner_generics.is_empty() => continue,
+                        Ok(inner_generics) => inner_generics,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
                     };
 
-                    for gen_ty in inner_generics {
-                        let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                    for gen_type_id in inner_generics {
+                        let gen_ty = match ctx.ty_ctx.ty_env.ty(gen_type_id) {
+                            Ok(ty) => ty.clone(),
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        };
+
+                        let ident = if let Ty::Generic(ident, ..) = gen_ty {
                             ident
                         } else {
                             unreachable!("gen_ty not generic: {:#?}", gen_ty);
@@ -1589,10 +1958,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
                         match generics.entry(ident.clone()) {
                             Entry::Occupied(mut o) => {
-                                o.get_mut().push(gen_ty);
+                                o.get_mut().push(gen_type_id);
                             }
                             Entry::Vacant(v) => {
-                                v.insert(vec![gen_ty]);
+                                v.insert(vec![gen_type_id]);
                             }
                         }
                     }
@@ -1603,26 +1972,37 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 // Gather "Generic" types from method parameters.
                 if let Some(params) = &method.borrow().parameters {
                     for param in params {
-                        if let Some(ty) = param.borrow().ty.as_ref() {
-                            let inner_generics = if let Some(inner_generics) = ty.get_generics() {
-                                inner_generics
-                            } else {
-                                continue;
+                        if let Some(type_id) = param.borrow().ty.as_ref() {
+                            let inner_generics = match ctx.ty_ctx.ty_env.get_generics(*type_id) {
+                                Ok(inner_generics) if inner_generics.is_empty() => continue,
+                                Ok(inner_generics) => inner_generics,
+                                Err(err) => {
+                                    self.errors.push(err);
+                                    return;
+                                }
                             };
 
-                            for gen_ty in inner_generics {
-                                let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                            for gen_type_id in inner_generics {
+                                let gen_ty = match ctx.ty_ctx.ty_env.ty(gen_type_id) {
+                                    Ok(ty) => ty.clone(),
+                                    Err(err) => {
+                                        self.errors.push(err);
+                                        return;
+                                    }
+                                };
+
+                                let ident = if let Ty::Generic(ident, ..) = gen_ty {
                                     ident
                                 } else {
-                                    unreachable!("gen_ty not generic: {:#?}", gen_ty);
+                                    unreachable!("gen_ty not generic: {:#?}", gen_type_id);
                                 };
 
                                 match generics.entry(ident.clone()) {
                                     Entry::Occupied(mut o) => {
-                                        o.get_mut().push(gen_ty);
+                                        o.get_mut().push(gen_type_id);
                                     }
                                     Entry::Vacant(v) => {
-                                        v.insert(vec![gen_ty]);
+                                        v.insert(vec![gen_type_id]);
                                     }
                                 }
                             }
@@ -1631,26 +2011,37 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 }
 
                 // Gather "Generic" types from method return type.
-                if let Some(ret_ty) = &mut method.borrow().ret_type.as_ref() {
-                    let inner_generics = if let Some(inner_generics) = ret_ty.get_generics() {
-                        inner_generics
-                    } else {
-                        continue;
+                if let Some(ret_type_id) = method.borrow().ret_type.as_ref() {
+                    let inner_generics = match ctx.ty_ctx.ty_env.get_generics(*ret_type_id) {
+                        Ok(inner_generics) if inner_generics.is_empty() => continue,
+                        Ok(inner_generics) => inner_generics,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
                     };
 
-                    for gen_ty in inner_generics {
-                        let ident = if let Ty::Generic(ident, ..) = gen_ty.clone() {
+                    for gen_type_id in inner_generics {
+                        let gen_ty = match ctx.ty_ctx.ty_env.ty(gen_type_id) {
+                            Ok(ty) => ty.clone(),
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        };
+
+                        let ident = if let Ty::Generic(ident, ..) = gen_ty {
                             ident
                         } else {
-                            unreachable!("gen_ty not generic: {:#?}", gen_ty);
+                            unreachable!("gen_ty not generic: {:#?}", gen_type_id);
                         };
 
                         match generics.entry(ident.clone()) {
                             Entry::Occupied(mut o) => {
-                                o.get_mut().push(gen_ty);
+                                o.get_mut().push(gen_type_id);
                             }
                             Entry::Vacant(v) => {
-                                v.insert(vec![gen_ty]);
+                                v.insert(vec![gen_type_id]);
                             }
                         }
                     }
@@ -1664,7 +2055,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
                     for j in i + 1..ident_generics.len() {
                         let right = ident_generics.get(j).cloned().unwrap();
-                        self.insert_constraint(&left, &right, ctx.block_id);
+                        self.insert_constraint(ctx, left, right);
                     }
                 }
             }
@@ -1673,17 +2064,27 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Need to make sure that a return statement has the same type as the
     /// function return type. Add it as a constraint.
-    fn visit_return(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    fn visit_return(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::Return(expr_opt, ..) = stmt {
             if let Some(func) = &self.cur_func {
-                let func_ret_ty = if let Some(ty) = &func.borrow().ret_type {
-                    ty.clone()
+                let func_ret_type_id = if let Some(type_id) = &func.borrow().ret_type {
+                    *type_id
                 } else {
                     // TODO: Where should this pos be fetched from?
-                    Ty::CompoundType(InnerTy::Void, Generics::empty(), TypeInfo::None)
+                    match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                        InnerTy::Void,
+                        Generics::empty(),
+                        TypeInfo::None,
+                    )) {
+                        Ok(type_id) => type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    }
                 };
 
-                let expr_ty = match self.type_context.get_expr_type(expr_opt.as_ref()) {
+                let expr_type_id = match ctx.ty_ctx.get_expr_type(expr_opt.as_ref()) {
                     Ok(expr_ty) => expr_ty,
                     Err(err) => {
                         self.errors.push(err);
@@ -1691,11 +2092,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                     }
                 };
 
-                self.insert_constraint(&func_ret_ty, &expr_ty, ctx.block_id);
+                self.insert_constraint(ctx, func_ret_type_id, expr_type_id);
             } else {
-                let err = self
-                    .type_context
-                    .analyze_context
+                let err = ctx
+                    .ast_ctx
                     .err("Unable to get cur func when looking at return stmt type.".into());
                 self.errors.push(err);
             }
@@ -1703,11 +2103,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
     }
 
     // TODO: Write when yield gets implemented.
-    fn visit_yield(&mut self, stmt: &mut Stmt, _ctx: &TraverseContext) {}
+    fn visit_yield(&mut self, stmt: &mut Stmt, _ctx: &mut TraverseCtx) {}
 
     /// Save the current match expr in a place so that the match cases in the body
     /// can access the type of the expr.
-    fn visit_match(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_match(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Match(expr), ..) = &ast_token {
             self.cur_match_expr = Some(expr.clone());
         }
@@ -1715,10 +2115,10 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// Need to make sure that the match expr and the match case exprs have the
     /// same type. Add it as a constraint.
-    fn visit_match_case(&mut self, mut ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_match_case(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token {
             if let Some(match_expr) = self.cur_match_expr.clone() {
-                let match_expr_ty = match match_expr.get_expr_type() {
+                let match_expr_type_id = match match_expr.get_expr_type() {
                     Ok(expr_ty) => expr_ty,
                     Err(err) => {
                         self.errors.push(err);
@@ -1727,7 +2127,7 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                 };
 
                 if let Some(match_case_expr) = match_case_expr {
-                    let case_expr_ty = match match_case_expr.get_expr_type() {
+                    let case_expr_type_id = match match_case_expr.get_expr_type() {
                         Ok(expr_ty) => expr_ty,
                         Err(err) => {
                             self.errors.push(err);
@@ -1735,12 +2135,11 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
                         }
                     };
 
-                    self.insert_constraint(&match_expr_ty, &case_expr_ty, ctx.block_id);
+                    self.insert_constraint(ctx, match_expr_type_id, case_expr_type_id);
                 }
             } else {
-                let err = self
-                    .type_context
-                    .analyze_context
+                let err = ctx
+                    .ast_ctx
                     .err("Unable to get cur match expr when looking at match case type.".into());
                 self.errors.push(err);
             }
@@ -1749,40 +2148,40 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
 
     /// The types of the lhs and rhs of a assignment should be of the same type.
     /// Add it as a constraint.
-    fn visit_assignment(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    fn visit_assignment(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::Assignment(_, lhs, rhs, ..) = stmt {
             debug!("ASSIGNMENT\nlhs: {:#?}\nrhs: {:#?}", lhs, rhs);
 
-            let lhs_ty = match lhs.get_expr_type() {
-                Ok(lhs_ty) => lhs_ty,
+            let lhs_type_id = match lhs.get_expr_type() {
+                Ok(lhs_type_id) => lhs_type_id,
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
             };
 
-            let rhs_ty = match rhs.get_expr_type() {
-                Ok(rhs_ty) => rhs_ty,
+            let rhs_type_id = match rhs.get_expr_type() {
+                Ok(rhs_type_id) => rhs_type_id,
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
             };
 
-            self.insert_constraint(&lhs_ty, &rhs_ty, ctx.block_id);
+            self.insert_constraint(ctx, lhs_type_id, rhs_type_id);
         }
     }
 
     /// The types of the lhs and rhs of a variable declaration with a init value
     /// should be of the same type, add as constraints.
-    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::VariableDecl(var, ..) = stmt {
             let mut var = var.borrow_mut();
 
             // No way to do type inference of rhs on var decl with no init value.
-            let rhs_ty_opt = if var.value.is_some() {
-                match self
-                    .type_context
+            let rhs_type_id_opt = if var.value.is_some() {
+                match ctx
+                    .ty_ctx
                     .get_expr_type(var.value.clone().map(|x| *x).as_ref())
                 {
                     Ok(rhs_ty) => Some(rhs_ty),
@@ -1798,75 +2197,89 @@ impl<'a, 'b> Visitor for TypeInferencer<'a, 'b> {
             // Create a unkown type if a type isn't already set. For simplicity
             // this new type will always be set, but it will contain the old type
             // if a type was already set.
-            let new_type = if var.ty.is_some() {
-                var.ty.clone()
+            let new_type_id = if var.ty.is_some() {
+                var.ty
             } else {
                 // If the type isn't hardcoded, there are no file position since
                 // it doesn't exist in the source code. In that case use the
                 // position of the variable identifier instead.
-                Some(Ty::CompoundType(
-                    InnerTy::Unknown(self.new_unknown_ident(&format!("var_decl({})", var.name))),
+                let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                    InnerTy::Unknown(unique_id),
                     Generics::new(),
                     TypeInfo::VarDecl(var.file_pos.unwrap(), false),
-                ))
+                )) {
+                    Ok(type_id) => Some(type_id),
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                }
             };
-            var.ty = new_type;
-
-            let lhs_ty = if let Some(ty) = &var.ty {
-                ty.clone()
-            } else {
-                let err = self
-                    .type_context
-                    .analyze_context
-                    .err(format!("Lhs of var decl has no type: {:?}", var.ty));
-                self.errors.push(err);
-                return;
-            };
+            var.ty = new_type_id;
 
             // Add constraints only if this var decl has a init value.
-            if let Some(rhs_ty) = rhs_ty_opt {
-                self.insert_constraint(&lhs_ty, &rhs_ty, ctx.block_id);
+            if let Some(rhs_type_id) = rhs_type_id_opt {
+                self.insert_constraint(ctx, var.ty.unwrap(), rhs_type_id);
             }
         }
     }
 
-    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::Increment(expr, ..) = stmt {
-            let expr_ty = match expr.get_expr_type() {
-                Ok(ty) => ty,
+            let expr_type_id = match expr.get_expr_type() {
+                Ok(type_id) => type_id,
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
             };
 
-            let int_ty = Ty::CompoundType(
-                InnerTy::UnknownInt(self.new_unknown_ident("increment"), 10),
-                Generics::new(),
-                TypeInfo::Default(*expr_ty.file_pos().unwrap()),
-            );
+            let expr_file_pos = ctx.ty_ctx.ty_env.file_pos(expr_type_id).cloned().unwrap();
 
-            self.insert_constraint(&expr_ty, &int_ty, ctx.block_id);
+            let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+            let int_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                InnerTy::UnknownInt(unique_id, 10),
+                Generics::new(),
+                TypeInfo::Default(expr_file_pos),
+            )) {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            self.insert_constraint(ctx, expr_type_id, int_type_id);
         }
     }
 
-    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &TraverseContext) {
+    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::Increment(expr, ..) = stmt {
-            let expr_ty = match expr.get_expr_type() {
-                Ok(ty) => ty,
+            let expr_type_id = match expr.get_expr_type() {
+                Ok(type_id) => type_id,
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
             };
 
-            let int_ty = Ty::CompoundType(
-                InnerTy::UnknownInt(self.new_unknown_ident("decrement"), 10),
-                Generics::new(),
-                TypeInfo::Default(*expr_ty.file_pos().unwrap()),
-            );
+            let expr_file_pos = ctx.ty_ctx.ty_env.file_pos(expr_type_id).cloned().unwrap();
 
-            self.insert_constraint(&expr_ty, &int_ty, ctx.block_id);
+            let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+            let int_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                InnerTy::UnknownInt(unique_id, 10),
+                Generics::new(),
+                TypeInfo::Default(expr_file_pos),
+            )) {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            self.insert_constraint(ctx, expr_type_id, int_type_id);
         }
     }
 }

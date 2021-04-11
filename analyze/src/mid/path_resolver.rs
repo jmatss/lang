@@ -1,110 +1,115 @@
-use std::cell::RefCell;
-
 use common::{
+    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangResult},
     token::{
         ast::AstToken,
         block::BlockHeader,
         expr::{AdtInit, FnCall},
     },
-    traverser::TraverseContext,
-    ty::{inner_ty::InnerTy, ty::Ty},
-    visitor::Visitor,
-    BlockId,
+    traverse::visitor::Visitor,
+    ty::ty::Ty,
+    BlockId, TypeId,
 };
-
-use crate::context::AnalyzeContext;
 
 /// Tries to solve partial paths (LangPath) in the code. This is done by trying
 /// to prepend "use" statements with paths found in the code. If a match is found,
 /// the partial path will be replaced with the full path.
-pub struct PathResolver<'a> {
-    analyze_context: &'a RefCell<AnalyzeContext>,
+pub struct PathResolver {
     errors: Vec<LangError>,
 }
 
-impl<'a> PathResolver<'a> {
-    pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
+impl PathResolver {
+    pub fn new() -> Self {
         Self {
-            analyze_context,
             errors: Vec::default(),
         }
     }
 
-    fn replace_inner_path(&self, inner_ty: &mut InnerTy, id: BlockId) -> LangResult<()> {
-        match inner_ty {
-            InnerTy::Struct(path) | InnerTy::Enum(path) | InnerTy::Union(path) => {
-                let mut full_path = self
-                    .analyze_context
-                    .borrow()
-                    .calculate_adt_full_path(path, id)?;
-                if let (Some(to), Some(from)) = (full_path.file_pos_mut(), path.file_pos()) {
-                    *to = *from;
-                }
-                *path = full_path;
-            }
+    fn replace_inner_path(
+        &mut self,
+        ctx: &mut TraverseCtx,
+        type_id: TypeId,
+        block_id: BlockId,
+    ) -> LangResult<()> {
+        let inner_ty = match ctx.ty_ctx.ty_env.get_inner(type_id) {
+            Ok(inner_ty) => inner_ty.clone(),
+            _ => return Ok(()),
+        };
 
-            InnerTy::Trait(path) => {
-                let mut full_path = self
-                    .analyze_context
-                    .borrow()
-                    .calculate_trait_full_path(path, id)?;
-                if let (Some(to), Some(from)) = (full_path.file_pos_mut(), path.file_pos()) {
-                    *to = *from;
-                }
-                *path = full_path;
-            }
+        if inner_ty.is_adt() {
+            let path = inner_ty.get_ident().unwrap();
+            let full_path = ctx
+                .ast_ctx
+                .calculate_adt_full_path(&ctx.ty_ctx, &path, block_id)?;
 
-            _ => (),
+            let inner_ty_mut = ctx.ty_ctx.ty_env.get_inner_mut(type_id)?;
+
+            *inner_ty_mut.get_ident_mut().unwrap() = full_path;
+        } else if inner_ty.is_trait() {
+            let path = inner_ty.get_ident().unwrap();
+            let full_path = ctx
+                .ast_ctx
+                .calculate_trait_full_path(&ctx.ty_ctx, &path, block_id)?;
+
+            let inner_ty_mut = ctx.ty_ctx.ty_env.get_inner_mut(type_id)?;
+
+            *inner_ty_mut.get_ident_mut().unwrap() = full_path;
         }
 
         Ok(())
     }
 
-    fn resolve_ty_path(&mut self, ty: &mut Ty, id: BlockId) {
+    fn resolve_ty_path(
+        &mut self,
+        ctx: &mut TraverseCtx,
+        type_id: TypeId,
+        block_id: BlockId,
+    ) -> LangResult<()> {
         // TODO: From what I know, only Compound types needs to be solved here
         //       since they are created for enum accesses during parsing.
         //       Is this a correct assumption?
+        let ty = ctx.ty_ctx.ty_env.ty(type_id)?.clone();
         match ty {
-            Ty::CompoundType(inner_ty, gens, ..) => {
-                for gen_ty in gens.iter_types_mut() {
-                    self.resolve_ty_path(gen_ty, id);
+            Ty::CompoundType(_, gens, ..) => {
+                for gen_type_id in gens.iter_types() {
+                    self.resolve_ty_path(ctx, *gen_type_id, block_id)?;
                 }
-                if let Err(err) = self.replace_inner_path(inner_ty, id) {
-                    self.errors.push(err);
-                    return;
-                }
+                self.replace_inner_path(ctx, type_id, block_id)?;
             }
 
             Ty::Fn(gen_tys, param_tys, ret_ty_opt, ..) => {
-                for ty_i in gen_tys.iter_mut().chain(param_tys) {
-                    self.resolve_ty_path(ty_i, id);
+                for ty_i in gen_tys.iter().chain(param_tys.iter()) {
+                    self.resolve_ty_path(ctx, *ty_i, block_id)?;
                 }
-                if let Some(ret_ty) = ret_ty_opt {
-                    self.resolve_ty_path(ret_ty, id);
+                if let Some(ret_type_id) = ret_ty_opt {
+                    self.resolve_ty_path(ctx, ret_type_id, block_id)?;
                 }
             }
 
             Ty::Expr(expr, ..) => {
-                if let Ok(expr_ty) = expr.get_expr_type_mut() {
-                    self.resolve_ty_path(expr_ty, id);
+                if let Ok(expr_type_id) = expr.get_expr_type() {
+                    self.resolve_ty_path(ctx, expr_type_id, block_id)?;
                 }
             }
 
-            Ty::Array(box_ty, ..)
-            | Ty::Pointer(box_ty, ..)
-            | Ty::UnknownAdtMember(box_ty, ..)
-            | Ty::UnknownAdtMethod(box_ty, ..)
-            | Ty::UnknownMethodArgument(box_ty, ..)
-            | Ty::UnknownMethodGeneric(box_ty, ..)
-            | Ty::UnknownArrayMember(box_ty, ..) => self.resolve_ty_path(box_ty, id),
+            Ty::Array(inner_type_id, ..)
+            | Ty::Pointer(inner_type_id, ..)
+            | Ty::UnknownAdtMember(inner_type_id, ..)
+            | Ty::UnknownAdtMethod(inner_type_id, ..)
+            | Ty::UnknownMethodArgument(inner_type_id, ..)
+            | Ty::UnknownMethodGeneric(inner_type_id, ..)
+            | Ty::UnknownArrayMember(inner_type_id, ..) => {
+                self.resolve_ty_path(ctx, inner_type_id, block_id)?;
+            }
 
             Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => (),
         }
+
+        Ok(())
     }
 }
 
-impl<'a> Visitor for PathResolver<'a> {
+impl Visitor for PathResolver {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -113,7 +118,7 @@ impl<'a> Visitor for PathResolver<'a> {
         }
     }
 
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
         if fn_call.is_fn_ptr_call || fn_call.is_method {
             // Method calls already solved during the "MethodAnalyzer" stage.
             return;
@@ -121,10 +126,9 @@ impl<'a> Visitor for PathResolver<'a> {
 
         let half_path = fn_call.module.clone_push(&fn_call.name, None);
 
-        match self
-            .analyze_context
-            .borrow()
-            .calculate_fn_full_path(&half_path, ctx.block_id)
+        match ctx
+            .ast_ctx
+            .calculate_fn_full_path(&ctx.ty_ctx, &half_path, ctx.block_id)
         {
             Ok(mut full_path) => {
                 full_path.pop();
@@ -136,13 +140,12 @@ impl<'a> Visitor for PathResolver<'a> {
         }
     }
 
-    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {
+    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &mut TraverseCtx) {
         let half_path = adt_init.module.clone_push(&adt_init.name, None);
 
-        match self
-            .analyze_context
-            .borrow()
-            .calculate_adt_full_path(&half_path, ctx.block_id)
+        match ctx
+            .ast_ctx
+            .calculate_adt_full_path(&ctx.ty_ctx, &half_path, ctx.block_id)
         {
             Ok(mut full_path) => {
                 full_path.pop();
@@ -154,31 +157,36 @@ impl<'a> Visitor for PathResolver<'a> {
         }
     }
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Implement(path, _), ..) = ast_token {
-            let analyze_context = self.analyze_context.borrow();
-
-            if let Ok(full_path) = analyze_context.calculate_adt_full_path(path, ctx.block_id) {
+            if let Ok(full_path) =
+                ctx.ast_ctx
+                    .calculate_adt_full_path(&ctx.ty_ctx, path, ctx.block_id)
+            {
                 *path = full_path
             } else if let Ok(full_path) =
-                analyze_context.calculate_trait_full_path(path, ctx.block_id)
+                ctx.ast_ctx
+                    .calculate_trait_full_path(&ctx.ty_ctx, path, ctx.block_id)
             {
                 *path = full_path
             } else {
-                let mut err = analyze_context.err_adt(
+                let mut err = ctx.ast_ctx.err_adt(
+                    &ctx.ty_ctx,
                     format!(
                         "Unable to find full path for type defined in impl block: {}",
-                        path
+                        ctx.ty_ctx.ty_env.to_string_path(&ctx.ty_ctx, &path)
                     ),
                     path,
                 );
-                err = analyze_context.err_trait(err.msg, path);
+                err = ctx.ast_ctx.err_trait(&ctx.ty_ctx, err.msg, path);
                 self.errors.push(err);
             }
         }
     }
 
-    fn visit_type(&mut self, ty: &mut Ty, ctx: &TraverseContext) {
-        self.resolve_ty_path(ty, ctx.block_id);
+    fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
+        if let Err(err) = self.resolve_ty_path(ctx, *type_id, ctx.block_id) {
+            self.errors.push(err);
+        }
     }
 }

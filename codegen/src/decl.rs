@@ -1,5 +1,5 @@
 use crate::generator::CodeGen;
-use analyze::{block::BlockInfo, util::order::dependency_order};
+use analyze::util::order::dependency_order;
 use common::{
     error::LangResult,
     token::{
@@ -20,17 +20,17 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_type_decl(&mut self, ast_token: &mut AstToken) -> LangResult<()> {
         self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
-        // TODO:
-        let block_id = BlockInfo::DEFAULT_BLOCK_ID;
-
         // TODO: Currently only returns the first error, should return all.
         let include_impls = false;
         let full_paths = true;
-        let order = dependency_order(self.analyze_context, ast_token, include_impls, full_paths)
+        let order = dependency_order(self.analyze_ctx, ast_token, include_impls, full_paths)
             .map_err(|e| e.first().cloned().unwrap())?;
 
-        for ident in &order {
-            let adt = self.analyze_context.get_adt(ident, block_id)?;
+        for adt_path in &order {
+            let adt = self
+                .analyze_ctx
+                .ast_ctx
+                .get_adt(&self.analyze_ctx.ty_ctx, adt_path)?;
             let adt = adt.borrow();
 
             match adt.kind {

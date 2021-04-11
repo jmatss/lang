@@ -32,15 +32,16 @@ fn main() -> i32
     printf("\nexpected_f32: %f, test_struct_f32.inner: %f", expected_f32 as f64, test_struct_f32.inner as f64)
     std::assert(expected_f32 == test_struct_f32.inner)
 
+
     var key = "Key"
     var value: u8 = 5
 
     var test_struct_two = TestStructTwo { key, value.& }
-
     test_struct_two.value.* = 10
 
     printf("\ntest_struct_two.value.*: %d", test_struct_two.value.* as u32)
     std::assert(test_struct_two.value.* == 10)
+
 
     return 0
 }

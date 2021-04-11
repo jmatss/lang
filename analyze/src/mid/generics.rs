@@ -1,34 +1,30 @@
-use crate::{block::BlockInfo, AnalyzeContext};
 use common::{
+    ctx::traverse_ctx::TraverseCtx,
     error::LangError,
     path::LangPathPart,
     token::{ast::AstToken, block::BlockHeader},
-    traverser::{AstTraverser, TraverseContext},
-    ty::{generics::Generics, ty::Ty},
-    visitor::Visitor,
+    traverse::{traverser::AstTraverser, visitor::Visitor},
+    ty::generics::Generics,
+    TypeId,
 };
-use std::cell::RefCell;
 
 /// Iterates through "generic" parameters tied to ADTs and functions, and replaces
 /// the uses of the generics with "Generic" types instead of the parsed
 /// "UnknownIdent". This is done so that generics can be handled differently
 /// during the type inference stage.
-pub struct GenericsAnalyzer<'a> {
-    analyze_context: &'a RefCell<AnalyzeContext>,
-
+pub struct GenericsAnalyzer {
     errors: Vec<LangError>,
 }
 
-impl<'a> GenericsAnalyzer<'a> {
-    pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
+impl GenericsAnalyzer {
+    pub fn new() -> Self {
         Self {
-            analyze_context,
             errors: Vec::default(),
         }
     }
 }
 
-impl<'a> Visitor for GenericsAnalyzer<'a> {
+impl Visitor for GenericsAnalyzer {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -39,26 +35,30 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
 
     /// "Rewrites" the types of the generic member types to "Generic"s for
     /// the structure members.
-    fn visit_struct(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Struct(struct_), ..) = &ast_token {
             let struct_ = struct_.borrow();
             if let (Some(generics), members) = (&struct_.generics, &struct_.members) {
                 for member in members {
-                    if let Some(ty) = member.borrow_mut().ty.as_mut() {
-                        ty.replace_generics(&generics)
+                    if let Some(type_id) = member.borrow_mut().ty.as_mut() {
+                        if let Err(err) = ctx.ty_ctx.ty_env.replace_gens(*type_id, generics) {
+                            self.errors.push(err);
+                        }
                     }
                 }
             }
         }
     }
 
-    fn visit_union(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Union(union), ..) = &ast_token {
             let union = union.borrow();
             if let (Some(generics), members) = (&union.generics, &union.members) {
                 for member in members {
-                    if let Some(ty) = member.borrow_mut().ty.as_mut() {
-                        ty.replace_generics(&generics)
+                    if let Some(type_id) = member.borrow_mut().ty.as_mut() {
+                        if let Err(err) = ctx.ty_ctx.ty_env.replace_gens(*type_id, generics) {
+                            self.errors.push(err);
+                        }
                     }
                 }
             }
@@ -68,11 +68,9 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
     /// "Rewrites" generics parsed as "UnknownIdent"s to "Generic"s by matching
     /// the identifiers with known names for the generics defined on the structure.
     /// This will be done for both the method headers and everything in their bodies.
-    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Implement(impl_path, _), .., body) = ast_token {
-            let analyze_context = self.analyze_context.borrow();
-
-            let full_impl_path = match analyze_context.get_module(ctx.block_id) {
+            let full_impl_path = match ctx.ast_ctx.get_module(ctx.block_id) {
                 Ok(Some(mut full_impl_path)) => {
                     let impl_ident = impl_path.last().unwrap().0.clone();
                     full_impl_path.push(LangPathPart(impl_ident, None));
@@ -90,19 +88,18 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
                 }
             };
 
-            // TODO: Will structures always be defined in the default block?
-            let block_id = BlockInfo::DEFAULT_BLOCK_ID;
-
             // TODO: Implement generics for iterfaces and enums (?).
 
-            let adt_generics = if let Ok(adt) = analyze_context.get_adt(&full_impl_path, block_id) {
+            let adt_generics = if let Ok(adt) = ctx.ast_ctx.get_adt(&ctx.ty_ctx, &full_impl_path) {
                 adt.borrow().generics.clone().unwrap_or_default()
-            } else if analyze_context.get_trait(&full_impl_path, block_id).is_ok() {
+            } else if ctx.ast_ctx.get_trait(&ctx.ty_ctx, &full_impl_path).is_ok() {
                 Generics::empty()
             } else {
-                let err = analyze_context.err(format!(
-                    "Unable to find ADT/Trait for impl block with name \"{}\" in block {}",
-                    full_impl_path, block_id
+                let err = ctx.ast_ctx.err(format!(
+                    "Unable to find ADT/Trait for impl block with name \"{}\".",
+                    &ctx.ty_ctx
+                        .ty_env
+                        .to_string_path(&ctx.ty_ctx, &full_impl_path),
                 ));
                 self.errors.push(err);
                 return;
@@ -125,7 +122,7 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
                 // Replaces any generics declared on the function.
                 if let Some(func_generics) = func_generics {
                     let mut func_replacer = FuncGenericsReplacer::new(&func_generics);
-                    if let Err(mut err) = AstTraverser::new()
+                    if let Err(mut err) = AstTraverser::from_ctx(ctx)
                         .add_visitor(&mut func_replacer)
                         .traverse_token(method)
                         .take_errors()
@@ -138,7 +135,7 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
                 // Replaces any generics declared on the ADT/Trait.
                 if !adt_generics.is_empty() {
                     let mut adt_replacer = FuncGenericsReplacer::new(&adt_generics);
-                    if let Err(mut err) = AstTraverser::new()
+                    if let Err(mut err) = AstTraverser::from_ctx(ctx)
                         .add_visitor(&mut adt_replacer)
                         .traverse_token(method)
                         .take_errors()
@@ -154,6 +151,7 @@ impl<'a> Visitor for GenericsAnalyzer<'a> {
 
 struct FuncGenericsReplacer<'a> {
     adt_generics: &'a Generics,
+    errors: Vec<LangError>,
 }
 
 /// Used when replacing generics in methods containing to a specific generic
@@ -161,12 +159,25 @@ struct FuncGenericsReplacer<'a> {
 /// methods.
 impl<'a> FuncGenericsReplacer<'a> {
     pub fn new(adt_generics: &'a Generics) -> Self {
-        Self { adt_generics }
+        Self {
+            adt_generics,
+            errors: Vec::default(),
+        }
     }
 }
 
 impl<'a> Visitor for FuncGenericsReplacer<'a> {
-    fn visit_type(&mut self, ty: &mut Ty, _ctx: &TraverseContext) {
-        ty.replace_generics(self.adt_generics);
+    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+        if self.errors.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.errors))
+        }
+    }
+
+    fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
+        if let Err(err) = ctx.ty_ctx.ty_env.replace_gens(*type_id, self.adt_generics) {
+            self.errors.push(err);
+        }
     }
 }

@@ -158,8 +158,6 @@ pub enum Fix {
 impl Operator {
     // Precedence according to:
     //      https://docs.oracle.com/javase/tutorial/java/nutsandbolts/operators.html
-    // and "power"  ~over "mul/div/mod" according to pythons:
-    //      https://www.mathcs.emory.edu/~valerie/courses/fall10/155/resources/op_precedence.html
     // and old rust docs:
     //      https://web.archive.org/web/20160304121349/https://doc.rust-lang.org/reference.html#unary-operator-expressions
     // and c:
@@ -191,15 +189,12 @@ impl Operator {
             18  = += -= *= /= %= *= &= |= ^= <<= >>=
     */
     fn lookup(&self) -> Option<(bool, usize, Fix)> {
-        if let Operator::ParenthesisBegin = self {
-            Some((true, 0, Fix::Dummy))
-        } else if let Operator::ParenthesisEnd = self {
-            Some((true, 0, Fix::Dummy))
-        } else if let Operator::UnaryOperator(unary_op) = self {
-            Some(match unary_op {
+        match self {
+            Operator::ParenthesisBegin | Operator::ParenthesisEnd => Some((true, 0, Fix::Dummy)),
+            Operator::Plus | Operator::Minus => None,
+            Operator::UnaryOperator(un_op) => Some(match un_op {
                 UnOperator::Positive => (true, 2, Fix::Prefix),
                 UnOperator::Negative => (true, 2, Fix::Prefix),
-
                 UnOperator::BitComplement => (true, 3, Fix::Prefix),
                 UnOperator::BoolNot => (true, 13, Fix::Prefix),
                 UnOperator::Deref => (true, 1, Fix::Postfix),
@@ -208,9 +203,8 @@ impl Operator {
                 UnOperator::UnionIs(..) => unreachable!("UnionIs"),
                 UnOperator::AdtAccess(..) => (true, 1, Fix::Postfix),
                 UnOperator::EnumAccess(..) => (true, 1, Fix::Postfix),
-            })
-        } else if let Operator::BinaryOperator(binary_op) = self {
-            Some(match binary_op {
+            }),
+            Operator::BinaryOperator(bin_op) => Some(match bin_op {
                 BinOperator::In => (false, 17, Fix::Dummy),
                 BinOperator::Is => (true, 8, Fix::Dummy),
                 BinOperator::As => (true, 4, Fix::Dummy),
@@ -240,9 +234,7 @@ impl Operator {
 
                 BinOperator::BoolAnd => (true, 14, Fix::Dummy),
                 BinOperator::BoolOr => (true, 15, Fix::Dummy),
-            })
-        } else {
-            None
+            }),
         }
     }
 

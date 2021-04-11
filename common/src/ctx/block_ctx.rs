@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
-use common::{file::FilePosition, path::LangPath, BlockId};
+use crate::{file::FilePosition, path::LangPath, BlockId};
 
 #[derive(Debug, Clone)]
-pub struct BlockInfo {
+pub struct BlockCtx {
     pub block_id: BlockId,
     pub parent_id: BlockId,
 
@@ -57,7 +57,7 @@ pub struct BlockInfo {
     pub uses: HashSet<LangPath>,
 }
 
-impl BlockInfo {
+impl BlockCtx {
     /// The block id given to the default block.
     pub const DEFAULT_BLOCK_ID: BlockId = 0;
 

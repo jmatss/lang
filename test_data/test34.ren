@@ -17,20 +17,20 @@ impl TypeStruct
 
 fn main() -> i32
 {
-    var x = Optional::some(TypeStruct { 123 })
+    var x = Optional::value(TypeStruct { 123 })
 
     var y
-    if value is x.some
+    if val is x.value
     {
-        y = Optional::some(value.len())
+        y = Optional::value(val.len())
     }
     else
     {
-        y = Optional::none()
+        y = Optional::empty()
     }
 
-    printf("y.get(): %d", y.get() as i32)
-    std::assert(y.some == 123)
+    printf("y.get(): %d", y.&.get() as i32)
+    std::assert(y.value == 123)
 
     return 0
 }

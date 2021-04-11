@@ -1,5 +1,7 @@
-use crate::AnalyzeContext;
+use std::collections::HashSet;
+
 use common::{
+    ctx::traverse_ctx::TraverseCtx,
     error::LangError,
     error::LangResult,
     path::LangPath,
@@ -9,12 +11,9 @@ use common::{
         expr::Expr,
         op::{Op, UnOperator},
     },
-    traverser::TraverseContext,
+    traverse::visitor::Visitor,
     ty::{inner_ty::InnerTy, ty::Ty},
-    visitor::Visitor,
-    BlockId,
 };
-use std::collections::HashSet;
 
 // TODO: Currently only implemented for hardcoded match case expression values
 //       since then you have a "known" set of values at this part of the compiler
@@ -28,28 +27,25 @@ use std::collections::HashSet;
 
 /// Makes sure that match statements are exhaustive, otherwise a error should be
 /// reported.
-pub struct ExhaustAnalyzer<'a> {
-    analyze_context: &'a AnalyzeContext,
+pub struct ExhaustAnalyzer {
     errors: Vec<LangError>,
 }
 
-impl<'a> ExhaustAnalyzer<'a> {
-    pub fn new(analyze_context: &'a AnalyzeContext) -> Self {
+impl ExhaustAnalyzer {
+    pub fn new() -> Self {
         Self {
-            analyze_context,
             errors: Vec::default(),
         }
     }
 
     fn exhaust_enum(
-        &mut self,
+        &self,
+        ctx: &mut TraverseCtx,
         full_path: &LangPath,
-        block_id: BlockId,
-        match_cases: &mut Vec<AstToken>,
-        ctx: &TraverseContext,
+        match_cases: &[AstToken],
     ) -> LangResult<()> {
         // Gather all names of the members for the enum into a hash set.
-        let enum_ = self.analyze_context.get_adt(full_path, block_id)?;
+        let enum_ = ctx.ast_ctx.get_adt(&ctx.ty_ctx, full_path)?;
         let mut member_names = enum_
             .borrow()
             .members
@@ -77,7 +73,7 @@ impl<'a> ExhaustAnalyzer<'a> {
                     }
                 }
 
-                return Err(self.analyze_context.err(format!(
+                return Err(ctx.ast_ctx.err(format!(
                     "Expected match case expression to be enum member, was: {:#?}",
                     match_case
                 )));
@@ -91,14 +87,14 @@ impl<'a> ExhaustAnalyzer<'a> {
         if member_names.is_empty() {
             Ok(())
         } else {
-            Err(self.analyze_context.err(format!(
+            Err(ctx.ast_ctx.err(format!(
                 "\"match\" on enum \"{}\" at position:\n{:#?}\ndoes NOT cover all enum members. Missing members:\n{:#?}",
                 &enum_.borrow().name, ctx.file_pos, member_names
             )))
         }
     }
 
-    fn exhaust_int(&mut self, inner_ty: &InnerTy, ctx: &TraverseContext) -> LangResult<()> {
+    fn exhaust_int(&mut self, ctx: &mut TraverseCtx, inner_ty: &InnerTy) -> LangResult<()> {
         // TODO: Implement, currently unable to do it unless every case expr is
         //       hardcoded, but then they would need to cover all possible ints
         //       for a specific bit size, which is unfeasible.
@@ -106,7 +102,7 @@ impl<'a> ExhaustAnalyzer<'a> {
     }
 }
 
-impl<'a> Visitor for ExhaustAnalyzer<'a> {
+impl Visitor for ExhaustAnalyzer {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -120,22 +116,31 @@ impl<'a> Visitor for ExhaustAnalyzer<'a> {
     /// Currently supported types:
     ///   ints
     ///   enums
-    fn visit_match(&mut self, ast_token: &mut AstToken, ctx: &TraverseContext) {
+    fn visit_match(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Match(match_expr), _, _, match_cases) = ast_token {
-            let match_case_ty = match match_expr.get_expr_type() {
-                Ok(ty) => ty,
+            let type_id = match match_expr.get_expr_type() {
+                Ok(type_id) => type_id,
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
             };
 
-            match &match_case_ty {
+            let match_case_ty = match ctx.ty_ctx.ty_env.ty(type_id) {
+                Ok(ty) => ty.clone(),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            match match_case_ty {
                 Ty::CompoundType(InnerTy::Enum(partial_path), ..) => {
-                    let full_path = match self
-                        .analyze_context
-                        .calculate_adt_full_path(&partial_path, ctx.block_id)
-                    {
+                    let full_path = match ctx.ast_ctx.calculate_adt_full_path(
+                        &ctx.ty_ctx,
+                        &partial_path,
+                        ctx.block_id,
+                    ) {
                         Ok(full_path) => full_path,
                         Err(err) => {
                             self.errors.push(err);
@@ -143,20 +148,19 @@ impl<'a> Visitor for ExhaustAnalyzer<'a> {
                         }
                     };
 
-                    if let Err(err) = self.exhaust_enum(&full_path, ctx.block_id, match_cases, ctx)
-                    {
+                    if let Err(err) = self.exhaust_enum(ctx, &full_path, match_cases) {
                         self.errors.push(err);
                     }
                 }
 
                 Ty::CompoundType(inner_ty, ..) if inner_ty.is_int() => {
-                    if let Err(err) = self.exhaust_int(inner_ty, ctx) {
+                    if let Err(err) = self.exhaust_int(ctx, &inner_ty) {
                         self.errors.push(err);
                     }
                 }
 
                 _ => {
-                    let err = self.analyze_context.err(format!(
+                    let err = ctx.ast_ctx.err(format!(
                         "Invalid type of match expression: {:#?}",
                         match_expr
                     ));

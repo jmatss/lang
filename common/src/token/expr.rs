@@ -7,11 +7,12 @@ use super::{
     stmt::Modifier,
 };
 use crate::{
+    ctx::{ty_ctx::TyCtx, ty_env::TyEnv},
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
     path::{LangPath, LangPathPart},
     ty::{generics::Generics, ty::Ty},
-    util, BlockId,
+    util, BlockId, TypeId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -20,11 +21,11 @@ pub enum Expr {
     //       implied. For numbers the postfix notation might be converted to a
     //       "As" so that the type doesn't need to be stored in the literal,
     //       it will be stored in the surrounding expression.
-    Lit(Lit, Option<Ty>, Option<FilePosition>),
+    Lit(Lit, Option<TypeId>, Option<FilePosition>),
 
     // TODO: Is it ok to have type as a expression? This lets one handle binary
     //       operators like ex. "as" in a simple way.
-    Type(Ty, Option<FilePosition>),
+    Type(TypeId, Option<FilePosition>),
     Var(Var),
     FnCall(FnCall),
     FnPtr(FnPtr),
@@ -36,12 +37,12 @@ pub enum Expr {
 }
 
 impl Expr {
-    pub fn get_expr_type(&self) -> LangResult<Ty> {
+    pub fn get_expr_type(&self) -> LangResult<TypeId> {
         Ok(match self {
-            Expr::Lit(_, Some(ty), _) | Expr::Type(ty, _) => ty.clone(),
+            Expr::Lit(_, Some(type_id), _) | Expr::Type(type_id, _) => *type_id,
             Expr::Var(var) => {
-                if let Some(ty) = &var.ty {
-                    ty.clone()
+                if let Some(type_id) = &var.ty {
+                    *type_id
                 } else {
                     return Err(LangError::new(
                         format!("Type of var was None: {:?}", var),
@@ -51,50 +52,50 @@ impl Expr {
                 }
             }
             Expr::FnCall(fn_call) if fn_call.ret_type.is_some() => {
-                if let Some(ty) = &fn_call.ret_type {
-                    ty.clone()
+                if let Some(type_id) = &fn_call.ret_type {
+                    *type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::FnPtr(fn_ptr) if fn_ptr.fn_ty.is_some() => {
-                if let Some(ty) = &fn_ptr.fn_ty {
-                    ty.clone()
+                if let Some(type_id) = &fn_ptr.fn_ty {
+                    *type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::BuiltInCall(built_in_call) if built_in_call.ret_type.is_some() => {
-                if let Some(ty) = &built_in_call.ret_type {
-                    ty.clone()
+                if let Some(type_id) = &built_in_call.ret_type {
+                    *type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::AdtInit(adt_init) if adt_init.ret_type.is_some() => {
-                if let Some(ty) = &adt_init.ret_type {
-                    ty.clone()
+                if let Some(type_id) = &adt_init.ret_type {
+                    *type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::ArrayInit(array_init) if array_init.ret_type.is_some() => {
-                if let Some(ty) = &array_init.ret_type {
-                    ty.clone()
+                if let Some(type_id) = &array_init.ret_type {
+                    *type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::Op(Op::BinOp(bin_op)) if bin_op.ret_type.is_some() => {
-                if let Some(ty) = &bin_op.ret_type {
-                    ty.clone()
+                if let Some(type_id) = &bin_op.ret_type {
+                    *type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::Op(Op::UnOp(un_op)) if un_op.ret_type.is_some() => {
-                if let Some(ty) = &un_op.ret_type {
-                    ty.clone()
+                if let Some(type_id) = &un_op.ret_type {
+                    *type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
@@ -109,11 +110,11 @@ impl Expr {
         })
     }
 
-    pub fn get_expr_type_mut(&mut self) -> LangResult<&mut Ty> {
+    pub fn get_expr_type_mut(&mut self) -> LangResult<&mut TypeId> {
         let file_pos = self.file_pos().cloned();
 
         Ok(match self {
-            Expr::Lit(_, Some(ty), _) | Expr::Type(ty, _) => ty,
+            Expr::Lit(_, Some(type_id), _) | Expr::Type(type_id, _) => type_id,
             Expr::Var(var) => {
                 if let Some(ty) = &mut var.ty {
                     ty
@@ -126,50 +127,50 @@ impl Expr {
                 }
             }
             Expr::FnCall(fn_call) if fn_call.ret_type.is_some() => {
-                if let Some(ty) = &mut fn_call.ret_type {
-                    ty
+                if let Some(type_id) = &mut fn_call.ret_type {
+                    type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::FnPtr(fn_ptr) if fn_ptr.fn_ty.is_some() => {
-                if let Some(ty) = &mut fn_ptr.fn_ty {
-                    ty
+                if let Some(type_id) = &mut fn_ptr.fn_ty {
+                    type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::BuiltInCall(built_in_call) if built_in_call.ret_type.is_some() => {
-                if let Some(ty) = &mut built_in_call.ret_type {
-                    ty
+                if let Some(type_id) = &mut built_in_call.ret_type {
+                    type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::AdtInit(adt_init) if adt_init.ret_type.is_some() => {
-                if let Some(ty) = &mut adt_init.ret_type {
-                    ty
+                if let Some(type_id) = &mut adt_init.ret_type {
+                    type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::ArrayInit(array_init) if array_init.ret_type.is_some() => {
-                if let Some(ty) = &mut array_init.ret_type {
-                    ty
+                if let Some(type_id) = &mut array_init.ret_type {
+                    type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::Op(Op::BinOp(bin_op)) if bin_op.ret_type.is_some() => {
-                if let Some(ty) = &mut bin_op.ret_type {
-                    ty
+                if let Some(type_id) = &mut bin_op.ret_type {
+                    type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
             }
             Expr::Op(Op::UnOp(un_op)) if un_op.ret_type.is_some() => {
-                if let Some(ty) = &mut un_op.ret_type {
-                    ty
+                if let Some(type_id) = &mut un_op.ret_type {
+                    type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
                 }
@@ -358,7 +359,7 @@ impl Expr {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Var {
     pub name: String,
-    pub ty: Option<Ty>,
+    pub ty: Option<TypeId>,
     pub modifiers: Option<Vec<Modifier>>,
     pub value: Option<Box<Expr>>,
     pub is_const: bool,
@@ -377,7 +378,7 @@ pub struct Var {
 impl Var {
     pub fn new(
         name: String,
-        ty: Option<Ty>,
+        ty: Option<TypeId>,
         modifiers: Option<Vec<Modifier>>,
         default_value: Option<Box<Expr>>,
         file_pos: Option<FilePosition>,
@@ -422,7 +423,7 @@ pub struct FnCall {
     pub name: String,
     pub module: LangPath,
     pub arguments: Vec<Argument>,
-    pub ret_type: Option<Ty>,
+    pub ret_type: Option<TypeId>,
     pub generics: Option<Generics>,
 
     pub file_pos: Option<FilePosition>,
@@ -430,7 +431,7 @@ pub struct FnCall {
     /// Will be set if this is a method call. It will be set to the ADT
     /// that this method is called on.
     pub is_method: bool,
-    pub method_adt: Option<Ty>,
+    pub method_adt: Option<TypeId>,
 
     /// Will be set to true if this is a function call that is being called on
     /// a variable that contains a function pointer.
@@ -460,8 +461,9 @@ impl FnCall {
 
     /// Returns the "full name" which is the name containing possible ADT
     /// and generics as well.
-    pub fn full_name(&self) -> LangResult<String> {
-        if let Some(adt_ty) = &self.method_adt {
+    pub fn full_name(&self, ty_ctx: &TyCtx) -> LangResult<String> {
+        if let Some(adt_type_id) = &self.method_adt {
+            let adt_ty = ty_ctx.ty_env.ty(*adt_type_id)?;
             let (adt_path, adt_generics) =
                 if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
                     if inner_ty.is_adt() {
@@ -483,6 +485,7 @@ impl FnCall {
                 };
 
             Ok(util::to_method_name(
+                ty_ctx,
                 &adt_path,
                 adt_generics,
                 &self.name,
@@ -490,15 +493,15 @@ impl FnCall {
             ))
         } else {
             let fn_path = self.module.clone_push(&self.name, self.generics.as_ref());
-            Ok(fn_path.full_name())
+            Ok(ty_ctx.ty_env.to_string_path(ty_ctx, &fn_path))
         }
     }
 
     /// Returns the "half name" which is the name that does NOT contain anything
     /// related to the structure but will contain function generics (if any).
-    pub fn half_name(&self) -> String {
+    pub fn half_name(&self, ty_ctx: &TyCtx) -> String {
         if let Some(generics) = &self.generics {
-            util::to_generic_name(&self.name, generics)
+            util::to_generic_name(ty_ctx, &self.name, generics)
         } else {
             self.name.clone()
         }
@@ -510,7 +513,7 @@ pub struct FnPtr {
     pub name: String,
     pub module: LangPath,
     pub generics: Option<Generics>,
-    pub fn_ty: Option<Ty>,
+    pub fn_ty: Option<TypeId>,
     pub file_pos: Option<FilePosition>,
 }
 
@@ -519,7 +522,7 @@ impl FnPtr {
         name: String,
         module: LangPath,
         generics: Option<Generics>,
-        fn_ty: Option<Ty>,
+        fn_ty: Option<TypeId>,
         file_pos: Option<FilePosition>,
     ) -> Self {
         Self {
@@ -533,13 +536,13 @@ impl FnPtr {
 
     /// Returns the "full name" which is the name containing possible ADT
     /// and generics as well.
-    pub fn full_name(&self) -> LangResult<String> {
+    pub fn full_name(&self, ty_ctx: &TyCtx) -> LangResult<String> {
         let fn_name_part = LangPathPart(self.name.clone(), self.generics.clone());
         let full_path = self
             .module
             .join(&LangPath::new(vec![fn_name_part], None), None);
 
-        Ok(full_path.full_name())
+        Ok(ty_ctx.ty_env.to_string_path(ty_ctx, &full_path))
     }
 }
 
@@ -547,7 +550,7 @@ impl FnPtr {
 pub struct BuiltInCall {
     pub name: String,
     pub arguments: Vec<Argument>,
-    pub ret_type: Option<Ty>,
+    pub ret_type: Option<TypeId>,
     pub generics: Option<Generics>,
     pub file_pos: FilePosition,
 }
@@ -574,7 +577,7 @@ pub struct AdtInit {
     pub name: String,
     pub module: LangPath,
     pub arguments: Vec<Argument>,
-    pub ret_type: Option<Ty>,
+    pub ret_type: Option<TypeId>,
     pub generics: Option<Generics>,
     pub kind: AdtKind,
     pub file_pos: Option<FilePosition>,
@@ -603,8 +606,9 @@ impl AdtInit {
     /// Returns the generics. If generics was set at the struct init call, this
     /// function will replace the types of the types parsed during type inference
     /// with type specified at the init call.
-    pub fn generics(&mut self) -> Option<&Generics> {
-        let ty_generics = if let Some(Ty::CompoundType(_, ty_generics, _)) = &self.ret_type {
+    pub fn generics(&mut self, ty_env: &TyEnv) -> Option<Generics> {
+        let ret_ty = ty_env.ty(self.ret_type.unwrap()).ok()?;
+        let ty_generics = if let Ty::CompoundType(_, ty_generics, _) = ret_ty {
             ty_generics
         } else {
             panic!("Struct init type not ADT.");
@@ -616,22 +620,23 @@ impl AdtInit {
             for (idx, name) in ty_generics.iter_names().enumerate() {
                 generics.insert_lookup(name.clone(), idx);
             }
-            Some(generics)
+            Some(generics.clone())
         } else {
-            Some(ty_generics)
+            Some(ty_generics.clone())
         }
     }
 
     /// Returns the "full name" which is the name containing possible generics
     /// as well.
-    pub fn full_name(&mut self) -> LangResult<String> {
-        let adt_init_generics = if let Some(generics) = self.generics() {
-            Some(generics.clone())
+    pub fn full_name(&mut self, ty_ctx: &TyCtx) -> LangResult<String> {
+        let adt_init_generics = if let Some(generics) = self.generics(&ty_ctx.ty_env) {
+            Some(generics)
         } else {
             None
         };
 
-        if let Some(adt_ty) = &self.ret_type {
+        if let Some(adt_type_id) = &self.ret_type {
+            let adt_ty = ty_ctx.ty_env.ty(*adt_type_id)?;
             if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
                 let generics = if let Some(adt_init_generics) = adt_init_generics {
                     adt_init_generics
@@ -647,7 +652,7 @@ impl AdtInit {
                 let new_adt_name = LangPathPart(self.name.clone(), Some(generics));
                 let new_adt_path = adt_path.join(&LangPath::new(vec![new_adt_name], None), None);
 
-                Ok(new_adt_path.full_name())
+                Ok(ty_ctx.ty_env.to_string_path(ty_ctx, &new_adt_path))
             } else {
                 Err(LangError::new(
                     format!("Unable to get full name for ADT init: {:#?}", self),
@@ -664,7 +669,7 @@ impl AdtInit {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ArrayInit {
     pub arguments: Vec<Argument>,
-    pub ret_type: Option<Ty>,
+    pub ret_type: Option<TypeId>,
     pub file_pos: FilePosition,
 }
 

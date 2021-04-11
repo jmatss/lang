@@ -1,5 +1,5 @@
 use super::{expr::Expr, stmt::Stmt};
-use crate::{file::FilePosition, ty::ty::Ty, BlockId};
+use crate::{file::FilePosition, BlockId, TypeId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Op {
@@ -19,7 +19,7 @@ impl Op {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BinOp {
     pub operator: BinOperator,
-    pub ret_type: Option<Ty>,
+    pub ret_type: Option<TypeId>,
     pub file_pos: Option<FilePosition>,
     pub is_const: bool,
     pub lhs: Box<Expr>,
@@ -47,7 +47,7 @@ impl BinOp {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UnOp {
     pub operator: UnOperator,
-    pub ret_type: Option<Ty>,
+    pub ret_type: Option<TypeId>,
     pub file_pos: Option<FilePosition>,
     pub is_const: bool,
     pub value: Box<Expr>,

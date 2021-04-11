@@ -6,9 +6,10 @@ use super::{
 };
 
 use crate::{
+    ctx::{ty_ctx::TyCtx, },
     path::LangPath,
-    ty::{generics::Generics, ty::Ty},
-    util,
+    ty::generics::Generics,
+    util, TypeId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +107,7 @@ pub struct Struct {
 
     /// The key is the the name of the generic type it and the values are the
     /// traits that the specific generic type needs to implement.
-    pub implements: Option<HashMap<String, Vec<Ty>>>,
+    pub implements: Option<HashMap<String, Vec<TypeId>>>,
     pub members: Option<Vec<Rc<RefCell<Var>>>>,
 
     pub modifiers: Vec<Modifier>,
@@ -131,11 +132,11 @@ pub struct Adt {
     pub generics: Option<Generics>,
     /// The key is the the name of the generic and the values are the
     /// traits that the specific generic type needs to implement.
-    pub implements: Option<HashMap<String, Vec<Ty>>>,
+    pub implements: Option<HashMap<String, Vec<TypeId>>>,
 
     /* Values set for Enum */
     /// The type of the enum values. Will most likely be a integer type.
-    pub enum_ty: Option<Ty>,
+    pub enum_ty: Option<TypeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -153,7 +154,7 @@ impl Adt {
         modifiers: Vec<Modifier>,
         members: Vec<Rc<RefCell<Var>>>,
         generics: Option<Generics>,
-        implements: Option<HashMap<String, Vec<Ty>>>,
+        implements: Option<HashMap<String, Vec<TypeId>>>,
     ) -> Self {
         Self {
             name,
@@ -174,7 +175,7 @@ impl Adt {
         modifiers: Vec<Modifier>,
         members: Vec<Rc<RefCell<Var>>>,
         generics: Option<Generics>,
-        implements: Option<HashMap<String, Vec<Ty>>>,
+        implements: Option<HashMap<String, Vec<TypeId>>>,
     ) -> Self {
         Self {
             name,
@@ -194,7 +195,7 @@ impl Adt {
         module: LangPath,
         modifiers: Vec<Modifier>,
         members: Vec<Rc<RefCell<Var>>>,
-        ty: Option<Ty>,
+        enum_ty: Option<TypeId>,
     ) -> Self {
         Self {
             name,
@@ -205,7 +206,7 @@ impl Adt {
             methods: HashMap::default(),
             generics: None,
             implements: None,
-            enum_ty: ty,
+            enum_ty,
         }
     }
 
@@ -258,17 +259,17 @@ pub struct Fn {
 
     /// The key is the the name of the generic type it and the values are the
     /// traits that the specific generic type needs to implement.
-    pub implements: Option<HashMap<String, Vec<Ty>>>,
+    pub implements: Option<HashMap<String, Vec<TypeId>>>,
 
     pub parameters: Option<Vec<Rc<RefCell<Var>>>>,
-    pub ret_type: Option<Ty>,
+    pub ret_type: Option<TypeId>,
     pub modifiers: Vec<Modifier>,
     pub is_var_arg: bool,
 
     /// Will be set if this is a function in a "impl" block which means that
     /// this is a function tied to a ADT. The type will be the ADT (or the "ident"
     /// of the impl block if other than ADT are allowed).
-    pub method_adt: Option<Ty>,
+    pub method_adt: Option<TypeId>,
 }
 
 impl Fn {
@@ -276,9 +277,9 @@ impl Fn {
         name: String,
         module: LangPath,
         generics: Option<Generics>,
-        implements: Option<HashMap<String, Vec<Ty>>>,
+        implements: Option<HashMap<String, Vec<TypeId>>>,
         parameters: Option<Vec<Rc<RefCell<Var>>>>,
-        ret_type: Option<Ty>,
+        ret_type: Option<TypeId>,
         modifiers: Vec<Modifier>,
         is_var_arg: bool,
     ) -> Self {
@@ -456,9 +457,9 @@ impl Fn {
 
     /// Returns the "half name" which is the name that does NOT contain anything
     /// related to the structure but will contain function generics (if any).
-    pub fn half_name(&self) -> String {
+    pub fn half_name(&self, ty_ctx: &TyCtx) -> String {
         if let Some(generics) = &self.generics {
-            util::to_generic_name(&self.name, generics)
+            util::to_generic_name(ty_ctx, &self.name, generics)
         } else {
             self.name.clone()
         }
@@ -475,8 +476,8 @@ impl Fn {
 pub struct BuiltIn {
     pub name: &'static str,
     pub parameters: Vec<Var>,
-    pub generics: Option<Vec<Ty>>,
-    pub ret_type: Ty,
+    pub generics: Option<Vec<TypeId>>,
+    pub ret_type: TypeId,
     pub is_var_arg: bool,
 }
 
@@ -484,8 +485,8 @@ impl BuiltIn {
     pub fn new(
         name: &'static str,
         parameters: Vec<Var>,
-        generics: Option<Vec<Ty>>,
-        ret_type: Ty,
+        generics: Option<Vec<TypeId>>,
+        ret_type: TypeId,
         is_var_arg: bool,
     ) -> Self {
         BuiltIn {

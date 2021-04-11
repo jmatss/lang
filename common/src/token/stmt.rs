@@ -3,13 +3,8 @@ use super::{
     expr::{Expr, Var},
     op::AssignOperator,
 };
-use crate::{
-    error::{LangError, LangErrorKind::GeneralError, LangResult},
-    file::FilePosition,
-    path::LangPath,
-    ENV_VAR,
-};
-use std::{cell::RefCell, hash::Hash, path::PathBuf, rc::Rc};
+use crate::{file::FilePosition, path::LangPath};
+use std::{cell::RefCell, hash::Hash, rc::Rc};
 
 #[derive(Debug, Clone, Eq)]
 pub enum Stmt {
@@ -155,67 +150,4 @@ pub enum Modifier {
     Hidden,
     This,
     ThisPointer,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Path {
-    pub idents: Vec<String>,
-    pub file_pos: FilePosition,
-}
-
-impl Path {
-    const EXTENSION: &'static str = ".ren";
-
-    pub fn new(idents: Vec<String>, file_pos: FilePosition) -> Self {
-        Path { idents, file_pos }
-    }
-
-    /// Returns the path to a file. First looks for the file in the env var
-    /// "LANG_HOME". If it isn't found, assume the file is located relative
-    /// to the current working directory.
-    pub fn to_file_path(&self) -> LangResult<String> {
-        let lang_path = std::env::var(ENV_VAR)?;
-        let relative_path = self.idents.join("/");
-
-        let lang_file_path = PathBuf::from(format!(
-            "{}/{}{}",
-            lang_path,
-            relative_path,
-            Path::EXTENSION
-        ));
-        let relative_file_path = PathBuf::from(format!("{}{}", relative_path, Path::EXTENSION));
-
-        if lang_file_path.exists() {
-            Ok(lang_file_path
-                .to_str()
-                .ok_or_else(|| {
-                    LangError::new(
-                        format!("Unable to convert path \"{:?}\" to str.", lang_file_path),
-                        GeneralError,
-                        Some(self.file_pos.to_owned()),
-                    )
-                })?
-                .into())
-        } else if relative_file_path.exists() {
-            Ok(relative_file_path
-                .to_str()
-                .ok_or_else(|| {
-                    LangError::new(
-                        format!(
-                            "Unable to convert path \"{:?}\" to str.",
-                            relative_file_path
-                        ),
-                        GeneralError,
-                        Some(self.file_pos.to_owned()),
-                    )
-                })?
-                .into())
-        } else {
-            Err(LangError::new(
-                format!("Unable to find file: {}{}", relative_path, Path::EXTENSION),
-                GeneralError,
-                Some(self.file_pos.to_owned()),
-            ))
-        }
-    }
 }

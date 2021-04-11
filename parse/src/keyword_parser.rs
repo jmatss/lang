@@ -14,8 +14,9 @@ use common::{
         generics::{Generics, GenericsKind},
         inner_ty::InnerTy,
         ty::Ty,
+        type_info::TypeInfo,
     },
-    type_info::TypeInfo,
+    TypeId,
 };
 use lex::token::{Kw, LexTokenKind, Sym};
 
@@ -744,13 +745,12 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // If the next token is a "Arrow" ("->"), assume that the return type
         // of the function is specified afterwards. If there are no arrow,
         // assume that the function returns void.
-        let (return_ty, ty_file_pos) = if let Some(lex_token) = self.iter.peek_skip_space_line() {
+        let (ret_type_id, ty_file_pos) = if let Some(lex_token) = self.iter.peek_skip_space_line() {
             if let LexTokenKind::Sym(Sym::Arrow) = lex_token.kind {
                 self.iter.next_skip_space_line(); // Consume the arrow.
 
-                let return_ty = self.iter.parse_type(None)?;
-                let return_ty_file_pos = return_ty.file_pos().cloned();
-                (Some(return_ty), return_ty_file_pos)
+                let (ret_type_id, ret_file_pos) = self.iter.parse_type(None)?;
+                (Some(ret_type_id), Some(ret_file_pos))
             } else {
                 (None, None)
             }
@@ -763,7 +763,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let implements = self.parse_where(generics.as_ref())?;
         Ok(Fn::new(
-            name, module, generics, implements, params_opt, return_ty, modifiers, is_var_arg,
+            name,
+            module,
+            generics,
+            implements,
+            params_opt,
+            ret_type_id,
+            modifiers,
+            is_var_arg,
         ))
     }
 
@@ -874,22 +881,22 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
             let enum_type_info = (name.clone(), file_pos.to_owned());
             let member_type_info = (member.name.clone(), member_file_pos);
-            let member_value_ty = Ty::CompoundType(
+            let member_value_type_id = self.iter.ty_env.id(&Ty::CompoundType(
                 InnerTy::I32,
                 Generics::empty(),
                 TypeInfo::EnumMember(enum_type_info, member_type_info),
-            );
+            ))?;
 
-            let enum_ty = Ty::CompoundType(
+            let enum_type_id = self.iter.ty_env.id(&Ty::CompoundType(
                 InnerTy::Enum(full_path.clone()),
                 Generics::empty(),
                 TypeInfo::Enum(member_file_pos.to_owned()),
-            );
+            ))?;
 
-            member.ty = Some(enum_ty);
+            member.ty = Some(enum_type_id);
             member.value = Some(Box::new(Expr::Lit(
                 Lit::Integer(idx.to_string(), RADIX),
-                Some(member_value_ty),
+                Some(member_value_type_id),
                 None,
             )));
 
@@ -900,13 +907,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         //       to specify as a generic on the enum declaration? But in that case
         //       it would take a generic impl instead of a generic decl as structs.
         //       Is this ok?
-        let enum_ty = Ty::CompoundType(
+        let enum_type_id = self.iter.ty_env.id(&Ty::CompoundType(
             InnerTy::Enum(full_path),
             Generics::empty(),
             TypeInfo::Enum(file_pos.to_owned()),
-        );
+        ))?;
 
-        let enum_ = Adt::new_enum(name, module, modifiers, members_rc, Some(enum_ty));
+        let enum_ = Adt::new_enum(name, module, modifiers, members_rc, Some(enum_type_id));
         let header = BlockHeader::Enum(Rc::new(RefCell::new(enum_)));
 
         let block_id = self.iter.reserve_block_id();
@@ -1117,7 +1124,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     fn parse_where(
         &mut self,
         generics: Option<&Generics>,
-    ) -> LangResult<Option<HashMap<String, Vec<Ty>>>> {
+    ) -> LangResult<Option<HashMap<String, Vec<TypeId>>>> {
         // Next token isn't a "where" keyword => early None return.
         if let Some(LexTokenKind::Kw(Kw::Where)) = self.iter.peek_skip_space_line().map(|t| t.kind)
         {
@@ -1160,8 +1167,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
             let mut types = Vec::default();
             loop {
-                let ty = self.iter.parse_type(generics)?;
-                types.push(ty);
+                let (type_id, _) = self.iter.parse_type(generics)?;
+                types.push(type_id);
 
                 // TODO: Should trailing commas be allowed?
                 // If the next token is a comma, continue parsing types. If it

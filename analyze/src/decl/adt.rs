@@ -1,28 +1,26 @@
-use crate::AnalyzeContext;
+use std::{cell::RefCell, rc::Rc};
+
 use common::{
+    ctx::traverse_ctx::TraverseCtx,
     error::LangError,
     path::LangPath,
     token::{
         ast::AstToken,
         block::{Adt, BlockHeader},
     },
-    traverser::TraverseContext,
-    visitor::Visitor,
+    traverse::visitor::Visitor,
     BlockId,
 };
-use std::{cell::RefCell, rc::Rc};
 
 /// Gathers information about all type declarations found in the AST and inserts
 /// them into the `analyze_context`. This includes structs, enums, unions and traits.
-pub struct DeclTypeAnalyzer<'a> {
-    analyze_context: &'a RefCell<AnalyzeContext>,
+pub struct DeclTypeAnalyzer {
     errors: Vec<LangError>,
 }
 
-impl<'a> DeclTypeAnalyzer<'a> {
-    pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
+impl DeclTypeAnalyzer {
+    pub fn new() -> Self {
         Self {
-            analyze_context,
             errors: Vec::default(),
         }
     }
@@ -30,8 +28,8 @@ impl<'a> DeclTypeAnalyzer<'a> {
     /// Adds the ADT to the lookup tables for ADTs. Also normalizes the name of
     /// the ADT with the correct module path. Assign the `module` variable stored
     /// inside the ADT the value of the module that it is declared in.
-    fn decl_new_adt(&mut self, adt: &Rc<RefCell<Adt>>, id: BlockId) {
-        let parent_id = match self.analyze_context.borrow().get_parent_id(id) {
+    fn decl_new_adt(&mut self, ctx: &mut TraverseCtx, adt: &Rc<RefCell<Adt>>, id: BlockId) {
+        let parent_id = match ctx.ast_ctx.get_parent_id(id) {
             Ok(parent_id) => parent_id,
             Err(err) => {
                 self.errors.push(err);
@@ -39,7 +37,7 @@ impl<'a> DeclTypeAnalyzer<'a> {
             }
         };
 
-        let full_path = match self.analyze_context.borrow().get_module(id) {
+        let adt_full_path = match ctx.ast_ctx.get_module(id) {
             Ok(module_opt) => {
                 let module = if let Some(module) = module_opt {
                     module
@@ -48,7 +46,6 @@ impl<'a> DeclTypeAnalyzer<'a> {
                 };
 
                 adt.borrow_mut().module = module.clone();
-
                 module.clone_push(&adt.borrow().name, None)
             }
             Err(err) => {
@@ -60,24 +57,21 @@ impl<'a> DeclTypeAnalyzer<'a> {
         // TODO: Should this be done in the same way as function, that
         //       one just checks that the declarations are equals and doesn't
         //       throw a exception? This would allow for "extern" declarations.
-        if let Ok(prev_adt) = self.analyze_context.borrow().get_adt(&full_path, id) {
-            let err = self.analyze_context.borrow().err(format!(
+        if let Ok(prev_adt) = ctx.ast_ctx.get_adt(&ctx.ty_ctx, &adt_full_path) {
+            let err = ctx.ast_ctx.err(format!(
                 "A ADT with name \"{}\" already defined.",
-                &full_path
+                ctx.ty_ctx.ty_env.to_string_path(ctx.ty_ctx, &adt_full_path)
             ));
             self.errors.push(err);
             return;
         }
 
-        let key = (full_path, parent_id);
-        self.analyze_context
-            .borrow_mut()
-            .adts
-            .insert(key, Rc::clone(adt));
+        let key = (adt_full_path, parent_id);
+        ctx.ast_ctx.adts.insert(key, Rc::clone(adt));
     }
 }
 
-impl<'a> Visitor for DeclTypeAnalyzer<'a> {
+impl Visitor for DeclTypeAnalyzer {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -86,37 +80,34 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
         }
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
-        self.analyze_context.borrow_mut().file_pos =
-            ast_token.file_pos().cloned().unwrap_or_default();
+    fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
+        ctx.ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
     }
 
-    fn visit_struct(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_struct(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Struct(struct_), _, id, ..) = &mut ast_token {
-            self.decl_new_adt(struct_, *id);
+            self.decl_new_adt(ctx, struct_, *id);
         }
     }
 
-    fn visit_enum(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_enum(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Enum(enum_), _, id, ..) = &mut ast_token {
-            self.decl_new_adt(enum_, *id);
+            self.decl_new_adt(ctx, enum_, *id);
         }
     }
 
-    fn visit_union(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_union(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Union(union), _, id, ..) = &mut ast_token {
-            self.decl_new_adt(union, *id);
+            self.decl_new_adt(ctx, union, *id);
         }
     }
 
     // TODO: Merge logic with ADTs.
-    fn visit_trait(&mut self, mut ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_trait(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Trait(trait_), _, trait_id, ..) = &mut ast_token {
-            let mut analyze_context = self.analyze_context.borrow_mut();
-
             // The trait will be added in the scope of its parent, so fetch
             // the block id for the parent.
-            let parent_id = match analyze_context.get_parent_id(*trait_id) {
+            let parent_id = match ctx.ast_ctx.get_parent_id(*trait_id) {
                 Ok(parent_id) => parent_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -124,7 +115,7 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
                 }
             };
 
-            let full_path = match analyze_context.get_module(*trait_id) {
+            let trait_full_path = match ctx.ast_ctx.get_module(*trait_id) {
                 Ok(module_opt) => {
                     let module = if let Some(module) = module_opt {
                         module
@@ -142,16 +133,18 @@ impl<'a> Visitor for DeclTypeAnalyzer<'a> {
                 }
             };
 
-            if let Ok(prev_trait) = analyze_context.get_trait(&full_path, *trait_id) {
-                let err = analyze_context.err(format!(
+            if let Ok(prev_trait) = ctx.ast_ctx.get_trait(&ctx.ty_ctx, &trait_full_path) {
+                let err = ctx.ast_ctx.err(format!(
                     "A trait with name \"{}\" already defined.",
-                    &full_path
+                    &ctx.ty_ctx
+                        .ty_env
+                        .to_string_path(&ctx.ty_ctx, &trait_full_path)
                 ));
                 self.errors.push(err);
             } else {
                 // Add the trait into decl lookup maps.
-                let key = (full_path, parent_id);
-                analyze_context.traits.insert(key, Rc::clone(trait_));
+                let key = (trait_full_path, parent_id);
+                ctx.ast_ctx.traits.insert(key, Rc::clone(trait_));
             }
         }
     }

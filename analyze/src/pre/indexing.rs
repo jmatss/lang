@@ -1,16 +1,17 @@
 use std::{cell::RefCell, rc::Rc};
 
+use log::debug;
+
 use common::{
+    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangErrorKind},
     token::{
         expr::Expr,
         op::{BinOperator, Op, UnOp, UnOperator},
         stmt::Stmt,
     },
-    traverser::TraverseContext,
-    visitor::Visitor,
+    traverse::visitor::Visitor,
 };
-use log::debug;
 
 /// Rewrites "access" operations to make them "easier" to work with.
 /// Binary ADT member indexing and union "is" matches will be written into
@@ -55,7 +56,7 @@ impl Visitor for IndexingAnalyzer {
         }
     }
 
-    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
+    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &mut TraverseCtx) {
         if let Expr::Op(Op::BinOp(bin_op)) = expr {
             match bin_op.operator {
                 // Struct or union access.

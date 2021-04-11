@@ -1,6 +1,5 @@
-use std::cell::RefCell;
-
 use common::{
+    ctx::traverse_ctx::TraverseCtx,
     error::LangError,
     path::LangPath,
     token::{
@@ -9,13 +8,9 @@ use common::{
         expr::{Argument, Expr, FnCall},
         op::{BinOperator, Op},
     },
-    traverser::TraverseContext,
-    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
-    type_info::TypeInfo,
-    visitor::Visitor,
+    traverse::visitor::Visitor,
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
 };
-
-use crate::AnalyzeContext;
 
 /// Iterates through all method calls and inserts "this"/"self" into the calls
 /// as the first argument. The bin ops representing the method call will be
@@ -24,9 +19,7 @@ use crate::AnalyzeContext;
 ///
 /// This step also checks for function calls that are done on variables containing
 /// function pointers rather than functions. A bool flag will be set in those calls.
-pub struct MethodAnalyzer<'a> {
-    analyze_context: &'a RefCell<AnalyzeContext>,
-
+pub struct MethodAnalyzer {
     /// Contains the generics for the ADT of the latest traversed impl block.
     impl_generics: Option<Generics>,
     /// Contains the generics for the fn of the latest traversed fn block.
@@ -38,10 +31,9 @@ pub struct MethodAnalyzer<'a> {
 // TODO: Where should the name "this" be fetched from?
 const THIS_VAR_NAME: &str = "this";
 
-impl<'a> MethodAnalyzer<'a> {
-    pub fn new(analyze_context: &'a RefCell<AnalyzeContext>) -> Self {
+impl MethodAnalyzer {
+    pub fn new() -> Self {
         Self {
-            analyze_context,
             impl_generics: None,
             fn_generics: None,
             errors: Vec::default(),
@@ -49,7 +41,7 @@ impl<'a> MethodAnalyzer<'a> {
     }
 }
 
-impl<'a> Visitor for MethodAnalyzer<'a> {
+impl Visitor for MethodAnalyzer {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -64,7 +56,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
     /// This function will also add "this" as the first argument of the method
     /// calls that are called on a instance. This can either be "this" by value
     /// or by pointer depending on the modified attached to the method.
-    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &TraverseContext) {
+    fn visit_expr(&mut self, expr: &mut Expr, _ctx: &mut TraverseCtx) {
         if let Expr::Op(Op::BinOp(bin_op)) = expr {
             if let Some(method_call) = bin_op.rhs.eval_to_fn_call() {
                 if let BinOperator::Dot = bin_op.operator {
@@ -79,11 +71,9 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
         }
     }
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Implement(adt_name, ..), _, id, _) = ast_token {
-            let analyze_context = self.analyze_context.borrow();
-
-            let module = match analyze_context.get_module(*id) {
+            let module = match ctx.ast_ctx.get_module(*id) {
                 Ok(Some(module)) => module,
                 Ok(None) => LangPath::default(),
                 Err(err) => {
@@ -95,7 +85,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
             let last_part = adt_name.last().unwrap();
             let path = module.clone_push(&last_part.0, None);
 
-            let adt = match analyze_context.get_adt(&path, *id) {
+            let adt = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, &path) {
                 Ok(adt) => adt,
                 Err(err) => {
                     self.errors.push(err);
@@ -107,7 +97,7 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
         }
     }
 
-    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &TraverseContext) {
+    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
             self.fn_generics = func.borrow().generics.clone();
 
@@ -120,13 +110,8 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
         }
     }
 
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
-        if self
-            .analyze_context
-            .borrow()
-            .get_var(&fn_call.name, ctx.block_id)
-            .is_ok()
-        {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
+        if ctx.ast_ctx.get_var(&fn_call.name, ctx.block_id).is_ok() {
             fn_call.is_fn_ptr_call = true;
             return;
         }
@@ -136,24 +121,43 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
         // to see if the module/path of the function call represents a ADT.
         // If that is the case, this is a static function call on that ADT.
         if fn_call.module.count() > 0 {
-            if let Ok(adt) = self
-                .analyze_context
-                .borrow()
-                .get_adt_partial(&fn_call.module, ctx.block_id)
-            {
+            let full_path_opt = if let Ok(adt) = ctx.ast_ctx.get_adt_partial(
+                &ctx.ty_ctx,
+                &fn_call.module.without_gens(),
+                ctx.block_id,
+            ) {
                 let adt = adt.borrow();
-
                 let fn_call_gens = fn_call.module.last().unwrap().1.as_ref();
-                let full_path = adt.module.clone_push(&adt.name, fn_call_gens);
+                Some(adt.module.clone_push(&adt.name, fn_call_gens))
+            } else {
+                None
+            };
 
-                let ty = Ty::CompoundType(
+            if let Some(full_path) = full_path_opt {
+                let gens = if let Some(gens) = full_path
+                    .last()
+                    .map(|part| part.generics().as_ref())
+                    .flatten()
+                {
+                    gens.clone()
+                } else {
+                    Generics::empty()
+                };
+
+                let type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
                     InnerTy::UnknownIdent(full_path, ctx.block_id),
-                    Generics::empty(),
+                    gens,
                     TypeInfo::Default(ctx.file_pos.to_owned()),
-                );
+                )) {
+                    Ok(type_id) => type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
                 fn_call.is_method = true;
-                fn_call.method_adt = Some(ty);
+                fn_call.method_adt = Some(type_id);
 
                 return;
             }
@@ -168,21 +172,41 @@ impl<'a> Visitor for MethodAnalyzer<'a> {
 
             if let Some(fn_gens) = &self.fn_generics {
                 if fn_gens.contains(possible_generic_name) {
-                    fn_call.is_method = true;
-                    fn_call.method_adt = Some(Ty::Generic(
+                    let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                    let type_id = match ctx.ty_ctx.ty_env.id(&Ty::Generic(
                         possible_generic_name.into(),
+                        unique_id,
                         TypeInfo::Default(ctx.file_pos.to_owned()),
-                    ));
+                    )) {
+                        Ok(type_id) => type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
+
+                    fn_call.is_method = true;
+                    fn_call.method_adt = Some(type_id);
                 }
             }
 
             if let Some(impl_gens) = &self.impl_generics {
                 if impl_gens.contains(possible_generic_name) {
-                    fn_call.is_method = true;
-                    fn_call.method_adt = Some(Ty::Generic(
+                    let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
+                    let type_id = match ctx.ty_ctx.ty_env.id(&Ty::Generic(
                         possible_generic_name.into(),
+                        unique_id,
                         TypeInfo::Default(ctx.file_pos.to_owned()),
-                    ));
+                    )) {
+                        Ok(type_id) => type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
+
+                    fn_call.is_method = true;
+                    fn_call.method_adt = Some(type_id);
                 }
             }
         }

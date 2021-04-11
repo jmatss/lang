@@ -1,5 +1,12 @@
-use crate::{expr::ExprTy, generator::CodeGen};
-use analyze::block::BlockInfo;
+use std::{cell::RefCell, rc::Rc};
+
+use inkwell::{
+    types::{AnyTypeEnum, BasicType, BasicTypeEnum},
+    values::{AggregateValue, AnyValueEnum, BasicValueEnum, IntValue, PointerValue},
+    AddressSpace, FloatPredicate, IntPredicate,
+};
+use log::debug;
+
 use common::{
     error::LangResult,
     file::FilePosition,
@@ -12,13 +19,8 @@ use common::{
     },
     ty::ty::Ty,
 };
-use inkwell::{
-    types::{AnyTypeEnum, BasicType, BasicTypeEnum},
-    values::{AggregateValue, AnyValueEnum, BasicValueEnum, IntValue, PointerValue},
-    AddressSpace, FloatPredicate, IntPredicate,
-};
-use log::debug;
-use std::{cell::RefCell, rc::Rc};
+
+use crate::{expr::ExprTy, generator::CodeGen};
 
 // TODO: Check constness for operators. Ex. adding two consts should use a
 //       const add instruction so that the result also is const.
@@ -46,8 +48,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         bin_op: &mut BinOp,
         file_pos: Option<FilePosition>,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let ret_type = if let Some(ref ret_type) = bin_op.ret_type {
-            self.compile_type(&ret_type, file_pos)?
+        let ret_type = if let Some(ret_type_id) = &bin_op.ret_type {
+            self.compile_type(*ret_type_id, file_pos)?
         } else {
             return Err(self.err(
                 format!(
@@ -109,6 +111,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
 
         // TODO: Implement is_signed for the function `compile_bin_op_as()`.
+        let is_signed = if let Some(ret_type_id) = &bin_op.ret_type {
+            self.analyze_ctx.ty_ctx.ty_env.is_signed(*ret_type_id)?
+        } else {
+            false
+        };
 
         Ok(match bin_op.operator {
             BinOperator::In => panic!("TODO: In"),
@@ -127,7 +134,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             | BinOperator::Gt
             | BinOperator::Lte
             | BinOperator::Gte => self.compile_bin_op_compare(
-                bin_op.ret_type.as_ref().map_or(false, |ty| ty.is_signed()),
+                is_signed,
                 bin_op.is_const,
                 &bin_op.operator,
                 left,
@@ -143,20 +150,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BinOperator::Mul => {
                 self.compile_bin_op_multiplication(ret_type, bin_op.is_const, left, right)?
             }
-            BinOperator::Div => self.compile_bin_op_division(
-                ret_type,
-                bin_op.ret_type.as_ref().map_or(false, |ty| ty.is_signed()),
-                bin_op.is_const,
-                left,
-                right,
-            )?,
-            BinOperator::Mod => self.compile_bin_op_modulus(
-                ret_type,
-                bin_op.ret_type.as_ref().map_or(false, |ty| ty.is_signed()),
-                bin_op.is_const,
-                left,
-                right,
-            )?,
+            BinOperator::Div => {
+                self.compile_bin_op_division(ret_type, is_signed, bin_op.is_const, left, right)?
+            }
+            BinOperator::Mod => {
+                self.compile_bin_op_modulus(ret_type, is_signed, bin_op.is_const, left, right)?
+            }
             BinOperator::BitAnd => {
                 self.compile_bin_op_bit_and(ret_type, bin_op.is_const, left, right)?
             }
@@ -169,13 +168,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             BinOperator::ShiftLeft => {
                 self.compile_bin_op_shift_left(ret_type, bin_op.is_const, left, right)?
             }
-            BinOperator::ShiftRight => self.compile_bin_op_shift_right(
-                ret_type,
-                bin_op.ret_type.as_ref().map_or(false, |ty| ty.is_signed()),
-                bin_op.is_const,
-                left,
-                right,
-            )?,
+            BinOperator::ShiftRight => {
+                self.compile_bin_op_shift_right(ret_type, is_signed, bin_op.is_const, left, right)?
+            }
             BinOperator::BoolAnd => {
                 panic!("Unexpected BoolAnd to late in func.");
             }
@@ -191,8 +186,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         expr_ty: ExprTy,
         file_pos: Option<FilePosition>,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let ret_type = if let Some(ref ret_type) = un_op.ret_type {
-            self.compile_type(&ret_type, file_pos)?
+        let ret_type = if let Some(ret_type_id) = &un_op.ret_type {
+            self.compile_type(*ret_type_id, file_pos)?
         } else {
             return Err(self.err(
                 format!(
@@ -1310,7 +1305,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             unreachable!();
         };
 
-        let adt_ty = un_op.value.get_expr_type()?;
+        let adt_type_id = un_op.value.get_expr_type()?;
+        let adt_ty = self.analyze_ctx.ty_ctx.ty_env.ty(adt_type_id)?.clone();
         let full_path = if let Ty::CompoundType(inner_ty, generics, ..) = &adt_ty {
             if inner_ty.is_adt() {
                 let mut full_path = inner_ty.get_ident().unwrap();
@@ -1319,25 +1315,33 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
                 full_path
             } else {
-                return Err(self.analyze_context.err(format!(
+                return Err(self.analyze_ctx.ast_ctx.err(format!(
                     "Expression that was ADT accessed wasn't ADT, was: {:#?}",
                     un_op.value
                 )));
             }
         } else {
-            return Err(self.analyze_context.err(format!(
+            return Err(self.analyze_ctx.ast_ctx.err(format!(
                 "Expression that was ADT accessed wasn't Compound, was: {:#?}",
                 un_op.value
             )));
         };
 
-        // TODO: Don't hardcode default id.
-        let id = BlockInfo::DEFAULT_BLOCK_ID;
-
-        if self.analyze_context.is_struct(&full_path, id) {
+        if self
+            .analyze_ctx
+            .ast_ctx
+            .is_struct(&self.analyze_ctx.ty_ctx, &full_path)
+        {
             self.compile_un_op_struct_access(un_op, expr_ty, idx as u32)
-        } else if self.analyze_context.is_union(&full_path, id) {
-            let union_ = self.analyze_context.get_adt(&full_path, id)?;
+        } else if self
+            .analyze_ctx
+            .ast_ctx
+            .is_union(&self.analyze_ctx.ty_ctx, &full_path)
+        {
+            let union_ = self
+                .analyze_ctx
+                .ast_ctx
+                .get_adt(&self.analyze_ctx.ty_ctx, &full_path)?;
             self.compile_un_op_union_access(un_op, expr_ty, idx as u32, Rc::clone(&union_))
         } else {
             unreachable!("{:#?}", un_op);
@@ -1425,7 +1429,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             idx, un_op, any_value
         );
 
-        let ty = union_
+        let type_id = union_
             .borrow()
             .members
             .get(idx as usize)
@@ -1434,7 +1438,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             .ty
             .clone()
             .unwrap();
-        let member_ty = self.compile_type(&ty, ty.file_pos().cloned())?;
+        let file_pos = self.analyze_ctx.ty_ctx.ty_env.file_pos(type_id).cloned();
+        let member_ty = self.compile_type(type_id, file_pos)?;
         let basic_member_ty = CodeGen::any_into_basic_type(member_ty)?;
 
         let data_idx = 1;
@@ -1545,22 +1550,20 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// This function "creates" a instance of a member of a specific enum.
     /// This instance will be a const value.
     fn compile_un_op_enum_access(&mut self, un_op: &mut UnOp) -> LangResult<AnyValueEnum<'ctx>> {
-        let (member_name, block_id) =
-            if let UnOperator::EnumAccess(member_name, block_id) = &un_op.operator {
-                (member_name.clone(), *block_id)
-            } else {
-                return Err(self.err(
-                    format!(
-                        "Un op not struct access when compilig enum access: {:?}",
-                        un_op
-                    ),
-                    None,
-                ));
-            };
+        let member_name = if let UnOperator::EnumAccess(member_name, ..) = &un_op.operator {
+            member_name.clone()
+        } else {
+            return Err(self.err(
+                format!(
+                    "Un op not struct access when compilig enum access: {:?}",
+                    un_op
+                ),
+                None,
+            ));
+        };
 
-        let full_path = if let Expr::Type(Ty::CompoundType(inner_ty, ..), ..) = un_op.value.as_ref()
-        {
-            inner_ty.get_ident().unwrap()
+        let full_path = if let Expr::Type(type_id, ..) = un_op.value.as_ref() {
+            self.analyze_ctx.ty_ctx.ty_env.get_ident(*type_id)?.unwrap()
         } else {
             return Err(self.err(
                 format!("Unop value in enum access not a enum type: {:#?}", un_op,),
@@ -1568,10 +1571,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             ));
         };
 
-        let member = self.analyze_context.get_adt_member(
+        let member = self.analyze_ctx.ast_ctx.get_adt_member(
+            &self.analyze_ctx.ty_ctx,
             &full_path,
             &member_name,
-            block_id,
             un_op.file_pos,
         )?;
 
@@ -1582,19 +1585,32 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             return Err(self.err(
                 format!(
                     "Member of enum \"{}\" has no value set, member: {:#?}",
-                    full_path, member
+                    self.analyze_ctx
+                        .ty_ctx
+                        .ty_env
+                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+                    member
                 ),
                 None,
             ));
         };
 
-        let enum_ty = if let Some(enum_ty) = self.module.get_struct_type(&full_path.to_string()) {
+        let enum_ty = if let Some(enum_ty) = self.module.get_struct_type(
+            &self
+                .analyze_ctx
+                .ty_ctx
+                .ty_env
+                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+        ) {
             enum_ty
         } else {
             return Err(self.err(
                 format!(
                     "Unable to find enum with name \"{}\" in codegen module.",
-                    full_path
+                    self.analyze_ctx
+                        .ty_ctx
+                        .ty_env
+                        .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
                 ),
                 None,
             ));
@@ -1602,7 +1618,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         debug!(
             "Compiling enum access -- enum_name: {}, member_name: {}, basic_value: {:#?}",
-            full_path, member_name, basic_value
+            self.analyze_ctx
+                .ty_ctx
+                .ty_env
+                .to_string_path(&self.analyze_ctx.ty_ctx, &full_path),
+            member_name,
+            basic_value
         );
 
         Ok(enum_ty.const_named_struct(&[basic_value]).into())

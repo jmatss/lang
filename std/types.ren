@@ -2,25 +2,25 @@ mod std::types
 
 pub union Optional<T>
 {
-    some: T,
-    none: T,
+    value: T,
+    empty: T,
 }
 
 impl Optional
 {
-    fn some(value: T = @null<T>()) -> Optional<T>
+    fn value(val: T = @null<T>()) -> Optional<T>
     {
-        return Optional<T> { some = value }
+        return Optional<T> { value = val}
     }
 
-    fn none() -> Optional<T>
+    fn empty() -> Optional<T>
     {
-        return Optional<T> { none = @null<T>() }
+        return Optional<T> { empty = @null<T>() }
     }
 
-    fn {this} is_some() -> bool
+    fn {this} has_value() -> bool
     {
-        if val is this.*.some
+        if value is this.*.value
         {
             return true
         }
@@ -30,18 +30,34 @@ impl Optional
         }
     }
 
-    fn {this} is_none() -> bool
+    fn {this} is_empty() -> bool
     {
-        return not this.is_some()
+        return not this.has_value()
     }
 
-    fn this get() -> T
+    // TODO: Calling a function taking this as a pointer with a non-pointer this
+    //       will fail during codegen with the error:
+    //         "Assertion failed: (i >= FTy->getNumParams() || FTy->getParamType(i) == Args[i]->getType()) && "Calling a function with a bad signature!", file D:\LLVM\llvmenv\10.0.1\lib\IR\Instructions.cpp, line 400"
+    //       should be caught during analyzing.
+    fn {this} get() -> T
     {
-        return this.some
+        return this.*.value
     }
 
-    fn {this} set(value: T)
+    fn {this} get_or(default: T) -> T
     {
-        this.*.some = value
+        if val is this.*.value
+        {
+            return val
+        }
+        else
+        {
+            return default
+        }
+    }
+
+    fn {this} set(val: T)
+    {
+        this.*.value = val
     }
 }

@@ -1,15 +1,18 @@
-use super::generator::CodeGen;
-use analyze::block::BlockInfo;
-use common::{
-    error::{LangError, LangErrorKind::CodeGenError, LangResult},
-    BlockId,
-};
+use std::convert::TryFrom;
+
 use inkwell::{
     basic_block::BasicBlock,
     types::{AnyTypeEnum, BasicTypeEnum},
     values::{AnyValueEnum, BasicValueEnum},
 };
-use std::convert::TryFrom;
+
+use common::{
+    ctx::block_ctx::BlockCtx,
+    error::{LangError, LangErrorKind::CodeGenError, LangResult},
+    BlockId,
+};
+
+use super::generator::CodeGen;
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn any_into_basic_value(any_value: AnyValueEnum) -> LangResult<BasicValueEnum> {
@@ -102,8 +105,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    fn get_block_info(&self, id: BlockId) -> LangResult<&BlockInfo> {
-        self.analyze_context.block_info.get(&id).ok_or_else(|| {
+    fn get_block_info(&self, id: BlockId) -> LangResult<&BlockCtx> {
+        self.analyze_ctx.ast_ctx.block_ctxs.get(&id).ok_or_else(|| {
             self.err(
                 format!("Unable to find block info for block with id {}", id),
                 None,

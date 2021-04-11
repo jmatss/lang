@@ -1,5 +1,11 @@
-use crate::AnalyzeContext;
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    rc::Rc,
+};
+
 use common::{
+    ctx::{ast_ctx::AstCtx, traverse_ctx::TraverseCtx},
     error::LangError,
     error::LangResult,
     token::expr::Argument,
@@ -8,14 +14,8 @@ use common::{
         block::AdtKind,
         expr::{AdtInit, Var},
     },
-    traverser::TraverseContext,
+    traverse::visitor::Visitor,
     ty::{inner_ty::InnerTy, ty::Ty},
-    visitor::Visitor,
-};
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
-    rc::Rc,
 };
 
 /// Iterates through all function and method calls and re-orders all named
@@ -24,15 +24,13 @@ use std::{
 /// function parameters to the current function call (if expected).
 /// It also wraps "this" in a pointer if the modifier of the function that it is
 /// calling expects this as a pointer.
-pub struct CallArgs<'a> {
-    analyze_context: &'a AnalyzeContext,
+pub struct CallArgs {
     errors: Vec<LangError>,
 }
 
-impl<'a> CallArgs<'a> {
-    pub fn new(analyze_context: &'a AnalyzeContext) -> Self {
+impl CallArgs {
+    pub fn new() -> Self {
         Self {
-            analyze_context,
             errors: Vec::default(),
         }
     }
@@ -41,7 +39,7 @@ impl<'a> CallArgs<'a> {
     /// is unique and is found only ones in the given argument list.
     /// Reports errors into `self.errors` if duplicates are found and returns
     /// false. Returns true if no duplicates are found.
-    fn names_are_unique(&mut self, args: &[Argument]) -> bool {
+    fn names_are_unique(&mut self, ast_ctx: &AstCtx, args: &[Argument]) -> bool {
         let mut name_to_arg: HashMap<_, Vec<&Argument>> = HashMap::new();
         let mut names_are_unique = true;
 
@@ -71,7 +69,7 @@ impl<'a> CallArgs<'a> {
                         ));
                     }
 
-                    let err = self.analyze_context.err(format!(
+                    let err = ast_ctx.err(format!(
                         "Found multiple arguments with the name \"{}\" in argument list:{}",
                         arg_name, &err_pos_msg
                     ));
@@ -83,8 +81,8 @@ impl<'a> CallArgs<'a> {
         names_are_unique
     }
 
-    fn reorder(&mut self, args: &mut Vec<Argument>, params: &[Rc<RefCell<Var>>]) {
-        if params.is_empty() || !self.names_are_unique(args) {
+    fn reorder(&mut self, ast_ctx: &AstCtx, args: &mut Vec<Argument>, params: &[Rc<RefCell<Var>>]) {
+        if params.is_empty() || !self.names_are_unique(ast_ctx, args) {
             return;
         }
 
@@ -113,7 +111,7 @@ impl<'a> CallArgs<'a> {
                     continue;
                 }
             } else {
-                let err = self.analyze_context.err(format!(
+                let err = ast_ctx.err(format!(
                     "Unable to find parameter with name \"{}\" given in argument list at: {:#?}",
                     arg_name,
                     arg.value.file_pos()
@@ -127,6 +125,7 @@ impl<'a> CallArgs<'a> {
 
     fn default_args(
         &self,
+        ast_ctx: &AstCtx,
         fn_call: &mut FnCall,
         params: &[Rc<RefCell<Var>>],
         is_variadic: bool,
@@ -146,7 +145,7 @@ impl<'a> CallArgs<'a> {
                         Argument::new(Some(param.name.clone()), None, *default_value.clone());
                     fn_call.arguments.push(default_arg);
                 } else {
-                    return Err(self.analyze_context.err(format!(
+                    return Err(ast_ctx.err(format!(
                         "Function call to \"{}\" missing argument for parameter \"{}\".",
                         &fn_call.name, &param.name
                     )));
@@ -158,7 +157,7 @@ impl<'a> CallArgs<'a> {
     }
 }
 
-impl<'a> Visitor for CallArgs<'a> {
+impl Visitor for CallArgs {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -167,7 +166,7 @@ impl<'a> Visitor for CallArgs<'a> {
         }
     }
 
-    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &TraverseContext) {
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
         // Function calls on variables containing fn pointers does currently not
         // support named arguments (since the names of the parameters isn't know
         // in those cases).
@@ -178,26 +177,32 @@ impl<'a> Visitor for CallArgs<'a> {
         // If this is a function contained in a ADT/trait (method), one needs to
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
-        let func_res = if let Some(adt_ty) = &fn_call.method_adt {
+        let func_res = if let Some(adt_type_id) = &fn_call.method_adt {
+            let adt_ty = match ctx.ty_ctx.ty_env.ty(*adt_type_id) {
+                Ok(adt_ty) => adt_ty.clone(),
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
             let full_path = match adt_ty {
                 Ty::CompoundType(inner_ty, generics, ..) => match inner_ty {
-                    InnerTy::Struct(path)
-                    | InnerTy::Enum(path)
-                    | InnerTy::Union(path)
-                    | InnerTy::Trait(path) => {
+                    InnerTy::Struct(mut path)
+                    | InnerTy::Enum(mut path)
+                    | InnerTy::Union(mut path)
+                    | InnerTy::Trait(mut path) => {
                         // TODO: Is this needed? Just want to make sure that the
                         //       generics are as up-to-date as possible.
-                        let mut path_clone = path.clone();
+                        let mut last_part = path.pop().unwrap();
+                        last_part.1 = Some(generics);
+                        path.push(last_part);
 
-                        let mut last_part = path_clone.pop().unwrap();
-                        last_part.1 = Some(generics.clone());
-                        path_clone.push(last_part);
-
-                        path_clone
+                        path
                     }
                     _ => {
-                        let err = self.analyze_context.err(format!(
-                            "Bad inner type for func call method_structure: {:#?}",
+                        let err = ctx.ast_ctx.err(format!(
+                            "Bad inner type for func call method_adt: {:#?}",
                             fn_call
                         ));
                         self.errors.push(err);
@@ -205,8 +210,8 @@ impl<'a> Visitor for CallArgs<'a> {
                     }
                 },
                 _ => {
-                    let err = self.analyze_context.err(format!(
-                        "method structure not valid type for func call: {:#?}",
+                    let err = ctx.ast_ctx.err(format!(
+                        "method_adt not valid type for func call: {:#?}",
                         fn_call
                     ));
                     self.errors.push(err);
@@ -214,25 +219,26 @@ impl<'a> Visitor for CallArgs<'a> {
                 }
             };
 
-            self.analyze_context
-                .get_method(&full_path, &fn_call.half_name(), ctx.block_id)
+            ctx.ast_ctx
+                .get_method(&ctx.ty_ctx, &full_path, &fn_call.half_name(&ctx.ty_ctx))
         } else {
             let partial_path = fn_call
                 .module
                 .clone_push(&fn_call.name, fn_call.generics.as_ref());
 
-            let full_path = match self
-                .analyze_context
-                .calculate_fn_full_path(&partial_path, ctx.block_id)
-            {
-                Ok(full_path) => full_path,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+            let full_path =
+                match ctx
+                    .ast_ctx
+                    .calculate_fn_full_path(&ctx.ty_ctx, &partial_path, ctx.block_id)
+                {
+                    Ok(full_path) => full_path,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
-            self.analyze_context.get_fn(&full_path, ctx.block_id)
+            ctx.ast_ctx.get_fn(&ctx.ty_ctx, &full_path)
         };
 
         let func = match func_res {
@@ -257,26 +263,40 @@ impl<'a> Visitor for CallArgs<'a> {
 
         // Reorder the arguments of the function call according to the parameter
         // names used for the arguments.
-        self.reorder(&mut fn_call.arguments, params);
+        self.reorder(&ctx.ast_ctx, &mut fn_call.arguments, params);
 
         // Assign any default value for arguments that are missing a value in
         // the function call.
-        if let Err(err) = self.default_args(fn_call, params, func.is_var_arg) {
+        if let Err(err) = self.default_args(&ctx.ast_ctx, fn_call, params, func.is_var_arg) {
             self.errors.push(err);
             return;
         }
     }
 
-    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &TraverseContext) {
+    fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &mut TraverseCtx) {
         match adt_init.kind {
             AdtKind::Struct => (),
             AdtKind::Union => return,
             AdtKind::Enum | AdtKind::Unknown => unreachable!("{:#?}", adt_init.kind),
         }
 
-        let generics = if let Some(Ty::CompoundType(_, generics, _)) = adt_init.ret_type.as_ref() {
+        let ret_type_id = if let Some(ret_type_id) = &adt_init.ret_type {
+            *ret_type_id
+        } else {
+            unreachable!("Adt init type not compound: {:#?}", adt_init);
+        };
+
+        let ret_ty = match ctx.ty_ctx.ty_env.ty(ret_type_id) {
+            Ok(ret_ty) => ret_ty.clone(),
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
+        let generics = if let Ty::CompoundType(_, generics, _) = ret_ty {
             if generics.len_types() > 0 {
-                Some(generics.clone())
+                Some(generics)
             } else {
                 None
             }
@@ -288,18 +308,19 @@ impl<'a> Visitor for CallArgs<'a> {
             .module
             .clone_push(&adt_init.name, generics.as_ref());
 
-        let full_path = match self
-            .analyze_context
-            .calculate_adt_full_path(&partial_path, ctx.block_id)
-        {
-            Ok(full_path) => full_path,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
+        let full_path =
+            match ctx
+                .ast_ctx
+                .calculate_adt_full_path(&ctx.ty_ctx, &partial_path, ctx.block_id)
+            {
+                Ok(full_path) => full_path,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
-        let adt = match self.analyze_context.get_adt(&full_path, ctx.block_id) {
+        let adt = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, &full_path) {
             Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);
@@ -307,7 +328,7 @@ impl<'a> Visitor for CallArgs<'a> {
             }
         };
 
-        self.reorder(&mut adt_init.arguments, &adt.borrow().members);
+        self.reorder(&ctx.ast_ctx, &mut adt_init.arguments, &adt.borrow().members);
 
         // TODO: Should there be default values for structs (?). Arrange that
         //       here in that case.

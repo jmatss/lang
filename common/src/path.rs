@@ -1,15 +1,8 @@
-use std::{
-    fmt::{Debug, Display},
-    hash::Hash,
-};
+use std::{fmt::Debug, hash::Hash};
 
-use crate::{
-    file::FilePosition,
-    ty::generics::Generics,
-    util::{self},
-};
+use crate::{file::FilePosition, ty::generics::Generics};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Eq)]
 pub struct LangPathPart(pub String, pub Option<Generics>);
 
 impl LangPathPart {
@@ -22,12 +15,33 @@ impl LangPathPart {
     }
 }
 
-impl Display for LangPathPart {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(generics) = &self.1 {
-            write!(f, "{}", util::to_generic_name(&self.0, generics))
-        } else {
-            write!(f, "{}", &self.0)
+impl PartialEq for LangPathPart {
+    /// A empty list of generics and no generics at all is considered equals.
+    fn eq(&self, other: &Self) -> bool {
+        if self.0 != other.0 {
+            return false;
+        }
+
+        let self_gens = match self.1.as_ref() {
+            Some(gens) if !gens.is_empty() => Some(gens),
+            _ => None,
+        };
+        let other_gens = match other.1.as_ref() {
+            Some(gens) if !gens.is_empty() => Some(gens),
+            _ => None,
+        };
+        self_gens == other_gens
+    }
+}
+
+impl Hash for LangPathPart {
+    /// A empty list of generics and no generics at all is considered equals.
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+        if let Some(gens) = self.1.as_ref() {
+            if !gens.is_empty() {
+                gens.hash(state)
+            }
         }
     }
 }
@@ -35,7 +49,7 @@ impl Display for LangPathPart {
 #[derive(Debug, Clone, Eq)]
 pub struct LangPath {
     /// Contains all parts of the path in order.
-    parts: Vec<LangPathPart>,
+    pub(crate) parts: Vec<LangPathPart>,
 
     /// Indicates if this path is resolved or not. This means that the path is
     /// a "full" path that for example isn't a partial path that needs to be
@@ -54,13 +68,19 @@ pub struct LangPath {
 }
 
 impl LangPath {
-    const SEP: &'static str = "::";
-
     pub fn new(parts: Vec<LangPathPart>, file_pos: Option<FilePosition>) -> Self {
         Self {
             parts,
             resolved: false,
             file_pos,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            parts: Vec::with_capacity(0),
+            resolved: false,
+            file_pos: None,
         }
     }
 
@@ -74,6 +94,13 @@ impl LangPath {
 
     pub fn is_empty(&self) -> bool {
         self.parts.is_empty()
+    }
+
+    pub fn without_gens(&self) -> LangPath {
+        let mut path_without_gens = self.clone();
+        let last_part = path_without_gens.pop().unwrap();
+        path_without_gens.push(LangPathPart(last_part.0, None));
+        path_without_gens
     }
 
     /// Removes the last "part" of the path from this LangPath and returns it.
@@ -93,6 +120,10 @@ impl LangPath {
         self.parts.last()
     }
 
+    pub fn last_mut(&mut self) -> Option<&mut LangPathPart> {
+        self.parts.last_mut()
+    }
+
     pub fn count(&self) -> usize {
         self.parts.len()
     }
@@ -104,16 +135,6 @@ impl LangPath {
         let new_part = LangPathPart(name.into(), generics.cloned());
         new_path.parts.push(new_part);
         new_path
-    }
-
-    /// Returns the "full name" of this path. This is all path parts seperated
-    /// by double colons (::).
-    pub fn full_name(&self) -> String {
-        self.parts
-            .iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join(LangPath::SEP)
     }
 
     pub fn file_pos(&self) -> Option<&FilePosition> {
@@ -138,25 +159,19 @@ impl LangPath {
 
 impl PartialEq for LangPath {
     fn eq(&self, other: &Self) -> bool {
-        self.full_name() == other.full_name()
+        self.parts == other.parts
     }
 }
 
 impl Hash for LangPath {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.full_name().hash(state);
+        self.parts.hash(state);
     }
 }
 
 impl Default for LangPath {
     fn default() -> Self {
         LangPath::new(Vec::default(), None)
-    }
-}
-
-impl Display for LangPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.full_name())
     }
 }
 
