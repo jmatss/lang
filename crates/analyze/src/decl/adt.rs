@@ -54,10 +54,8 @@ impl DeclTypeAnalyzer {
             }
         };
 
-        // TODO: Should this be done in the same way as function, that
-        //       one just checks that the declarations are equals and doesn't
-        //       throw a exception? This would allow for "extern" declarations.
-        if let Ok(prev_adt) = ctx.ast_ctx.get_adt(&ctx.ty_ctx, &adt_full_path) {
+        // TODO: Add file positions to error message.
+        if ctx.ast_ctx.get_adt(&ctx.ty_ctx, &adt_full_path).is_ok() {
             let err = ctx.ast_ctx.err(format!(
                 "A ADT with name \"{}\" already defined.",
                 ctx.ty_ctx.to_string_path(&adt_full_path)
@@ -133,17 +131,17 @@ impl Visitor for DeclTypeAnalyzer {
                 }
             };
 
-            if let Ok(prev_trait) = ctx.ast_ctx.get_trait(&ctx.ty_ctx, &trait_full_path) {
+            // TODO: Add file positions to error message.
+            if ctx.ast_ctx.get_trait(&ctx.ty_ctx, &trait_full_path).is_ok() {
                 let err = ctx.ast_ctx.err(format!(
                     "A trait with name \"{}\" already defined.",
                     &ctx.ty_ctx.to_string_path(&trait_full_path)
                 ));
                 self.errors.push(err);
-            } else {
-                // Add the trait into decl lookup maps.
-                let key = (trait_full_path, parent_id);
-                ctx.ast_ctx.traits.insert(key, Rc::clone(trait_));
             }
+
+            let key = (trait_full_path, parent_id);
+            ctx.ast_ctx.traits.insert(key, Rc::clone(trait_));
         }
     }
 }

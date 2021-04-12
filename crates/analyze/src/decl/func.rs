@@ -63,76 +63,14 @@ impl DeclFnAnalyzer {
             }
         };
 
-        // If true: Function already declared somewhere, make sure that the
-        // current declaration and the previous one matches.
-        if let Ok(prev_func) = ctx.ast_ctx.get_fn(&ctx.ty_ctx, &full_path) {
-            let func = func.borrow();
-
-            let empty_vec = Vec::new();
-            let cur_func_params = if let Some(params) = &func.parameters {
-                params
-            } else {
-                &empty_vec
-            };
-
-            let prev_func = prev_func.borrow();
-            let prev_func_params = if let Some(params) = &prev_func.parameters {
-                params
-            } else {
-                &empty_vec
-            };
-
-            // Check that they have the same amount of parameters and
-            // their types are equal.
-            if cur_func_params.len() != prev_func_params.len() {
-                let err_msg = format!(
-                    "Two declarations of function \"{}\" have different amount of parameters. \
-                    Prev amount: {}, current amount: {}",
-                    &func.name,
-                    cur_func_params.len(),
-                    prev_func_params.len(),
-                );
-                let err = ctx.ast_ctx.err(err_msg);
-                self.errors.push(err);
-            } else {
-                for (i, (cur_param, prev_param)) in cur_func_params
-                    .iter()
-                    .zip(prev_func_params.iter())
-                    .enumerate()
-                {
-                    let cur_param = cur_param.borrow();
-                    let prev_param = prev_param.borrow();
-
-                    if cur_param.name != prev_param.name {
-                        let err_msg = format!(
-                            "Two declarations of function \"{}\" have parameters with different names. \
-                            Parameter at position {}. Prev name: {:?}, current name: {:?}.",
-                            &func.name, i, &cur_param.name, &prev_param.name
-                        );
-                        let err = ctx.ast_ctx.err(err_msg);
-                        self.errors.push(err);
-                    }
-                    if cur_param.ty != prev_param.ty {
-                        let param_name = if cur_param.name == prev_param.name {
-                            cur_param.name.clone()
-                        } else {
-                            format!("{}/{}", &prev_param.name, &cur_param.name)
-                        };
-                        let err_msg = format!(
-                            "Two declarations of function \"{}\" have parameters with different types. \
-                            Parameter at position {} with name \"{}\". \
-                            Prev type: {:?}, current type: {:?}",
-                            &func.name, i, &param_name, cur_param.ty, prev_param.ty
-                        );
-                        let err = ctx.ast_ctx.err(err_msg);
-                        self.errors.push(err);
-                    }
-                }
-            }
-
-            // Need to do early return and not do the logic below in a else block
-            // to make rust not fail becaose of the `analyze_context` borrw.
-            return;
+        // TODO: Add file positions to error message.
+        if ctx.ast_ctx.get_fn(&ctx.ty_ctx, &full_path).is_ok() {
+            let err = ctx.ast_ctx.err(format!(
+                "Two declarations of function \"{}\" founds. Full path: {}",
+                &func.borrow().name,
+                ctx.ty_ctx.to_string_path(&full_path),
+            ));
+            self.errors.push(err);
         }
 
         // Add the function into decl lookup maps.
@@ -155,34 +93,10 @@ impl DeclFnAnalyzer {
         func: &mut Rc<RefCell<Fn>>,
         func_id: BlockId,
     ) {
-        // The given `ident` might be a ADT or Trait. Therefore the logic below is
-        // duplicated, first checking Traits and then checking the same for ADTs.
-        let (decl_id, inner_ty) = if ctx.ast_ctx.is_trait(&ctx.ty_ctx, adt_path) {
-            let decl_id = match ctx
-                .ast_ctx
-                .get_trait_decl_scope(&ctx.ty_ctx, adt_path, func_id)
-            {
-                Ok(decl_id) => decl_id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            (decl_id, InnerTy::Trait(adt_path.clone()))
+        let inner_ty = if ctx.ast_ctx.is_trait(&ctx.ty_ctx, adt_path) {
+            InnerTy::Trait(adt_path.clone())
         } else {
-            let decl_id = match ctx
-                .ast_ctx
-                .get_adt_decl_scope(&ctx.ty_ctx, adt_path, func_id)
-            {
-                Ok(decl_id) => decl_id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            let inner_ty = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, adt_path) {
+            match ctx.ast_ctx.get_adt(&ctx.ty_ctx, adt_path) {
                 Ok(adt) => match adt.borrow().kind {
                     AdtKind::Struct => InnerTy::Struct(adt_path.clone()),
                     AdtKind::Union => InnerTy::Union(adt_path.clone()),
@@ -193,9 +107,7 @@ impl DeclFnAnalyzer {
                     self.errors.push(err);
                     return;
                 }
-            };
-
-            (decl_id, inner_ty)
+            }
         };
 
         // TODO: Should probably be changed to something better.
