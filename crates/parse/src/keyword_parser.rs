@@ -94,6 +94,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
     }
 
+    /// Parses a modifier (public, private or hidden) and the recursively calls
+    /// `parse_keyword()` to parse the "actual" structure/type to which this
+    /// modifier is applied on.
     fn parse_modifier(
         &mut self,
         modifier_kw: Kw,
@@ -569,7 +572,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         is_const: bool,
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
-        // Start by parsing the identifier.
         let lex_token = self.iter.next_skip_space_line();
         let (ident, var_file_pos) = if let Some((LexTokenKind::Ident(ident), var_file_pos)) =
             lex_token

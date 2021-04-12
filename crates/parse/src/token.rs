@@ -25,35 +25,14 @@ pub fn get_if_expr_op(symbol: &Sym) -> Option<Operator> {
     Some(match symbol {
         Sym::ParenthesisBegin => Operator::ParenthesisBegin,
         Sym::ParenthesisEnd => Operator::ParenthesisEnd,
-        Sym::Plus => Operator::Plus,
-        Sym::Minus => Operator::Minus,
-        /*
-        Symbol::SquareBracketBegin,
-        Symbol::SquareBracketEnd,
-        Symbol::CurlyBracketBegin,
-        Symbol::CurlyBracketEnd,
-        */
         Sym::PointyBracketBegin => Operator::BinaryOperator(BinOperator::Lt),
         Sym::PointyBracketEnd => Operator::BinaryOperator(BinOperator::Gt),
+        Sym::Plus => Operator::Plus,
+        Sym::Minus => Operator::Minus,
 
         Sym::Dot => Operator::BinaryOperator(BinOperator::Dot),
-        //Symbol::Comma,
-        //Symbol::QuestionMark,
-        //Symbol::ExclamationMark,
-        //Symbol::DoubleQuote,
-        //Symbol::SingleQuote,
-        //Symbol::Colon,
-        //Symbol::SemiColon,
-        //Symbol::Pound,
-        //Symbol::At,
-        //Symbol::Dollar,
-        //Symbol::LineBreak,
-        //Symbol::WhiteSpace(usize),
-
-        //Symbol::Pipe,
         Sym::Range => Operator::BinaryOperator(BinOperator::Range),
         Sym::RangeInclusive => Operator::BinaryOperator(BinOperator::RangeInclusive),
-        //Symbol::Arrow,
         Sym::Deref => Operator::UnaryOperator(UnOperator::Deref),
         Sym::Address => Operator::UnaryOperator(UnOperator::Address),
 
@@ -75,11 +54,6 @@ pub fn get_if_expr_op(symbol: &Sym) -> Option<Operator> {
         Sym::ShiftRight => Operator::BinaryOperator(BinOperator::ShiftRight),
         Sym::BitCompliment => Operator::UnaryOperator(UnOperator::BitComplement),
 
-        /*
-        Symbol::CommentSingleLine,
-        Symbol::CommentMultiLineBegin,
-        Symbol::CommentMultiLineEnd,
-        */
         Sym::BoolNot => Operator::UnaryOperator(UnOperator::BoolNot),
         Sym::BoolAnd => Operator::BinaryOperator(BinOperator::BoolAnd),
         Sym::BoolOr => Operator::BinaryOperator(BinOperator::BoolOr),

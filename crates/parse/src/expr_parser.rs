@@ -1,3 +1,6 @@
+use lex::token::{Kw, LexToken, LexTokenKind, Sym};
+use log::debug;
+
 use common::{
     error::LangResult,
     file::FilePosition,
@@ -14,8 +17,6 @@ use common::{
         type_info::TypeInfo,
     },
 };
-use lex::token::{Kw, LexToken, LexTokenKind, Sym};
-use log::debug;
 
 use crate::{
     parser::ParseTokenIter,
@@ -241,7 +242,6 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     }
 
                     let op = Operator::UnaryOperator(UnOperator::ArrayAccess(Box::new(expr)));
-
                     self.shunt_operator(op)?;
                 }
 
@@ -293,7 +293,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     self.shunt_operand(expr)?;
                 }
 
-                // Skip any linebreaks if the linbreaks aren't a part of the
+                // Skip any linebreaks if the linebreaks aren't a part of the
                 // stop conditions. Also skip comments.
                 LexTokenKind::Sym(Sym::LineBreak) | LexTokenKind::Comment(..) => {
                     file_pos.set_end(&lex_token.file_pos)?;
@@ -367,13 +367,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             self.prev_was_operand = true;
             Ok(())
         } else {
-            // Need to rewind twice to get to the previous expr. The first rewind
-            // gets the current expr again. Also make sure to "forward" the iter
-            // again to the end position.
-            self.iter.rewind_skip_space()?;
-            self.iter.rewind_skip_space()?;
-
-            let prev_operand = self.prev.clone().unwrap();
+            let prev_operand = self.prev.as_ref().unwrap();
 
             let mut err_file_pos = prev_operand.file_pos.to_owned();
             err_file_pos.set_end(expr.file_pos().unwrap())?;
@@ -412,7 +406,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         }
                     }
                 }
-                // TODO: Error handling of operator stack pop is None (?).
+                // TODO: Error handling if operator stack pop is None (?).
             }
 
             // Need extra logic for minus and plus since the can be both
@@ -490,7 +484,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     }
 
     // TODO: Should empty expression be allowed?
-    /// Converts the given "outputs" in reverse polsih notation to an expression.
+    /// Converts the given "outputs" in reverse polish notation to an expression.
     fn rev_polish_to_expr(&mut self, full_expr_file_pos: &mut FilePosition) -> LangResult<Expr> {
         let mut expr_stack = Vec::new();
         let outputs = std::mem::take(&mut self.outputs);
@@ -784,8 +778,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         if let Some(lex_token) = self.iter.peek_skip_space() {
             if let LexTokenKind::Sym(Sym::PointyBracketBegin) = lex_token.kind {
                 match TypeParser::new(self.iter, None).parse_type_generics(GenericsKind::Impl) {
-                    Ok((generics, Some(tmp_file_pos))) => {
-                        file_pos.set_end(&tmp_file_pos).ok()?;
+                    Ok((generics, Some(gens_file_pos))) => {
+                        file_pos.set_end(&gens_file_pos).ok()?;
                         generics
                     }
                     Ok((generics, None)) => generics,
