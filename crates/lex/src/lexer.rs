@@ -455,8 +455,7 @@ impl<'a> LexTokenIter<'a> {
     /// This count includes the braces as well.
     fn escape_unicode(&mut self) -> LangResult<(char, usize)> {
         let next_char = self.iter.next_char();
-        if let Some('{') = next_char {
-        } else {
+        if !matches!(next_char, Some('{')) {
             return Err(self.err(format!(
                 "Expected `{{`character after `\\u` in unicode escape, got: {:?}",
                 next_char

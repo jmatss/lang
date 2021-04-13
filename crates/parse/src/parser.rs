@@ -291,8 +291,7 @@ impl<'a> ParseTokenIter<'a> {
 
         // Ensure that the block starts with a "CurlyBracketBegin".
         if let Some(lex_token) = self.next_skip_space_line() {
-            if let LexTokenKind::Sym(Sym::CurlyBracketBegin) = lex_token.kind {
-            } else {
+            if !matches!(lex_token.kind, LexTokenKind::Sym(Sym::CurlyBracketBegin)) {
                 return Err(self.err(
                     format!("Received invalid token at start of block: {:?}", lex_token),
                     Some(lex_token.file_pos),

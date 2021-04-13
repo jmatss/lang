@@ -231,10 +231,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // Ensure that the next token is a CurlyBracketBegin.
         // If it isn't, something has gone wrong, return error.
         let peek_token = self.iter.next_skip_space_line();
-        if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
-            peek_token.as_ref().map(|t| &t.kind)
-        {
-        } else {
+        if !matches!(
+            peek_token.as_ref().map(|t| &t.kind),
+            Some(LexTokenKind::Sym(Sym::CurlyBracketBegin))
+        ) {
             return Err(self.iter.err(
                 format!(
                     "Expected CurlyBracketBegin after match expr, was: {:#?}",
@@ -670,10 +670,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                         }
 
                         let lex_token = self.iter.next_skip_space_line();
-                        if let Some(LexTokenKind::Sym(Sym::CurlyBracketEnd)) =
-                            lex_token.as_ref().map(|l| &l.kind)
-                        {
-                        } else {
+                        if !matches!(
+                            lex_token.as_ref().map(|l| &l.kind),
+                            Some(LexTokenKind::Sym(Sym::CurlyBracketEnd))
+                        ) {
                             return Err(self.iter.err(
                                 format!(
                                     "Expected CurlyBracketEnd after \"this\" in \"function\" header, got: {:?}",
@@ -996,10 +996,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         // Consume the expected CurlyBracketBegin.
         let start_token = self.iter.next_skip_space_line();
-        if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
-            start_token.as_ref().map(|t| &t.kind)
-        {
-        } else {
+        if !matches!(
+            start_token.as_ref().map(|t| &t.kind),
+            Some(LexTokenKind::Sym(Sym::CurlyBracketBegin))
+        ) {
             return Err(self.iter.err(
                 format!(
                     "Expected CurlyBracketBegin at start if trait block, got: {:#?}",
@@ -1156,8 +1156,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
             // Consume and make sure that the next token is a "implements" keyword .
             let lex_token = self.iter.next_skip_space_line();
-            if let Some(LexTokenKind::Kw(Kw::Implements)) = lex_token.as_ref().map(|t| &t.kind) {
-            } else {
+            if !matches!(
+                lex_token.as_ref().map(|t| &t.kind),
+                Some(LexTokenKind::Kw(Kw::Implements))
+            ) {
                 return Err(self.iter.err(
                     format!(
                         "Expected \"implements\" when parsing \"where\" clause, got: {:#?}",

@@ -30,8 +30,7 @@ impl Visitor for UnionInitArg {
     }
 
     fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &mut TraverseCtx) {
-        if let AdtKind::Union = adt_init.kind {
-        } else {
+        if !matches!(adt_init.kind, AdtKind::Union) {
             return;
         }
 
