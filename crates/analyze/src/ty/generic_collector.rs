@@ -272,7 +272,7 @@ impl GenericCollector {
             };
 
             if let Some(adt_path) = impl_opt {
-                let mut nested_collector = NestedGenericCollector::new(&adt_path);
+                let mut nested_collector = NestedGenericCollector::new();
                 let mut traverser = AstTraverser::from_ctx(ctx);
                 if let Err(errs) = traverser
                     .add_visitor(&mut nested_collector)
@@ -519,8 +519,8 @@ impl GenericCollector {
         };
 
         // Go through all implementations of the method `method_name` and
-        // use those generic instances to create new method instances for
-        // the nested one.
+        // use those generic instances to create new instances for the nested
+        // ADT generics.
         for generics in gen_func_tys {
             let nested_adt_type_id = if let Some(new_type_id) =
                 ty_env.replace_gen_impls(nested_adt_type_id, &generics)?
@@ -530,7 +530,7 @@ impl GenericCollector {
                 nested_adt_type_id
             };
 
-            match self.generic_adts.entry(nested_adt_path.clone()) {
+            match self.generic_adts.entry(nested_adt_path.without_gens()) {
                 Entry::Occupied(mut o) => {
                     if !o.get().contains(&nested_adt_type_id) {
                         o.get_mut().push(nested_adt_type_id);
@@ -815,8 +815,8 @@ impl GenericCollector {
         }
     }
 
-    /// Removes duplicates from `self.generics`. Since types might be identical
-    /// even through they might refer to different type IDs, this function will
+    /// Removes duplicates from `self.generic_adts`. Since types might be identical
+    /// even though they might refer to different type IDs, this function will
     /// convert every type to its final string from and compare those to find
     /// duplicates instead of comparing type IDs.
     fn remove_duplicates(&mut self, ctx: &TraverseCtx) -> LangResult<()> {
@@ -884,6 +884,8 @@ impl Visitor for GenericCollector {
     }
 
     fn visit_end(&mut self, ctx: &mut TraverseCtx) {
+        self.convert_nested_to_regular(ctx);
+
         debug!(
             "Before removal of duplicates -- self.generic_adts: {:#?}, self.generic_methods: {:#?}",
             self.generic_adts, self.generic_methods
@@ -907,13 +909,10 @@ impl Visitor for GenericCollector {
             "After removal of duplicates -- self.generic_adts: {:#?}, self.generic_methods: {:#?}",
             self.generic_adts, self.generic_methods
         );
-        self.convert_nested_to_regular(ctx);
     }
 }
 
-struct NestedGenericCollector<'a> {
-    adt_path: &'a LangPath,
-
+struct NestedGenericCollector {
     /// The key String is the name of the function that this type/generics was
     /// found in.
     pub nested_generic_adts: HashMap<String, Vec<TypeId>>,
@@ -928,10 +927,9 @@ struct NestedGenericCollector<'a> {
     errors: Vec<LangError>,
 }
 
-impl<'a> NestedGenericCollector<'a> {
-    fn new(adt_path: &'a LangPath) -> Self {
+impl NestedGenericCollector {
+    fn new() -> Self {
         Self {
-            adt_path,
             nested_generic_adts: HashMap::default(),
             nested_generic_methods: HashMap::default(),
             cur_func_name: "".into(),
@@ -944,12 +942,8 @@ impl<'a> NestedGenericCollector<'a> {
         ty_env: &mut TyEnv,
         type_id: TypeId,
     ) -> LangResult<()> {
-        if ty_env.contains_generic_shallow(type_id)? {
+        if !ty_env.contains_generic_shallow(type_id)? {
             return Ok(());
-        } else if let Ok(Some(ty_path)) = ty_env.get_ident(type_id) {
-            if self.adt_path == &ty_path {
-                return Ok(());
-            }
         }
 
         let ty = ty_env.ty(type_id)?.clone();
@@ -1041,7 +1035,7 @@ impl<'a> NestedGenericCollector<'a> {
     }
 }
 
-impl<'a> Visitor for NestedGenericCollector<'a> {
+impl Visitor for NestedGenericCollector {
     fn take_errors(&mut self) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None

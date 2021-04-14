@@ -1,0 +1,72 @@
+extern fn printf(format: {u8}, ...) -> i32
+
+struct TestStruct;
+impl TestStruct
+{
+    fn static_func() -> i8
+    {
+        return 12
+    }
+
+    fn func1() -> i8
+    {
+        return this::static_func()
+    }
+
+    fn this func2()  -> i8
+    {
+        return this::static_func()
+    }
+
+    fn {this} func3()  -> i8
+    {
+        return this::static_func()
+    }
+
+    /*
+    TODO: Should this be implemented?
+    fn func4() -> this
+    {
+        // ADT constructor.
+        this {}
+    }
+    */
+}
+
+struct TestStructWithGen<Ts>;
+impl TestStructWithGen
+{
+    fn static_func(val: Ts) -> Ts
+    {
+        return val
+    }
+
+    fn func<Tf>(val: Tf) -> Tf
+    {
+        return this<Tf>::static_func(val)
+    }
+}
+
+fn main() -> i32
+{
+    var expected = 12
+    var ts = TestStruct {}
+
+    var res1 = TestStruct::func1()
+    printf("res1: %d", res1 as i32);
+    std::assert(expected == res1)
+
+    var res2 = ts.func2()
+    printf("\nres2: %d", res2 as i32);
+    std::assert(expected == res2)
+
+    var res3 = ts.&.func3()
+    printf("\nres3: %d", res3 as i32);
+    std::assert(expected == res3)
+
+    var res4 = TestStructWithGen<f32>::func<i8>(12)
+    printf("\nres4: %d", res4 as i32);
+    std::assert(expected == res4)
+
+    return 0
+}

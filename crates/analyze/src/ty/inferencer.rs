@@ -9,9 +9,8 @@ use log::debug;
 
 use common::{
     ctx::traverse_ctx::TraverseCtx,
-    error::{LangError, LangResult},
+    error::LangError,
     file::FilePosition,
-    path::LangPath,
     token::{
         ast::AstToken,
         block::{AdtKind, BlockHeader, Fn},
@@ -25,6 +24,8 @@ use common::{
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
     TypeId,
 };
+
+use crate::util::generics::combine_generics;
 
 /// Infers types for exprs that doesn't have a type explicitly set.
 /// For more information about the algorithm, see:
@@ -63,73 +64,6 @@ impl TypeInferencer {
         if let Err(err) = ctx.ty_ctx.insert_constraint(type_id_a, type_id_b) {
             self.errors.push(err);
         }
-    }
-
-    /// Updates the vector `generic_types` with names declared on the ADT and
-    /// returnes the updated Generics. This Generics can be used to replace the
-    /// old one.
-    fn combine_generics(
-        &mut self,
-        ctx: &mut TraverseCtx,
-        inner_ty: &InnerTy,
-        gen_impls: &Generics,
-        fn_call_path: &LangPath,
-    ) -> LangResult<Generics> {
-        let adt_gen_names = if let Some(adt_path) = inner_ty.get_ident() {
-            if let Ok(adt) =
-                ctx.ast_ctx
-                    .get_adt_partial(&ctx.ty_ctx, &adt_path.without_gens(), ctx.block_id)
-            {
-                if let Some(adt_gens) = &adt.borrow().generics {
-                    adt_gens.iter_names().cloned().collect::<Vec<_>>()
-                } else {
-                    Vec::default()
-                }
-            } else {
-                Vec::default()
-            }
-        } else {
-            Vec::default()
-        };
-
-        let mut new_gens = Generics::new();
-
-        // If no generic implements have been specified, create new "GenericInstance"s.
-        // Else if the generics impls have been specified, use those to populate
-        // the Generics.
-        if gen_impls.is_empty() {
-            for gen_name in adt_gen_names {
-                let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
-                let gen_type_id = ctx.ty_ctx.ty_env.id(&Ty::GenericInstance(
-                    gen_name.clone(),
-                    unique_id,
-                    TypeInfo::None,
-                ))?;
-
-                new_gens.insert(gen_name.clone(), gen_type_id);
-            }
-        } else {
-            if adt_gen_names.len() != gen_impls.len_types() {
-                let err = ctx.ast_ctx.err(format!(
-                    "Wrong amount of generics on ADT for static call. Found: {}, expected: {}.\n\
-                    Adt name: {:?}\nMethod name: {}\nAdt generic names: {:?}",
-                    gen_impls.len_types(),
-                    adt_gen_names.len(),
-                    inner_ty.get_ident(),
-                    ctx.ty_ctx.to_string_path(&fn_call_path),
-                    adt_gen_names
-                ));
-                return Err(err);
-            }
-
-            adt_gen_names
-                .iter()
-                .cloned()
-                .zip(gen_impls.iter_types().cloned())
-                .for_each(|(gen_name, gen_ty)| new_gens.insert(gen_name, gen_ty));
-        }
-
-        Ok(new_gens)
     }
 }
 
@@ -453,7 +387,12 @@ impl Visitor for TypeInferencer {
             // of this method ADT use and the actual ADT declaration.
             let gens_was_updated =
                 if let Ty::CompoundType(inner_ty, generic_types, ..) = &mut adt_ty_clone {
-                    match self.combine_generics(ctx, &inner_ty, generic_types, &fn_half_path) {
+                    match combine_generics(
+                        ctx,
+                        inner_ty.get_ident().as_ref(),
+                        generic_types,
+                        &fn_half_path,
+                    ) {
                         Ok(combined_gens) => *generic_types = combined_gens,
                         Err(err) => {
                             self.errors.push(err);
@@ -471,7 +410,12 @@ impl Visitor for TypeInferencer {
                     };
 
                     if let Ty::CompoundType(inner_ty, generic_types, ..) = &mut adt_ty_i_clone {
-                        match self.combine_generics(ctx, &inner_ty, generic_types, &fn_half_path) {
+                        match combine_generics(
+                            ctx,
+                            inner_ty.get_ident().as_ref(),
+                            generic_types,
+                            &fn_half_path,
+                        ) {
                             Ok(combined_gens) => {
                                 *generic_types = combined_gens;
                                 let new_type_id_i = match ctx.ty_ctx.ty_env.id(&adt_ty_i_clone) {

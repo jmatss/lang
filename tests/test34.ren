@@ -1,3 +1,5 @@
+// TODO: This test fails sometimes randomly. Why?
+
 use std::types::Optional
 
 extern fn printf(format: {u8}, ...) -> i32

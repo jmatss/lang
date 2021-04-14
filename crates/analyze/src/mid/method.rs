@@ -12,16 +12,25 @@ use common::{
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
 };
 
+use crate::util::generics::combine_generics;
+
 /// Iterates through all method calls and inserts "this"/"self" into the calls
 /// as the first argument. The bin ops representing the method call will be
 /// transformed into a single FunctionCall expr where the lhs will have been
 /// moved into the first parameter of the function call.
 ///
+/// The `this` in static calls (ex. `this::func()`) will have the `this` be
+/// re-written to the ADT that it represents.
+///
 /// This step also checks for function calls that are done on variables containing
 /// function pointers rather than functions. A bool flag will be set in those calls.
 pub struct MethodAnalyzer {
+    /// Contains the name for the ADT of the latest traversed impl block.
+    impl_adt_path: Option<LangPath>,
+
     /// Contains the generics for the ADT of the latest traversed impl block.
     impl_generics: Option<Generics>,
+
     /// Contains the generics for the fn of the latest traversed fn block.
     fn_generics: Option<Generics>,
 
@@ -34,6 +43,7 @@ const THIS_VAR_NAME: &str = "this";
 impl MethodAnalyzer {
     pub fn new() -> Self {
         Self {
+            impl_adt_path: None,
             impl_generics: None,
             fn_generics: None,
             errors: Vec::default(),
@@ -93,6 +103,7 @@ impl Visitor for MethodAnalyzer {
                 }
             };
 
+            self.impl_adt_path = Some(path);
             self.impl_generics = adt.borrow().generics.clone();
         }
     }
@@ -101,10 +112,10 @@ impl Visitor for MethodAnalyzer {
         if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
             self.fn_generics = func.borrow().generics.clone();
 
-            // This isn't a method, reset the generics for impl blocks.
-            // This ensures that the function calls traversed in this function
-            // doesn't use any generics from a impl block.
-            if func.borrow().method_adt.is_none() && self.impl_generics.is_some() {
+            // This isn't a method, reset the variable for any impl block
+            // because we have left the impl block.
+            if func.borrow().method_adt.is_none() {
+                self.impl_adt_path = None;
                 self.impl_generics = None;
             }
         }
@@ -163,18 +174,57 @@ impl Visitor for MethodAnalyzer {
             }
         }
 
+        // If the first part is "this", this is a static function call on the
+        // current ADT.
         // If the first part of the "module" for the function call is a generic,
         // it should be treated as static method call on the ADT represented by
         // the generic.
         if fn_call.module.count() == 1 {
             let first_part = fn_call.module.first().unwrap();
-            let possible_generic_name = &first_part.0;
+            let possible_gen_or_this = &first_part.0;
+
+            if let Some(adt_path) = &self.impl_adt_path {
+                if possible_gen_or_this == "this" {
+                    let this_gens = if let Some(this_gens) = first_part.1.clone() {
+                        this_gens
+                    } else {
+                        Generics::empty()
+                    };
+
+                    let fn_call_path = fn_call
+                        .module
+                        .clone_push(&fn_call.name, fn_call.generics.as_ref());
+                    let new_gens =
+                        match combine_generics(ctx, Some(adt_path), &this_gens, &fn_call_path) {
+                            Ok(new_gens) => new_gens,
+                            Err(err) => {
+                                self.errors.push(err);
+                                return;
+                            }
+                        };
+
+                    let type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                        InnerTy::UnknownIdent(adt_path.to_owned(), ctx.block_id),
+                        new_gens,
+                        TypeInfo::None,
+                    )) {
+                        Ok(type_id) => type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
+
+                    fn_call.is_method = true;
+                    fn_call.method_adt = Some(type_id);
+                }
+            }
 
             if let Some(fn_gens) = &self.fn_generics {
-                if fn_gens.contains(possible_generic_name) {
+                if fn_gens.contains(possible_gen_or_this) {
                     let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
                     let type_id = match ctx.ty_ctx.ty_env.id(&Ty::Generic(
-                        possible_generic_name.into(),
+                        possible_gen_or_this.into(),
                         unique_id,
                         TypeInfo::Default(ctx.file_pos.to_owned()),
                     )) {
@@ -191,10 +241,10 @@ impl Visitor for MethodAnalyzer {
             }
 
             if let Some(impl_gens) = &self.impl_generics {
-                if impl_gens.contains(possible_generic_name) {
+                if impl_gens.contains(possible_gen_or_this) {
                     let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
                     let type_id = match ctx.ty_ctx.ty_env.id(&Ty::Generic(
-                        possible_generic_name.into(),
+                        possible_gen_or_this.into(),
                         unique_id,
                         TypeInfo::Default(ctx.file_pos.to_owned()),
                     )) {

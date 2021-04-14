@@ -667,12 +667,12 @@ impl TyEnv {
         type_id: TypeId,
         generics_impl: &Generics,
     ) -> LangResult<Option<TypeId>> {
-        debug!(
-            "replace_gen_impls -- type_id: {}, generics_impl: {:#?}",
-            type_id, generics_impl
-        );
-
         let mut ty_clone = self.ty(type_id)?.clone();
+
+        debug!(
+            "replace_gen_impls -- type_id: {}, ty: {:#?} generics_impl: {:#?}",
+            type_id, ty_clone, generics_impl
+        );
 
         let ty_was_updated = match &mut ty_clone {
             Ty::Generic(ident, ..) => {
@@ -689,11 +689,13 @@ impl TyEnv {
             // replace itself.
             Ty::GenericInstance(ident, ..) => {
                 if let Some(impl_type_id) = generics_impl.get(ident) {
-                    if !self.is_generic(impl_type_id)? {
-                        ty_clone = self.ty(impl_type_id)?.clone();
-                        true
-                    } else {
-                        false
+                    match self.ty(impl_type_id)? {
+                        Ty::Generic(..) => false,
+                        Ty::GenericInstance(inner_ident, ..) if inner_ident == ident => false,
+                        _ => {
+                            ty_clone = self.ty(impl_type_id)?.clone();
+                            true
+                        }
                     }
                 } else {
                     false

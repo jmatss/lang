@@ -11,7 +11,6 @@ use crate::{
         op::{Op, UnOperator},
         stmt::Stmt,
     },
-    ty::ty::Ty,
     TypeId,
 };
 
