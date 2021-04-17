@@ -1,3 +1,4 @@
+use core::panic;
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -168,6 +169,10 @@ impl TyEnv {
                 None,
             ))
         }
+    }
+
+    pub fn current_type_id(&self) -> u64 {
+        self.type_id
     }
 
     pub fn new_unique_id(&mut self) -> u64 {

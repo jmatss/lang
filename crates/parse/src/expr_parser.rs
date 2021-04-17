@@ -16,6 +16,7 @@ use common::{
         ty::Ty,
         type_info::TypeInfo,
     },
+    TypeId,
 };
 
 use crate::{
@@ -771,6 +772,11 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     fn parse_generic_impls(&mut self, file_pos: &mut FilePosition) -> Option<Generics> {
         let pos = self.iter.pos();
 
+        // Keep track of the current type id. Parsing the types below might create
+        // new types. If it turns out that this isn't a generic list, revert and
+        // remove the newly created types.
+        let start_type_id = self.iter.ty_env.current_type_id();
+
         // If the next token is a  "PointyBracketBegin" it can either be a start
         // of a generic list for structures/function, or it can also be a "LessThan"
         // compare operation. Try to parse it as a generic list, if it fails assume
@@ -784,6 +790,12 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     }
                     Ok((generics, None)) => generics,
                     Err(_) => {
+                        // Remove types that was created during the process of
+                        // figuring out if they were types or not.
+                        let end_type_id = self.iter.ty_env.current_type_id();
+                        for type_id in start_type_id..end_type_id {
+                            self.iter.ty_env.remove(TypeId(type_id))
+                        }
                         self.iter.rewind_to_pos(pos);
                         None
                     }
