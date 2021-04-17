@@ -42,7 +42,7 @@ impl DeclTypeAnalyzer {
                 let module = if let Some(module) = module_opt {
                     module
                 } else {
-                    LangPath::default()
+                    LangPath::empty()
                 };
 
                 adt.borrow_mut().module = module.clone();
