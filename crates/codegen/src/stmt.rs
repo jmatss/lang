@@ -35,7 +35,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let mut var = var.borrow_mut();
 
                 self.compile_var_decl(&var)?;
-                if let Some(expr) = &mut var.value {
+                if var.is_global {
+                    // TODO: Fix this. Currently doesn't allow assigns in globals
+                    //       since they can be created outside functions and the
+                    //       assigns in LLVM would then be invalid since they
+                    //       aren't inside a function/block.
+                } else if let Some(expr) = &mut var.value {
                     let any_value = self.compile_expr(expr, ExprTy::RValue)?;
                     let basic_value = CodeGen::any_into_basic_value(any_value)?;
                     self.compile_var_store(&var, basic_value)?;

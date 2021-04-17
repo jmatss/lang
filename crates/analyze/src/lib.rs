@@ -29,7 +29,7 @@ use post::{
     call_args::CallArgs, clean_up::clean_up, exhaust::ExhaustAnalyzer,
     traits_generic::TraitsGenericAnalyzer, union_init_arg::UnionInitArg,
 };
-use pre::indexing::IndexingAnalyzer;
+use pre::{indexing::IndexingAnalyzer, main_args::MainArgsAnalyzer};
 use ty::{
     fn_generics_check::FnGenericsCheck, generic_adt_creator::GenericAdtCreator,
     generic_collector::GenericCollector, generic_fn_creator::GenericFnCreator,
@@ -79,6 +79,10 @@ pub fn analyze(
     let mut ty_ctx = TyCtx::new(ty_env);
 
     let mut traverser = AstTraverser::new(&mut ast_ctx, &mut ty_ctx);
+
+    debug!("Running MainArgsAnalyzer");
+    let mut main_analyzer = MainArgsAnalyzer::new();
+    traverser.traverse_with_visitor(&mut main_analyzer, ast_root)?;
 
     debug!("Running IndexingAnalyzer");
     let mut index_analyzer = IndexingAnalyzer::new();

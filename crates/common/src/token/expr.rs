@@ -363,6 +363,7 @@ pub struct Var {
     pub modifiers: Option<Vec<Modifier>>,
     pub value: Option<Box<Expr>>,
     pub is_const: bool,
+    pub is_global: bool,
 
     /// The file position spanning the whole variable.
     pub file_pos: Option<FilePosition>,
@@ -393,12 +394,17 @@ impl Var {
             file_pos,
             ty_file_pos,
             is_const,
+            is_global: false,
             copy_nr: None,
         }
     }
 
     pub fn set_copy_nr(&mut self, copy_nr: usize) {
         self.copy_nr = Some(copy_nr);
+    }
+
+    pub fn set_global(&mut self, is_global: bool) {
+        self.is_global = is_global;
     }
 
     /// Since variables might be duplicated when structs/functions have generics,

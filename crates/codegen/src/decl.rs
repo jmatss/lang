@@ -1,4 +1,5 @@
-use crate::generator::CodeGen;
+use inkwell::module::Linkage;
+
 use analyze::util::order::dependency_order;
 use common::{
     error::LangResult,
@@ -8,7 +9,8 @@ use common::{
         stmt::Modifier,
     },
 };
-use inkwell::module::Linkage;
+
+use crate::generator::CodeGen;
 
 impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// Compile all declarations of types: structs, enums, unions and interfaces.
@@ -62,7 +64,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
             if let BlockHeader::Fn(func) = header {
                 let func = func.borrow();
-                let linkage = if func.name == "main" || func.modifiers.contains(&Modifier::Public) {
+
+                let linkage = if func.modifiers.contains(&Modifier::Public)
+                    || (func.name == "main" && func.module.count() == 0)
+                {
                     Linkage::External
                 } else {
                     // Private and Hidden.

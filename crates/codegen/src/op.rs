@@ -407,14 +407,27 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         self.builder
                             .build_int_cast(left.into_int_value(), ty, "cast.int")
                             .into()
+                    } else if left_type.is_pointer_type() {
+                        self.builder
+                            .build_ptr_to_int(left.into_pointer_value(), ty, "cast.int")
+                            .into()
                     } else {
                         self.builder.build_bitcast(left, ty, "cast.int").into()
                     }
                 }
-                BasicTypeEnum::PointerType(ty) => self
-                    .builder
-                    .build_pointer_cast(left.into_pointer_value(), ty, "cast.ptr")
-                    .into(),
+                BasicTypeEnum::PointerType(ty) => {
+                    if left_type.is_int_type() {
+                        self.builder
+                            .build_int_to_ptr(left.into_int_value(), ty, "cast.ptr")
+                            .into()
+                    } else if left_type.is_pointer_type() {
+                        self.builder
+                            .build_pointer_cast(left.into_pointer_value(), ty, "cast.ptr")
+                            .into()
+                    } else {
+                        self.builder.build_bitcast(left, ty, "cast.ptr").into()
+                    }
+                }
                 BasicTypeEnum::StructType(ty) => {
                     self.builder.build_bitcast(left, ty, "cast.struct").into()
                 }
@@ -1285,10 +1298,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let sign_extend = false;
         let zero = self.context.i32_type().const_int(0, sign_extend);
 
-        Ok(unsafe {
+        let tmp = Ok(unsafe {
             self.builder
                 .build_gep(ptr, &[zero, compiled_dim.into_int_value()], "array.gep")
-        })
+        });
+        tmp
     }
 
     /// This function accessed the member at index `idx_opt` for the ADT in

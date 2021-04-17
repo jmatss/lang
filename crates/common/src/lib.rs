@@ -18,6 +18,11 @@ impl std::fmt::Display for TypeId {
     }
 }
 
+pub const ARGC_GLOBAL_VAR_NAME: &str = "_lang_argc_global";
+pub const ARGV_GLOBAL_VAR_NAME: &str = "_lang_argv_global";
+pub const ARGC_PARAM_VAR_NAME: &str = "_lang_argc_param";
+pub const ARGV_PARAM_VAR_NAME: &str = "_lang_argv_param";
+
 /// The name of the environment variable pointing to the path of "lang".
 /// This will be used to resolve the std lib.
 pub const ENV_VAR: &str = "LANG_HOME";

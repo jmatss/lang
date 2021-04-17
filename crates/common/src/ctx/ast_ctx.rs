@@ -747,7 +747,7 @@ impl AstCtx {
         }
 
         if !adt_suggestions.is_empty() {
-            err_msg.push_str("\nFound potential ADTs in inaccessable modules:\n - ");
+            err_msg.push_str("\nFound potential ADTs in other modules:\n - ");
             let suggestions = adt_suggestions
                 .into_iter()
                 .map(|p| ty_ctx.to_string_path(&p))
@@ -769,15 +769,44 @@ impl AstCtx {
         let mut adt_suggestions = Vec::default();
         let end_ident = &err_path.last().unwrap().0;
 
-        for (adt_path, _) in self.traits.keys() {
-            if end_ident == &adt_path.last().unwrap().0 {
-                adt_suggestions.push(adt_path.clone())
+        for (trait_path, _) in self.traits.keys() {
+            if end_ident == &trait_path.last().unwrap().0 {
+                adt_suggestions.push(trait_path.clone())
             }
         }
 
         if !adt_suggestions.is_empty() {
-            err_msg.push_str("\nFound potential traits in inaccessable modules:\n - ");
+            err_msg.push_str("\nFound potential traits in other modules:\n - ");
             let suggestions = adt_suggestions
+                .into_iter()
+                .map(|p| ty_ctx.to_string_path(&p))
+                .collect::<Vec<_>>()
+                .join("\n - ");
+            err_msg.push_str(&suggestions);
+        }
+
+        self.err(err_msg)
+    }
+
+    /// Reports a error related to a function that can't be found.
+    ///
+    /// Given the path `err_path`, finds all functions that has a path that ends
+    /// with the same identifier as the `err_path`. If atleast one function matches,
+    /// information is added to the error message informing the user about the
+    /// function(s) with a similar name.
+    pub fn err_fn(&self, ty_ctx: &TyCtx, mut err_msg: String, err_path: &LangPath) -> LangError {
+        let mut fn_suggestions = Vec::default();
+        let end_ident = &err_path.last().unwrap().0;
+
+        for (fn_path, _) in self.fns.keys() {
+            if end_ident == &fn_path.last().unwrap().0 {
+                fn_suggestions.push(fn_path.clone())
+            }
+        }
+
+        if !fn_suggestions.is_empty() {
+            err_msg.push_str("\nFound potential functions in other modules:\n - ");
+            let suggestions = fn_suggestions
                 .into_iter()
                 .map(|p| ty_ctx.to_string_path(&p))
                 .collect::<Vec<_>>()

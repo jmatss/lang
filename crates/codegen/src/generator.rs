@@ -4,7 +4,7 @@ use inkwell::{
     basic_block::BasicBlock,
     builder::Builder,
     context::Context,
-    module::Module,
+    module::{Linkage, Module},
     targets::TargetMachine,
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
     values::{AnyValueEnum, BasicValueEnum, FunctionValue, PointerValue},
@@ -221,7 +221,44 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         // Constants are never "compiled" into instructions, they are handled
         // "internally" in this code during compilation.
-        if !var.is_const {
+        if var.is_global {
+            let decl_block_id = self
+                .analyze_ctx
+                .ast_ctx
+                .get_var_decl_scope(&var.full_name(), self.cur_block_id)?;
+            let key = (var.full_name(), decl_block_id);
+
+            let var_type = self.compile_type(var.ty.unwrap(), var.file_pos.to_owned())?;
+            let global_var = self.module.add_global(
+                CodeGen::any_into_basic_type(var_type)?,
+                Some(AddressSpace::Generic),
+                &var.name,
+            );
+            global_var.set_linkage(Linkage::Private);
+
+            // Zero out contents of globals as default.
+            match var_type {
+                AnyTypeEnum::FloatType(ty) => {
+                    global_var.set_initializer(&BasicValueEnum::FloatValue(ty.const_zero()))
+                }
+                AnyTypeEnum::IntType(ty) => {
+                    global_var.set_initializer(&BasicValueEnum::IntValue(ty.const_zero()))
+                }
+                AnyTypeEnum::PointerType(ty) => {
+                    global_var.set_initializer(&BasicValueEnum::PointerValue(ty.const_zero()))
+                }
+                AnyTypeEnum::StructType(ty) => {
+                    global_var.set_initializer(&BasicValueEnum::StructValue(ty.const_zero()))
+                }
+                AnyTypeEnum::VectorType(ty) => {
+                    global_var.set_initializer(&BasicValueEnum::VectorValue(ty.const_zero()))
+                }
+                _ => (),
+            }
+
+            let ptr = global_var.as_pointer_value();
+            self.variables.insert(key, ptr);
+        } else if !var.is_const {
             let decl_block_id = self
                 .analyze_ctx
                 .ast_ctx
@@ -355,8 +392,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // TODO: Calculate array size that contains ther things than just
             //       a single integer literal
             Ty::Array(inner_type_id, dim_opt, ..) => {
-                let lit_dim = if let Some(dim) = dim_opt {
-                    match dim.as_ref() {
+                if let Some(dim) = dim_opt {
+                    let lit_dim = match dim.as_ref() {
                         Expr::Lit(Lit::Integer(num, radix), ..) => {
                             u32::from_str_radix(num, *radix)?
                         }
@@ -369,28 +406,41 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                                 file_pos,
                             ))
                         }
+                    };
+
+                    match self.compile_type(inner_type_id, file_pos)? {
+                        AnyTypeEnum::ArrayType(ty) => ty.array_type(lit_dim).into(),
+                        AnyTypeEnum::FloatType(ty) => ty.array_type(lit_dim).into(),
+                        AnyTypeEnum::IntType(ty) => ty.array_type(lit_dim).into(),
+                        AnyTypeEnum::PointerType(ty) => ty.array_type(lit_dim).into(),
+                        AnyTypeEnum::StructType(ty) => ty.array_type(lit_dim).into(),
+                        AnyTypeEnum::VectorType(ty) => ty.array_type(lit_dim).into(),
+                        AnyTypeEnum::FunctionType(_) => {
+                            return Err(self
+                                .err("Tried to array index into function type.".into(), file_pos));
+                        }
+                        AnyTypeEnum::VoidType(_) => {
+                            return Err(
+                                self.err("Tried to array index into void type.".into(), file_pos)
+                            );
+                        }
                     }
                 } else {
-                    // TODO: FilePosition.
-                    return Err(self.err("No dimension set for array.".into(), file_pos));
-                };
-
-                match self.compile_type(inner_type_id, file_pos)? {
-                    AnyTypeEnum::ArrayType(ty) => ty.array_type(lit_dim).into(),
-                    AnyTypeEnum::FloatType(ty) => ty.array_type(lit_dim).into(),
-                    AnyTypeEnum::IntType(ty) => ty.array_type(lit_dim).into(),
-                    AnyTypeEnum::PointerType(ty) => ty.array_type(lit_dim).into(),
-                    AnyTypeEnum::StructType(ty) => ty.array_type(lit_dim).into(),
-                    AnyTypeEnum::VectorType(ty) => ty.array_type(lit_dim).into(),
-                    AnyTypeEnum::FunctionType(_) => {
-                        return Err(
-                            self.err("Tried to array index into function type.".into(), file_pos)
-                        );
-                    }
-                    AnyTypeEnum::VoidType(_) => {
-                        return Err(
-                            self.err("Tried to array index into void type.".into(), file_pos)
-                        );
+                    // TODO: Is this corrent? Can an array with no dimension set
+                    //       be treated as a pointer in LLVM?
+                    match self.compile_type(inner_type_id, file_pos)? {
+                        AnyTypeEnum::ArrayType(ty) => ty.ptr_type(address_space).into(),
+                        AnyTypeEnum::FloatType(ty) => ty.ptr_type(address_space).into(),
+                        AnyTypeEnum::IntType(ty) => ty.ptr_type(address_space).into(),
+                        AnyTypeEnum::PointerType(ty) => ty.ptr_type(address_space).into(),
+                        AnyTypeEnum::StructType(ty) => ty.ptr_type(address_space).into(),
+                        AnyTypeEnum::VectorType(ty) => ty.ptr_type(address_space).into(),
+                        AnyTypeEnum::FunctionType(ty) => ty.ptr_type(address_space).into(),
+                        AnyTypeEnum::VoidType(_) => {
+                            return Err(
+                                self.err("Tried to array index into void type.".into(), file_pos)
+                            );
+                        }
                     }
                 }
             }

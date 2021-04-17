@@ -134,7 +134,15 @@ impl Visitor for PathResolver {
                 full_path.pop();
                 fn_call.module = full_path;
             }
-            Err(err) => {
+            Err(_) => {
+                let err = ctx.ast_ctx.err_fn(
+                    &ctx.ty_ctx,
+                    format!(
+                        "Unable to find function to call with name: {}",
+                        ctx.ty_ctx.to_string_path(&half_path)
+                    ),
+                    &half_path,
+                );
                 self.errors.push(err);
             }
         }
@@ -151,7 +159,15 @@ impl Visitor for PathResolver {
                 full_path.pop();
                 adt_init.module = full_path;
             }
-            Err(err) => {
+            Err(_) => {
+                let err = ctx.ast_ctx.err_adt(
+                    &ctx.ty_ctx,
+                    format!(
+                        "Unable to find ADT found in ADT init statement: {}",
+                        ctx.ty_ctx.to_string_path(&half_path)
+                    ),
+                    &half_path,
+                );
                 self.errors.push(err);
             }
         }

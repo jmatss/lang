@@ -867,8 +867,6 @@ impl Visitor for TypeInferencer {
             }
         };
 
-        // TODO: Tie the types of the parameters as well. To lazy to implement atm.
-
         // Make sure that the amount of arguments are equal to the amount of parameters.
         if built_in_call.arguments.len() != built_in.parameters.len() {
             let err = ctx.ast_ctx.err(format!(
@@ -881,8 +879,29 @@ impl Visitor for TypeInferencer {
             return;
         }
 
+        for (built_in_param, built_in_call_arg) in
+            built_in.parameters.iter().zip(&built_in_call.arguments)
+        {
+            let built_in_type_id = built_in_param.ty.unwrap();
+            let built_in_call_type_id = built_in_call_arg.value.get_expr_type().unwrap();
+
+            // Need to replace any unique IDs found in the built-in declaration
+            // types so that they actual are unique. Otherwise all uses of the
+            // same function types would have the same unique ID which would lead
+            // to that all types would map to eachother.
+            let built_in_type_id = match ctx.ty_ctx.ty_env.replace_unique_ids(built_in_type_id) {
+                Ok(Some(new_type_id)) => new_type_id,
+                Ok(None) => built_in_type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+            self.insert_constraint(ctx, built_in_type_id, built_in_call_type_id);
+        }
+
         // Make sure that the amount of generic arguments are equals to the
-        // amount of generic parameters.
+        // amount of generic parameters. Also add constraints between them.
         if !(built_in.generics.is_none() && built_in_call.generics.is_none()) {
             let built_in_gens = if let Some(built_in_gens) = &built_in.generics {
                 built_in_gens
@@ -919,36 +938,40 @@ impl Visitor for TypeInferencer {
                 return;
             }
 
-            for (idx, (built_in_gen, built_in_call_gen)) in built_in_gens
-                .iter()
-                .zip(built_in_call_gens.iter_types())
-                .enumerate()
+            for (built_in_gen, built_in_call_gen) in
+                built_in_gens.iter().zip(built_in_call_gens.iter_types())
             {
-                match ctx
-                    .ty_ctx
-                    .ty_env
-                    .is_compatible(*built_in_gen, *built_in_call_gen)
-                {
-                    Ok(true) => (),
-                    Ok(false) => {
-                        let err = ctx.ast_ctx.err(format!(
-                            "Generic parameter at index {} not compatible. Built-in: {:#?}, call: {:#?}",
-                            idx,
-                            built_in,
-                            built_in_call,
-                        ));
-                        self.errors.push(err);
-                        return;
-                    }
+                // Need to replace any unique IDs found in the built-in declaration
+                // types so that they actual are unique. Otherwise all uses of the
+                // same function types would have the same unique ID which would lead
+                // to that all types would map to eachother.
+                let built_in_gen = match ctx.ty_ctx.ty_env.replace_unique_ids(*built_in_gen) {
+                    Ok(Some(new_type_id)) => new_type_id,
+                    Ok(None) => *built_in_gen,
                     Err(err) => {
                         self.errors.push(err);
                         return;
                     }
-                }
+                };
+                self.insert_constraint(ctx, built_in_gen, *built_in_call_gen);
             }
         }
 
-        // TODO: Temporary ugly hack to make "@type" to work. Should do this in
+        let built_in_ret_type = match ctx.ty_ctx.ty_env.replace_unique_ids(built_in.ret_type) {
+            Ok(Some(new_type_id)) => new_type_id,
+            Ok(None) => built_in.ret_type,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+        if let Some(built_in_call_ret_type) = built_in_call.ret_type {
+            self.insert_constraint(ctx, built_in_ret_type, built_in_call_ret_type);
+        } else {
+            built_in_call.ret_type = Some(built_in_ret_type);
+        }
+
+        // TODO: Temporary ugly hack to make `@type` work. Should do this in
         //       a different way and somewhere else.
         if &built_in_call.name == "type" {
             let type_id = match ctx.ty_ctx.ty_env.id(&Ty::Expr(
@@ -965,11 +988,19 @@ impl Visitor for TypeInferencer {
             built_in_call.ret_type = Some(type_id);
         }
 
-        // TODO: Is it correct to directly set the return type for the function
-        //       call? Should be inserted as a constraint instead? Will this
-        //       affect generics?
-        if built_in_call.ret_type.is_none() {
-            built_in_call.ret_type = Some(built_in.ret_type);
+        // TODO: "Temporary" hack to make the use of `@ptr_add`/`@ptr_sub` "better".
+        //        Currently there are no direct link between the type of the ptr
+        //        argument and the return type (which should have the same type).
+        //        Add that link here.
+        if &built_in_call.name == "ptr_add" || &built_in_call.name == "ptr_sub" {
+            let arg_type = built_in_call
+                .arguments
+                .first()
+                .map(|arg| arg.value.get_expr_type().ok())
+                .flatten()
+                .unwrap();
+            let ret_type = built_in_call.ret_type.unwrap();
+            self.insert_constraint(ctx, arg_type, ret_type);
         }
     }
 
@@ -1390,7 +1421,7 @@ impl Visitor for TypeInferencer {
             let new_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
                 InnerTy::Unknown(unique_id),
                 Generics::new(),
-                TypeInfo::Default(bin_op.file_pos.unwrap()),
+                TypeInfo::DefaultOpt(bin_op.file_pos.to_owned()),
             )) {
                 Ok(type_id) => type_id,
                 Err(err) => {
@@ -1422,7 +1453,7 @@ impl Visitor for TypeInferencer {
         let bool_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
             InnerTy::Boolean,
             Generics::empty(),
-            TypeInfo::Default(bin_op.file_pos.unwrap()),
+            TypeInfo::DefaultOpt(bin_op.file_pos.to_owned()),
         )) {
             Ok(type_id) => type_id,
             Err(err) => {

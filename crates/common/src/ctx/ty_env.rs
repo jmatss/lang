@@ -823,7 +823,6 @@ impl TyEnv {
                     if path == old_path {
                         ty_clone = self.ty(new_self_type_id)?.clone();
                         true
-                    //self.update(id, new_self_ty.clone())?;
                     } else {
                         false
                     }
@@ -937,9 +936,6 @@ impl TyEnv {
 
         let ty_was_updated = match &mut ty_clone {
             Ty::Generic(ident, ..) => {
-                // Arbitrarily use the current type ID as the unique ID for the
-                // new generic instance type. This should make it unique but
-                // also prevent creating of a bunch of duplicates.
                 let new_gen_inst = self.id(&Ty::GenericInstance(
                     ident.clone(),
                     unique_id,
@@ -1025,6 +1021,105 @@ impl TyEnv {
             }
 
             Ty::GenericInstance(..) | Ty::Any(..) => false,
+        };
+
+        // If any nested type was updated, the `ty_clone` will have been updated
+        // and represents the new type for the current `type_id`. Insert it into
+        // the type environment (if it is a new unique type) and return the new
+        // type ID to indicate to the caller that the type have changed.
+        Ok(if ty_was_updated {
+            Some(self.id(&ty_clone)?)
+        } else {
+            None
+        })
+    }
+
+    /// Recursively replaces any found unique IDs in the given type.
+    ///
+    /// This can be done when creating a "copy" of the type so that the two types
+    /// doesn't have types mapping to eachother because they contain the same
+    /// unique ID.
+    pub fn replace_unique_ids(&mut self, type_id: TypeId) -> LangResult<Option<TypeId>> {
+        debug!("replace_unique_ids -- type_id: {},", type_id);
+
+        let mut ty_clone = self.ty(type_id)?.clone();
+
+        let ty_was_updated = match &mut ty_clone {
+            Ty::GenericInstance(_, unique_id, ..)
+            | Ty::Any(unique_id, ..)
+            | Ty::Generic(_, unique_id, ..) => {
+                *unique_id = self.new_unique_id();
+                true
+            }
+
+            Ty::UnknownAdtMember(type_id_i, _, unique_id, ..)
+            | Ty::UnknownAdtMethod(type_id_i, _, _, unique_id, ..)
+            | Ty::UnknownMethodArgument(type_id_i, _, _, _, unique_id, ..)
+            | Ty::UnknownMethodGeneric(type_id_i, _, _, unique_id, ..)
+            | Ty::UnknownArrayMember(type_id_i, unique_id, ..) => {
+                if let Some(new_type_id_i) = self.replace_unique_ids(*type_id_i)? {
+                    *type_id_i = new_type_id_i;
+                }
+
+                *unique_id = self.new_unique_id();
+                true
+            }
+
+            Ty::CompoundType(_, gens_clone, ..) => {
+                let mut was_updated = false;
+                for gen_type_id in gens_clone.iter_types_mut() {
+                    if let Some(new_gen_type_id) = self.replace_unique_ids(*gen_type_id)? {
+                        *gen_type_id = new_gen_type_id;
+                        was_updated = true;
+                    }
+                }
+                was_updated
+            }
+
+            Ty::Pointer(type_id_i, ..) | Ty::Array(type_id_i, ..) => {
+                if let Some(new_type_id_i) = self.replace_unique_ids(*type_id_i)? {
+                    *type_id_i = new_type_id_i;
+                    true
+                } else {
+                    false
+                }
+            }
+
+            Ty::Fn(gens, params, ret_type_id_opt, ..) => {
+                let mut was_updated = false;
+                if let Some(ret_type_id) = ret_type_id_opt {
+                    if let Some(new_ret_type_id) = self.replace_unique_ids(*ret_type_id)? {
+                        *ret_type_id = new_ret_type_id;
+                        was_updated = true;
+                    }
+                }
+                for gen_type_id in gens.iter_mut() {
+                    if let Some(new_gen_type_id) = self.replace_unique_ids(*gen_type_id)? {
+                        *gen_type_id = new_gen_type_id;
+                        was_updated = true;
+                    }
+                }
+                for param_type_id in params.iter_mut() {
+                    if let Some(new_param_type_id) = self.replace_unique_ids(*param_type_id)? {
+                        *param_type_id = new_param_type_id;
+                        was_updated = true;
+                    }
+                }
+                was_updated
+            }
+
+            Ty::Expr(expr, ..) => {
+                if let Ok(type_id_i) = expr.get_expr_type_mut() {
+                    if let Some(new_type_id_i) = self.replace_unique_ids(*type_id_i)? {
+                        *type_id_i = new_type_id_i;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
         };
 
         // If any nested type was updated, the `ty_clone` will have been updated
