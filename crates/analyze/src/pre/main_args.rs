@@ -93,8 +93,16 @@ impl MainArgsAnalyzer {
         argv_global.name = ARGV_GLOBAL_VAR_NAME.into();
         let argv_global_decl = Stmt::VariableDecl(Rc::new(RefCell::new(argv_global)), None);
 
-        body.insert(0, AstToken::Stmt(argc_global_decl));
-        body.insert(1, AstToken::Stmt(argv_global_decl));
+        // If there is a Module statement at the top of this body, need to make
+        // sure to insert the declaration below it. The Module MUST be the first
+        // statement in a file if it is specified.
+        let start_idx = if let Some(AstToken::Stmt(Stmt::Module(..))) = body.get(0) {
+            1
+        } else {
+            0
+        };
+        body.insert(start_idx, AstToken::Stmt(argc_global_decl));
+        body.insert(start_idx + 1, AstToken::Stmt(argv_global_decl));
 
         Ok(())
     }
