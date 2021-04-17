@@ -1,4 +1,7 @@
-/target
+target/
+debug/
+**/*.o
+**/*.exe
 **/*.rs.bk
 .vscode/
 .idea/
