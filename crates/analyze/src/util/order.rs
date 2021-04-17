@@ -307,7 +307,7 @@ fn contains_strings_rec(
 
 pub struct ReferenceCollector {
     pub references: HashMap<LangPath, HashSet<LangPath>>,
-    cur_adt_name: LangPath,
+    cur_adt_name: Option<LangPath>,
     include_impls: bool,
     full_paths: bool,
     errors: Vec<LangError>,
@@ -317,7 +317,7 @@ impl ReferenceCollector {
     pub fn new(include_impls: bool, full_paths: bool) -> Self {
         Self {
             references: HashMap::default(),
-            cur_adt_name: LangPath::new(Vec::with_capacity(0), None),
+            cur_adt_name: None,
             include_impls,
             full_paths,
             errors: Vec::default(),
@@ -438,7 +438,17 @@ impl Visitor for ReferenceCollector {
 
     fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Implement(ident, ..), ..) = ast_token {
-            self.cur_adt_name = ident.clone();
+            self.cur_adt_name = Some(ident.clone());
+        }
+    }
+
+    fn visit_fn(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
+        if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
+            // This is a function, not a method. It is not located inside a impl
+            // block, so reset the ADT name since it doesn't belong to the ADT.
+            if func.borrow().method_adt.is_none() {
+                self.cur_adt_name = None;
+            }
         }
     }
 
@@ -448,27 +458,29 @@ impl Visitor for ReferenceCollector {
     //       tell types outside of impls might be used??
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
         if self.include_impls {
-            let mut references = match ctx
-                .ty_ctx
-                .ty_env
-                .get_adt_and_trait_paths(*type_id, self.full_paths)
-            {
-                Ok(paths) => paths,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+            if let Some(cur_adt_name) = &self.cur_adt_name {
+                let mut references = match ctx
+                    .ty_ctx
+                    .ty_env
+                    .get_adt_and_trait_paths(*type_id, self.full_paths)
+                {
+                    Ok(paths) => paths,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
-            // Do not add references to itself.
-            references.remove(&self.cur_adt_name);
+                // Do not add references to itself.
+                references.remove(cur_adt_name);
 
-            match self.references.entry(self.cur_adt_name.clone()) {
-                Entry::Occupied(mut o) => {
-                    o.get_mut().extend(references);
-                }
-                Entry::Vacant(v) => {
-                    v.insert(references);
+                match self.references.entry(cur_adt_name.clone()) {
+                    Entry::Occupied(mut o) => {
+                        o.get_mut().extend(references);
+                    }
+                    Entry::Vacant(v) => {
+                        v.insert(references);
+                    }
                 }
             }
         }
