@@ -39,12 +39,7 @@ impl DeclTypeAnalyzer {
 
         let adt_full_path = match ctx.ast_ctx.get_module(id) {
             Ok(module_opt) => {
-                let module = if let Some(module) = module_opt {
-                    module
-                } else {
-                    LangPath::empty()
-                };
-
+                let module = module_opt.unwrap_or_else(LangPath::empty);
                 adt.borrow_mut().module = module.clone();
                 module.clone_push(&adt.borrow().name, None)
             }
