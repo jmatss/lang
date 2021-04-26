@@ -482,8 +482,8 @@ impl TyEnv {
         }
     }
 
-    /// Returns the identifier if this type represents a structure or a generic.
-    /// If this type isn't a structure or generic, None is returned.
+    /// Returns the identifier if this type represents a ADT.
+    /// If this type isn't a ADT, None is returned.
     pub fn get_ident(&self, id: TypeId) -> LangResult<Option<LangPath>> {
         match self.ty(id)? {
             Ty::CompoundType(inner_ty, ..) => Ok(inner_ty.get_ident()),

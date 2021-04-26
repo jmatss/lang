@@ -5,12 +5,7 @@ use super::{
     stmt::Modifier,
 };
 
-use crate::{
-    ctx::{ty_ctx::TyCtx, },
-    path::LangPath,
-    ty::generics::Generics,
-    util, TypeId,
-};
+use crate::{ctx::ty_ctx::TyCtx, path::LangPath, ty::generics::Generics, util, TypeId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockHeader {
@@ -469,6 +464,16 @@ impl Fn {
         (!self.modifiers.contains(&Modifier::This)
             && !self.modifiers.contains(&Modifier::ThisPointer))
             || self.modifiers.contains(&Modifier::Static)
+    }
+
+    /// Returns true if this method takes `this` as a value (`this`).
+    pub fn is_this_by_val(&self) -> bool {
+        self.modifiers.contains(&Modifier::This)
+    }
+
+    /// Returns true if this method takes `this` as a reference/pointer (`{this}`).
+    pub fn is_this_by_ref(&self) -> bool {
+        self.modifiers.contains(&Modifier::ThisPointer)
     }
 }
 

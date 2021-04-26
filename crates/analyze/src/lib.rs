@@ -30,7 +30,8 @@ use mid::{
 };
 use post::{
     call_args::CallArgs, clean_up::clean_up, match_exhaust::MatchExhaustAnalyzer,
-    traits_generic::TraitsGenericAnalyzer, union_init_arg::UnionInitArg,
+    method_this::MethodThisAnalyzer, traits_generic::TraitsGenericAnalyzer,
+    union_init_arg::UnionInitArg,
 };
 use pre::{indexing::IndexingAnalyzer, main_args::MainArgsAnalyzer};
 use ty::{
@@ -169,6 +170,10 @@ pub fn analyze(
     debug!("Running GenericTysSolvedChecker");
     let mut generic_ty_solved_check = GenericTysSolvedChecker::new();
     traverse(&mut ctx, &mut generic_ty_solved_check, ast_root)?;
+
+    debug!("Running MethodThisAnalyzer");
+    let mut method_this_analyzer = MethodThisAnalyzer::new();
+    traverse(&mut ctx, &mut method_this_analyzer, ast_root)?;
 
     debug!("Running UnionInitArg");
     let mut union_init_arg = UnionInitArg::new();
