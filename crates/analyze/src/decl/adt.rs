@@ -110,14 +110,8 @@ impl Visitor for DeclTypeAnalyzer {
 
             let trait_full_path = match ctx.ast_ctx.get_module(*trait_id) {
                 Ok(module_opt) => {
-                    let module = if let Some(module) = module_opt {
-                        module
-                    } else {
-                        LangPath::default()
-                    };
-
+                    let module = module_opt.unwrap_or_else(LangPath::empty);
                     trait_.borrow_mut().module = module.clone();
-
                     module.clone_push(&trait_.borrow().name, None)
                 }
                 Err(err) => {
