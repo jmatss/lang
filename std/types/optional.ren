@@ -10,12 +10,12 @@ impl Optional
 {
     fn value(val: T = @null<T>()) -> Optional<T>
     {
-        return Optional<T> { value = val}
+        return Optional { value = val}
     }
 
     fn empty() -> Optional<T>
     {
-        return Optional<T> { empty = @null<T>() }
+        return Optional { empty = @null<T>() }
     }
 
     fn {this} has_value() -> bool
@@ -35,10 +35,6 @@ impl Optional
         return not this.has_value()
     }
 
-    // TODO: Calling a function taking this as a pointer with a non-pointer this
-    //       will fail during codegen with the error:
-    //         "Assertion failed: (i >= FTy->getNumParams() || FTy->getParamType(i) == Args[i]->getType()) && "Calling a function with a bad signature!", file D:\LLVM\llvmenv\10.0.1\lib\IR\Instructions.cpp, line 400"
-    //       should be caught during analyzing.
     fn {this} get() -> T
     {
         return this.*.value

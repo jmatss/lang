@@ -1,7 +1,3 @@
-fn two2(a: i32, b: i32)
-{
-}
-
 fn two(a: i32, b: f32)
 {
 }
@@ -24,10 +20,6 @@ fn main() -> i32
     three(c=z, y, a=x)
     three(a=x, b=y, c=z)
     three(b=y, c=z, a=x)
-    // TODO: Causes infinite loop if one specifies the same name
-    //       and both parameters have the same type.
-    //       Implement simple prevention.
-    //two2(b=3, b=5)
 
     return 0
 }

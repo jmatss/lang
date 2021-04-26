@@ -21,12 +21,9 @@ struct TestArrayStruct
 fn main() -> i32
 {
     var x1 = [[1.1, 2.2], [3.3, 4.4]]
-    x1.[1].[0] = 5.5
 
-    // TODO: Make this work, should convert the array from a "[[f32: 2]: 2]" to "[[f64: 2]: 2]".
-    //       The f32 is currently inferred from a "UnknownFloat", but f64 should be preferred.
-    //var f64_var: f64 = 3.0
-    //x1.[1].[0] = 5.5 + f64_var
+    var f64_var: f64 = 3.3
+    x1.[1].[0] = 5.5 + f64_var
 
     printf(
         "\nx1.[0].[0]: %f, x1.[0].[1]: %f, x1.[1].[0]: %f, x1.[1].[1]: %f",
@@ -35,7 +32,7 @@ fn main() -> i32
         x1.[1].[0] as f64,
         x1.[1].[1] as f64,
     )
-    std::assert(x1.[0].[0] == 1.1 and x1.[0].[1] == 2.2 and x1.[1].[0] == 5.5 and x1.[1].[1] == 4.4)
+    std::assert(x1.[0].[0] == 1.1 and x1.[0].[1] == 2.2 and x1.[1].[0] == 8.8 and x1.[1].[1] == 4.4)
 
 
     var x2 = [1, 2, 3]

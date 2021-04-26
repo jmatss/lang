@@ -1,6 +1,5 @@
 mod std::types
 
-// TODO: What should be stored inside the `error` variant?
 pub union Result<T, E>
 {
     success: T,
@@ -11,12 +10,12 @@ impl Result
 {
     fn success(val: T = @null<T>()) -> Result<T, E>
     {
-        return Result<T, E> { success = val}
+        return Result { success = val }
     }
 
     fn error(err: E = @null<E>()) -> Result<T, E>
     {
-        return Result<T, E> { error = err }
+        return Result { error = err }
     }
 
     fn {this} is_success() -> bool

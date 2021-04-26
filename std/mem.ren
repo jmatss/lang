@@ -19,7 +19,7 @@ impl Allocator
 {
     pub fn init<T>(value: T = @null<T>()) -> Result<{T}, {u8}>
     {
-        var ptr_or_error = Allocator::init_size<T>(@size<T>())
+        var ptr_or_error = this::init_size<T>(@size<T>())
         if ptr is ptr_or_error.success
         {
             ptr.* = value
@@ -67,7 +67,7 @@ impl Allocator
     /// Implemented using libc `memcpy`.
     fn clone<T>(src: {T}, size: u32 = @size<T>() as u32) -> Result<{T}, {u8}>
     {
-        var ptr_or_error = Allocator::init_size<T>(size)
+        var ptr_or_error = this::init_size<T>(size)
         if dst is ptr_or_error.success
         {
             memcpy(dst as {u8}, src as {u8}, size)
