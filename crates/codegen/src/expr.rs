@@ -316,7 +316,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         } else {
             return Err(self.err(
                 format!(
-                    "Unable to find function with name {} to call (full name: {:#?}).",
+                    "Unable to find function with name \"{}\" to call (full name: {:#?}).",
                     &fn_call.name,
                     &fn_call.full_name(&self.analyze_ctx.ty_ctx)
                 ),

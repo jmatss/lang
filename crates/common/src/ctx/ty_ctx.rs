@@ -4,9 +4,9 @@ use either::Either;
 
 use crate::{
     ctx::ty_env::SolveCond,
-    error::LangResult,
+    error::{LangError, LangErrorKind, LangResult},
     path::{LangPath, LangPathPart},
-    token::block::Fn,
+    token::{block::Fn, expr::Expr, lit::Lit, op::Op},
     ty::{
         generics::Generics, inner_ty::InnerTy, substitution_sets::SubstitutionSets, ty::Ty,
         type_info::TypeInfo,
@@ -71,7 +71,7 @@ impl<'a> TyCtx {
     }
 
     /// Inserts a new constraint between two types.
-    /// If the types are the equal, this function will do a early Ok return.
+    /// If the type IDs are the equal, no new constraint will be created.
     pub fn insert_constraint(&mut self, type_id_a: TypeId, type_id_b: TypeId) -> LangResult<()> {
         let type_id_a = self.ty_env.get_forwarded(type_id_a);
         let type_id_b = self.ty_env.get_forwarded(type_id_b);
@@ -707,11 +707,8 @@ impl<'a> TyCtx {
         // Create/get the generics for the function call and replace potential
         // generics in the return type of "this function call".
         let fn_call_gens = if fn_call_gens_vec.is_empty() {
-            if let Some(method_generics) = self.new_method_generics(&method, &type_info)? {
-                method_generics
-            } else {
-                Generics::empty()
-            }
+            self.new_method_generics(&method, &type_info)?
+                .unwrap_or_else(Generics::empty)
         } else {
             let mut fn_call_gens = Generics::new();
             for (gen_name, gen_unknown_ty) in fn_gens.iter_names().zip(fn_call_gens_vec) {
@@ -719,6 +716,11 @@ impl<'a> TyCtx {
             }
             fn_call_gens
         };
+
+        debug!(
+            "solve_unknown_adt_method -- fn_call_gens: {:#?}, adt_gens: {:#?}",
+            fn_call_gens, adt_gens
+        );
 
         let inf_new_type_id = if let Some(mut new_type_id) = method.ret_type {
             if let Some(new_new_type_id) =
@@ -750,6 +752,12 @@ impl<'a> TyCtx {
                 TypeInfo::None,
             ))?
         };
+
+        debug!(
+            "solve_unknown_adt_method -- inf_new_type_id: {},  ty: {:#?}",
+            inf_new_type_id,
+            self.ty_env.ty(inf_new_type_id)
+        );
 
         self.insert_constraint(type_id, inf_new_type_id)?;
         Ok(inf_new_type_id)
@@ -1023,8 +1031,8 @@ impl<'a> TyCtx {
             }
 
             let inf_adt_ty = self.ty_env.ty(inf_adt_type_id)?.clone();
-            let (inner_ty, adt_generics) = match inf_adt_ty {
-                Ty::CompoundType(inner_ty, generics, ..) => (inner_ty, generics),
+            let (inner_ty, adt_gens) = match inf_adt_ty {
+                Ty::CompoundType(inner_ty, gens, ..) => (inner_ty, gens),
 
                 // TODO: Fix this edge case. This might be a pointer to ADT to
                 //       represent a "{this}" function. Remove the need for this
@@ -1041,9 +1049,13 @@ impl<'a> TyCtx {
                         return Ok(AdtSolveStatus::NoProgress);
                     }
 
+                    if adt_type_id != inf_adt_type_id {
+                        self.set_generic_names(ast_ctx, inf_type_id_i)?;
+                    }
+
                     let inf_ty_i = self.ty_env.ty(inf_type_id_i)?.clone();
-                    if let Ty::CompoundType(inner_ty, generics, ..) = inf_ty_i {
-                        (inner_ty, generics)
+                    if let Ty::CompoundType(inner_ty, gens, ..) = inf_ty_i {
+                        (inner_ty, gens)
                     } else {
                         unreachable!(
                             "ADT type not pointer to compound, inf_adt_type_id: {}",
@@ -1056,7 +1068,7 @@ impl<'a> TyCtx {
             };
 
             if let Some(adt_path) = inner_ty.get_ident() {
-                Ok(AdtSolveStatus::Solved(adt_path, adt_generics))
+                Ok(AdtSolveStatus::Solved(adt_path, adt_gens))
             } else {
                 Err(ast_ctx.err(format!(
                     "ADT CompoundType isn't generic or identifier, is: {:?}\nADT type ID: {}",
@@ -1152,17 +1164,10 @@ impl<'a> TyCtx {
 
         let inf_type_id = self.inferred_type(type_id)?;
         match self.ty_env.ty(inf_type_id)? {
-            Ty::CompoundType(inner_ty, gens, ..) => {
+            Ty::CompoundType(inner_ty, ..) => {
+                // The generics are generated from the `inner_ty` LangPath, not
+                // from the `Generics` on the type.
                 result.push_str(&self.to_string_inner_ty(inner_ty));
-                // The generics are generated from the `inner_ty` LangPath.
-                /*
-                if !gens.is_empty() {
-                    let type_ids = gens.iter_types().cloned().collect::<Vec<_>>();
-                    result.push('<');
-                    result.push_str(&self.to_string_list(&type_ids)?);
-                    result.push('>');
-                }
-                */
             }
 
             Ty::Pointer(type_id_i, ..) => {
@@ -1203,15 +1208,33 @@ impl<'a> TyCtx {
             Ty::Array(type_id_i, dim_opt, ..) => {
                 result.push('[');
                 result.push_str(&self.to_string_type_id(*type_id_i)?);
-                result.push(']');
-
-                // TODO: Dimension.
-                /*
                 if let Some(dim) = dim_opt {
-                    result.push(':');
-                    result.push_str(&dim.as_ref().to_string());
+                    let dim_str = match dim.as_ref() {
+                        Expr::Lit(Lit::Integer(value, ..), ..) => value.clone(),
+
+                        // TODO: These array dimensions aren't correct, need to
+                        //       be able to get the actual int value. This is
+                        //       better than nothing for now, but might also
+                        //       break any compares done of the dimension.
+                        Expr::Var(var) => format!("var({})", var.name),
+                        Expr::FnCall(fn_call) => format!("fn_call({})", fn_call.name),
+                        Expr::FnPtr(fn_ptr) => format!("fn_ptr({})", fn_ptr.name),
+                        Expr::BuiltInCall(bi_call) => format!("bi_call({})", bi_call.name),
+                        Expr::Op(Op::BinOp(_)) => "bin_op".into(),
+                        Expr::Op(Op::UnOp(_)) => "un_op".into(),
+
+                        _ => {
+                            return Err(LangError::new(
+                                format!("Found invalid expression in array dimension: {:#?}", dim),
+                                LangErrorKind::GeneralError,
+                                dim.file_pos().cloned(),
+                            ))
+                        }
+                    };
+                    result.push(',');
+                    result.push_str(&dim_str);
                 }
-                */
+                result.push(']');
             }
 
             Ty::Generic(gen_ident, id, ..) => {

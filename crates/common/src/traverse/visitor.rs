@@ -12,10 +12,7 @@ use crate::{
 
 #[allow(unused_variables)]
 pub trait Visitor {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
-        None
-    }
-    fn take_errors_with_ctx(&mut self, ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         None
     }
 

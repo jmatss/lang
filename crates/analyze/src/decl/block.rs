@@ -216,24 +216,39 @@ impl BlockAnalyzer {
 
             // When iterating through all tokens, look at the If and Ifcases
             // and keep track if all their children contains return statements.
+            //
+            // The `contains_exhaustive_blocks` is used to indicate that the given
+            // block has child blocks that are "exhaustive". This will be used for
+            // if and match-statements to see if they have a else/default block.
+            // If they don't, the assumption is that all the children doesn't contain
+            // returns since every path isn't covered.
+            // All other blocks other than "if" and "match" is assumed to be
+            // a exhaustive block.
             let mut all_children_contains_returns = true;
+            let mut contains_exhaustive_block =
+                !matches!(header, BlockHeader::If | BlockHeader::Match(_));
             let mut child_count = 0;
+
             for child_token in body.iter() {
                 // TODO: Fix ugly hack. If this token is a EOF, the `self.is_first_stmt`
                 //       shouldn't be reset.
                 let mut is_eof = false;
 
                 match child_token {
-                    AstToken::Block(BlockHeader::If, _, child_id, _)
-                    | AstToken::Block(BlockHeader::IfCase(_), _, child_id, _)
-                    | AstToken::Block(BlockHeader::Fn(_), _, child_id, _)
-                    | AstToken::Block(BlockHeader::Match(_), _, child_id, _)
-                    | AstToken::Block(BlockHeader::MatchCase(_), _, child_id, _)
-                    | AstToken::Block(BlockHeader::For(..), _, child_id, _)
-                    | AstToken::Block(BlockHeader::While(..), _, child_id, _)
-                    | AstToken::Block(BlockHeader::Test(_), _, child_id, _)
-                    | AstToken::Block(BlockHeader::Anonymous, _, child_id, _) => {
+                    AstToken::Block(h @ BlockHeader::If, _, child_id, _)
+                    | AstToken::Block(h @ BlockHeader::IfCase(_), _, child_id, _)
+                    | AstToken::Block(h @ BlockHeader::Fn(_), _, child_id, _)
+                    | AstToken::Block(h @ BlockHeader::Match(_), _, child_id, _)
+                    | AstToken::Block(h @ BlockHeader::MatchCase(_), _, child_id, _)
+                    | AstToken::Block(h @ BlockHeader::For(..), _, child_id, _)
+                    | AstToken::Block(h @ BlockHeader::While(..), _, child_id, _)
+                    | AstToken::Block(h @ BlockHeader::Test(_), _, child_id, _)
+                    | AstToken::Block(h @ BlockHeader::Anonymous, _, child_id, _) => {
                         self.analyze_block(ast_ctx, child_token, *id);
+
+                        if matches!(h, BlockHeader::IfCase(None) | BlockHeader::MatchCase(None)) {
+                            contains_exhaustive_block = true;
+                        }
 
                         if let Some(child_block_info) = ast_ctx.block_ctxs.get(&child_id) {
                             if !child_block_info.all_children_contains_returns {
@@ -285,7 +300,7 @@ impl BlockAnalyzer {
             // the value will be set to true if this block itself contains a return.
             let block_info = ast_ctx.block_ctxs.get_mut(id).unwrap();
             block_info.all_children_contains_returns = if child_count > 0 {
-                all_children_contains_returns
+                all_children_contains_returns && contains_exhaustive_block
             } else {
                 block_info.contains_return
             };
@@ -294,7 +309,7 @@ impl BlockAnalyzer {
 }
 
 impl Visitor for BlockAnalyzer {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {

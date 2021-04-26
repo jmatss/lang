@@ -11,11 +11,14 @@ use std::collections::HashMap;
 use log::debug;
 
 use common::{
-    ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx, ty_ctx::TyCtx, ty_env::TyEnv},
+    ctx::{
+        analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx, traverse_ctx::TraverseCtx, ty_ctx::TyCtx,
+        ty_env::TyEnv,
+    },
     error::LangError,
     file::{FileId, FileInfo},
     token::ast::AstToken,
-    traverse::traverser::AstTraverser,
+    traverse::traverser::traverse,
 };
 use decl::{
     adt::DeclTypeAnalyzer, block::BlockAnalyzer, built_in::init_built_ins, func::DeclFnAnalyzer,
@@ -31,11 +34,12 @@ use post::{
 };
 use pre::{indexing::IndexingAnalyzer, main_args::MainArgsAnalyzer};
 use ty::{
-    fn_generics_check::FnGenericsCheck, generic_adt_creator::GenericAdtCreator,
-    generic_collector::GenericCollector, generic_fn_creator::GenericFnCreator,
-    generic_tys_solved::GenericTysSolvedChecker, inferencer::TypeInferencer, solver::TypeSolver,
-    traits_fn::TraitsFnAnalyzer,
+    fn_generics_check::FnGenericsCheck, generic_adt_collector::GenericAdtCollector,
+    generic_adt_creator::GenericAdtCreator, generic_fn_collector::GenericFnCollector,
+    generic_fn_creator::GenericFnCreator, generic_tys_solved::GenericTysSolvedChecker,
+    inferencer::TypeInferencer, solver::TypeSolver, traits_fn::TraitsFnAnalyzer,
 };
+use util::order::dependency_order_from_ctx;
 
 // TODO: Error if a function that doesn't have a return type has a return in it.
 // TODO: Make it so that one doesn't have to recreate a new AstVisitor for every
@@ -72,119 +76,115 @@ pub fn analyze(
     file_info: HashMap<FileId, FileInfo>,
 ) -> Result<AnalyzeCtx, Vec<LangError>> {
     let built_ins = init_built_ins(&mut ty_env).map_err(|err| vec![err])?;
+
     let mut ast_ctx = match AstCtx::new(built_ins, file_info) {
         Ok(ast_ctx) => ast_ctx,
         Err(err) => return Err(vec![err]),
     };
     let mut ty_ctx = TyCtx::new(ty_env);
-
-    let mut traverser = AstTraverser::new(&mut ast_ctx, &mut ty_ctx);
+    let mut ctx = TraverseCtx::new(&mut ast_ctx, &mut ty_ctx);
 
     debug!("Running MainArgsAnalyzer");
     let mut main_analyzer = MainArgsAnalyzer::new();
-    traverser.traverse_with_visitor(&mut main_analyzer, ast_root)?;
+    traverse(&mut ctx, &mut main_analyzer, ast_root)?;
 
     debug!("Running IndexingAnalyzer");
     let mut index_analyzer = IndexingAnalyzer::new();
-    traverser.traverse_with_visitor(&mut index_analyzer, ast_root)?;
+    traverse(&mut ctx, &mut index_analyzer, ast_root)?;
 
     debug!("Running BlockAnalyzer");
     let mut block_analyzer = BlockAnalyzer::new();
-    traverser.traverse_with_visitor(&mut block_analyzer, ast_root)?;
+    traverse(&mut ctx, &mut block_analyzer, ast_root)?;
 
     debug!("Running DeclTypeAnalyzer");
     let mut decl_type_analyzer = DeclTypeAnalyzer::new();
-    traverser.traverse_with_visitor(&mut decl_type_analyzer, ast_root)?;
+    traverse(&mut ctx, &mut decl_type_analyzer, ast_root)?;
 
     debug!("Running DeclFnAnalyzer");
     let mut decl_fn_analyzer = DeclFnAnalyzer::new();
-    traverser.traverse_with_visitor(&mut decl_fn_analyzer, ast_root)?;
+    traverse(&mut ctx, &mut decl_fn_analyzer, ast_root)?;
 
     debug!("Running DeclVarAnalyzer");
     let mut decl_var_analyzer = DeclVarAnalyzer::new();
-    traverser
-        .add_visitor(&mut decl_var_analyzer)
-        .traverse_token(ast_root)
-        .clear_visitors()
-        .take_errors_with_ctx()?;
+    traverse(&mut ctx, &mut decl_var_analyzer, ast_root)?;
 
     debug!("Lookup tables after decl step:");
-    traverser.get_ctx().ast_ctx.debug_print();
+    ctx.ast_ctx.debug_print();
 
     debug!("Running MethodAnalyzer");
     let mut method_analyzer = MethodAnalyzer::new();
-    traverser.traverse_with_visitor(&mut method_analyzer, ast_root)?;
+    traverse(&mut ctx, &mut method_analyzer, ast_root)?;
 
     debug!("Running PathResolver");
     let mut path_resolver = PathResolver::new();
-    traverser.traverse_with_visitor(&mut path_resolver, ast_root)?;
+    traverse(&mut ctx, &mut path_resolver, ast_root)?;
 
     debug!("running GenericsAnalyzer");
     let mut generics_analyzer = GenericsAnalyzer::new();
-    traverser.traverse_with_visitor(&mut generics_analyzer, ast_root)?;
+    traverse(&mut ctx, &mut generics_analyzer, ast_root)?;
 
     debug!("Running DeferAnalyzer");
     let mut defer_analyzer = DeferAnalyzer::new();
-    traverser.traverse_with_visitor(&mut defer_analyzer, ast_root)?;
+    traverse(&mut ctx, &mut defer_analyzer, ast_root)?;
 
     debug!("Running TypeInferencer");
     let mut type_inference = TypeInferencer::new();
-    traverser.traverse_with_visitor(&mut type_inference, ast_root)?;
+    traverse(&mut ctx, &mut type_inference, ast_root)?;
 
     debug!("Running TypeSolver");
     let mut type_solver = TypeSolver::new();
-    traverser.traverse_with_visitor(&mut type_solver, ast_root)?;
+    traverse(&mut ctx, &mut type_solver, ast_root)?;
 
     debug!("Running FnGenericsCheck");
     let mut fn_generics_check = FnGenericsCheck::new();
-    traverser.traverse_with_visitor(&mut fn_generics_check, ast_root)?;
+    traverse(&mut ctx, &mut fn_generics_check, ast_root)?;
 
     debug!("Running TraitsFnAnalyzer");
     let mut traits_fn_analyzer = TraitsFnAnalyzer::new();
-    traverser.traverse_with_visitor(&mut traits_fn_analyzer, ast_root)?;
+    traverse(&mut ctx, &mut traits_fn_analyzer, ast_root)?;
 
-    debug!("Running GenericCollector");
-    let mut generic_collector = GenericCollector::new();
-    // TODO: Implement in a safe way.
-    let generic_collector_copy = unsafe {
-        (&mut generic_collector as *mut GenericCollector)
-            .as_mut()
-            .unwrap()
-    };
-    traverser.traverse_with_visitor(&mut generic_collector, ast_root)?;
+    let incl_impls = true;
+    let full_paths = false;
+    let mut dep_order_rev = dependency_order_from_ctx(&mut ctx, ast_root, incl_impls, full_paths)?;
+    dep_order_rev.reverse();
 
-    let generic_methods = std::mem::take(&mut generic_collector_copy.generic_methods);
-    let generic_structs = std::mem::take(&mut generic_collector_copy.generic_adts);
+    debug!("Running GenericFnCollector");
+    let mut generic_fn_collector = GenericFnCollector::new(&dep_order_rev);
+    traverse(&mut ctx, &mut generic_fn_collector, ast_root)?;
 
     debug!("Running GenericFnCreator");
-    let mut generic_fn_creator = GenericFnCreator::new(generic_methods);
-    traverser.traverse_with_visitor(&mut generic_fn_creator, ast_root)?;
+    let mut generic_fn_creator = GenericFnCreator::new(generic_fn_collector.generic_methods);
+    traverse(&mut ctx, &mut generic_fn_creator, ast_root)?;
+
+    debug!("Running GenericAdtCollector");
+    let mut generic_adt_collector = GenericAdtCollector::new(&dep_order_rev);
+    traverse(&mut ctx, &mut generic_adt_collector, ast_root)?;
 
     debug!("Running GenericAdtCreator");
-    let mut generic_adt_creator = GenericAdtCreator::new(generic_structs);
-    traverser.traverse_with_visitor(&mut generic_adt_creator, ast_root)?;
+    let mut generic_adt_creator = GenericAdtCreator::new(generic_adt_collector.generic_adts);
+    traverse(&mut ctx, &mut generic_adt_creator, ast_root)?;
 
     debug!("before generics check -- AST: {:#?}", &ast_root);
 
     debug!("Running GenericTysSolvedChecker");
     let mut generic_ty_solved_check = GenericTysSolvedChecker::new();
-    traverser.traverse_with_visitor(&mut generic_ty_solved_check, ast_root)?;
+    traverse(&mut ctx, &mut generic_ty_solved_check, ast_root)?;
 
     debug!("Running UnionInitArg");
     let mut union_init_arg = UnionInitArg::new();
-    traverser.traverse_with_visitor(&mut union_init_arg, ast_root)?;
+    traverse(&mut ctx, &mut union_init_arg, ast_root)?;
 
     debug!("Running CallArgs");
     let mut call_args = CallArgs::new();
-    traverser.traverse_with_visitor(&mut call_args, ast_root)?;
+    traverse(&mut ctx, &mut call_args, ast_root)?;
 
     debug!("Running ExhaustAnalyzer");
     let mut exhaust_analyzer = ExhaustAnalyzer::new();
-    traverser.traverse_with_visitor(&mut exhaust_analyzer, ast_root)?;
+    traverse(&mut ctx, &mut exhaust_analyzer, ast_root)?;
 
     debug!("Running TraitsGenericAnalyzer");
     let mut traits_generic_analyzer = TraitsGenericAnalyzer::new();
-    traverser.traverse_with_visitor(&mut traits_generic_analyzer, ast_root)?;
+    traverse(&mut ctx, &mut traits_generic_analyzer, ast_root)?;
 
     clean_up(&mut ast_ctx);
 

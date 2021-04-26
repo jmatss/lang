@@ -19,6 +19,7 @@ impl LexToken {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum LexTokenKind {
     Ident(String),
@@ -421,6 +422,7 @@ impl LexToken {
         }
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     fn ret_single_lookup(symbol: Sym) -> Option<(LexTokenKind, usize)> {
         Some((LexTokenKind::Sym(symbol), 1))
     }

@@ -1,6 +1,7 @@
 use super::{block::BlockHeader, expr::Expr, stmt::Stmt};
 use crate::{file::FilePosition, BlockId};
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AstToken {
     // TODO: Rust/C block (statement/expression (?)).

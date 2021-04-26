@@ -158,7 +158,7 @@ impl CallArgs {
 }
 
 impl Visitor for CallArgs {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {
@@ -187,18 +187,14 @@ impl Visitor for CallArgs {
             };
 
             let full_path = match adt_ty {
-                Ty::CompoundType(inner_ty, generics, ..) => match inner_ty {
-                    InnerTy::Struct(mut path)
-                    | InnerTy::Enum(mut path)
-                    | InnerTy::Union(mut path)
-                    | InnerTy::Trait(mut path) => {
+                Ty::CompoundType(inner_ty, gens, ..) => match inner_ty {
+                    InnerTy::Struct(path)
+                    | InnerTy::Enum(path)
+                    | InnerTy::Union(path)
+                    | InnerTy::Trait(path) => {
                         // TODO: Is this needed? Just want to make sure that the
                         //       generics are as up-to-date as possible.
-                        let mut last_part = path.pop().unwrap();
-                        last_part.1 = Some(generics);
-                        path.push(last_part);
-
-                        path
+                        path.with_gens(gens)
                     }
                     _ => {
                         let err = ctx.ast_ctx.err(format!(

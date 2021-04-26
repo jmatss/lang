@@ -102,11 +102,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     fn compile_use(&mut self, _path: &LangPath) -> LangResult<()> {
         // Do nothing, "use"s are done during lexing/parsing for now.
         Ok(())
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     fn compile_module(&mut self, _path: &LangPath) -> LangResult<()> {
         // Do nothing, "module"s are done during lexing/parsing for now.
         Ok(())

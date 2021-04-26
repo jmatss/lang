@@ -1,0 +1,34 @@
+use std::types::String
+
+extern fn printf(format: {u8}, ...) -> i32
+
+fn main() -> i32
+{
+    var str1_or_error = String::init(1)
+    std::assert(str1_or_error.&.is_success())
+
+    var str1 = str1_or_error.&.get_success()
+    var str1_len = str1.len
+    var str1_cap = str1.cap
+    printf("str1 -- len: %d, cap: %d", str1_len, str1_cap)
+    str1.&.deinit()
+    std::assert(str1_len == 0 and str1_cap == 1)
+
+
+    var str2_or_error = String::init_from_lit("firstsecond")
+    std::assert(str2_or_error.&.is_success())
+    var str3_or_error = String::init_from_lit("first")
+    std::assert(str3_or_error.&.is_success())
+
+    var str2 = str2_or_error.&.get_success()
+    var str3 = str3_or_error.&.get_success()
+    printf("\nstr2 -- len: %d, cap: %d", str2.len, str2.cap)
+    printf("\nstr3 -- len: %d, cap: %d", str3.len, str3.cap)
+    str3.&.append_lit("second")
+    printf("\nstr3 after append -- len: %d, cap: %d", str3.len, str3.cap)
+    std::assert(str2.&.eq(str3.&))
+    str2.&.deinit()
+    str3.&.deinit()
+
+    return 0
+}

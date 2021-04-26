@@ -195,7 +195,7 @@ impl MainArgsAnalyzer {
 }
 
 impl Visitor for MainArgsAnalyzer {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {

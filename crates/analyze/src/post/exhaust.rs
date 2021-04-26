@@ -94,6 +94,7 @@ impl ExhaustAnalyzer {
         }
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     fn exhaust_int(&mut self, ctx: &mut TraverseCtx, inner_ty: &InnerTy) -> LangResult<()> {
         // TODO: Implement, currently unable to do it unless every case expr is
         //       hardcoded, but then they would need to cover all possible ints
@@ -103,7 +104,7 @@ impl ExhaustAnalyzer {
 }
 
 impl Visitor for ExhaustAnalyzer {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {

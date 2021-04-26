@@ -95,7 +95,7 @@ pub fn init_built_ins(ty_env: &mut TyEnv) -> LangResult<HashMap<&'static str, Bu
     let name = "is_null";
     let parameters = vec![Var::new(
         "value".into(),
-        Some(any_type_id),
+        Some(any_ptr_type_id),
         None,
         None,
         None,

@@ -18,7 +18,7 @@ use common::{
         block::{Adt, BlockHeader},
         expr::Var,
     },
-    traverse::{traverser::AstTraverser, visitor::Visitor},
+    traverse::{traverser::traverse, visitor::Visitor},
     BlockId, TypeId,
 };
 
@@ -39,27 +39,8 @@ pub fn dependency_order(
     include_impls: bool,
     full_paths: bool,
 ) -> Result<Vec<LangPath>, Vec<LangError>> {
-    // Step 1: Find all ADTs and references between them.
-    // Step 2: Figure out the correct order to compile them in.
-
-    // The key is the name of a ADT and the value set contains names of ADTs that
-    // is referenced from the given "key" ADT. This does NOT include recursive
-    // dependencies, only direct "top level" references.
-    let references = order_step1(analyze_ctx, ast_token, include_impls, full_paths)?;
-    match order_step2(&analyze_ctx.ty_ctx, &references) {
-        Ok(order) => {
-            debug!("ADTs -- references: {:#?}, order: {:#?}", references, order);
-            Ok(order)
-        }
-        Err(cyc_err) => Err(vec![LangError::new(
-            format!(
-                "Cyclic dependency between ADTs \"{}\" and \"{}\". All refs: {:#?}",
-                cyc_err.0, cyc_err.1, references
-            ),
-            LangErrorKind::GeneralError,
-            None,
-        )]),
-    }
+    let mut traverse_ctx = TraverseCtx::new(&mut analyze_ctx.ast_ctx, &mut analyze_ctx.ty_ctx);
+    dependency_order_from_ctx(&mut traverse_ctx, ast_token, include_impls, full_paths)
 }
 
 pub fn dependency_order_from_ctx(
@@ -74,7 +55,7 @@ pub fn dependency_order_from_ctx(
     // The key is the name of a ADT and the value set contains names of ADTs that
     // is referenced from the given "key" ADT. This does NOT include recursive
     // dependencies, only direct "top level" references.
-    let references = order_step1_from_ctx(traverse_ctx, ast_token, include_impls, full_paths)?;
+    let references = order_step1(traverse_ctx, ast_token, include_impls, full_paths)?;
     match order_step2(&traverse_ctx.ty_ctx, &references) {
         Ok(order) => {
             debug!("ADTs -- references: {:#?}, order: {:#?}", references, order);
@@ -95,27 +76,13 @@ pub fn dependency_order_from_ctx(
 /// ADTs. In those cases, the referenced ADTs would need to be handled/compiled
 /// before the referencing ADT.
 fn order_step1(
-    analyze_ctx: &mut AnalyzeCtx,
-    ast_token: &mut AstToken,
-    include_impls: bool,
-    full_paths: bool,
-) -> Result<HashMap<LangPath, HashSet<LangPath>>, Vec<LangError>> {
-    let mut ref_collector = ReferenceCollector::new(include_impls, full_paths);
-    AstTraverser::new(&mut analyze_ctx.ast_ctx, &mut analyze_ctx.ty_ctx)
-        .traverse_with_visitor(&mut ref_collector, ast_token)?;
-
-    Ok(ref_collector.references)
-}
-
-fn order_step1_from_ctx(
     traverse_ctx: &mut TraverseCtx,
     ast_token: &mut AstToken,
     include_impls: bool,
     full_paths: bool,
 ) -> Result<HashMap<LangPath, HashSet<LangPath>>, Vec<LangError>> {
     let mut ref_collector = ReferenceCollector::new(include_impls, full_paths);
-    AstTraverser::from_ctx(traverse_ctx).traverse_with_visitor(&mut ref_collector, ast_token)?;
-
+    traverse(traverse_ctx, &mut ref_collector, ast_token)?;
     Ok(ref_collector.references)
 }
 
@@ -377,7 +344,7 @@ impl ReferenceCollector {
 }
 
 impl Visitor for ReferenceCollector {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {
@@ -442,7 +409,7 @@ impl Visitor for ReferenceCollector {
         }
     }
 
-    fn visit_fn(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
+    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
             // This is a function, not a method. It is not located inside a impl
             // block, so reset the ADT name since it doesn't belong to the ADT.

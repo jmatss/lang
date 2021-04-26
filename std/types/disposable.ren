@@ -1,0 +1,10 @@
+mod std::types
+
+/// A trait used for types that needs to be disposed after use.
+///
+/// This can be ex. structs that have allocated memory that needs to be freed or
+/// sockets that needs to be flushed and closed.
+trait Disposable
+{
+    fn {this} deinit();
+}

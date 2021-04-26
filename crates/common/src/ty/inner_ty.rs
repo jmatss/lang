@@ -68,6 +68,17 @@ impl InnerTy {
         }
     }
 
+    pub fn get_ident_ref(&self) -> Option<&LangPath> {
+        match self {
+            InnerTy::Struct(ident)
+            | InnerTy::Enum(ident)
+            | InnerTy::Union(ident)
+            | InnerTy::Trait(ident)
+            | InnerTy::UnknownIdent(ident, ..) => Some(ident),
+            _ => None,
+        }
+    }
+
     pub fn get_ident_mut(&mut self) -> Option<&mut LangPath> {
         match self {
             InnerTy::Struct(ident)
@@ -93,7 +104,7 @@ impl InnerTy {
         match s {
             "void" => InnerTy::Void,
             "char" => InnerTy::Character,
-            "String" => InnerTy::String,
+            "BuiltInString" => InnerTy::String,
             "bool" => InnerTy::Boolean,
             "i8" => InnerTy::I8,
             "u8" => InnerTy::U8,
@@ -190,7 +201,10 @@ impl InnerTy {
     /// Checks if this InnerTy is a ADT i.e. a struct, enum or union.
     /// It does NOT check if this is a UnknownIdent.
     pub fn is_adt(&self) -> bool {
-        matches!(self, InnerTy::Struct(_) |  InnerTy::Enum(_) | InnerTy::Union(_))
+        matches!(
+            self,
+            InnerTy::Struct(_) | InnerTy::Enum(_) | InnerTy::Union(_)
+        )
     }
 
     pub fn is_trait(&self) -> bool {

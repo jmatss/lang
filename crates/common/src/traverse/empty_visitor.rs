@@ -17,9 +17,15 @@ use super::visitor::Visitor;
 /// should set another visitor before running.
 pub struct DummyVisitor {}
 
+impl Default for DummyVisitor {
+    fn default() -> Self {
+        Self {}
+    }
+}
+
 #[allow(unused)]
 impl Visitor for DummyVisitor {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         unreachable!()
     }
 

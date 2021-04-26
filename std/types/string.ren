@@ -1,0 +1,128 @@
+mod std::types
+
+use std::mem::Allocator
+use std::types::Optional
+use std::types::Result
+
+extern fn strlen(str: {u8}) -> u32
+extern fn strncmp(str1: {u8}, str2: {u8}, len: u32) -> i32
+
+// TODO: Add error handling of allocations etc. Should be done after
+//       std::mem starts using "Result"s to indicate failures.
+
+pub struct String
+{
+    ptr: {u8},
+    len: u32,
+    cap: u32,
+}
+
+impl String
+{
+    pub fn init(cap: u32) -> Result<String, {u8}>
+    {
+        var ptr_or_error = Allocator::init_size<u8>(cap)
+        if ptr is ptr_or_error.success
+        {
+            return Result::success(String { ptr, 0, cap })
+        }
+        else
+        {
+            var error_msg = ptr_or_error.&.get_error()
+            return Result::error(error_msg)
+        }
+    }
+
+    pub fn init_from_lit(str_lit: {u8}) -> Result<String, {u8}>
+    {
+        var len = strlen(str_lit)
+        var ptr_or_error = Allocator::clone<u8>(str_lit, len)
+        if ptr is ptr_or_error.success
+        {
+            return Result::success(String { ptr, len, len })
+        }
+        else
+        {
+            var error_msg = ptr_or_error.&.get_error()
+            return Result::error(error_msg)
+        }
+    }
+
+    // TODO: What should it return in the success case?
+    //       The value doesn't matter in that case.
+    pub fn {this} append_lit(str_lit: {u8}) -> Result<i32, {u8}>
+    {
+        var str_lit_len = strlen(str_lit)
+        if str_lit_len > this.*.cap - this.*.len
+        {
+            if this.resize(str_lit_len).&.is_empty()
+            {
+                return Result::error("Unable to resize String")
+            }
+        }
+
+        var dst = @ptr_add(this.*.ptr, this.*.len)
+        Allocator::copy<u8>(dst, str_lit, str_lit_len)
+
+        this.*.len += str_lit_len
+        return Result::success(0)
+    }
+
+    /// This function makes a new heap allocation to put the null terminated C string in.
+    /// The pointer to the heap allocation is returned and needs to be free'd by the caller.
+    pub fn {this} to_c_string() -> Result<{u8}, {u8}>
+    {
+        var len = this.*.len
+        var ptr_or_error = Allocator::init_size<u8>(len + 1)
+        if abcerr is ptr_or_error.error
+        {
+            return Result::error(abcerr)
+        }
+
+        var c_str_ptr = ptr_or_error.&.get_success()
+        Allocator::copy<u8>(c_str_ptr, this.*.ptr, len)
+
+        var null_byte_ptr = @ptr_add(c_str_ptr, len)
+        null_byte_ptr.* = 0
+
+        return Result::success(c_str_ptr)
+    }
+
+    pub fn {this} eq(other: {String}) -> bool
+    {
+        if this.*.len == other.*.len
+        {
+            return strncmp(this.*.ptr, other.*.ptr, this.*.len) == 0
+        }
+        else
+        {
+            return false
+        }
+    }
+
+    fn {this} resize(min_resize: u32) -> Optional<{u8}>
+    {
+        var new_cap = this.*.cap * 2
+        while new_cap - this.*.len < min_resize
+        {
+            new_cap *= 2
+        }
+
+        var new_ptr_or_empty = Allocator::reinit<u8>(this.*.ptr, new_cap)
+        if new_ptr is new_ptr_or_empty.value
+        {
+            this.*.ptr = new_ptr
+            this.*.cap = new_cap
+        }
+        return new_ptr_or_empty
+    }
+}
+
+impl Disposable for String
+{
+    pub fn {this} deinit()
+    {
+        // TODO: Check ptr for null.
+        Allocator::deinit<u8>(this.*.ptr)
+    }
+}

@@ -6,12 +6,12 @@ use common::{
     ctx::{ast_ctx::AstCtx, traverse_ctx::TraverseCtx},
     error::LangError,
     file::FilePosition,
-    path::{LangPath, LangPathPart},
+    path::LangPath,
     token::{
         ast::AstToken,
         block::{AdtKind, BlockHeader},
     },
-    traverse::{traverser::AstTraverser, visitor::Visitor},
+    traverse::{traverser::traverse_with_deep_copy, visitor::Visitor},
     ty::ty::Ty,
     BlockId, TypeId,
 };
@@ -144,8 +144,8 @@ impl GenericAdtCreator {
                 // inserted both into the AST and into the ADT lookup table
                 // (in AnalyzeContext).
                 debug!(
-                    "Creating new generic ADT in block id {}: {:#?}",
-                    parent_id, new_adt
+                    "Creating new generic ADT in block id {}, new_path: {:?} -- {:#?}",
+                    parent_id, new_path, new_adt
                 );
 
                 let new_adt_rc = Rc::new(RefCell::new(new_adt));
@@ -218,8 +218,8 @@ impl GenericAdtCreator {
                     panic!("{:?}", gen_adt_type_id);
                 };
 
-                let generics = if let Ty::CompoundType(_, generics, ..) = &gen_adt_ty {
-                    generics.clone()
+                let gens = if let Ty::CompoundType(_, gens, ..) = &gen_adt_ty {
+                    gens.clone()
                 } else {
                     let err = ctx.ast_ctx.err(format!(
                         "Generic instance type not compound: {:#?}",
@@ -238,10 +238,7 @@ impl GenericAdtCreator {
                     new_impl_body,
                 ) = &mut new_impl_token
                 {
-                    let mut new_path = old_path.clone();
-                    let last_part = new_path.pop().unwrap();
-                    new_path.push(LangPathPart(last_part.0, Some(generics.clone())));
-
+                    let new_path = old_path.with_gens(gens.clone());
                     *new_impl_path = new_path.clone();
                     (new_impl_body, new_path)
                 } else {
@@ -259,15 +256,10 @@ impl GenericAdtCreator {
 
                 let mut generics_replacer = GenericsReplacer::new_adt(
                     Rc::clone(&new_adt),
-                    &generics,
+                    &gens,
                     old_path,
                     *gen_adt_type_id,
                 );
-
-                let mut traverser = AstTraverser::from_ctx(ctx);
-                traverser
-                    .add_visitor(&mut generics_replacer)
-                    .set_deep_copy(true);
 
                 // For every method of the ADT, replace any generic types with
                 // the type of the generics instances. Also replace any reference
@@ -276,16 +268,18 @@ impl GenericAdtCreator {
                 // This will be done for parameters, return types and bodies.
                 // New instances will be created for all shared references (see
                 // `set_deep_copy(true)` in `AstTraverser`).
-                for mut method in new_impl_body {
+                for method in new_impl_body {
                     if let AstToken::Block(BlockHeader::Fn(..), ..) = method {
-                        traverser
-                            .set_deep_copy_nr(new_idx)
-                            .traverse_token(&mut method);
+                        if let Err(mut errs) =
+                            traverse_with_deep_copy(ctx, &mut generics_replacer, method, new_idx)
+                        {
+                            self.errors.append(&mut errs);
+                            continue;
+                        }
                     }
                 }
 
-                if let Err(mut err) = traverser.take_errors() {
-                    self.errors.append(&mut err);
+                if !self.errors.is_empty() {
                     return None;
                 }
 
@@ -312,7 +306,7 @@ impl GenericAdtCreator {
 }
 
 impl Visitor for GenericAdtCreator {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {

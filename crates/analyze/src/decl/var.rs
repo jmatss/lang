@@ -1,7 +1,7 @@
 use std::{collections::hash_map::Entry, rc::Rc};
 
 use common::{
-    ctx::{ traverse_ctx::TraverseCtx},
+    ctx::traverse_ctx::TraverseCtx,
     error::LangError,
     token::{ast::AstToken, expr::Var, stmt::Stmt},
     traverse::visitor::Visitor,
@@ -33,7 +33,7 @@ impl DeclVarAnalyzer {
 }
 
 impl Visitor for DeclVarAnalyzer {
-    fn take_errors_with_ctx(&mut self, ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() && self.vars_not_found.is_empty() {
             None
         } else {
@@ -56,10 +56,6 @@ impl Visitor for DeclVarAnalyzer {
         }
     }
 
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
-        panic!("Should call `take_errors_with_ctx()` to get better error messages.");
-    }
-
     fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         ctx.ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
     }
@@ -74,9 +70,10 @@ impl Visitor for DeclVarAnalyzer {
                 Entry::Occupied(o) => {
                     let old_file_pos = o.get().borrow().file_pos;
                     let err = ctx.ast_ctx.err(format!(
-                        "Variable \"{}\" declared multiple times in the same scope.\n\
+                        "Variable \"{}\" declared multiple times in the same scope ({}).\n\
                         First declaration at pos:\n{:#?}\nRe-declared at pos:\n{:#?}",
                         &var.borrow().name,
+                        ctx.block_id,
                         old_file_pos,
                         &var.borrow().file_pos,
                     ));

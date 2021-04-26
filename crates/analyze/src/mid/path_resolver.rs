@@ -110,7 +110,7 @@ impl PathResolver {
 }
 
 impl Visitor for PathResolver {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {
@@ -143,7 +143,10 @@ impl Visitor for PathResolver {
                     ),
                     &half_path,
                 );
-                self.errors.push(err);
+
+                if !self.errors.contains(&err) {
+                    self.errors.push(err);
+                }
             }
         }
     }
@@ -168,13 +171,16 @@ impl Visitor for PathResolver {
                     ),
                     &half_path,
                 );
-                self.errors.push(err);
+
+                if !self.errors.contains(&err) {
+                    self.errors.push(err);
+                }
             }
         }
     }
 
     fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Implement(path, _), ..) = ast_token {
+        if let AstToken::Block(BlockHeader::Implement(path, trait_path_opt), ..) = ast_token {
             if let Ok(full_path) =
                 ctx.ast_ctx
                     .calculate_adt_full_path(&ctx.ty_ctx, path, ctx.block_id)
@@ -195,14 +201,47 @@ impl Visitor for PathResolver {
                     path,
                 );
                 err = ctx.ast_ctx.err_trait(&ctx.ty_ctx, err.msg, path);
-                self.errors.push(err);
+
+                if !self.errors.contains(&err) {
+                    self.errors.push(err);
+                }
+            }
+
+            if let Some(trait_path) = trait_path_opt {
+                if let Ok(full_path) =
+                    ctx.ast_ctx
+                        .calculate_adt_full_path(&ctx.ty_ctx, trait_path, ctx.block_id)
+                {
+                    *trait_path = full_path
+                } else if let Ok(full_path) =
+                    ctx.ast_ctx
+                        .calculate_trait_full_path(&ctx.ty_ctx, trait_path, ctx.block_id)
+                {
+                    *trait_path = full_path
+                } else {
+                    let mut err = ctx.ast_ctx.err_trait(
+                        &ctx.ty_ctx,
+                        format!(
+                            "Unable to find full path for trait defined in impl block: {}",
+                            ctx.ty_ctx.to_string_path(&trait_path)
+                        ),
+                        trait_path,
+                    );
+                    err = ctx.ast_ctx.err_trait(&ctx.ty_ctx, err.msg, trait_path);
+
+                    if !self.errors.contains(&err) {
+                        self.errors.push(err);
+                    }
+                }
             }
         }
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
         if let Err(err) = self.resolve_ty_path(ctx, *type_id, ctx.block_id) {
-            self.errors.push(err);
+            if !self.errors.contains(&err) {
+                self.errors.push(err);
+            }
         }
     }
 }

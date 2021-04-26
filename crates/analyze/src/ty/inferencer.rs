@@ -68,7 +68,7 @@ impl TypeInferencer {
 }
 
 impl Visitor for TypeInferencer {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {
@@ -851,7 +851,6 @@ impl Visitor for TypeInferencer {
                     fn_ptr.file_pos
                 ));
                 self.errors.push(err);
-                return;
             }
         } else {
             fn_ptr.fn_ty = Some(new_fn_type_id);

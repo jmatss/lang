@@ -61,10 +61,6 @@ fn main() -> i32
     printf("\nheap_array.*.[0]: %d, (heap_array.*).[1]: %d", heap_array.*.[0], (heap_array.*).[1])
     std::assert(heap_array.*.[0] == 12 and (heap_array.*).[1] == 24)
 
-
-    var heap_array = malloc(8) as {[i32: 2]}
-    heap_array.* = [12, 24]
-
     var abc = TestArrayStruct { 456, heap_array }
     printf("\nabc.a: %d, abc.b.*.[0]: %d, abc.b.*.[1]: %d", abc.a, abc.b.*.[0], abc.b.*.[1])
     std::assert(abc.a == 456 and abc.b.*.[0] == 12 and abc.b.*.[1] == 24)

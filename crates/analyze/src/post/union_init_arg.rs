@@ -21,7 +21,7 @@ impl UnionInitArg {
 }
 
 impl Visitor for UnionInitArg {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {
@@ -40,10 +40,12 @@ impl Visitor for UnionInitArg {
                 adt_init
             ));
             self.errors.push(err);
-            return;
+        } else if adt_init.arguments.get(0).unwrap().name.is_none() {
+            let err = ctx.ast_ctx.err(format!(
+                "Expected named argument in union init but was unnamed: {:#?}",
+                adt_init
+            ));
+            self.errors.push(err);
         }
-
-        // TODO: Does one need to check the name/type here? Is already check
-        //       in the type inference step.
     }
 }

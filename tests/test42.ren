@@ -1,9 +1,8 @@
 use std::mem::Allocator
-use std::mem::Disposable
 use std::mem::Ptr
+use std::types::Disposable
 
 extern fn printf(format: {u8}, ...) -> i32
-extern fn strlen(str: {u8}) -> i32
 
 enum ErrorKind
 {
@@ -37,6 +36,7 @@ fn main() -> i32
 {
     var kind
     var msg
+    var msg_or_error
     var needs_deinit
 
     kind = ErrorKind::FIRST
@@ -45,15 +45,15 @@ fn main() -> i32
     var stack_err = Error { kind, msg, needs_deinit }
 
     kind = ErrorKind::SECOND
-    msg = Allocator::clone<u8>("A heap allocated error message.", 32)
+    msg_or_error = Allocator::clone<u8>("A heap allocated error message.", 32)
+    msg = msg_or_error.&.get_success()
     needs_deinit = true
     var heap_err = Error { kind, msg, needs_deinit }
 
     printf("Stack: %s", stack_err.msg)
     printf("\nHeap: %s", heap_err.msg)
-
-    var a = Ptr::init(heap_err)
-    a.&.deinit()
+    
+    heap_err.&.deinit()
 
     return 0
 }

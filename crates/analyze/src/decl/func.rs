@@ -76,14 +76,6 @@ impl DeclFnAnalyzer {
         // Add the function into decl lookup maps.
         let key = (full_path, parent_id);
         ctx.ast_ctx.fns.insert(key, Rc::clone(func));
-
-        // Add the parameters as variables in the function scope decl lookup.
-        if let Some(params) = &func.borrow().parameters {
-            for param in params {
-                let param_key = (param.borrow().name.clone(), fn_id);
-                ctx.ast_ctx.variables.insert(param_key, Rc::clone(param));
-            }
-        }
     }
 
     fn analyze_method_header(
@@ -91,7 +83,6 @@ impl DeclFnAnalyzer {
         ctx: &mut TraverseCtx,
         adt_path: &LangPath,
         func: &mut Rc<RefCell<Fn>>,
-        func_id: BlockId,
     ) {
         let inner_ty = if ctx.ast_ctx.is_trait(&ctx.ty_ctx, adt_path) {
             InnerTy::Trait(adt_path.clone())
@@ -180,19 +171,11 @@ impl DeclFnAnalyzer {
             self.errors.push(err);
             return;
         }
-
-        // Add the parameters as variables in the method scope.
-        if let Some(params) = &mut func.borrow_mut().parameters {
-            for param in params {
-                let param_key = (param.borrow().name.clone(), func_id);
-                ctx.ast_ctx.variables.insert(param_key, Rc::clone(param));
-            }
-        }
     }
 }
 
 impl Visitor for DeclFnAnalyzer {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {
@@ -306,7 +289,7 @@ impl Visitor for DeclFnAnalyzer {
                         | InnerTy::Enum(path)
                         | InnerTy::Union(path)
                         | InnerTy::Trait(path) => {
-                            self.analyze_method_header(ctx, &path, func, *func_id);
+                            self.analyze_method_header(ctx, &path, func);
                         }
 
                         _ => unreachable!(

@@ -151,9 +151,19 @@ impl AstCtx {
         };
 
         if let Some(module) = self.get_module(id)? {
-            let module_path = module.join(path, module.file_pos().cloned());
-            if self.get_decl_scope(ty_ctx, &module_path, id, map).is_ok() {
-                return Ok(module_path);
+            let file_pos = if let Some(path_file_pos) = path.file_pos() {
+                if let Some(mut new_file_pos) = module.file_pos().cloned() {
+                    new_file_pos.set_end(path_file_pos)?;
+                    Some(new_file_pos)
+                } else {
+                    Some(*path_file_pos)
+                }
+            } else {
+                module.file_pos().cloned()
+            };
+            let new_path = module.join(path, file_pos);
+            if self.get_decl_scope(ty_ctx, &new_path, id, map).is_ok() {
+                return Ok(new_path);
             }
         }
 
@@ -335,32 +345,6 @@ impl AstCtx {
         }
     }
 
-    /// Given a name of a declaration `name`, returns a mutable reference
-    /// to the declaration in the AST.
-    /// The assumption is that all declarations (ADTs/Traits) are declared in
-    /// the default block.
-    fn get_mut<'a, T>(
-        &self,
-        ty_ctx: &TyCtx,
-        name: &LangPath,
-        map: &'a HashMap<(LangPath, BlockId), Rc<RefCell<T>>>,
-    ) -> LangResult<RefMut<'a, T>> {
-        let decl_block_id = BlockCtx::DEFAULT_BLOCK_ID;
-        let key = (name.clone(), decl_block_id);
-
-        if let Some(item) = map.get(&key) {
-            Ok(item.borrow_mut())
-        } else {
-            Err(self.err(format!(
-                "Unable to find decl with name \"{}\" ({:#?}) in decl block ID {}.\nMap keys:\n{:#?}",
-                ty_ctx.to_string_path(name),
-                name,
-                decl_block_id,
-                map.keys()
-            )))
-        }
-    }
-
     /// Checks if there exists a struct with name `path.
     pub fn is_struct(&self, ty_ctx: &TyCtx, path: &LangPath) -> bool {
         if let Ok(adt) = self.get_adt(ty_ctx, path) {
@@ -496,8 +480,9 @@ impl AstCtx {
             Ok(Rc::clone(method))
         } else {
             Err(self.err(format!(
-                "Unable to find method named \"{}\" in ADT \"{:#?}\".",
+                "Unable to find method named \"{}\" in ADT \"{}\".\nExisting methods: {:#?}.",
                 &method_name,
+                ty_ctx.to_string_path(adt_name),
                 &adt.methods.keys(),
             )))
         }

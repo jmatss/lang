@@ -269,9 +269,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
         // If the next token isn't a "PointyBracketBegin" there are no generic
         // list, just return a empty generics.
         if let Some(lex_token) = self.iter.next_skip_space() {
-            if let LexTokenKind::Sym(Sym::PointyBracketBegin) = lex_token.kind {
-                // Do nothing, parse generic list in logic underneath.
-            } else {
+            if !matches!(lex_token.kind, LexTokenKind::Sym(Sym::PointyBracketBegin)) {
                 self.iter.rewind_to_pos(pos);
                 return Ok((Some(generics), None));
             }

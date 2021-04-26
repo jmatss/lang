@@ -258,7 +258,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             //BlockHeader::Defer(expr) => self.compile_defer(expr),
 
             //BlockHeader::Test(test_func) => self.compile_test_func(expr),
-            _ => panic!(format!("TODO: compile_block type: {:?}", header)),
+            _ => panic!("{}", format!("TODO: compile_block type: {:?}", header)),
         }
 
         Ok(())
@@ -290,11 +290,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         func_id: BlockId,
         body: &mut [AstToken],
     ) -> LangResult<()> {
-        let module = if let Some(module) = self.analyze_ctx.ast_ctx.get_module(self.cur_block_id)? {
-            module
-        } else {
-            LangPath::default()
-        };
+        let module = self
+            .analyze_ctx
+            .ast_ctx
+            .get_module(self.cur_block_id)?
+            .unwrap_or_default();
 
         let fn_name = if let Some(adt_type_id) = &func.method_adt {
             let adt_ty = self.analyze_ctx.ty_ctx.ty_env.ty(*adt_type_id)?;
@@ -412,22 +412,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> LangResult<FunctionValue<'ctx>> {
         debug!("compile_fn_proto: {:#?}", func);
 
-        let module = if let Some(module) = self.analyze_ctx.ast_ctx.get_module(self.cur_block_id)? {
-            module
-        } else {
-            LangPath::default()
-        };
+        let module = self
+            .analyze_ctx
+            .ast_ctx
+            .get_module(self.cur_block_id)?
+            .unwrap_or_default();
 
         let fn_name = if let Some(adt_type_id) = &func.method_adt {
             let adt_ty = self.analyze_ctx.ty_ctx.ty_env.ty(*adt_type_id)?;
             if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
-                let last_part = adt_path.last().unwrap();
-                let adt_path_without_gens = LangPath::new(vec![last_part.clone()], None);
+                let adt_path_without_module =
+                    LangPath::new(vec![adt_path.last().unwrap().clone()], None);
 
                 util::to_method_name(
                     &self.analyze_ctx.ty_ctx,
-                    &adt_path_without_gens,
+                    &adt_path_without_module,
                     Some(adt_gens),
                     &func.name,
                     None,
@@ -486,11 +486,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .fn_type(param_types.as_slice(), func.is_var_arg)
         };
 
-        Ok(self.module.add_function(
-            &self.analyze_ctx.ty_ctx.to_string_path(&full_path),
-            fn_type,
-            linkage_opt,
-        ))
+        let fn_name = self.analyze_ctx.ty_ctx.to_string_path(&full_path);
+        if let Some(fn_ptr) = self.module.get_function(&fn_name) {
+            Ok(fn_ptr)
+        } else {
+            Ok(self.module.add_function(&fn_name, fn_type, linkage_opt))
+        }
     }
 
     fn compile_anon(

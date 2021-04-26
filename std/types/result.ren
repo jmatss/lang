@@ -1,0 +1,65 @@
+mod std::types
+
+// TODO: What should be stored inside the `error` variant?
+pub union Result<T, E>
+{
+    success: T,
+    error: E,
+}
+
+impl Result
+{
+    fn success(val: T = @null<T>()) -> Result<T, E>
+    {
+        return Result<T, E> { success = val}
+    }
+
+    fn error(err: E = @null<E>()) -> Result<T, E>
+    {
+        return Result<T, E> { error = err }
+    }
+
+    fn {this} is_success() -> bool
+    {
+        if _ is this.*.success
+        {
+            return true
+        }
+        else
+        {
+            return false
+        }
+    }
+
+    fn {this} is_error() -> bool
+    {
+        return not this.is_success()
+    }
+
+    fn {this} get_success() -> T
+    {
+        return this.*.success
+    }
+
+    fn {this} get_success_or(default: T) -> T
+    {
+        if val is this.*.success
+        {
+            return val
+        }
+        else
+        {
+            return default
+        }
+    }
+
+    fn {this} get_error() -> E
+    {
+        return this.*.error
+    }
+
+    fn {this} set(val: T)
+    {
+        this.*.success = val
+    }
+}

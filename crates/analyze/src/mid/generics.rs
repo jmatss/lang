@@ -3,7 +3,7 @@ use common::{
     error::LangError,
     path::LangPathPart,
     token::{ast::AstToken, block::BlockHeader},
-    traverse::{traverser::AstTraverser, visitor::Visitor},
+    traverse::{traverser::traverse, visitor::Visitor},
     ty::generics::Generics,
     TypeId,
 };
@@ -25,7 +25,7 @@ impl GenericsAnalyzer {
 }
 
 impl Visitor for GenericsAnalyzer {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {
@@ -120,12 +120,8 @@ impl Visitor for GenericsAnalyzer {
                 // Replaces any generics declared on the function.
                 if let Some(func_generics) = func_generics {
                     let mut func_replacer = FuncGenericsReplacer::new(&func_generics);
-                    if let Err(mut err) = AstTraverser::from_ctx(ctx)
-                        .add_visitor(&mut func_replacer)
-                        .traverse_token(method)
-                        .take_errors()
-                    {
-                        self.errors.append(&mut err);
+                    if let Err(mut errs) = traverse(ctx, &mut func_replacer, method) {
+                        self.errors.append(&mut errs);
                         return;
                     }
                 }
@@ -133,12 +129,8 @@ impl Visitor for GenericsAnalyzer {
                 // Replaces any generics declared on the ADT/Trait.
                 if !adt_generics.is_empty() {
                     let mut adt_replacer = FuncGenericsReplacer::new(&adt_generics);
-                    if let Err(mut err) = AstTraverser::from_ctx(ctx)
-                        .add_visitor(&mut adt_replacer)
-                        .traverse_token(method)
-                        .take_errors()
-                    {
-                        self.errors.append(&mut err);
+                    if let Err(mut errs) = traverse(ctx, &mut adt_replacer, method) {
+                        self.errors.append(&mut errs);
                         return;
                     }
                 }
@@ -165,7 +157,7 @@ impl<'a> FuncGenericsReplacer<'a> {
 }
 
 impl<'a> Visitor for FuncGenericsReplacer<'a> {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {

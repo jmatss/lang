@@ -114,9 +114,7 @@ impl Generics {
     }
 
     pub fn insert_type(&mut self, id: TypeId) {
-        if !self.types.contains(&id) {
-            self.types.push(id);
-        }
+        self.types.push(id);
     }
 
     pub fn iter_names(&self) -> std::slice::Iter<String> {

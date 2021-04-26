@@ -1,2 +1,5 @@
 test42.ren
 ../std/mem.ren
+../std/types/disposable.ren
+../std/types/optional.ren
+../std/types/result.ren

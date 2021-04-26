@@ -15,5 +15,5 @@ fn remove_unused<K, V>(map: &mut HashMap<K, Rc<V>>)
 where
     K: Eq + Hash,
 {
-    map.retain(|_, v| Rc::strong_count(v) > 1);
+    map.retain(|_, v| Rc::strong_count(v) >= 2);
 }

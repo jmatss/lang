@@ -9,24 +9,31 @@ struct TestStruct
 fn main() -> i32
 {
     var i_u64: u64 = 123
-    var a = Allocator::init<u64>(i_u64)
+    var a_or_error = Allocator::init<u64>(i_u64)
+    var a = a_or_error.&.get_success()
     defer Allocator::deinit<u64>(a)
 
 
-    var b = Allocator::init_size<f32>(4)
+    var b_or_error = Allocator::init_size<f32>(4)
+    var b = b_or_error.&.get_success()
     b.* = 678.0
     Allocator::deinit<f32>(b)
 
 
-    var c = Allocator::init<TestStruct>()
-    var d = Allocator::init<u64>(456)
+    var c_or_error = Allocator::init<TestStruct>()
+    var c = c_or_error.&.get_success()
+    var d_or_error = Allocator::init<u64>(456)
+    var d = d_or_error.&.get_success()
     Allocator::deinit<u64>(d)
     Allocator::deinit<TestStruct>(c)
 
 
-    var e = Allocator::init<u64>(123 as u64)
-    var f = Allocator::reinit<u64>(e, 128)
+    var e_or_error = Allocator::init<u64>(123 as u64)
+    var e = e_or_error.&.get_success()
+    var f_or_empty = Allocator::reinit<u64>(e, 128)
+    var f = f_or_empty.&.get()
     Allocator::deinit<u64>(f)
+
 
     return 0
 }

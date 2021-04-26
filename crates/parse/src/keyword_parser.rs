@@ -456,6 +456,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// ```
     ///
     /// The "break" keyword has already been consumed when this function is called.
+    #[allow(clippy::unnecessary_wraps)]
     fn parse_break(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
         Ok(AstToken::Stmt(Stmt::Break(Some(file_pos))))
     }
@@ -469,6 +470,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// ```
     ///
     /// The "continue" keyword has already been consumed when this function is called.
+    #[allow(clippy::unnecessary_wraps)]
     fn parse_continue(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
         Ok(AstToken::Stmt(Stmt::Continue(Some(file_pos))))
     }

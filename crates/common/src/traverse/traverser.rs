@@ -1,9 +1,8 @@
-use std::{cell::RefCell, rc::Rc, time::Instant};
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    ctx::{ast_ctx::AstCtx, traverse_ctx::TraverseCtx, ty_ctx::TyCtx},
+    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangErrorKind},
-    file::FilePosition,
     token::{
         ast::AstToken,
         block::BlockHeader,
@@ -11,137 +10,115 @@ use crate::{
         op::{Op, UnOperator},
         stmt::Stmt,
     },
+    ty::ty::Ty,
     TypeId,
 };
 
 use super::visitor::Visitor;
 
-pub struct AstTraverser<'a> {
-    visitors: Vec<&'a mut dyn Visitor>,
-    ctx: TraverseCtx<'a>,
+/// Traverses AST nodes staring from the node `ast_token` with the context found
+/// in `ctx`.  For every AST node traversed, `visitor` will be called depending
+/// on what node type it is.
+///
+/// The context will be reset both before and after the traversal. This is done
+/// to ensure that a previous traversal doesn't affect the result of this new
+/// traversal.
+pub fn traverse<V>(
+    ctx: &mut TraverseCtx,
+    visitor: &mut V,
+    ast_token: &mut AstToken,
+) -> Result<(), Vec<LangError>>
+where
+    V: Visitor,
+{
+    traverse_priv(ctx, visitor, ast_token, None)
+}
+
+pub fn traverse_with_deep_copy<V>(
+    ctx: &mut TraverseCtx,
+    visitor: &mut V,
+    ast_token: &mut AstToken,
+    deep_copy_nr: usize,
+) -> Result<(), Vec<LangError>>
+where
+    V: Visitor,
+{
+    traverse_priv(ctx, visitor, ast_token, Some(deep_copy_nr))
+}
+
+fn traverse_priv<V>(
+    ctx: &mut TraverseCtx,
+    visitor: &mut V,
+    ast_token: &mut AstToken,
+    deep_copy_nr: Option<usize>,
+) -> Result<(), Vec<LangError>>
+where
+    V: Visitor,
+{
+    ctx.reset();
+    let result = AstTraverser::new(ctx, visitor)
+        .set_deep_copy_nr(deep_copy_nr)
+        .traverse_token_with_end(ast_token)
+        .take_errors();
+    ctx.reset();
+    result
+}
+
+/// A struct used to traverse AST nodes. This traverser will recursively traverse
+/// a given AST node and call functions on the given `self.visitor` depending
+/// on the node type that it is visiting(/traversing).
+struct AstTraverser<'a, 'ctx, V: Visitor> {
+    /// Context regarding the AST that this traverse will keep track of. This
+    /// will be given to `self.visitor` during the traversal to provide more
+    /// context and also a way to "communicate" between Visitor and Traverser.
+    ctx: &'a mut TraverseCtx<'ctx>,
+
+    /// The struct that wants to traverse the AST with this traverser.
+    visitor: &'a mut V,
 
     errors: Vec<LangError>,
 }
 
-/// Traverses the AST.
-impl<'a> AstTraverser<'a> {
-    pub fn new(ast_ctx: &'a mut AstCtx, ty_ctx: &'a mut TyCtx) -> Self {
+impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
+    fn new(ctx: &'a mut TraverseCtx<'ctx>, visitor: &'a mut V) -> Self {
         Self {
-            visitors: Vec::default(),
+            ctx,
+            visitor,
             errors: Vec::default(),
-            ctx: TraverseCtx {
-                ast_ctx,
-                ty_ctx,
-                deep_copy: false,
-                copy_nr: None,
-                block_id: 0,
-                file_pos: FilePosition::default(),
-                stop: false,
-            },
         }
     }
 
-    pub fn from_ctx(traverse_ctx: &'a mut TraverseCtx) -> Self {
-        Self::new(&mut traverse_ctx.ast_ctx, &mut traverse_ctx.ty_ctx)
-    }
-
-    pub fn get_ctx(&mut self) -> &mut TraverseCtx<'a> {
-        &mut self.ctx
-    }
-
-    pub fn add_visitor(&mut self, visitor: &'a mut dyn Visitor) -> &mut Self {
-        self.visitors.push(visitor);
+    fn set_deep_copy_nr(&mut self, copy_nr: Option<usize>) -> &mut Self {
+        self.ctx.copy_nr = copy_nr;
         self
     }
 
-    pub fn clear_visitors(&mut self) -> &mut Self {
-        self.visitors.clear();
-        self
-    }
-
-    /// A convenient help function equivalent to calling the chain of commands:
-    ///
-    /// ```no_run
-    /// traverser.add_visitor(v).traverse_token(t).take_errors()?.clear_visitors()
-    /// ```
-    pub fn traverse_with_visitor(
-        &mut self,
-        visitor: &'a mut dyn Visitor,
-        ast_token: &mut AstToken,
-    ) -> Result<&mut Self, Vec<LangError>> {
-        let timer = Instant::now();
-        let result = self
-            .add_visitor(visitor)
-            .traverse_token(ast_token)
-            .take_errors();
-        debug!("Elapsed: {:?}", timer.elapsed());
-        Ok(result?.clear_visitors())
-    }
-
-    pub fn has_errors(&self) -> bool {
-        !self.errors.is_empty()
-    }
-
-    pub fn set_deep_copy(&mut self, deep_copy: bool) -> &mut Self {
-        self.ctx.deep_copy = deep_copy;
-        self
-    }
-
-    pub fn set_deep_copy_nr(&mut self, copy_nr: usize) -> &mut Self {
-        self.ctx.copy_nr = Some(copy_nr);
-        self
-    }
-
-    pub fn take_errors(&mut self) -> Result<&mut Self, Vec<LangError>> {
-        for visitor in self.visitors.iter_mut() {
-            if let Some(ref mut visitor_errs) = visitor.take_errors() {
-                self.errors.append(visitor_errs);
-            }
-        }
-
-        if self.errors.is_empty() {
-            Ok(self)
+    pub fn take_errors(&mut self) -> Result<(), Vec<LangError>> {
+        if let Some(errors) = self.visitor.take_errors(&mut self.ctx) {
+            Err(errors)
         } else {
-            Err(std::mem::take(&mut self.errors))
+            Ok(())
         }
     }
 
-    pub fn take_errors_with_ctx(&mut self) -> Result<&mut Self, Vec<LangError>> {
-        for visitor in self.visitors.iter_mut() {
-            if let Some(ref mut visitor_errs) = visitor.take_errors_with_ctx(&mut self.ctx) {
-                self.errors.append(visitor_errs);
-            }
-        }
-
-        if self.errors.is_empty() {
-            Ok(self)
-        } else {
-            Err(std::mem::take(&mut self.errors))
-        }
-    }
-
-    pub fn traverse_token(&mut self, ast_token: &mut AstToken) -> &mut Self {
-        self.traverse_token_priv(ast_token);
-        for v in self.visitors.iter_mut() {
-            if self.ctx.stop {
-                return self;
-            }
-            v.visit_end(&mut self.ctx);
+    fn traverse_token_with_end(&mut self, ast_token: &mut AstToken) -> &mut Self {
+        self.traverse_token(ast_token);
+        if !self.ctx.stop {
+            self.visitor.visit_end(&mut self.ctx);
         }
         self
     }
 
-    fn traverse_token_priv(&mut self, mut ast_token: &mut AstToken) -> &mut Self {
+    fn traverse_token(&mut self, mut ast_token: &mut AstToken) {
         let old_pos = self.ctx.file_pos.to_owned();
         if let Some(file_pos) = ast_token.file_pos() {
             self.ctx.file_pos = file_pos.to_owned();
         }
 
-        for v in self.visitors.iter_mut() {
-            if self.ctx.stop {
-                return self;
-            }
-            v.visit_token(ast_token, &mut self.ctx);
+        if !self.ctx.stop {
+            self.visitor.visit_token(ast_token, &mut self.ctx);
+        } else {
+            return;
         }
 
         match &mut ast_token {
@@ -150,7 +127,7 @@ impl<'a> AstTraverser<'a> {
                 if let AstToken::Block(.., id, body) = ast_token {
                     for body_token in body {
                         self.ctx.block_id = *id;
-                        self.traverse_token_priv(body_token);
+                        self.traverse_token(body_token);
                     }
                 }
             }
@@ -160,21 +137,18 @@ impl<'a> AstTraverser<'a> {
             AstToken::Empty => debug!("Visiting Empty block"),
             AstToken::EOF => {
                 debug!("Visiting EOF");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return self;
-                    }
-                    v.visit_eof(ast_token, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_eof(ast_token, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
         }
 
         self.ctx.file_pos = old_pos;
-
-        self
     }
 
-    pub fn traverse_block(&mut self, mut ast_token: &mut AstToken) {
+    fn traverse_block(&mut self, mut ast_token: &mut AstToken) {
         let old_pos = self.ctx.file_pos.to_owned();
         if let Some(file_pos) = ast_token.file_pos() {
             self.ctx.file_pos = file_pos.to_owned();
@@ -185,32 +159,30 @@ impl<'a> AstTraverser<'a> {
         }
 
         debug!("Visiting block -- {:#?}", ast_token);
-        for v in self.visitors.iter_mut() {
-            if self.ctx.stop {
-                return;
-            }
-            v.visit_block(ast_token, &mut self.ctx);
+        if !self.ctx.stop {
+            self.visitor.visit_block(ast_token, &mut self.ctx);
+        } else {
+            return;
         }
 
         match &mut ast_token {
             AstToken::Block(header, ..) => match header {
                 BlockHeader::Default => {
                     debug!("Visiting default block");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_default_block(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_default_block(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::Fn(func) => {
-                    if self.ctx.deep_copy {
+                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
                         let mut new_func = func.borrow().clone();
 
                         if let Some(params) = &mut new_func.parameters {
                             for param in params {
                                 let mut new_param = param.borrow().clone();
-                                new_param.set_copy_nr(self.ctx.copy_nr.unwrap());
+                                new_param.set_copy_nr(deep_copy_nr);
                                 *param = Rc::new(RefCell::new(new_param));
                             }
                         }
@@ -234,11 +206,10 @@ impl<'a> AstTraverser<'a> {
                             // smoothly.
                             let file_pos = param.borrow().file_pos.to_owned();
                             let mut var_decl = Stmt::VariableDecl(Rc::clone(param), file_pos);
-                            for v in self.visitors.iter_mut() {
-                                if self.ctx.stop {
-                                    return;
-                                }
-                                v.visit_var_decl(&mut var_decl, &mut self.ctx);
+                            if !self.ctx.stop {
+                                self.visitor.visit_var_decl(&mut var_decl, &mut self.ctx);
+                            } else {
+                                return;
                             }
                         }
                     }
@@ -258,20 +229,19 @@ impl<'a> AstTraverser<'a> {
                     }
 
                     debug!("Visiting func");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_fn(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_fn(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::Struct(struct_) => {
-                    if self.ctx.deep_copy {
+                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
                         let mut new_struct = struct_.borrow().clone();
 
                         for member in new_struct.members.iter_mut() {
                             let mut new_member = member.borrow().clone();
-                            new_member.set_copy_nr(self.ctx.copy_nr.unwrap());
+                            new_member.set_copy_nr(deep_copy_nr);
                             *member = Rc::new(RefCell::new(new_member));
                         }
 
@@ -280,9 +250,9 @@ impl<'a> AstTraverser<'a> {
 
                     // TODO: Visit `implements`?
                     for member in struct_.borrow_mut().members.iter_mut() {
-                        if self.ctx.deep_copy {
+                        if let Some(deep_copy_nr) = self.ctx.copy_nr {
                             let mut new_member = member.borrow().clone();
-                            new_member.set_copy_nr(self.ctx.copy_nr.unwrap());
+                            new_member.set_copy_nr(deep_copy_nr);
                             *member = Rc::new(RefCell::new(new_member));
                         }
 
@@ -309,20 +279,19 @@ impl<'a> AstTraverser<'a> {
                     }
 
                     debug!("Visiting struct");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_struct(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_struct(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::Enum(enum_) => {
-                    if self.ctx.deep_copy {
+                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
                         let mut new_enum = enum_.borrow().clone();
 
                         for member in new_enum.members.iter_mut() {
                             let mut new_member = member.borrow().clone();
-                            new_member.set_copy_nr(self.ctx.copy_nr.unwrap());
+                            new_member.set_copy_nr(deep_copy_nr);
                             *member = Rc::new(RefCell::new(new_member));
                         }
 
@@ -337,20 +306,19 @@ impl<'a> AstTraverser<'a> {
                     }
 
                     debug!("Visiting enum");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_enum(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_enum(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::Union(union) => {
-                    if self.ctx.deep_copy {
+                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
                         let mut new_union = union.borrow().clone();
 
                         for member in new_union.members.iter_mut() {
                             let mut new_member = member.borrow().clone();
-                            new_member.set_copy_nr(self.ctx.copy_nr.unwrap());
+                            new_member.set_copy_nr(deep_copy_nr);
                             *member = Rc::new(RefCell::new(new_member));
                         }
 
@@ -358,9 +326,9 @@ impl<'a> AstTraverser<'a> {
                     }
 
                     for member in union.borrow_mut().members.iter_mut() {
-                        if self.ctx.deep_copy {
+                        if let Some(deep_copy_nr) = self.ctx.copy_nr {
                             let mut new_member = member.borrow().clone();
-                            new_member.set_copy_nr(self.ctx.copy_nr.unwrap());
+                            new_member.set_copy_nr(deep_copy_nr);
                             *member = Rc::new(RefCell::new(new_member));
                         }
 
@@ -390,49 +358,44 @@ impl<'a> AstTraverser<'a> {
                     }
 
                     debug!("Visiting union");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_union(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_union(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::Trait(_) => {
                     // TODO: Visit containing methods?
 
                     debug!("Visiting trait");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_trait(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_trait(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::Implement(..) => {
                     debug!("Visiting impl");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_impl(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_impl(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::Anonymous => {
                     debug!("Visiting anon");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_anon(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_anon(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::If => {
                     debug!("Visiting if");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_if(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_if(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::IfCase(expr_opt) => {
@@ -440,21 +403,19 @@ impl<'a> AstTraverser<'a> {
                         self.traverse_expr(expr);
                     }
                     debug!("Visiting if case");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_if_case(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_if_case(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::Match(expr) => {
                     self.traverse_expr(expr);
                     debug!("Visiting match");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_match(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_match(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::MatchCase(expr_opt) => {
@@ -462,11 +423,10 @@ impl<'a> AstTraverser<'a> {
                         self.traverse_expr(expr);
                     }
                     debug!("Visiting match case");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_match_case(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_match_case(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::For(var, expr) => {
@@ -476,11 +436,10 @@ impl<'a> AstTraverser<'a> {
 
                     self.traverse_expr(expr);
                     debug!("Visiting for");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_for(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_for(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::While(expr_opt) => {
@@ -488,19 +447,18 @@ impl<'a> AstTraverser<'a> {
                         self.traverse_expr(expr);
                     }
                     debug!("Visiting while");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_while(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_while(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
                 BlockHeader::Test(func) => {
-                    if self.ctx.deep_copy {
+                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
                         if let Some(params) = &mut func.parameters {
                             for param in params {
                                 let mut new_param = param.borrow().clone();
-                                new_param.set_copy_nr(self.ctx.copy_nr.unwrap());
+                                new_param.set_copy_nr(deep_copy_nr);
                                 *param = Rc::new(RefCell::new(new_param));
                             }
                         }
@@ -520,11 +478,10 @@ impl<'a> AstTraverser<'a> {
                     }
 
                     debug!("Visiting test");
-                    for v in self.visitors.iter_mut() {
-                        if self.ctx.stop {
-                            return;
-                        }
-                        v.visit_test(ast_token, &mut self.ctx);
+                    if !self.ctx.stop {
+                        self.visitor.visit_test(ast_token, &mut self.ctx);
+                    } else {
+                        return;
                     }
                 }
             },
@@ -546,7 +503,7 @@ impl<'a> AstTraverser<'a> {
         self.ctx.file_pos = old_pos;
     }
 
-    pub fn traverse_expr(&mut self, expr: &mut Expr) {
+    fn traverse_expr(&mut self, expr: &mut Expr) {
         let old_pos = self.ctx.file_pos.to_owned();
         if let Some(file_pos) = expr.file_pos() {
             self.ctx.file_pos = file_pos.to_owned();
@@ -555,11 +512,10 @@ impl<'a> AstTraverser<'a> {
         match expr {
             Expr::Lit(..) => {
                 debug!("Visiting lit");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_lit(expr, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_lit(expr, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Expr::Var(var) => {
@@ -568,11 +524,10 @@ impl<'a> AstTraverser<'a> {
                 }
 
                 debug!("Visiting var");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_var(var, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_var(var, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Expr::FnCall(fn_call) => {
@@ -591,11 +546,10 @@ impl<'a> AstTraverser<'a> {
                 }
 
                 debug!("Visiting fn call");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_fn_call(fn_call, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_fn_call(fn_call, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Expr::FnPtr(fn_ptr) => {
@@ -610,11 +564,10 @@ impl<'a> AstTraverser<'a> {
                 }
 
                 debug!("Visiting fn ptr");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_fn_ptr(expr, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_fn_ptr(expr, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Expr::BuiltInCall(built_in_call) => {
@@ -629,11 +582,11 @@ impl<'a> AstTraverser<'a> {
                 }
 
                 debug!("Visiting built in call");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_built_in_call(built_in_call, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor
+                        .visit_built_in_call(built_in_call, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Expr::AdtInit(adt_init) => {
@@ -648,11 +601,10 @@ impl<'a> AstTraverser<'a> {
                 }
 
                 debug!("Visiting ADT init");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_adt_init(adt_init, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_adt_init(adt_init, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Expr::ArrayInit(array_init) => {
@@ -660,11 +612,10 @@ impl<'a> AstTraverser<'a> {
                     self.traverse_expr(&mut arg.value);
                 }
                 debug!("Visiting array init");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_array_init(array_init, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_array_init(array_init, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Expr::Op(Op::BinOp(bin_op)) => {
@@ -672,11 +623,10 @@ impl<'a> AstTraverser<'a> {
                 self.traverse_expr(&mut bin_op.rhs);
 
                 debug!("Visiting bin op");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_bin_op(bin_op, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_bin_op(bin_op, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Expr::Op(Op::UnOp(un_op)) => {
@@ -690,11 +640,10 @@ impl<'a> AstTraverser<'a> {
                 }
 
                 debug!("Visiting un op");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_un_op(un_op, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_un_op(un_op, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Expr::Type(ty, ..) => self.traverse_type(ty),
@@ -707,17 +656,16 @@ impl<'a> AstTraverser<'a> {
         }
 
         debug!("Visiting expr -- {:#?}", expr);
-        for v in self.visitors.iter_mut() {
-            if self.ctx.stop {
-                return;
-            }
-            v.visit_expr(expr, &mut self.ctx);
+        if !self.ctx.stop {
+            self.visitor.visit_expr(expr, &mut self.ctx);
+        } else {
+            return;
         }
 
         self.ctx.file_pos = old_pos;
     }
 
-    pub fn traverse_stmt(&mut self, stmt: &mut Stmt) {
+    fn traverse_stmt(&mut self, stmt: &mut Stmt) {
         let old_pos = self.ctx.file_pos.to_owned();
         if let Some(file_pos) = stmt.file_pos() {
             self.ctx.file_pos = file_pos.to_owned();
@@ -729,118 +677,112 @@ impl<'a> AstTraverser<'a> {
                     self.traverse_expr(expr);
                 }
                 debug!("Visiting return");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_return(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_return(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::Yield(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting yield");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_yield(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_yield(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::Break(_) => {
                 debug!("Visiting break");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_break(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_break(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::Continue(_) => {
                 debug!("Visiting continue");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_continue(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_continue(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::Use(..) => {
                 debug!("Visiting use");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_use(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_use(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::Module(..) => {
                 debug!("Visiting package");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_package(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_package(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::Increment(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting increment");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_inc(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_inc(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::Decrement(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting decrement");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_dec(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_dec(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::Defer(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting defer");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_defer(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_defer(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::DeferExec(expr) => {
                 self.traverse_expr(expr);
                 debug!("Visiting defer exec");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_defer_exec(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_defer_exec(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::Assignment(_, lhs, rhs, _) => {
                 self.traverse_expr(lhs);
                 self.traverse_expr(rhs);
                 debug!("Visiting assignment");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_assignment(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_assignment(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::VariableDecl(var, _) => {
-                if self.ctx.deep_copy {
+                if let Some(deep_copy_nr) = self.ctx.copy_nr {
                     let mut new_var = var.borrow().clone();
-                    new_var.set_copy_nr(self.ctx.copy_nr.unwrap());
+                    new_var.set_copy_nr(deep_copy_nr);
                     *var = Rc::new(RefCell::new(new_var));
                 }
 
-                if let Some(value) = &mut var.borrow_mut().value {
+                let unsafe_var_value = unsafe {
+                    ((&mut var.borrow_mut().value) as *mut Option<Box<Expr>>)
+                        .as_mut()
+                        .unwrap()
+                };
+                if let Some(value) = unsafe_var_value {
                     self.traverse_expr(value);
                 }
 
@@ -849,20 +791,18 @@ impl<'a> AstTraverser<'a> {
                 }
 
                 debug!("Visiting var decl");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_var_decl(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_var_decl(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
             Stmt::ExternalDecl(..) => {
                 debug!("Visiting extern decl");
-                for v in self.visitors.iter_mut() {
-                    if self.ctx.stop {
-                        return;
-                    }
-                    v.visit_extern_decl(stmt, &mut self.ctx);
+                if !self.ctx.stop {
+                    self.visitor.visit_extern_decl(stmt, &mut self.ctx);
+                } else {
+                    return;
                 }
             }
         }
@@ -870,21 +810,21 @@ impl<'a> AstTraverser<'a> {
         self.ctx.file_pos = old_pos;
 
         debug!("Visiting stmt -- {:#?}", stmt);
-        for v in self.visitors.iter_mut() {
-            if self.ctx.stop {
-                return;
-            }
-            v.visit_stmt(stmt, &mut self.ctx);
+        if !self.ctx.stop {
+            self.visitor.visit_stmt(stmt, &mut self.ctx);
+        } else {
+            return;
         }
 
         self.ctx.file_pos = old_pos;
     }
 
-    pub fn traverse_type(&mut self, id: &mut TypeId) {
+    fn traverse_type(&mut self, type_id: &mut TypeId) {
         // TODO: Does the FilePosition need to be updated?
 
         // TODO: Make safe.
-        if let Ok(exprs) = self.ctx.ty_ctx.ty_env.get_exprs_mut(*id) {
+        /*
+        if let Ok(exprs) = self.ctx.ty_ctx.ty_env.get_exprs_mut(*type_id) {
             let mut unsafe_exprs = Vec::with_capacity(exprs.len());
             for expr in exprs {
                 let unsafe_expr = unsafe { (expr as *mut Expr).as_mut().unwrap() };
@@ -894,13 +834,71 @@ impl<'a> AstTraverser<'a> {
                 self.traverse_expr(expr);
             }
         }
+        */
+        if !self.ctx.stop {
+            debug!("Visiting type -- {:#?}", type_id);
+            self.visitor.visit_type(type_id, &mut self.ctx);
 
-        debug!("Visiting type -- {:#?}", id);
-        for v in self.visitors.iter_mut() {
-            if self.ctx.stop {
-                return;
+            // TODO: Make safe.
+            let unsafe_self = unsafe { (self as *mut AstTraverser<V>).as_mut().unwrap() };
+
+            match self.ctx.ty_ctx.ty_env.ty_mut(*type_id).unwrap() {
+                Ty::Pointer(type_id_i, ..)
+                | Ty::UnknownAdtMember(type_id_i, ..)
+                | Ty::UnknownMethodGeneric(type_id_i, ..)
+                | Ty::UnknownArrayMember(type_id_i, ..) => {
+                    unsafe_self.traverse_type(type_id_i);
+                }
+
+                Ty::CompoundType(inner_ty, gens, ..) => {
+                    if let Some(path) = inner_ty.get_ident_mut() {
+                        if let Some(path_gens) =
+                            path.last_mut().map(|part| part.1.as_mut()).flatten()
+                        {
+                            for gen_type_id in path_gens.iter_types_mut() {
+                                unsafe_self.traverse_type(gen_type_id);
+                            }
+                        }
+                    }
+
+                    for gen_type_id in gens.iter_types_mut() {
+                        unsafe_self.traverse_type(gen_type_id);
+                    }
+                }
+
+                Ty::Array(type_id_i, expr_opt, ..) => {
+                    unsafe_self.traverse_type(type_id_i);
+
+                    if let Some(expr) = expr_opt {
+                        unsafe_self.traverse_expr(expr);
+                    }
+                }
+
+                Ty::Fn(gens, params, ret_type_id_opt, ..) => {
+                    for type_id_i in gens.iter_mut().chain(params) {
+                        unsafe_self.traverse_type(type_id_i);
+                    }
+
+                    if let Some(ret_type_id) = ret_type_id_opt {
+                        unsafe_self.traverse_type(ret_type_id);
+                    }
+                }
+
+                Ty::Expr(expr, ..) => {
+                    unsafe_self.traverse_expr(expr);
+                }
+
+                Ty::UnknownAdtMethod(type_id_i, _, gen_tys, ..)
+                | Ty::UnknownMethodArgument(type_id_i, _, gen_tys, ..) => {
+                    unsafe_self.traverse_type(type_id_i);
+
+                    for gen_type_id in gen_tys.iter_mut() {
+                        unsafe_self.traverse_type(gen_type_id);
+                    }
+                }
+
+                Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => (),
             }
-            v.visit_type(id, &mut self.ctx);
         }
     }
 }

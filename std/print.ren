@@ -1,0 +1,45 @@
+mod std
+
+use std::types::Optional
+
+extern fn strlen(str: {u8}) -> i32
+
+struct FormatParser
+{
+    pos: u32,
+    cap: u32,
+    str: {u8},
+}
+
+impl FormatParser
+{
+    fn new(str: {u8}) -> FormatParser
+    {
+        var pos = 0
+        var cap = strlen(str) as u32
+        return FormatParser { pos, cap, str }
+    }
+
+    fn {this} next_u8() -> Optional<u8>
+    {
+        var pos = this.*.pos
+        var cap = this.*.cap
+        if pos < cap
+        {
+            var next_ptr = @ptr_add(this.*.str, pos)
+            this.*.pos += 1
+            return Optional::value(next_ptr.*)
+        }
+        else
+        {
+            return Optional::empty()
+        }
+    }
+
+    fn {this} has_next() -> bool
+    {
+        return this.*.pos < this.*.cap
+    }
+    
+    fn
+}

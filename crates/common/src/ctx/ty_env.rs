@@ -1,4 +1,3 @@
-use core::panic;
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -154,6 +153,12 @@ impl TyEnv {
         if !self.ty_to_id.contains_key(&ty) {
             let id = TypeId(self.type_id);
             self.type_id += 1;
+
+            debug!("new_ty -- type_id: {}, ty: {:#?}", id, ty);
+
+            if self.type_id == 56 + 1 {
+                //panic!("new_ty -- type_id: {}, ty: {:#?}", id, ty);
+            }
 
             self.ty_to_id.insert(ty.clone(), id);
             self.id_to_ty.insert(id, ty);
@@ -689,14 +694,15 @@ impl TyEnv {
                 }
             }
 
-            // Edge case if this is a GenericInstance and the type to replace it
-            // with is also a GenericInstance or Generic, don't do it. No need to
-            // replace itself.
-            Ty::GenericInstance(ident, ..) => {
+            Ty::GenericInstance(ident, unique_id, ..) => {
                 if let Some(impl_type_id) = generics_impl.get(ident) {
                     match self.ty(impl_type_id)? {
                         Ty::Generic(..) => false,
-                        Ty::GenericInstance(inner_ident, ..) if inner_ident == ident => false,
+                        Ty::GenericInstance(_, impl_unique_id, ..)
+                            if impl_unique_id == unique_id =>
+                        {
+                            false
+                        }
                         _ => {
                             ty_clone = self.ty(impl_type_id)?.clone();
                             true
@@ -707,8 +713,11 @@ impl TyEnv {
                 }
             }
 
-            Ty::CompoundType(_, gens_clone, ..) => {
+            // Need to update generics both in the type `gens_clone` and the
+            // generics declared inside a potential LangPath of the InnerTy.
+            Ty::CompoundType(inner_ty, gens_clone, ..) => {
                 let mut was_updated = false;
+
                 for gen_type_id in gens_clone.iter_types_mut() {
                     if let Some(new_gen_type_id) =
                         self.replace_gen_impls(*gen_type_id, generics_impl)?
@@ -717,6 +726,22 @@ impl TyEnv {
                         was_updated = true;
                     }
                 }
+
+                if let Some(path) = inner_ty.get_ident_mut() {
+                    if let Some(inner_gens_clune) =
+                        path.last_mut().map(|part| part.1.as_mut()).flatten()
+                    {
+                        for gen_type_id in inner_gens_clune.iter_types_mut() {
+                            if let Some(new_gen_type_id) =
+                                self.replace_gen_impls(*gen_type_id, generics_impl)?
+                            {
+                                *gen_type_id = new_gen_type_id;
+                                was_updated = true;
+                            }
+                        }
+                    }
+                }
+
                 was_updated
             }
 
@@ -1564,25 +1589,26 @@ impl TyEnv {
         Ok(())
     }
 
-    /// Checks if the type with ID `child_id` can be found in type with ID `parent_id`.
-    /// This is a "deep" check i.e. the "contents" of the type matters as well,
-    /// NOT only that the "type" of the type. This function will only return true
-    /// if at any recursive call `parent_id` == `child_id`.
-    pub fn contains_ty_deep(&self, parent_id: TypeId, child_id: TypeId) -> LangResult<bool> {
-        if parent_id == child_id {
-            return Ok(true);
-        }
+    /// Checks if the type with ID `type_id` contains generics with any of the
+    /// names found in `gen_names`. The function will check both Generic's and
+    /// GenericInstance's.
+    pub fn contains_generic_with_name(
+        &self,
+        type_id: TypeId,
+        gen_names: &[String],
+    ) -> LangResult<bool> {
+        Ok(match self.ty(type_id)? {
+            Ty::Generic(gen_name, ..) | Ty::GenericInstance(gen_name, ..) => {
+                gen_names.contains(gen_name)
+            }
 
-        Ok(match self.ty(parent_id)? {
-            Ty::CompoundType(_, gens, _) => {
-                let mut contains = false;
+            Ty::CompoundType(_, gens, ..) => {
                 for type_id in gens.iter_types() {
-                    if self.contains_ty_deep(*type_id, child_id)? {
-                        contains = true;
-                        break;
+                    if self.contains_generic_with_name(*type_id, gen_names)? {
+                        return Ok(true);
                     }
                 }
-                contains
+                false
             }
 
             Ty::Pointer(type_id, ..)
@@ -1591,17 +1617,35 @@ impl TyEnv {
             | Ty::UnknownAdtMethod(type_id, ..)
             | Ty::UnknownMethodArgument(type_id, ..)
             | Ty::UnknownMethodGeneric(type_id, ..)
-            | Ty::UnknownArrayMember(type_id, ..) => self.contains_ty_deep(*type_id, child_id)?,
+            | Ty::UnknownArrayMember(type_id, ..) => {
+                self.contains_generic_with_name(*type_id, gen_names)?
+            }
 
             Ty::Expr(expr, ..) => {
                 if let Ok(type_id) = expr.get_expr_type() {
-                    self.contains_ty_deep(type_id, child_id)?
+                    self.contains_generic_with_name(type_id, gen_names)?
                 } else {
                     false
                 }
             }
 
-            _ => false,
+            Ty::Fn(gens, params, ret_type_id_opt, ..) => {
+                for type_id_i in gens.iter().chain(params) {
+                    if self.contains_generic_with_name(*type_id_i, gen_names)? {
+                        return Ok(true);
+                    }
+                }
+
+                if let Some(ret_type_id) = ret_type_id_opt {
+                    if self.contains_generic_with_name(*ret_type_id, gen_names)? {
+                        return Ok(true);
+                    }
+                }
+
+                false
+            }
+
+            Ty::Any(..) => false,
         })
     }
 
@@ -1740,7 +1784,7 @@ impl TyEnv {
 
     pub fn contains_generic_decl_shallow(&mut self, id: TypeId) -> LangResult<bool> {
         let gen_ty = Ty::Generic("".into(), 0, TypeInfo::None);
-        Ok(self.contains_ty_shallow(id, &gen_ty)?)
+        self.contains_ty_shallow(id, &gen_ty)
     }
 
     pub fn contains_generic_shallow(&mut self, id: TypeId) -> LangResult<bool> {
@@ -1937,6 +1981,7 @@ impl TyEnv {
         }
     }
 
+    #[allow(clippy::suspicious_operation_groupings)]
     pub fn is_compatible_inner_ty(
         &self,
         first_inner_ty: &InnerTy,
@@ -2107,7 +2152,7 @@ impl TyEnv {
         second_id: TypeId,
     ) -> LangResult<Ordering> {
         match self.prec_allow_eq(sub_sets, first_id, second_id)? {
-            Ordering::Equal => self.prec_eq(first_id, second_id),
+            Ordering::Equal => Ok(self.prec_eq(first_id, second_id)),
             res => Ok(res),
         }
     }
@@ -2124,7 +2169,7 @@ impl TyEnv {
         second_id: TypeId,
     ) -> LangResult<Ordering> {
         if first_id == second_id {
-            return self.prec_eq(first_id, second_id);
+            return Ok(self.prec_eq(first_id, second_id));
         }
 
         let inf_first_id = sub_sets.map_or(Ok(first_id), |sets| sets.inferred_type(first_id))?;
@@ -2460,11 +2505,11 @@ impl TyEnv {
     /// Function used when the two types have the same preference. This function
     /// will decide which type is preferred. The type with the lowest type ID is
     /// preferred. If the given type IDs are equal, the first is preferred.
-    fn prec_eq(&self, first_id: TypeId, second_id: TypeId) -> LangResult<Ordering> {
-        Ok(if first_id <= second_id {
+    fn prec_eq(&self, first_id: TypeId, second_id: TypeId) -> Ordering {
+        if first_id <= second_id {
             Ordering::Less
         } else {
             Ordering::Greater
-        })
+        }
     }
 }

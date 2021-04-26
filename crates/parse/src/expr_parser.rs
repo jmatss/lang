@@ -1,4 +1,3 @@
-use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 use log::debug;
 
 use common::{
@@ -18,6 +17,7 @@ use common::{
     },
     TypeId,
 };
+use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 
 use crate::{
     parser::ParseTokenIter,

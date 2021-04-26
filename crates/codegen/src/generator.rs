@@ -89,6 +89,7 @@ pub fn generate<'a, 'ctx>(
     // specifiy type/func prototypes above their use in the source code.
     code_gen.compile_type_decl(ast_root)?;
     code_gen.compile_fn_decl(ast_root)?;
+
     code_gen.compile(ast_root)?;
 
     // TODO: Temporary solution, loop through all merge blocks and look for all

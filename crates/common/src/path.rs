@@ -97,10 +97,18 @@ impl LangPath {
     }
 
     pub fn without_gens(&self) -> LangPath {
-        let mut path_without_gens = self.clone();
-        let last_part = path_without_gens.pop().unwrap();
-        path_without_gens.push(LangPathPart(last_part.0, None));
-        path_without_gens
+        self.with_gens_opt(None)
+    }
+
+    pub fn with_gens(&self, generics: Generics) -> LangPath {
+        self.with_gens_opt(Some(generics))
+    }
+
+    fn with_gens_opt(&self, generics: Option<Generics>) -> LangPath {
+        let mut path = self.clone();
+        let last_part = path.pop().unwrap();
+        path.push(LangPathPart(last_part.0, generics));
+        path
     }
 
     /// Removes the last "part" of the path from this LangPath and returns it.

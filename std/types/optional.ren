@@ -20,7 +20,7 @@ impl Optional
 
     fn {this} has_value() -> bool
     {
-        if value is this.*.value
+        if _ is this.*.value
         {
             return true
         }

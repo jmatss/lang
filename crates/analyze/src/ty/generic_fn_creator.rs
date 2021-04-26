@@ -7,12 +7,14 @@ use common::{
     error::LangError,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader},
-    traverse::{traverser::AstTraverser, visitor::Visitor},
+    traverse::{traverser::traverse_with_deep_copy, visitor::Visitor},
     ty::generics::Generics,
 };
 
 use super::generic_replace::GenericsReplacer;
 
+/// Iterate through all functions that take generic parameters. Creates new
+/// instances of them replacing the generics with actual implementations.
 pub struct GenericFnCreator {
     /// The first string is the path of the ADT and the second string is the name
     /// of the method.
@@ -21,8 +23,6 @@ pub struct GenericFnCreator {
     errors: Vec<LangError>,
 }
 
-/// Iterate throughall functions that take generic parameters. Creates new instances
-/// of them replacing the generics with actual implementations.
 impl GenericFnCreator {
     pub fn new(generic_methods: HashMap<LangPath, HashMap<String, Vec<Generics>>>) -> Self {
         debug!("generic_methods: {:#?}", generic_methods);
@@ -70,14 +70,13 @@ impl GenericFnCreator {
 
                         let mut generics_replacer = GenericsReplacer::new_func(method_generics);
 
-                        if let Err(mut err) = AstTraverser::from_ctx(ctx)
-                            .add_visitor(&mut generics_replacer)
-                            .set_deep_copy(true)
-                            .set_deep_copy_nr(idx)
-                            .traverse_token(&mut new_method)
-                            .take_errors()
-                        {
-                            self.errors.append(&mut err);
+                        if let Err(mut errs) = traverse_with_deep_copy(
+                            ctx,
+                            &mut generics_replacer,
+                            &mut new_method,
+                            idx,
+                        ) {
+                            self.errors.append(&mut errs);
                             return;
                         }
 
@@ -136,7 +135,7 @@ impl GenericFnCreator {
 }
 
 impl Visitor for GenericFnCreator {
-    fn take_errors(&mut self) -> Option<Vec<LangError>> {
+    fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
         } else {

@@ -1,4 +1,5 @@
 extern fn printf(format: {u8}, ...) -> i32
+extern fn strlen(str: {u8}) -> i32
 
 fn main() -> i32
 {
@@ -19,6 +20,8 @@ fn main() -> i32
     var new_ptr_sub = @ptr_sub(x.&, 2)
     printf("\nnew_ptr_sub: 0x%p", new_ptr_sub)
     std::assert(x.& as i64 - new_ptr_sub as i64 == 16)
+
+    strlen("abc")
 
     return 0
 }

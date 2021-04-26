@@ -1,55 +1,63 @@
 mod std::mem
 
+use std::types::Optional
+use std::types::Result
+
+//use std::types::Disposable
+
 extern fn malloc(size: u32) -> {u8}
 extern fn free(ptr: {u8})
 extern fn realloc(ptr: {u8}, size: u32) -> {u8}
 extern fn printf(format: {u8}, ...) -> i32
 extern fn memcpy(dest: {u8}, src: {u8}, size: u32) -> {u8}
 
-/// A trait used for types that needs to be disposed after use.
-/// This can be ex. structs that have allocated memory that needs to be freed or
-/// sockets that needs to be flused and closed.
-trait Disposable
-{
-    fn {this} deinit();
-}
+// TODO: Implement error handling. Return "Result"s from functions.
 
 /// A basic heap allocator that can be used to work with heap allocated data.
 pub struct Allocator;
 impl Allocator
 {
-    pub fn init<T>(value: T = @null<T>()) -> {T}
+    pub fn init<T>(value: T = @null<T>()) -> Result<{T}, {u8}>
     {
-        var ptr = Allocator::init_size<T>(@size<T>())
-        ptr.* = value
-        return ptr
+        var ptr_or_error = Allocator::init_size<T>(@size<T>())
+        if ptr is ptr_or_error.success
+        {
+            ptr.* = value
+        }
+        return ptr_or_error
     }
 
-    pub fn init_size<T>(size: u32) -> {T}
+    pub fn init_size<T>(size: u32) -> Result<{T}, {u8}>
     {
         var ptr = malloc(size) as {T}
-        printf("Allocation (size: %d, ptr: 0x%p)\n", size, ptr)
-        return ptr
-    }
-
-    pub fn reinit<T>(ptr: {T}, size: u32) -> {T}
-    {
-        var new_ptr = realloc(ptr as {u8}, size) as {T}
-        if new_ptr == @null<{T}>()
+        if not @is_null(ptr)
         {
-            printf("Reallocation failed (size: %d, ptr: 0x%p)\n", size, new_ptr)
-            return ptr
+            return Result::success(ptr)
         }
         else
         {
-            printf("Reallocation success (size: %d, old_ptr: 0x%p, new_ptr: 0x%p)\n", size, ptr, new_ptr)
-            return new_ptr
+            return Result::error("Unable to allocate memory")
+        }
+    }
+
+    /// Re-allocates the heap memory with a new size `size`.
+    /// After a successful re-allocation, the new pointer will returned in the Optional value.
+    /// If the allocation failed, the function will return an empty Optional.
+    pub fn reinit<T>(ptr: {T}, size: u32) -> Optional<{T}>
+    {
+        var new_ptr = realloc(ptr as {u8}, size) as {T}
+        if not @is_null(new_ptr)
+        {
+            return Optional::value(new_ptr)
+        }
+        else
+        {
+            return Optional::empty()
         }
     }
 
     pub fn deinit<T>(ptr: {T})
     {
-        printf("Deallocation (ptr: 0x%p)\n", ptr)
         free(ptr as {u8})
     }
     
@@ -57,22 +65,27 @@ impl Allocator
     /// and returns a pointer to the new allocation.
     /// If `size` isn't set, it will default to the size of `T`.
     /// Implemented using libc `memcpy`.
-    fn clone<T>(src: {T}, size: u32 = @size<T>() as u32) -> {T}
+    fn clone<T>(src: {T}, size: u32 = @size<T>() as u32) -> Result<{T}, {u8}>
     {
-        var dest = Allocator::init_size<T>(size)
-        memcpy(dest as {u8}, src as {u8}, size)
-        return dest
+        var ptr_or_error = Allocator::init_size<T>(size)
+        if dst is ptr_or_error.success
+        {
+            memcpy(dst as {u8}, src as {u8}, size)
+        }
+        return ptr_or_error
     }
 
-    /// Copies `size` bytes from `src` to `dest`.
+    /// Copies `size` bytes from `src` to `dst`.
     /// If `size` isn't set, it will default to the size of `T`.
     /// Implemented using libc `memcpy`.
-    pub fn copy<T>(dest: {T}, src: {T}, size: u32 = @size<T>() as u32)
+    pub fn copy<T>(dst: {T}, src: {T}, size: u32 = @size<T>() as u32)
     {
-        memcpy(dest as {u8}, src as {u8}, size)
+        memcpy(dst as {u8}, src as {u8}, size)
     }
 }
 
+// TODO: How should this work?
+/*
 /// Represent a pointer to a heap allocated value of type `T`.
 struct Ptr<T> where T impls Disposable
 {
@@ -99,3 +112,4 @@ impl Disposable for Ptr
         Allocator::deinit<T>(this.*.ptr)
     }
 }
+*/
