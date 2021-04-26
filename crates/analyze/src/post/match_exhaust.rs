@@ -27,11 +27,11 @@ use common::{
 
 /// Makes sure that match statements are exhaustive, otherwise a error should be
 /// reported.
-pub struct ExhaustAnalyzer {
+pub struct MatchExhaustAnalyzer {
     errors: Vec<LangError>,
 }
 
-impl ExhaustAnalyzer {
+impl MatchExhaustAnalyzer {
     pub fn new() -> Self {
         Self {
             errors: Vec::default(),
@@ -103,7 +103,7 @@ impl ExhaustAnalyzer {
     }
 }
 
-impl Visitor for ExhaustAnalyzer {
+impl Visitor for MatchExhaustAnalyzer {
     fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None

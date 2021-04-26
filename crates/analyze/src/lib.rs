@@ -29,7 +29,7 @@ use mid::{
     path_resolver::PathResolver,
 };
 use post::{
-    call_args::CallArgs, clean_up::clean_up, exhaust::ExhaustAnalyzer,
+    call_args::CallArgs, clean_up::clean_up, match_exhaust::MatchExhaustAnalyzer,
     traits_generic::TraitsGenericAnalyzer, union_init_arg::UnionInitArg,
 };
 use pre::{indexing::IndexingAnalyzer, main_args::MainArgsAnalyzer};
@@ -178,8 +178,8 @@ pub fn analyze(
     let mut call_args = CallArgs::new();
     traverse(&mut ctx, &mut call_args, ast_root)?;
 
-    debug!("Running ExhaustAnalyzer");
-    let mut exhaust_analyzer = ExhaustAnalyzer::new();
+    debug!("Running MatchExhaustAnalyzer");
+    let mut exhaust_analyzer = MatchExhaustAnalyzer::new();
     traverse(&mut ctx, &mut exhaust_analyzer, ast_root)?;
 
     debug!("Running TraitsGenericAnalyzer");
