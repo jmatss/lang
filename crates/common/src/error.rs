@@ -1,6 +1,5 @@
 use crate::{file::FilePosition, ENV_VAR};
 use backtrace::Backtrace;
-use inkwell::support::LLVMString;
 use log::Level;
 use std::error::Error;
 use std::fmt;
@@ -103,12 +102,6 @@ impl From<std::num::ParseFloatError> for LangError {
 impl From<std::io::Error> for LangError {
     fn from(e: std::io::Error) -> Self {
         LangError::new(e.to_string(), LangErrorKind::LexError, None)
-    }
-}
-
-impl From<LLVMString> for LangError {
-    fn from(e: LLVMString) -> Self {
-        LangError::new(e.to_string(), LangErrorKind::CodeGenError, None)
     }
 }
 

@@ -1,5 +1,8 @@
 use crate::LangResult;
-use common::error::{LangError, LangErrorKind::CompileError};
+use common::error::{
+    LangError,
+    LangErrorKind::{self, CompileError},
+};
 use inkwell::{
     module::Module,
     passes::PassManager,
@@ -19,7 +22,8 @@ pub fn setup_target() -> LangResult<TargetMachine> {
     let reloc_mode = RelocMode::Default;
     let code_model = CodeModel::Default;
 
-    let target = Target::from_triple(&triple)?;
+    let target = Target::from_triple(&triple)
+        .map_err(|e| LangError::new(e.to_string(), LangErrorKind::CodeGenError, None))?;
     if let Some(machine) =
         target.create_target_machine(&triple, &cpu, &features, level, reloc_mode, code_model)
     {

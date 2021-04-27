@@ -129,7 +129,6 @@ dependencies = [
  "backtrace",
  "either",
  "env_logger",
- "inkwell",
  "log",
 ]
 
@@ -330,7 +329,6 @@ dependencies = [
 name = "parse"
 version = "0.1.0"
 dependencies = [
- "backtrace",
  "common",
  "lex",
  "log",

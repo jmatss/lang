@@ -197,7 +197,9 @@ fn main() -> LangResult<()> {
     }
 
     let compile_timer = Instant::now();
-    module.verify()?;
+    module
+        .verify()
+        .map_err(|e| LangError::new(e.to_string(), LangErrorKind::CodeGenError, None))?;
     compiler::compile(target_machine, &module, &opts.output_file, opts.optimize)?;
     println!("Compiling complete ({:?}).", compile_timer.elapsed());
 

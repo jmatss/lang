@@ -8,7 +8,6 @@ edition = "2018"
 
 [dependencies]
 log = "0.4.11"
-backtrace = "0.3.50"
 
 common = { path = "../common" }
 lex = { path = "../lex" }
