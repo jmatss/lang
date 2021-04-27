@@ -137,14 +137,6 @@ impl Visitor for DummyVisitor {
         unreachable!()
     }
 
-    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
-        unreachable!()
-    }
-
-    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
-        unreachable!()
-    }
-
     fn visit_defer(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         unreachable!()
     }

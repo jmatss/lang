@@ -89,18 +89,24 @@ impl BlockAnalyzer {
     /// a new scope where every block created inside them only has access to
     /// this block + globals.
     fn is_root(&self, header: &BlockHeader) -> bool {
-        matches!(header, BlockHeader::Fn(_)
-            | BlockHeader::Struct(_)
-            | BlockHeader::Enum(_)
-            | BlockHeader::Trait(_)
-            | BlockHeader::Implement(..)
-            | BlockHeader::Default)
+        matches!(
+            header,
+            BlockHeader::Fn(_)
+                | BlockHeader::Struct(_)
+                | BlockHeader::Enum(_)
+                | BlockHeader::Trait(_)
+                | BlockHeader::Implement(..)
+                | BlockHeader::Default
+        )
     }
 
     /// Returns true if the given header is a "branchable" block i.e. a block
     /// that can contain branch instructions like "break".
     fn is_branchable(&self, header: &BlockHeader) -> bool {
-        matches!(header, BlockHeader::Match(_) | BlockHeader::For(_, _) | BlockHeader::While(_))
+        matches!(
+            header,
+            BlockHeader::Match(_) | BlockHeader::For(_, _) | BlockHeader::While(_)
+        )
     }
 
     /// Sets the information about if a statement exists in `block_info`.
@@ -175,9 +181,7 @@ impl BlockAnalyzer {
                 self.module = Some(path.clone());
             }
 
-            Stmt::Increment(..)
-            | Stmt::Decrement(..)
-            | Stmt::Assignment(..)
+            Stmt::Assignment(..)
             | Stmt::VariableDecl(..)
             | Stmt::ExternalDecl(..)
             | Stmt::DeferExec(_) => (),

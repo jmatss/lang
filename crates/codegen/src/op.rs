@@ -326,7 +326,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 // Do nothing.
                 Ok(any_value)
             }
+
             UnOperator::Negative => self.compile_un_op_negative(ret_type, un_op),
+            UnOperator::Increment => self.compile_un_op_inc(un_op),
+            UnOperator::Decrement => self.compile_un_op_dec(un_op),
             UnOperator::BitComplement => panic!("TODO: Bit complement"),
             UnOperator::BoolNot => self.compile_un_op_bool_not(ret_type, un_op),
         }
@@ -1629,6 +1632,70 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         );
 
         Ok(enum_ty.const_named_struct(&[basic_value]).into())
+    }
+
+    fn compile_un_op_inc(&mut self, un_op: &mut UnOp) -> LangResult<AnyValueEnum<'ctx>> {
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
+
+        let ptr = if let AnyTypeEnum::PointerType(_) = any_value.get_type() {
+            any_value.into_pointer_value()
+        } else {
+            return Err(self.err(
+                "Expression to increment didn't eval to int pointer.".into(),
+                un_op.file_pos.to_owned(),
+            ));
+        };
+
+        let val = self.builder.build_load(ptr, "inc.load");
+        let new_value = if let BasicValueEnum::IntValue(value) = val {
+            let sign_extend = false;
+            let one = value.get_type().const_int(1, sign_extend);
+            if value.is_const() {
+                value.const_add(one)
+            } else {
+                self.builder.build_int_add(value, one, "inc")
+            }
+        } else {
+            return Err(self.err(
+                "Load of value to increment didn't eval to int.".into(),
+                un_op.file_pos.to_owned(),
+            ));
+        };
+
+        self.builder.build_store(ptr, new_value);
+        Ok(self.builder.build_load(ptr, "inc.res").into())
+    }
+
+    fn compile_un_op_dec(&mut self, un_op: &mut UnOp) -> LangResult<AnyValueEnum<'ctx>> {
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
+
+        let ptr = if let AnyTypeEnum::PointerType(_) = any_value.get_type() {
+            any_value.into_pointer_value()
+        } else {
+            return Err(self.err(
+                "Expression to decrement didn't eval to int pointer.".into(),
+                un_op.file_pos.to_owned(),
+            ));
+        };
+
+        let val = self.builder.build_load(ptr, "dec.load");
+        let new_value = if let BasicValueEnum::IntValue(value) = val {
+            let sign_extend = false;
+            let one = value.get_type().const_int(1, sign_extend);
+            if value.is_const() {
+                value.const_sub(one)
+            } else {
+                self.builder.build_int_sub(value, one, "dec")
+            }
+        } else {
+            return Err(self.err(
+                "Load of value to decrement didn't eval to int.".into(),
+                un_op.file_pos.to_owned(),
+            ));
+        };
+
+        self.builder.build_store(ptr, new_value);
+        Ok(self.builder.build_load(ptr, "dec.res").into())
     }
 
     fn compile_un_op_negative(

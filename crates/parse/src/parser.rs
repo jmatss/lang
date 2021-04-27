@@ -242,15 +242,6 @@ impl<'a> ParseTokenIter<'a> {
                     AstToken::Comment(msg, comment_type, self.file_pos.to_owned())
                 }
 
-                LexTokenKind::Sym(Sym::Increment) => {
-                    let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                    AstToken::Stmt(Stmt::Increment(expr, Some(self.file_pos.to_owned())))
-                }
-                LexTokenKind::Sym(Sym::Decrement) => {
-                    let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
-                    AstToken::Stmt(Stmt::Decrement(expr, Some(self.file_pos.to_owned())))
-                }
-
                 // Error if the iterator finds a lonely symbol of these types:
                 LexTokenKind::Sym(Sym::ParenthesisEnd)
                 | LexTokenKind::Sym(Sym::CurlyBracketEnd)

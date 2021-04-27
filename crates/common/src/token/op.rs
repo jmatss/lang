@@ -117,6 +117,10 @@ pub enum UnOperator {
     Positive,
     Negative,
 
+    // Inc/dec is always evaluated before use.
+    Increment,
+    Decrement,
+
     // TODO: Slice/slicing.
     /// The expression is the dimension.
     ArrayAccess(Box<Expr>),

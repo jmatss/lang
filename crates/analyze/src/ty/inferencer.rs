@@ -1568,6 +1568,8 @@ impl Visitor for TypeInferencer {
         match &mut un_op.operator {
             UnOperator::Positive
             | UnOperator::Negative
+            | UnOperator::Increment
+            | UnOperator::Decrement
             | UnOperator::BitComplement
             | UnOperator::BoolNot => {
                 self.insert_constraint(ctx, ret_type_id, val_type_id);
@@ -2203,64 +2205,6 @@ impl Visitor for TypeInferencer {
             if let Some(rhs_type_id) = rhs_type_id_opt {
                 self.insert_constraint(ctx, var.ty.unwrap(), rhs_type_id);
             }
-        }
-    }
-
-    fn visit_inc(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
-        if let Stmt::Increment(expr, ..) = stmt {
-            let expr_type_id = match expr.get_expr_type() {
-                Ok(type_id) => type_id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            let expr_file_pos = ctx.ty_ctx.ty_env.file_pos(expr_type_id).cloned().unwrap();
-
-            let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
-            let int_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
-                InnerTy::UnknownInt(unique_id, 10),
-                Generics::new(),
-                TypeInfo::Default(expr_file_pos),
-            )) {
-                Ok(type_id) => type_id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            self.insert_constraint(ctx, expr_type_id, int_type_id);
-        }
-    }
-
-    fn visit_dec(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
-        if let Stmt::Increment(expr, ..) = stmt {
-            let expr_type_id = match expr.get_expr_type() {
-                Ok(type_id) => type_id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            let expr_file_pos = ctx.ty_ctx.ty_env.file_pos(expr_type_id).cloned().unwrap();
-
-            let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
-            let int_type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
-                InnerTy::UnknownInt(unique_id, 10),
-                Generics::new(),
-                TypeInfo::Default(expr_file_pos),
-            )) {
-                Ok(type_id) => type_id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-
-            self.insert_constraint(ctx, expr_type_id, int_type_id);
         }
     }
 }

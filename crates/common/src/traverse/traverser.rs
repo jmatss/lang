@@ -724,24 +724,6 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                     return;
                 }
             }
-            Stmt::Increment(expr, _) => {
-                self.traverse_expr(expr);
-                debug!("Visiting increment");
-                if !self.ctx.stop {
-                    self.visitor.visit_inc(stmt, &mut self.ctx);
-                } else {
-                    return;
-                }
-            }
-            Stmt::Decrement(expr, _) => {
-                self.traverse_expr(expr);
-                debug!("Visiting decrement");
-                if !self.ctx.stop {
-                    self.visitor.visit_dec(stmt, &mut self.ctx);
-                } else {
-                    return;
-                }
-            }
             Stmt::Defer(expr, _) => {
                 self.traverse_expr(expr);
                 debug!("Visiting defer");

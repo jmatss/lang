@@ -17,10 +17,6 @@ pub enum Stmt {
     Use(LangPath),
     Module(LangPath), // Module ~= Package
 
-    /// Inc/dec are statements so that they can't be used in other expressions.
-    Increment(Expr, Option<FilePosition>),
-    Decrement(Expr, Option<FilePosition>),
-
     /// Defer -> Run this expression at the end of the current block scope.
     /// The "Defer" is the place in the code where the "defer <expr>" was written
     /// in the actual source code.
@@ -57,10 +53,9 @@ impl PartialEq for Stmt {
             (Stmt::Return(a, b), Stmt::Return(c, d)) => a == c && b == d,
             (Stmt::Break(a), Stmt::Break(b)) | (Stmt::Continue(a), Stmt::Continue(b)) => a == b,
             (Stmt::Use(a), Stmt::Use(b)) | (Stmt::Module(a), Stmt::Module(b)) => a == b,
-            (Stmt::Yield(a, b), Stmt::Yield(c, d))
-            | (Stmt::Increment(a, b), Stmt::Increment(c, d))
-            | (Stmt::Decrement(a, b), Stmt::Decrement(c, d))
-            | (Stmt::Defer(a, b), Stmt::Defer(c, d)) => a == c && b == d,
+            (Stmt::Yield(a, b), Stmt::Yield(c, d)) | (Stmt::Defer(a, b), Stmt::Defer(c, d)) => {
+                a == c && b == d
+            }
             (Stmt::DeferExec(a), Stmt::DeferExec(b)) => a == b,
             (Stmt::Assignment(a1, b1, c1, d1), Stmt::Assignment(e2, f2, g2, h2)) => {
                 a1 == e2 && b1 == f2 && c1 == g2 && d1 == h2
@@ -85,10 +80,7 @@ impl Hash for Stmt {
             Stmt::Use(a) | Stmt::Module(a) => {
                 a.hash(state);
             }
-            Stmt::Yield(a, b)
-            | Stmt::Increment(a, b)
-            | Stmt::Decrement(a, b)
-            | Stmt::Defer(a, b) => {
+            Stmt::Yield(a, b) | Stmt::Defer(a, b) => {
                 a.hash(state);
                 b.hash(state);
             }
@@ -126,8 +118,6 @@ impl Stmt {
             | Stmt::Yield(_, file_pos)
             | Stmt::Break(file_pos)
             | Stmt::Continue(file_pos)
-            | Stmt::Increment(_, file_pos)
-            | Stmt::Decrement(_, file_pos)
             | Stmt::Defer(_, file_pos)
             | Stmt::Assignment(.., file_pos)
             | Stmt::VariableDecl(.., file_pos)

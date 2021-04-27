@@ -7,27 +7,27 @@ struct TestStruct
 
 fn main() -> i32
 {
-    // TODO: Maybe do inc/dec postfix instead of prefix.
-    //       Postfix feels more natural, but might be best
-    //       to keep the symbol at the front for clarity.
-
     var x = 3
-    ++x
+    x.++
     printf("x inc: %d", x)
     std::assert(x == 4)
 
-    --x
+    x.--
     printf("\nx dec: %d", x)
     std::assert(x == 3)
     
     var test_struct = TestStruct { 3 }
-    ++test_struct.x
+    test_struct.x.++
     printf("\ntest_struct.x inc: %lld", test_struct.x)
     std::assert(test_struct.x == 4)
 
-    --test_struct.x
+    test_struct.x.--
     printf("\ntest_struct.x dec: %lld", test_struct.x)
     std::assert(test_struct.x == 3)
+    
+    var eval = test_struct.x.++ - 2
+    printf("\neval: %lld", eval)
+    std::assert(eval == 2)
 
     return 0
 }

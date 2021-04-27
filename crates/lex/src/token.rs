@@ -117,6 +117,8 @@ pub enum Sym {
     Deref,           // .*
     Address,         // .&
     ArrayIndexBegin, // .[
+    Increment,       // .++
+    Decrement,       // .--
 
     DoubleEquals,
     NotEquals,
@@ -149,9 +151,6 @@ pub enum Sym {
     AssignBitXor,
     AssignShiftLeft,
     AssignShiftRight,
-
-    Increment,
-    Decrement,
 
     CommentSingleLine,
     CommentMultiLineBegin,
@@ -346,6 +345,8 @@ impl LexToken {
                     (".*", Sym::Deref),
                     (".&", Sym::Address),
                     (".[", Sym::ArrayIndexBegin),
+                    (".++", Sym::Increment),
+                    (".--", Sym::Decrement),
                     ("..=", Sym::RangeInclusive),
                     ("...", Sym::TripleDot),
                 ],
@@ -360,14 +361,9 @@ impl LexToken {
                 ],
             ),
 
-            '+' => LexToken::match_symbol(
-                &real_string,
-                vec![
-                    ("+", Sym::Plus),
-                    ("++", Sym::Increment),
-                    ("+=", Sym::AssignAdd),
-                ],
-            ),
+            '+' => {
+                LexToken::match_symbol(&real_string, vec![("+", Sym::Plus), ("+=", Sym::AssignAdd)])
+            }
 
             '<' => LexToken::match_symbol(
                 &real_string,
@@ -393,7 +389,6 @@ impl LexToken {
                 &real_string,
                 vec![
                     ("-", Sym::Minus),
-                    ("--", Sym::Decrement),
                     ("->", Sym::Arrow),
                     ("-=", Sym::AssignSub),
                 ],

@@ -20,9 +20,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Stmt::Use(path) => self.compile_use(path),
             Stmt::Module(path) => self.compile_module(path),
 
-            Stmt::Increment(expr, file_pos) => self.compile_inc(expr, file_pos),
-            Stmt::Decrement(expr, file_pos) => self.compile_dec(expr, file_pos),
-
             // Only the "DeferExecution" are compiled into code, the "Defer" is
             // only used during analyzing.
             Stmt::Defer(..) => Ok(()),
@@ -111,82 +108,6 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     #[allow(clippy::unnecessary_wraps)]
     fn compile_module(&mut self, _path: &LangPath) -> LangResult<()> {
         // Do nothing, "module"s are done during lexing/parsing for now.
-        Ok(())
-    }
-
-    fn compile_inc(&mut self, expr: &mut Expr, file_pos: &Option<FilePosition>) -> LangResult<()> {
-        let any_value = self.compile_expr(expr, ExprTy::LValue)?;
-
-        let ptr = if let AnyTypeEnum::PointerType(_) = any_value.get_type() {
-            any_value.into_pointer_value()
-        } else {
-            return Err(self.err(
-                format!(
-                    "Increment expr didn't eval to pointer.\nExpr: {:#?}\nany_value: {:#?}",
-                    expr, any_value
-                ),
-                file_pos.to_owned(),
-            ));
-        };
-
-        let val = self.builder.build_load(ptr, "inc.load");
-        let new_value = if let BasicValueEnum::IntValue(value) = val {
-            let sign_extend = false;
-            let one = value.get_type().const_int(1, sign_extend);
-            if value.is_const() {
-                value.const_add(one)
-            } else {
-                self.builder.build_int_add(value, one, "inc")
-            }
-        } else {
-            return Err(self.err(
-                format!(
-                    "Increment value in pointer didn't eval to int.\nExpr: {:#?}\nany_value: {:#?}",
-                    expr, any_value
-                ),
-                file_pos.to_owned(),
-            ));
-        };
-
-        self.builder.build_store(ptr, new_value);
-        Ok(())
-    }
-
-    fn compile_dec(&mut self, expr: &mut Expr, file_pos: &Option<FilePosition>) -> LangResult<()> {
-        let any_value = self.compile_expr(expr, ExprTy::LValue)?;
-
-        let ptr = if let AnyTypeEnum::PointerType(_) = any_value.get_type() {
-            any_value.into_pointer_value()
-        } else {
-            return Err(self.err(
-                format!(
-                    "Decrement expr didn't eval to pointer.\nExpr: {:#?}\nany_value: {:#?}",
-                    expr, any_value
-                ),
-                file_pos.to_owned(),
-            ));
-        };
-
-        let val = self.builder.build_load(ptr, "dec.load");
-        let new_value = if let BasicValueEnum::IntValue(value) = val {
-            let sign_extend = false;
-            let one = value.get_type().const_int(1, sign_extend);
-            if value.is_const() {
-                value.const_sub(one)
-            } else {
-                self.builder.build_int_sub(value, one, "dec")
-            }
-        } else {
-            return Err(self.err(
-                format!(
-                    "Decrement value in pointer didn't eval to int.\nExpr: {:#?}\nany_value: {:#?}",
-                    expr, any_value
-                ),
-                file_pos.to_owned(),
-            ));
-        };
-
-        self.builder.build_store(ptr, new_value);
         Ok(())
     }
 

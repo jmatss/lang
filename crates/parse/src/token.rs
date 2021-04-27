@@ -27,8 +27,11 @@ pub fn get_if_expr_op(symbol: &Sym) -> Option<Operator> {
         Sym::ParenthesisEnd => Operator::ParenthesisEnd,
         Sym::PointyBracketBegin => Operator::BinaryOperator(BinOperator::Lt),
         Sym::PointyBracketEnd => Operator::BinaryOperator(BinOperator::Gt),
+
         Sym::Plus => Operator::Plus,
         Sym::Minus => Operator::Minus,
+        Sym::Increment => Operator::UnaryOperator(UnOperator::Increment),
+        Sym::Decrement => Operator::UnaryOperator(UnOperator::Decrement),
 
         Sym::Dot => Operator::BinaryOperator(BinOperator::Dot),
         Sym::Range => Operator::BinaryOperator(BinOperator::Range),
@@ -140,7 +143,7 @@ impl Operator {
     /*
         Precedence:
             0   ( )          (precedence for parenthesis always highest)
-            1   . :: .* .& .[] (func/method calls, deref, address, indexing etc.)
+            1   . :: .* .& .[] .++ .-- (func/method calls, deref, address, indexing, inc, dec etc.)
             2   +x -x        (negative/positive)
             3   ~
             4   as
@@ -169,6 +172,8 @@ impl Operator {
             Operator::UnaryOperator(un_op) => Some(match un_op {
                 UnOperator::Positive => (true, 2, Fix::Prefix),
                 UnOperator::Negative => (true, 2, Fix::Prefix),
+                UnOperator::Increment => (true, 1, Fix::Postfix),
+                UnOperator::Decrement => (true, 1, Fix::Postfix),
                 UnOperator::BitComplement => (true, 3, Fix::Prefix),
                 UnOperator::BoolNot => (true, 13, Fix::Prefix),
                 UnOperator::Deref => (true, 1, Fix::Postfix),
