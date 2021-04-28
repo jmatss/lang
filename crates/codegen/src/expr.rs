@@ -344,9 +344,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             unreachable!("expr not fn_ptr: {:#?}", expr);
         };
 
-        let partial_path = fn_ptr
-            .module
-            .clone_push(&fn_ptr.name, fn_ptr.generics.as_ref());
+        let partial_path =
+            fn_ptr
+                .module
+                .clone_push(&fn_ptr.name, fn_ptr.generics.as_ref(), fn_ptr.file_pos);
         let full_path = self.analyze_ctx.ast_ctx.calculate_fn_full_path(
             &self.analyze_ctx.ty_ctx,
             &partial_path,
@@ -456,9 +457,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         union_init: &mut AdtInit,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let partial_path = union_init
-            .module
-            .clone_push(&union_init.name, union_init.generics.as_ref());
+        let partial_path = union_init.module.clone_push(
+            &union_init.name,
+            union_init.generics.as_ref(),
+            union_init.file_pos,
+        );
         let full_path = self.analyze_ctx.ast_ctx.calculate_adt_full_path(
             &self.analyze_ctx.ty_ctx,
             &partial_path,

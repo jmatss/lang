@@ -55,7 +55,7 @@ impl DeclFnAnalyzer {
                 };
 
                 let func = func.borrow();
-                module.clone_push(&func.name, func.generics.as_ref())
+                module.clone_push(&func.name, func.generics.as_ref(), Some(func.file_pos))
             }
             Err(err) => {
                 self.errors.push(err);
@@ -314,7 +314,9 @@ impl Visitor for DeclFnAnalyzer {
             // External declarations should always be in the default block.
             let key = {
                 let func = func.borrow();
-                let path = func.module.clone_push(&func.name, None);
+                let path = func
+                    .module
+                    .clone_push(&func.name, None, Some(func.file_pos));
                 (path, BlockCtx::DEFAULT_BLOCK_ID)
             };
             ctx.ast_ctx.fns.insert(key, Rc::clone(func));

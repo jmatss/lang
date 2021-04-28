@@ -314,7 +314,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             func.name.clone()
         };
 
-        let full_path = module.clone_push(&fn_name, func.generics.as_ref());
+        let full_path = module.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos));
 
         let fn_val = if let Some(fn_val) = self
             .module
@@ -439,7 +439,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             func.name.clone()
         };
 
-        let full_path = module.clone_push(&fn_name, func.generics.as_ref());
+        let full_path = module.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos));
 
         let param_types = if let Some(params) = &func.parameters {
             let mut inner_types = Vec::with_capacity(params.len());
@@ -884,9 +884,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_struct(&mut self, struct_: &Adt) -> LangResult<()> {
         debug!("Compiling struct -- {:#?}", struct_);
 
-        let full_path = struct_
-            .module
-            .clone_push(&struct_.name, struct_.generics.as_ref());
+        let full_path = struct_.module.clone_push(
+            &struct_.name,
+            struct_.generics.as_ref(),
+            Some(struct_.file_pos),
+        );
 
         let members = &struct_.members;
         let mut member_types = Vec::with_capacity(members.len());
@@ -925,9 +927,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_enum(&mut self, enum_: &Adt) -> LangResult<()> {
         debug!("Compiling enum -- {:#?}", enum_);
 
-        let full_path = enum_
-            .module
-            .clone_push(&enum_.name, enum_.generics.as_ref());
+        let full_path =
+            enum_
+                .module
+                .clone_push(&enum_.name, enum_.generics.as_ref(), Some(enum_.file_pos));
 
         // Create a new struct type containing a single member that has the type
         // of the "inner enum type". This will most likely be a integer type.
@@ -978,9 +981,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     pub(super) fn compile_union(&mut self, union: &Adt) -> LangResult<()> {
         debug!("Compiling union -- {:#?}", union);
 
-        let full_path = union
-            .module
-            .clone_push(&union.name, union.generics.as_ref());
+        let full_path =
+            union
+                .module
+                .clone_push(&union.name, union.generics.as_ref(), Some(union.file_pos));
 
         let mut largest_size = 0;
 

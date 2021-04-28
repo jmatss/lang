@@ -218,9 +218,11 @@ impl Visitor for CallArgs {
             ctx.ast_ctx
                 .get_method(&ctx.ty_ctx, &full_path, &fn_call.half_name(&ctx.ty_ctx))
         } else {
-            let partial_path = fn_call
-                .module
-                .clone_push(&fn_call.name, fn_call.generics.as_ref());
+            let partial_path = fn_call.module.clone_push(
+                &fn_call.name,
+                fn_call.generics.as_ref(),
+                fn_call.file_pos,
+            );
 
             let full_path =
                 match ctx
@@ -300,9 +302,10 @@ impl Visitor for CallArgs {
             unreachable!("Adt init type not compound: {:#?}", adt_init);
         };
 
-        let partial_path = adt_init
-            .module
-            .clone_push(&adt_init.name, generics.as_ref());
+        let partial_path =
+            adt_init
+                .module
+                .clone_push(&adt_init.name, generics.as_ref(), adt_init.file_pos);
 
         let full_path =
             match ctx

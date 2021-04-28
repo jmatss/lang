@@ -153,7 +153,11 @@ impl<'a> Visitor for GenericsReplacer<'a> {
 
             let new_adt_name = {
                 let new_adt = new_adt.borrow();
-                module.clone_push(&new_adt.name, Some(self.generics_impl))
+                module.clone_push(
+                    &new_adt.name,
+                    Some(self.generics_impl),
+                    Some(new_adt.file_pos),
+                )
             };
 
             if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {

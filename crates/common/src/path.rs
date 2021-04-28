@@ -50,46 +50,19 @@ impl Hash for LangPathPart {
 pub struct LangPath {
     /// Contains all parts of the path in order.
     pub(crate) parts: Vec<LangPathPart>,
-
-    /// Indicates if this path is resolved or not. This means that the path is
-    /// a "full" path that for example isn't a partial path that needs to be
-    /// merged with a "use" path to make it correct.
-    ///
-    /// For static methods in a struct, the path might contain the struct just
-    /// after the path has been parsed. This is incorrect and the struct will
-    /// be moved/removed from the path at a later stage. As long as this might
-    /// be the case, this flag will be set to false.
-    ///
-    /// When a path first is created, this is set to false no matter if the path
-    /// is full or not.
-    resolved: bool,
-
-    file_pos: Option<FilePosition>,
+    pub file_pos: Option<FilePosition>,
 }
 
 impl LangPath {
     pub fn new(parts: Vec<LangPathPart>, file_pos: Option<FilePosition>) -> Self {
-        Self {
-            parts,
-            resolved: false,
-            file_pos,
-        }
+        Self { parts, file_pos }
     }
 
     pub fn empty() -> Self {
         Self {
             parts: Vec::with_capacity(0),
-            resolved: false,
             file_pos: None,
         }
-    }
-
-    pub fn set_resolved(&mut self, resolved: bool) {
-        self.resolved = resolved;
-    }
-
-    pub fn is_resolved(&self) -> bool {
-        self.resolved
     }
 
     pub fn is_empty(&self) -> bool {
@@ -138,10 +111,17 @@ impl LangPath {
 
     /// Clones `self` and returns a new LangPath where the `name`/`generics`
     /// have been appended as a part.
-    pub fn clone_push(&self, name: &str, generics: Option<&Generics>) -> LangPath {
+    pub fn clone_push(
+        &self,
+        name: &str,
+        generics: Option<&Generics>,
+        file_pos: Option<FilePosition>,
+    ) -> LangPath {
         let mut new_path = self.clone();
-        let new_part = LangPathPart(name.into(), generics.cloned());
-        new_path.parts.push(new_part);
+        new_path.file_pos = file_pos;
+        new_path
+            .parts
+            .push(LangPathPart(name.into(), generics.cloned()));
         new_path
     }
 
@@ -158,10 +138,7 @@ impl LangPath {
     pub fn join(&self, other: &LangPath, file_pos: Option<FilePosition>) -> LangPath {
         let mut parts = self.parts.clone();
         parts.extend(other.parts.iter().cloned());
-
-        let mut new_path = LangPath::new(parts, file_pos);
-        new_path.set_resolved(true);
-        new_path
+        LangPath::new(parts, file_pos)
     }
 }
 

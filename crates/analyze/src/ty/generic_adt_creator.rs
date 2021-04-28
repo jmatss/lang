@@ -105,7 +105,7 @@ impl GenericAdtCreator {
                 // Create the new path containing generics.
                 let mut new_path = old_path.clone();
                 let last_part = new_path.pop().unwrap();
-                new_path = new_path.clone_push(&last_part.0, Some(&generics));
+                new_path = new_path.clone_push(&last_part.0, Some(&generics), old_path.file_pos);
 
                 // TODO: Can this be done with a visitor/traverser? The current
                 //       default traverser takes a AstToken, so would need to create
@@ -369,7 +369,7 @@ impl Visitor for GenericAdtCreator {
                                 };
 
                                 let adt = adt.borrow();
-                                module.clone_push(&adt.name, None)
+                                module.clone_push(&adt.name, None, Some(adt.file_pos))
                             };
 
                             if self.generic_adts.contains_key(&full_path) {
@@ -430,7 +430,7 @@ impl Visitor for GenericAdtCreator {
                         };
 
                         let last_part = adt_path.last().unwrap();
-                        module.clone_push(&last_part.0, None)
+                        module.clone_push(&last_part.0, None, adt_path.file_pos)
                     };
 
                     if self.generic_adts.contains_key(&full_path) {

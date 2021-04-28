@@ -226,7 +226,10 @@ impl Expr {
                     _ => false,
                 },
                 Op::UnOp(un_op) => {
-                    matches!(un_op.operator, UnOperator::Deref | UnOperator::Address | UnOperator::ArrayAccess(_))
+                    matches!(
+                        un_op.operator,
+                        UnOperator::Deref | UnOperator::Address | UnOperator::ArrayAccess(_)
+                    )
                 }
             },
             _ => false,
@@ -338,17 +341,14 @@ impl Expr {
     pub fn eval_to_fn_call(&mut self) -> Option<&mut FnCall> {
         match self {
             Expr::FnCall(fn_call) => Some(fn_call),
-            Expr::Op(op) => match op {
-                Op::BinOp(bin_op) => match bin_op.operator {
-                    BinOperator::Dot => {
-                        if bin_op.rhs.eval_to_fn_call().is_some() {
-                            bin_op.rhs.eval_to_fn_call()
-                        } else {
-                            None
-                        }
+            Expr::Op(Op::BinOp(bin_op)) => match bin_op.operator {
+                BinOperator::Dot => {
+                    if let Some(fn_call) = bin_op.rhs.eval_to_fn_call() {
+                        Some(fn_call)
+                    } else {
+                        None
                     }
-                    _ => None,
-                },
+                }
                 _ => None,
             },
             _ => None,
@@ -498,7 +498,9 @@ impl FnCall {
                 self.generics.as_ref(),
             ))
         } else {
-            let fn_path = self.module.clone_push(&self.name, self.generics.as_ref());
+            let fn_path = self
+                .module
+                .clone_push(&self.name, self.generics.as_ref(), self.file_pos);
             Ok(ty_ctx.to_string_path(&fn_path))
         }
     }
@@ -546,7 +548,7 @@ impl FnPtr {
         let fn_name_part = LangPathPart(self.name.clone(), self.generics.clone());
         let full_path = self
             .module
-            .join(&LangPath::new(vec![fn_name_part], None), None);
+            .join(&LangPath::new(vec![fn_name_part], None), self.file_pos);
 
         Ok(ty_ctx.to_string_path(&full_path))
     }
@@ -656,7 +658,8 @@ impl AdtInit {
                 adt_path.pop();
 
                 let new_adt_name = LangPathPart(self.name.clone(), Some(generics));
-                let new_adt_path = adt_path.join(&LangPath::new(vec![new_adt_name], None), None);
+                let new_adt_path =
+                    adt_path.join(&LangPath::new(vec![new_adt_name], None), self.file_pos);
 
                 Ok(ty_ctx.to_string_path(&new_adt_path))
             } else {

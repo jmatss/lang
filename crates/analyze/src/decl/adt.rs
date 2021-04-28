@@ -41,7 +41,9 @@ impl DeclTypeAnalyzer {
             Ok(module_opt) => {
                 let module = module_opt.unwrap_or_else(LangPath::empty);
                 adt.borrow_mut().module = module.clone();
-                module.clone_push(&adt.borrow().name, None)
+
+                let adt = adt.borrow();
+                module.clone_push(&adt.name, None, Some(adt.file_pos))
             }
             Err(err) => {
                 self.errors.push(err);
@@ -112,7 +114,9 @@ impl Visitor for DeclTypeAnalyzer {
                 Ok(module_opt) => {
                     let module = module_opt.unwrap_or_else(LangPath::empty);
                     trait_.borrow_mut().module = module.clone();
-                    module.clone_push(&trait_.borrow().name, None)
+
+                    let trait_ = trait_.borrow();
+                    module.clone_push(&trait_.name, None, Some(trait_.file_pos))
                 }
                 Err(err) => {
                     self.errors.push(err);

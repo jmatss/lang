@@ -124,7 +124,9 @@ impl Visitor for PathResolver {
             return;
         }
 
-        let half_path = fn_call.module.clone_push(&fn_call.name, None);
+        let half_path = fn_call
+            .module
+            .clone_push(&fn_call.name, None, fn_call.file_pos);
 
         match ctx
             .ast_ctx
@@ -152,7 +154,9 @@ impl Visitor for PathResolver {
     }
 
     fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &mut TraverseCtx) {
-        let half_path = adt_init.module.clone_push(&adt_init.name, None);
+        let half_path = adt_init
+            .module
+            .clone_push(&adt_init.name, None, adt_init.file_pos);
 
         match ctx
             .ast_ctx

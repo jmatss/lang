@@ -323,6 +323,7 @@ impl ReferenceCollector {
         id: BlockId,
     ) -> LangResult<LangPath> {
         let adt_name = adt.borrow().name.clone();
+        let adt_file_pos = Some(adt.borrow().file_pos);
 
         let module = if let Some(module) = ast_ctx.get_module(id)? {
             module
@@ -336,9 +337,9 @@ impl ReferenceCollector {
             } else {
                 None
             };
-            module.clone_push(&adt_name, generics.as_ref())
+            module.clone_push(&adt_name, generics.as_ref(), adt_file_pos)
         } else {
-            module.clone_push(&adt_name, None)
+            module.clone_push(&adt_name, None, adt_file_pos)
         })
     }
 }

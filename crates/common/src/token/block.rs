@@ -5,7 +5,9 @@ use super::{
     stmt::Modifier,
 };
 
-use crate::{ctx::ty_ctx::TyCtx, path::LangPath, ty::generics::Generics, util, TypeId};
+use crate::{
+    ctx::ty_ctx::TyCtx, file::FilePosition, path::LangPath, ty::generics::Generics, util, TypeId,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockHeader {
@@ -102,6 +104,8 @@ pub struct Adt {
     pub module: LangPath,
     pub modifiers: Vec<Modifier>,
     pub members: Vec<Rc<RefCell<Var>>>,
+    pub file_pos: FilePosition,
+
     /// The key is the name of the method.
     pub methods: HashMap<String, Rc<RefCell<Fn>>>,
     pub kind: AdtKind,
@@ -131,6 +135,7 @@ impl Adt {
         module: LangPath,
         modifiers: Vec<Modifier>,
         members: Vec<Rc<RefCell<Var>>>,
+        file_pos: FilePosition,
         generics: Option<Generics>,
         implements: Option<HashMap<String, Vec<TypeId>>>,
     ) -> Self {
@@ -139,6 +144,7 @@ impl Adt {
             module,
             modifiers,
             members,
+            file_pos,
             kind: AdtKind::Struct,
             methods: HashMap::default(),
             generics,
@@ -152,6 +158,7 @@ impl Adt {
         module: LangPath,
         modifiers: Vec<Modifier>,
         members: Vec<Rc<RefCell<Var>>>,
+        file_pos: FilePosition,
         generics: Option<Generics>,
         implements: Option<HashMap<String, Vec<TypeId>>>,
     ) -> Self {
@@ -160,6 +167,7 @@ impl Adt {
             module,
             modifiers,
             members,
+            file_pos,
             kind: AdtKind::Union,
             methods: HashMap::default(),
             generics,
@@ -173,6 +181,7 @@ impl Adt {
         module: LangPath,
         modifiers: Vec<Modifier>,
         members: Vec<Rc<RefCell<Var>>>,
+        file_pos: FilePosition,
         enum_ty: Option<TypeId>,
     ) -> Self {
         Self {
@@ -180,6 +189,7 @@ impl Adt {
             module,
             modifiers,
             members,
+            file_pos,
             kind: AdtKind::Enum,
             methods: HashMap::default(),
             generics: None,
@@ -234,6 +244,7 @@ pub struct Fn {
     pub name: String,
     pub module: LangPath,
     pub generics: Option<Generics>,
+    pub file_pos: FilePosition,
 
     /// The key is the the name of the generic type it and the values are the
     /// traits that the specific generic type needs to implement.
@@ -251,20 +262,23 @@ pub struct Fn {
 }
 
 impl Fn {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         module: LangPath,
         generics: Option<Generics>,
+        file_pos: FilePosition,
         implements: Option<HashMap<String, Vec<TypeId>>>,
         parameters: Option<Vec<Rc<RefCell<Var>>>>,
         ret_type: Option<TypeId>,
         modifiers: Vec<Modifier>,
         is_var_arg: bool,
     ) -> Self {
-        Fn {
+        Self {
             name,
             module,
             generics,
+            file_pos,
             implements,
             parameters,
             ret_type,
@@ -477,7 +491,7 @@ impl BuiltIn {
         ret_type: TypeId,
         is_var_arg: bool,
     ) -> Self {
-        BuiltIn {
+        Self {
             name,
             parameters,
             generics,
@@ -492,6 +506,7 @@ pub struct Trait {
     pub name: String,
     pub module: LangPath,
     pub generics: Option<Vec<String>>,
+    pub file_pos: FilePosition,
     pub methods: Vec<Fn>,
     pub modifiers: Vec<Modifier>,
 }
@@ -501,6 +516,7 @@ impl Trait {
         name: String,
         module: LangPath,
         generics: Option<Vec<String>>,
+        file_pos: FilePosition,
         methods: Vec<Fn>,
         modifiers: Vec<Modifier>,
     ) -> Self {
@@ -508,6 +524,7 @@ impl Trait {
             name,
             module,
             generics,
+            file_pos,
             methods,
             modifiers,
         }

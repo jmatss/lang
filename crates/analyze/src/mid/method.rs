@@ -93,7 +93,7 @@ impl Visitor for MethodAnalyzer {
             };
 
             let last_part = adt_name.last().unwrap();
-            let path = module.clone_push(&last_part.0, None);
+            let path = module.clone_push(&last_part.0, None, adt_name.file_pos);
 
             let adt = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, &path) {
                 Ok(adt) => adt,
@@ -139,7 +139,10 @@ impl Visitor for MethodAnalyzer {
             ) {
                 let adt = adt.borrow();
                 let fn_call_gens = fn_call.module.last().unwrap().1.as_ref();
-                Some(adt.module.clone_push(&adt.name, fn_call_gens))
+                Some(
+                    adt.module
+                        .clone_push(&adt.name, fn_call_gens, fn_call.file_pos),
+                )
             } else {
                 None
             };
@@ -191,9 +194,11 @@ impl Visitor for MethodAnalyzer {
                         Generics::empty()
                     };
 
-                    let fn_call_path = fn_call
-                        .module
-                        .clone_push(&fn_call.name, fn_call.generics.as_ref());
+                    let fn_call_path = fn_call.module.clone_push(
+                        &fn_call.name,
+                        fn_call.generics.as_ref(),
+                        fn_call.file_pos,
+                    );
                     let new_gens =
                         match combine_generics(ctx, Some(adt_path), &this_gens, &fn_call_path) {
                             Ok(new_gens) => new_gens,

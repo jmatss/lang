@@ -373,7 +373,9 @@ impl Visitor for TypeInferencer {
             // If the ADT type is know and contains generics, this logic will fetch
             // the ADT and combine the names for the generics found in the ADT
             // declaration with potential generic impls in the ADT init/func call.
-            let fn_half_path = fn_call.module.clone_push(&fn_call.name, None);
+            let fn_half_path = fn_call
+                .module
+                .clone_push(&fn_call.name, None, fn_call.file_pos);
 
             let mut adt_ty_clone = match ctx.ty_ctx.ty_env.ty(adt_type_id) {
                 Ok(adt_ty) => adt_ty.clone(),
@@ -563,9 +565,11 @@ impl Visitor for TypeInferencer {
                 }
             }
         } else {
-            let partial_path = fn_call
-                .module
-                .clone_push(&fn_call.name, fn_call.generics.as_ref());
+            let partial_path = fn_call.module.clone_push(
+                &fn_call.name,
+                fn_call.generics.as_ref(),
+                fn_call.file_pos,
+            );
             let full_path =
                 match ctx
                     .ast_ctx
@@ -736,9 +740,10 @@ impl Visitor for TypeInferencer {
             Generics::empty()
         };
 
-        let partial_path = fn_ptr
-            .module
-            .clone_push(&fn_ptr.name, fn_ptr.generics.as_ref());
+        let partial_path =
+            fn_ptr
+                .module
+                .clone_push(&fn_ptr.name, fn_ptr.generics.as_ref(), fn_ptr.file_pos);
         let full_path =
             match ctx
                 .ast_ctx
@@ -1006,7 +1011,9 @@ impl Visitor for TypeInferencer {
     /// Adds the correct type for the ADT init and ties the types of the ADT
     /// members with the type of the ADT init arguments.
     fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &mut TraverseCtx) {
-        let partial_path = adt_init.module.clone_push(&adt_init.name, None);
+        let partial_path = adt_init
+            .module
+            .clone_push(&adt_init.name, None, adt_init.file_pos);
         let full_path =
             match ctx
                 .ast_ctx

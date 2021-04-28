@@ -735,6 +735,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             self.iter
                 .parse_par_list(start_symbol, end_symbol, generics.as_ref())?;
 
+        file_pos.set_end(&par_file_pos)?;
+
         // Wrap the params into RC & RefCell.
         let params = params
             .iter()
@@ -765,12 +767,27 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             ));
         };
 
-        let implements = self.parse_where(generics.as_ref())?;
+        if let Some(ret_ty_file_pos) = &ty_file_pos {
+            file_pos.set_end(ret_ty_file_pos)?;
+        }
+
+        let impls = self.parse_where(generics.as_ref())?;
+        if impls.is_some() {
+            if let Ok(next_file_pos) = self.iter.peek_file_pos() {
+                file_pos.set_end(&next_file_pos)?;
+            }
+        }
+
+        // TODO: How should the `file_pos` of the function be decided? Currently
+        //       it will only include the function header, it probably should
+        //       also contain the body.
+
         Ok(Fn::new(
             name,
             module,
             generics,
-            implements,
+            file_pos,
+            impls,
             params_opt,
             ret_type_id,
             modifiers,
@@ -792,7 +809,12 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let name = last_part.0;
         let generics = last_part.1;
 
-        let implements = self.parse_where(generics.as_ref())?;
+        let impls = self.parse_where(generics.as_ref())?;
+        if impls.is_some() {
+            if let Ok(next_file_pos) = self.iter.peek_file_pos() {
+                file_pos.set_end(&next_file_pos)?;
+            }
+        }
 
         // Parse the members of the struct. If the next token isn't a
         // "CurlyBracketBegin" symbol, assume this is a struct with no members.
@@ -827,7 +849,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             ));
         }
 
-        let struct_ = Adt::new_struct(name, module, modifiers, members, generics, implements);
+        let struct_ = Adt::new_struct(name, module, modifiers, members, file_pos, generics, impls);
         let header = BlockHeader::Struct(Rc::new(RefCell::new(struct_)));
 
         let block_id = self.iter.reserve_block_id();
@@ -917,7 +939,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             TypeInfo::Enum(file_pos.to_owned()),
         ))?;
 
-        let enum_ = Adt::new_enum(name, module, modifiers, members_rc, Some(enum_type_id));
+        let enum_ = Adt::new_enum(
+            name,
+            module,
+            modifiers,
+            members_rc,
+            file_pos,
+            Some(enum_type_id),
+        );
         let header = BlockHeader::Enum(Rc::new(RefCell::new(enum_)));
 
         let block_id = self.iter.reserve_block_id();
@@ -940,7 +969,12 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let name = last_part.0;
         let generics = last_part.1;
 
-        let implements = self.parse_where(generics.as_ref())?;
+        let impls = self.parse_where(generics.as_ref())?;
+        if impls.is_some() {
+            if let Ok(next_file_pos) = self.iter.peek_file_pos() {
+                file_pos.set_end(&next_file_pos)?;
+            }
+        }
 
         // Parse the members of the union. If the next token isn't a
         // "CurlyBracketBegin" symbol, assume this is a enum with no members.
@@ -972,7 +1006,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             ));
         }
 
-        let union = Adt::new_union(name, module, modifiers, members, generics, implements);
+        let union = Adt::new_union(name, module, modifiers, members, file_pos, generics, impls);
         let header = BlockHeader::Union(Rc::new(RefCell::new(union)));
 
         let block_id = self.iter.reserve_block_id();
@@ -1032,6 +1066,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
                 LexTokenKind::Kw(Kw::Function) => {
                     let method = self.parse_fn_proto(modifiers, lex_token.file_pos)?;
+                    file_pos.set_end(&method.file_pos)?;
                     methods.push(method);
                     modifiers = Vec::default();
                 }
@@ -1053,7 +1088,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
 
-        let trait_ = Trait::new(name, module, generic_names, methods, modifiers);
+        let trait_ = Trait::new(name, module, generic_names, file_pos, methods, modifiers);
         let header = BlockHeader::Trait(Rc::new(RefCell::new(trait_)));
 
         let block_id = self.iter.reserve_block_id();
