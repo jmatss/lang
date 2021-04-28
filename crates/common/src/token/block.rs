@@ -94,23 +94,6 @@ pub enum BlockHeader {
     Test(Fn),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Struct {
-    pub name: String,
-    pub module: LangPath,
-    pub generics: Option<Vec<String>>,
-
-    /// The key is the the name of the generic type it and the values are the
-    /// traits that the specific generic type needs to implement.
-    pub implements: Option<HashMap<String, Vec<TypeId>>>,
-    pub members: Option<Vec<Rc<RefCell<Var>>>>,
-
-    pub modifiers: Vec<Modifier>,
-
-    /// The key is the name of the method.
-    pub methods: Option<HashMap<String, Rc<RefCell<Fn>>>>,
-}
-
 /// Represents a Algebraic Data Type (ADT). Struct, enum or union.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Adt {
