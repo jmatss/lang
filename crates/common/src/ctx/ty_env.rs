@@ -2162,6 +2162,10 @@ impl TyEnv {
     /// needed to comapre the types properly to then return a "final" answer
     /// to the caller of `precedence()` that will either prefer the first or
     /// second type.
+    ///
+    /// OBS! The type IDs of the ADTs in "Unknown..." types ex. "UnknownAdtMember"
+    ///      can't be compared since different ADTs might have members of the
+    ///      same type. These can then be mapped together during type inference.
     fn prec_allow_eq(
         &self,
         sub_sets: Option<&SubstitutionSets>,
@@ -2236,13 +2240,10 @@ impl TyEnv {
             (_, Ty::UnknownArrayMember(..)) => Ok(Ordering::Less),
 
             (
-                Ty::UnknownAdtMember(type_id_a, _, unique_id_a, ..),
-                Ty::UnknownAdtMember(type_id_b, _, unique_id_b, ..),
+                Ty::UnknownAdtMember(_, _, unique_id_a, ..),
+                Ty::UnknownAdtMember(_, _, unique_id_b, ..),
             ) => {
-                let ord = self.prec_allow_eq(sub_sets, *type_id_a, *type_id_b)?;
-                if ord != Ordering::Equal {
-                    Ok(ord)
-                } else if unique_id_a != unique_id_b {
+                if unique_id_a != unique_id_b {
                     Ok(unique_id_a.cmp(unique_id_b))
                 } else {
                     Ok(Ordering::Equal)
@@ -2252,13 +2253,10 @@ impl TyEnv {
             (_, Ty::UnknownAdtMember(..)) => Ok(Ordering::Less),
 
             (
-                Ty::UnknownAdtMethod(type_id_a, _, gens_a, unique_id_a, ..),
-                Ty::UnknownAdtMethod(type_id_b, _, gens_b, unique_id_b, ..),
+                Ty::UnknownAdtMethod(_, _, _, unique_id_a, ..),
+                Ty::UnknownAdtMethod(_, _, _, unique_id_b, ..),
             ) => {
-                let ord = self.prec_incl_gens(sub_sets, *type_id_a, gens_a, *type_id_b, gens_b)?;
-                if ord != Ordering::Equal {
-                    Ok(ord)
-                } else if unique_id_a != unique_id_b {
+                if unique_id_a != unique_id_b {
                     Ok(unique_id_a.cmp(unique_id_b))
                 } else {
                     Ok(Ordering::Equal)
@@ -2268,15 +2266,10 @@ impl TyEnv {
             (_, Ty::UnknownAdtMethod(..)) => Ok(Ordering::Less),
 
             (
-                Ty::UnknownMethodArgument(type_id_a, _, gens_a, either_a, unique_id_a, ..),
-                Ty::UnknownMethodArgument(type_id_b, _, gens_b, either_b, unique_id_b, ..),
+                Ty::UnknownMethodArgument(_, _, _, _, unique_id_a, ..),
+                Ty::UnknownMethodArgument(_, _, _, _, unique_id_b, ..),
             ) => {
-                let ord = self.prec_incl_gens(sub_sets, *type_id_a, gens_a, *type_id_b, gens_b)?;
-                if ord != Ordering::Equal {
-                    Ok(ord)
-                } else if either_a != either_b {
-                    Ok(either_a.cmp(either_b))
-                } else if unique_id_a != unique_id_b {
+                if unique_id_a != unique_id_b {
                     Ok(unique_id_a.cmp(unique_id_b))
                 } else {
                     Ok(Ordering::Equal)
@@ -2286,15 +2279,10 @@ impl TyEnv {
             (_, Ty::UnknownMethodArgument(..)) => Ok(Ordering::Less),
 
             (
-                Ty::UnknownMethodGeneric(type_id_a, _, either_a, unique_id_a, ..),
-                Ty::UnknownMethodGeneric(type_id_b, _, either_b, unique_id_b, ..),
+                Ty::UnknownMethodGeneric(_, _, _, unique_id_a, ..),
+                Ty::UnknownMethodGeneric(_, _, _, unique_id_b, ..),
             ) => {
-                let ord = self.prec_allow_eq(sub_sets, *type_id_a, *type_id_b)?;
-                if ord != Ordering::Equal {
-                    Ok(ord)
-                } else if either_a != either_b {
-                    Ok(either_a.cmp(either_b))
-                } else if unique_id_a != unique_id_b {
+                if unique_id_a != unique_id_b {
                     Ok(unique_id_a.cmp(unique_id_b))
                 } else {
                     Ok(Ordering::Equal)
@@ -2470,36 +2458,6 @@ impl TyEnv {
                 first_inner_ty, second_inner_ty
             ),
         }
-    }
-
-    fn prec_incl_gens(
-        &self,
-        sub_sets: Option<&SubstitutionSets>,
-        first_id: TypeId,
-        first_ids: &[TypeId],
-        second_id: TypeId,
-        second_ids: &[TypeId],
-    ) -> LangResult<Ordering> {
-        let ord = self.prec_allow_eq(sub_sets, first_id, second_id)?;
-        if ord != Ordering::Equal {
-            return Ok(ord);
-        }
-
-        assert!(
-            first_ids.len() == second_ids.len(),
-            "call gen len diff. first_ids: {:#?}, inf_second_id: {:#?}",
-            first_ids,
-            second_ids
-        );
-
-        for (first_id_i, second_id_i) in first_ids.iter().zip(second_ids.iter()) {
-            let ord = self.prec_allow_eq(sub_sets, *first_id_i, *second_id_i)?;
-            if ord != Ordering::Equal {
-                return Ok(ord);
-            }
-        }
-
-        Ok(Ordering::Equal)
     }
 
     /// Function used when the two types have the same preference. This function

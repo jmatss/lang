@@ -100,10 +100,10 @@ impl String
         }
     }
 
-    fn {this} resize(min_resize: u32) -> Optional<{u8}>
+    fn {this} resize(min_req_resize: u32) -> Optional<{u8}>
     {
         var new_cap = this.*.cap * 2
-        while new_cap - this.*.len < min_resize
+        while new_cap - this.*.len < min_req_resize
         {
             new_cap *= 2
         }
