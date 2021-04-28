@@ -1,8 +1,3 @@
-use crate::LangResult;
-use common::error::{
-    LangError,
-    LangErrorKind::{self, CompileError},
-};
 use inkwell::{
     module::Module,
     passes::PassManager,
@@ -10,6 +5,10 @@ use inkwell::{
     values::FunctionValue,
     OptimizationLevel,
 };
+
+use common::error::{LangError, LangErrorKind};
+
+use crate::LangResult;
 
 pub fn setup_target() -> LangResult<TargetMachine> {
     Target::initialize_all(&InitializationConfig::default());
@@ -23,7 +22,7 @@ pub fn setup_target() -> LangResult<TargetMachine> {
     let code_model = CodeModel::Default;
 
     let target = Target::from_triple(&triple)
-        .map_err(|e| LangError::new(e.to_string(), LangErrorKind::CodeGenError, None))?;
+        .map_err(|e| LangError::new(e.to_string(), LangErrorKind::CompileError, None))?;
     if let Some(machine) =
         target.create_target_machine(&triple, &cpu, &features, level, reloc_mode, code_model)
     {
@@ -31,7 +30,7 @@ pub fn setup_target() -> LangResult<TargetMachine> {
     } else {
         Err(LangError::new(
             "Unable to create target machine.".into(),
-            CompileError,
+            LangErrorKind::CompileError,
             None,
         ))
     }
@@ -80,5 +79,5 @@ pub fn compile(
     let file_type = FileType::Object;
     machine
         .write_to_file(&module, file_type, output_path.as_ref())
-        .map_err(|e| LangError::new(e.to_string(), CompileError, None))
+        .map_err(|e| LangError::new(e.to_string(), LangErrorKind::CompileError, None))
 }
