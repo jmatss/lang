@@ -73,9 +73,9 @@ fn assert_msg(expr: bool, msg: {u8})
 
 */
 
-extern fn printf(format: {u8}, ...) -> i32
-extern fn exit(exit_code: i32)
-extern fn strlen(str: {u8}) -> u32
+ext fn printf(format: {u8}, ...) -> i32
+ext fn exit(exit_code: i32)
+ext fn strlen(str: {u8}) -> u32
 
 fn assert(expr: bool, msg: {u8} = "")
 {

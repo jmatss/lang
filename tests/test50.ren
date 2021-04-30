@@ -1,6 +1,6 @@
 use std::types::String
 
-extern fn printf(format: {u8}, ...) -> i32
+ext fn printf(format: {u8}, ...) -> i32
 
 fn main() -> i32
 {

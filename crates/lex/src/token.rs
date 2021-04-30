@@ -222,7 +222,7 @@ impl LexToken {
 
             "use" => LexTokenKind::Kw(Kw::Use),
             "mod" => LexTokenKind::Kw(Kw::Module),
-            "extern" => LexTokenKind::Kw(Kw::External),
+            "ext" => LexTokenKind::Kw(Kw::External),
 
             "var" => LexTokenKind::Kw(Kw::Var),
             "const" => LexTokenKind::Kw(Kw::Const),

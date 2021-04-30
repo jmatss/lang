@@ -5,13 +5,11 @@ use std::types::Result
 
 //use std::types::Disposable
 
-extern fn malloc(size: u32) -> {u8}
-extern fn free(ptr: {u8})
-extern fn realloc(ptr: {u8}, size: u32) -> {u8}
-extern fn printf(format: {u8}, ...) -> i32
-extern fn memcpy(dest: {u8}, src: {u8}, size: u32) -> {u8}
-
-// TODO: Implement error handling. Return "Result"s from functions.
+ext fn malloc(size: u32) -> {u8}
+ext fn free(ptr: {u8})
+ext fn realloc(ptr: {u8}, size: u32) -> {u8}
+ext fn printf(format: {u8}, ...) -> i32
+ext fn memcpy(dest: {u8}, src: {u8}, size: u32) -> {u8}
 
 /// A basic heap allocator that can be used to work with heap allocated data.
 pub struct Allocator;

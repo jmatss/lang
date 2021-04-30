@@ -1,5 +1,5 @@
-extern fn malloc(size: u32) -> {u8}
-extern fn free(ptr: {u8})
+ext fn malloc(size: u32) -> {u8}
+ext fn free(ptr: {u8})
 
 fn test_func(a: i32, b: i32) -> i64
 {

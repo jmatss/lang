@@ -2,7 +2,7 @@ use std::mem::Allocator
 use std::mem::Ptr
 use std::types::Disposable
 
-extern fn printf(format: {u8}, ...) -> i32
+ext fn printf(format: {u8}, ...) -> i32
 
 enum ErrorKind
 {

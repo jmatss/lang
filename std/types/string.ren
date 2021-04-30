@@ -4,8 +4,8 @@ use std::mem::Allocator
 use std::types::Optional
 use std::types::Result
 
-extern fn strlen(str: {u8}) -> u32
-extern fn strncmp(str1: {u8}, str2: {u8}, len: u32) -> i32
+ext fn strlen(str: {u8}) -> u32
+ext fn strncmp(str1: {u8}, str2: {u8}, len: u32) -> i32
 
 // TODO: Add error handling of allocations etc. Should be done after
 //       std::mem starts using "Result"s to indicate failures.

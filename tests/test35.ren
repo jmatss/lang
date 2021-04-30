@@ -1,5 +1,5 @@
-extern fn printf(format: {u8}, ...) -> i32
-extern fn strcmp(s1: {u8}, s2: {u8}) -> i32
+ext fn printf(format: {u8}, ...) -> i32
+ext fn strcmp(s1: {u8}, s2: {u8}) -> i32
 
 struct TestStruct<T>
 {
