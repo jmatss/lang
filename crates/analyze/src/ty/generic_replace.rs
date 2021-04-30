@@ -78,8 +78,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
         match ctx
             .ty_ctx
-            .ty_env
-            .replace_gen_impls(*type_id, &self.generics_impl)
+            .replace_gen_impls(&ctx.ast_ctx, *type_id, &self.generics_impl)
         {
             Ok(Some(new_type_id)) => *type_id = new_type_id,
             Ok(None) => (),

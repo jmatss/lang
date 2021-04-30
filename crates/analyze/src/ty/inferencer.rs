@@ -709,8 +709,7 @@ impl Visitor for TypeInferencer {
 
             match ctx
                 .ty_ctx
-                .ty_env
-                .replace_gen_impls(fn_ret_ty, &generics_impl)
+                .replace_gen_impls(&ctx.ast_ctx, fn_ret_ty, &generics_impl)
             {
                 Ok(Some(new_type_id)) => fn_ret_ty = new_type_id,
                 Ok(None) => (),
@@ -805,8 +804,7 @@ impl Visitor for TypeInferencer {
         for fn_param_type_id in &mut fn_param_tys {
             match ctx
                 .ty_ctx
-                .ty_env
-                .replace_gen_impls(*fn_param_type_id, &gens_impl)
+                .replace_gen_impls(&ctx.ast_ctx, *fn_param_type_id, &gens_impl)
             {
                 Ok(Some(new_type_id)) => *fn_param_type_id = new_type_id,
                 Ok(None) => (),
@@ -820,8 +818,7 @@ impl Visitor for TypeInferencer {
         if let Some(ret_type_id) = &mut fn_ret_ty {
             match ctx
                 .ty_ctx
-                .ty_env
-                .replace_gen_impls(*ret_type_id, &gens_impl)
+                .replace_gen_impls(&ctx.ast_ctx, *ret_type_id, &gens_impl)
             {
                 Ok(Some(new_type_id)) => *ret_type_id = new_type_id,
                 Ok(None) => (),
@@ -1170,11 +1167,11 @@ impl Visitor for TypeInferencer {
                                 let member_type_id = if let Some(member_type_id) =
                                     &mut new_member.ty
                                 {
-                                    match ctx
-                                        .ty_ctx
-                                        .ty_env
-                                        .replace_gen_impls(*member_type_id, &generics)
-                                    {
+                                    match ctx.ty_ctx.replace_gen_impls(
+                                        &ctx.ast_ctx,
+                                        *member_type_id,
+                                        &generics,
+                                    ) {
                                         Ok(Some(new_type_id)) => *member_type_id = new_type_id,
                                         Ok(None) => (),
                                         Err(err) => {
@@ -1286,7 +1283,10 @@ impl Visitor for TypeInferencer {
                         let new_member = member.borrow().clone();
 
                         let member_type_id = if let Some(type_id) = &new_member.ty {
-                            match ctx.ty_ctx.ty_env.replace_gen_impls(*type_id, &generics) {
+                            match ctx
+                                .ty_ctx
+                                .replace_gen_impls(&ctx.ast_ctx, *type_id, &generics)
+                            {
                                 Ok(Some(new_type_id)) => new_type_id,
                                 Ok(None) => *type_id,
                                 Err(err) => {

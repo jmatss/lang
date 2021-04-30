@@ -256,10 +256,9 @@ impl<'a> GenericAdtCollector<'a> {
                 return Err(err);
             };
 
-            let nested_adt_type_id = if let Some(new_type_id) = ctx
-                .ty_ctx
-                .ty_env
-                .replace_gen_impls(nested_adt_type_id, &generics)?
+            let nested_adt_type_id = if let Some(new_type_id) =
+                ctx.ty_ctx
+                    .replace_gen_impls(&ctx.ast_ctx, nested_adt_type_id, &generics)?
             {
                 new_type_id
             } else {

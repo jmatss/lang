@@ -117,7 +117,10 @@ impl GenericAdtCreator {
                     let mut new_member = member.borrow().clone();
 
                     if let Some(type_id) = &mut new_member.ty {
-                        match ctx.ty_ctx.ty_env.replace_gen_impls(*type_id, &generics) {
+                        match ctx
+                            .ty_ctx
+                            .replace_gen_impls(&ctx.ast_ctx, *type_id, &generics)
+                        {
                             Ok(Some(new_type_id)) => *type_id = new_type_id,
                             Ok(None) => (),
                             Err(err) => self.errors.push(err),

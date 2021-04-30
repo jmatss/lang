@@ -32,12 +32,12 @@ pub struct TyEnv {
     id_to_ty: HashMap<TypeId, Ty>,
     ty_to_id: HashMap<Ty, TypeId>,
 
-    /// Contains a map of type IDs that should be "forwareded" to some other ID.
+    /// Contains a map of type IDs that should be "forwarded" to some other ID.
     /// This is use for example with GenericInstance's where multiple type IDs
     /// should map to the exact same instance of a type.
     /// The key is the type ID that should map to something else and the value
     /// is to which type it should map.
-    forward_ty_to_ty: HashMap<TypeId, TypeId>,
+    forwards: HashMap<TypeId, TypeId>,
 
     /// A counter that is used to create new `TypeId`s. It will be increment
     /// for every new type created. The type ID 0 is used for special purposes,
@@ -140,7 +140,7 @@ impl TyEnv {
         Self {
             id_to_ty: HashMap::default(),
             ty_to_id: HashMap::default(),
-            forward_ty_to_ty: HashMap::default(),
+            forwards: HashMap::default(),
             type_id: 1,
             unique_id: 1,
         }
@@ -155,10 +155,6 @@ impl TyEnv {
             self.type_id += 1;
 
             debug!("new_ty -- type_id: {}, ty: {:#?}", id, ty);
-
-            if self.type_id == 56 + 1 {
-                //panic!("new_ty -- type_id: {}, ty: {:#?}", id, ty);
-            }
 
             self.ty_to_id.insert(ty.clone(), id);
             self.id_to_ty.insert(id, ty);
@@ -297,7 +293,7 @@ impl TyEnv {
         // Need to consider that the `to_type_id` has a forward itself. In that
         // case, that forward type should be used instead.
         let fwd_to_type_id = self.get_forwarded(to_type_id);
-        self.forward_ty_to_ty.insert(from_type_id, fwd_to_type_id);
+        self.forwards.insert(from_type_id, fwd_to_type_id);
 
         if let Some(from_ty) = self.id_to_ty.remove(&from_type_id) {
             self.ty_to_id.insert(from_ty, fwd_to_type_id);
@@ -307,7 +303,7 @@ impl TyEnv {
     }
 
     pub fn get_forwarded(&self, type_id: TypeId) -> TypeId {
-        if let Some(forwarded_type_id) = self.forward_ty_to_ty.get(&type_id) {
+        if let Some(forwarded_type_id) = self.forwards.get(&type_id) {
             *forwarded_type_id
         } else {
             type_id
@@ -315,7 +311,7 @@ impl TyEnv {
     }
 
     pub fn get_forwards(&self) -> HashMap<TypeId, TypeId> {
-        self.forward_ty_to_ty.clone()
+        self.forwards.clone()
     }
 
     /// Checks if the type referenced by the type ID `id` only contains solved types.
@@ -658,164 +654,6 @@ impl TyEnv {
         }
 
         Ok(())
-    }
-
-    /// Recursively replaces any "Generic" types with the actual implementation
-    /// type. I.e. any "Generic" type that has a ident that is a key in the
-    /// `generics_impl` will be replaced with the value in the map.
-    ///
-    /// The returned value indicates if the given type stored in `type_id` have
-    /// been updated. If that is the case, a new type ID representing the new
-    /// type will be returned. If the type haven't been updated/modified, None
-    /// is returned.
-    ///
-    /// This function will recursively create new type IDs for all the types that
-    /// contains nested generics. This is needed to not modify the already existing
-    /// types in the type environment when replace the generics.
-    pub fn replace_gen_impls(
-        &mut self,
-        type_id: TypeId,
-        generics_impl: &Generics,
-    ) -> LangResult<Option<TypeId>> {
-        let mut ty_clone = self.ty(type_id)?.clone();
-
-        debug!(
-            "replace_gen_impls -- type_id: {}, ty: {:#?} generics_impl: {:#?}",
-            type_id, ty_clone, generics_impl
-        );
-
-        let ty_was_updated = match &mut ty_clone {
-            Ty::Generic(ident, ..) => {
-                if let Some(impl_type_id) = generics_impl.get(ident) {
-                    ty_clone = self.ty(impl_type_id)?.clone();
-                    true
-                } else {
-                    false
-                }
-            }
-
-            Ty::GenericInstance(ident, unique_id, ..) => {
-                if let Some(impl_type_id) = generics_impl.get(ident) {
-                    match self.ty(impl_type_id)? {
-                        Ty::Generic(..) => false,
-                        Ty::GenericInstance(_, impl_unique_id, ..)
-                            if impl_unique_id == unique_id =>
-                        {
-                            false
-                        }
-                        _ => {
-                            ty_clone = self.ty(impl_type_id)?.clone();
-                            true
-                        }
-                    }
-                } else {
-                    false
-                }
-            }
-
-            // Need to update generics both in the type `gens_clone` and the
-            // generics declared inside a potential LangPath of the InnerTy.
-            Ty::CompoundType(inner_ty, gens_clone, ..) => {
-                let mut was_updated = false;
-
-                for gen_type_id in gens_clone.iter_types_mut() {
-                    if let Some(new_gen_type_id) =
-                        self.replace_gen_impls(*gen_type_id, generics_impl)?
-                    {
-                        *gen_type_id = new_gen_type_id;
-                        was_updated = true;
-                    }
-                }
-
-                if let Some(path) = inner_ty.get_ident_mut() {
-                    if let Some(inner_gens_clune) =
-                        path.last_mut().map(|part| part.1.as_mut()).flatten()
-                    {
-                        for gen_type_id in inner_gens_clune.iter_types_mut() {
-                            if let Some(new_gen_type_id) =
-                                self.replace_gen_impls(*gen_type_id, generics_impl)?
-                            {
-                                *gen_type_id = new_gen_type_id;
-                                was_updated = true;
-                            }
-                        }
-                    }
-                }
-
-                was_updated
-            }
-
-            Ty::Pointer(type_id_i, ..)
-            | Ty::Array(type_id_i, ..)
-            | Ty::UnknownAdtMember(type_id_i, ..)
-            | Ty::UnknownAdtMethod(type_id_i, ..)
-            | Ty::UnknownMethodArgument(type_id_i, ..)
-            | Ty::UnknownMethodGeneric(type_id_i, ..)
-            | Ty::UnknownArrayMember(type_id_i, ..) => {
-                if let Some(new_type_id_i) = self.replace_gen_impls(*type_id_i, generics_impl)? {
-                    *type_id_i = new_type_id_i;
-                    true
-                } else {
-                    false
-                }
-            }
-
-            Ty::Fn(gens, params, ret_type_id_opt, ..) => {
-                let mut was_updated = false;
-                if let Some(ret_type_id) = ret_type_id_opt {
-                    if let Some(new_ret_type_id) =
-                        self.replace_gen_impls(*ret_type_id, generics_impl)?
-                    {
-                        *ret_type_id = new_ret_type_id;
-                        was_updated = true;
-                    }
-                }
-                for gen_type_id in gens.iter_mut() {
-                    if let Some(new_gen_type_id) =
-                        self.replace_gen_impls(*gen_type_id, generics_impl)?
-                    {
-                        *gen_type_id = new_gen_type_id;
-                        was_updated = true;
-                    }
-                }
-                for param_type_id in params.iter_mut() {
-                    if let Some(new_param_type_id) =
-                        self.replace_gen_impls(*param_type_id, generics_impl)?
-                    {
-                        *param_type_id = new_param_type_id;
-                        was_updated = true;
-                    }
-                }
-                was_updated
-            }
-
-            Ty::Expr(expr, ..) => {
-                if let Ok(type_id_i) = expr.get_expr_type_mut() {
-                    if let Some(new_type_id_i) =
-                        self.replace_gen_impls(*type_id_i, generics_impl)?
-                    {
-                        *type_id_i = new_type_id_i;
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            }
-
-            Ty::Any(..) => false,
-        };
-
-        // If any nested type was updated, the `ty_clone` will have been updated
-        // and represents the new type for the current `type_id`. Insert it into
-        // the type environment (if it is a new unique type) and return the new
-        // type ID to indicate to the caller that the type have changed.
-        Ok(if ty_was_updated {
-            Some(self.id(&ty_clone)?)
-        } else {
-            None
-        })
     }
 
     /// Recursively replaces any structure types with idents that matches the

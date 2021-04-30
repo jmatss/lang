@@ -310,18 +310,18 @@ impl<'a> GenericFnCollector<'a> {
             // if they are missing (might have no effect if the names are set already).
             let mut new_generics = Generics::new();
             for (name, type_id) in method_gen_names.iter().zip(generics.iter_types()) {
-                let type_id = match ctx
-                    .ty_ctx
-                    .ty_env
-                    .replace_gen_impls(*type_id, &generics_impls)
-                {
-                    Ok(Some(new_type_id)) => new_type_id,
-                    Ok(None) => *type_id,
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
-                };
+                let type_id =
+                    match ctx
+                        .ty_ctx
+                        .replace_gen_impls(&ctx.ast_ctx, *type_id, &generics_impls)
+                    {
+                        Ok(Some(new_type_id)) => new_type_id,
+                        Ok(None) => *type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
                 new_generics.insert(name.clone(), type_id);
             }
 
