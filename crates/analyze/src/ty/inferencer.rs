@@ -190,7 +190,7 @@ impl Visitor for TypeInferencer {
         } else {
             let err = ctx
                 .ast_ctx
-                .err(format!("Ret type not set for var decl: {:?}", var_decl));
+                .err(format!("Ret type not set for var decl: {:#?}", var_decl));
             self.errors.push(err);
             return;
         };
@@ -884,7 +884,13 @@ impl Visitor for TypeInferencer {
             built_in.parameters.iter().zip(&built_in_call.arguments)
         {
             let built_in_type_id = built_in_param.ty.unwrap();
-            let built_in_call_type_id = built_in_call_arg.value.get_expr_type().unwrap();
+            let built_in_call_type_id = match built_in_call_arg.value.get_expr_type() {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
             // Need to replace any unique IDs found in the built-in declaration
             // types so that they actual are unique. Otherwise all uses of the

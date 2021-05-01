@@ -74,6 +74,7 @@ impl Visitor for MethodAnalyzer {
 
                     method_call.arguments.insert(0, arg);
                     method_call.is_method = true;
+                    method_call.is_fn_ptr_call = false;
 
                     *expr = Expr::FnCall(method_call.clone());
                 }
@@ -122,11 +123,6 @@ impl Visitor for MethodAnalyzer {
     }
 
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
-        if ctx.ast_ctx.get_var(&fn_call.name, ctx.block_id).is_ok() {
-            fn_call.is_fn_ptr_call = true;
-            return;
-        }
-
         // This function call can either be a static function call on a ADT or
         // a call on a stand-alone function. The only way to figure it out is
         // to see if the module/path of the function call represents a ADT.
@@ -222,6 +218,8 @@ impl Visitor for MethodAnalyzer {
 
                     fn_call.is_method = true;
                     fn_call.method_adt = Some(type_id);
+
+                    return;
                 }
             }
 
@@ -242,6 +240,8 @@ impl Visitor for MethodAnalyzer {
 
                     fn_call.is_method = true;
                     fn_call.method_adt = Some(type_id);
+
+                    return;
                 }
             }
 
@@ -262,8 +262,19 @@ impl Visitor for MethodAnalyzer {
 
                     fn_call.is_method = true;
                     fn_call.method_adt = Some(type_id);
+
+                    return;
                 }
             }
+        }
+
+        // OBS! There is a possiblity that a variable containing a function pointer
+        // and a normal function have the same name. In those cases, this will
+        // incorrectly set `is_fn_ptr_call` to true. This can then be set to false
+        // again in the `visit_expr()` function where we have more context about
+        // how this `fn_call` is "used" in the AST.
+        if ctx.ast_ctx.get_var(&fn_call.name, ctx.block_id).is_ok() {
+            fn_call.is_fn_ptr_call = true;
         }
     }
 }

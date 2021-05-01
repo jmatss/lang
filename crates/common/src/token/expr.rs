@@ -45,7 +45,7 @@ impl Expr {
                     *type_id
                 } else {
                     return Err(LangError::new(
-                        format!("Type of var was None: {:?}", var),
+                        format!("Type of var was None: {:#?}", var),
                         LangErrorKind::GeneralError,
                         self.file_pos().cloned(),
                     ));
