@@ -3,13 +3,12 @@ mod std::mem
 use std::types::Optional
 use std::types::Result
 
-//use std::types::Disposable
-
 ext fn malloc(size: u32) -> {u8}
 ext fn free(ptr: {u8})
 ext fn realloc(ptr: {u8}, size: u32) -> {u8}
 ext fn printf(format: {u8}, ...) -> i32
 ext fn memcpy(dest: {u8}, src: {u8}, size: u32) -> {u8}
+ext fn memcmp(str1: {u8}, str2: {u8}, size: u32) -> i32
 
 /// A basic heap allocator that can be used to work with heap allocated data.
 pub struct Allocator;
@@ -81,33 +80,3 @@ impl Allocator
         memcpy(dst as {u8}, src as {u8}, size)
     }
 }
-
-// TODO: How should this work?
-/*
-/// Represent a pointer to a heap allocated value of type `T`.
-struct Ptr<T> where T impls Disposable
-{
-    ptr: {T},
-}
-
-impl Ptr
-{
-    /// Allocates a value of type `T` on the heap.
-    /// If no `value` is given, the memory will be initialized with null.
-    fn init(value: T = @null<T>()) -> Ptr<T>
-    {
-        return Ptr<T> { Allocator::init<T>(value) }
-    }
-}
-
-impl Disposable for Ptr
-{
-    /// Disposes of the allocated heap memory. Before freeing the memory, the inner
-    /// value of type `T` is disposed.
-    fn {this} deinit()
-    {
-        this.*.ptr.deinit()
-        Allocator::deinit<T>(this.*.ptr)
-    }
-}
-*/
