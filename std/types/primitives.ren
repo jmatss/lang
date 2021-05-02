@@ -1,0 +1,132 @@
+mod std::types
+
+use std::container::ArrayList
+
+/// Converts a `digit` to ascii.
+/// The given `digit` is expected to be a single digit (0-9).
+fn digit_to_ascii(digit: u8) -> u8
+{
+    if digit >= 10
+    {
+        @unreachable()
+    }
+    return digit + 48
+}
+
+pub struct I8
+impl I8
+{
+    pub fn to_string(number: i8) -> Result<String, {u8}>
+    {
+        var list_or_error = ArrayList<u8>::init(3)
+        if err is list_or_error.error
+        {
+            return Result::error(err)
+        }
+
+        var list = list_or_error.&.get_success()
+        defer list.&.deinit()
+
+        while true
+        {
+            var digit = number % 10
+            var ascii = digit_to_ascii(digit as u8)
+            list.&.push(ascii)
+
+            number /= 10
+            if number <= 0
+            {
+                break
+            }
+        }
+
+        var str_or_error = String::init_size(list.len())
+        if err is str_or_error.error
+        {
+            return Result::error(err)
+        }
+
+        var str = str_or_error.&.get_success()
+        var idx = list.len() - 1
+        while true
+        {
+            var ascii_or_empty = list.&.get(idx)
+            if _ is ascii_or_empty.empty
+            {
+                var err = "Got back empty from list containing ascii chars"
+                return Result::error(err)
+            }
+
+            var ascii = ascii_or_empty.&.get()
+            str.&.append_ascii(ascii)
+
+            if idx == 0
+            {
+                break
+            }
+
+            idx.--
+        }
+
+        return Result::success(str)
+    }
+}
+
+pub struct U8
+impl U8
+{
+    pub fn to_string(number: u8) -> Result<String, {u8}>
+    {
+        var list_or_error = ArrayList<u8>::init(3)
+        if err is list_or_error.error
+        {
+            return Result::error(err)
+        }
+
+        var list = list_or_error.&.get_success()
+        defer list.&.deinit()
+
+        while true
+        {
+            var digit = number % 10
+            var ascii = digit_to_ascii(digit as u8)
+            list.&.push(ascii)
+
+            number /= 10
+            if number <= 0
+            {
+                break
+            }
+        }
+
+        var str_or_error = String::init_size(list.len())
+        if err is str_or_error.error
+        {
+            return Result::error(err)
+        }
+
+        var str = str_or_error.&.get_success()
+        var idx = list.len() - 1
+        while true
+        {
+            var ascii_or_empty = list.&.get(idx)
+            if _ is ascii_or_empty.empty
+            {
+                var err = "Got back empty from list containing ascii chars"
+                return Result::error(err)
+            }
+
+            var ascii = ascii_or_empty.&.get()
+            str.&.append_ascii(ascii)
+
+            if idx == 0
+            {
+                break
+            }
+
+            idx.--
+        }
+
+        return Result::success(str)
+    }
+}

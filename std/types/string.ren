@@ -1,6 +1,7 @@
 mod std::types
 
 use std::mem::Allocator
+use std::types::Disposable
 use std::types::Optional
 use std::types::Result
 
@@ -116,6 +117,12 @@ impl String
         return this.append_lit(str_view.ptr, str_view.len())
     }
 
+    /// Appends the given ascii character to this String.
+    pub fn {this} append_ascii(ascii: u8) -> Result<i32, {u8}>
+    {
+        return this.append_lit(ascii.&, 0, 1)
+    }
+
     pub fn this as_view() -> StringView
     {
         return StringView::new(this.ptr, 0, this.len())
@@ -125,9 +132,9 @@ impl String
     ///
     /// This function creates a new heap allocation with size `this.len` + 1
     /// which needs to be free'd by the caller.
-    pub fn {this} to_c_string() -> Result<{u8}, {u8}>
+    pub fn this to_c_string() -> Result<{u8}, {u8}>
     {
-        var len = this.*.len()
+        var len = this.len()
         var ptr_or_error = Allocator::init_size<u8>(len + 1)
         if err is ptr_or_error.error
         {
@@ -135,7 +142,7 @@ impl String
         }
 
         var c_str_ptr = ptr_or_error.&.get_success()
-        Allocator::copy<u8>(c_str_ptr, this.*.ptr, len)
+        Allocator::copy<u8>(c_str_ptr, this.ptr, len)
 
         var null_byte_ptr = @ptr_add(c_str_ptr, len)
         null_byte_ptr.* = '\0' as u8
