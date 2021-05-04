@@ -558,7 +558,7 @@ impl<'a> ParseTokenIter<'a> {
                                 lex_token
                             ),
                             Some(lex_token.file_pos),
-                        ))
+                        ));
                     }
                 }
             } else {
@@ -827,7 +827,7 @@ impl<'a> ParseTokenIter<'a> {
 
             if let Some(cur_token) = self.iter.peek() {
                 match cur_token.kind {
-                    LexTokenKind::Sym(Sym::WhiteSpace(_)) => continue,
+                    LexTokenKind::Sym(Sym::WhiteSpace(_)) | LexTokenKind::Comment(..) => continue,
                     _ => return Ok(()),
                 }
             } else {
