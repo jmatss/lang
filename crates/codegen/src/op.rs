@@ -110,12 +110,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         }
 
-        // TODO: Implement is_signed for the function `compile_bin_op_as()`.
-        let is_signed = if let Some(ret_type_id) = &bin_op.ret_type {
-            self.analyze_ctx.ty_ctx.ty_env.is_signed(*ret_type_id)?
-        } else {
-            false
-        };
+        // Since lhs and rhs should be the same type when the signedness actual
+        // matters, we can use either one of them to check it.
+        let type_id = bin_op.lhs.get_expr_type()?;
+        let is_signed = self.analyze_ctx.ty_ctx.ty_env.is_signed(type_id)?;
 
         Ok(match bin_op.operator {
             BinOperator::In => panic!("TODO: In"),
@@ -191,7 +189,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         } else {
             return Err(self.err(
                 format!(
-                    "Type of un_op \"{:?}\" not know when compiling assignment.",
+                    "Type of un_op \"{:#?}\" not know when compiling assignment.",
                     &un_op
                 ),
                 file_pos,

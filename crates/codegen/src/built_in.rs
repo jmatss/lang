@@ -1,14 +1,20 @@
+use std::{cell::RefCell, rc::Rc};
+
 use inkwell::{values::AnyValueEnum, AddressSpace, IntPredicate};
 
 use common::{
+    ctx::ty_env::TyEnv,
     error::LangResult,
+    path::{LangPath, LangPathBuilder},
     token::{
         expr::Var,
-        expr::{BuiltInCall, Expr},
+        expr::{Argument, BuiltInCall, Expr, FnCall, FormatPart},
         lit::Lit,
+        op::{AssignOperator, Op, UnOp, UnOperator},
+        stmt::Stmt,
     },
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
-    ARGC_GLOBAL_VAR_NAME, ARGV_GLOBAL_VAR_NAME,
+    TypeId, ARGC_GLOBAL_VAR_NAME, ARGV_GLOBAL_VAR_NAME,
 };
 
 use crate::{expr::ExprTy, generator::CodeGen};
@@ -160,6 +166,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // the pointer element to the pointer value.
             "ptr_sub" => self.compile_ptr_math(built_in_call, PtrMathOp::Sub),
 
+            // The first argument of the `format` call is a string literal and
+            // the rest of the arguments (variadic) are the arguments to the
+            // given format string literal.
+            "format" => self.compile_format(built_in_call),
+
             // Gets the amount of CLI arguments used when running the program (`argc`).
             // If no `main` function is found in this module, it will be set to 0.
             "argc" => {
@@ -291,5 +302,371 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         );
 
         Ok(new_ptr.into())
+    }
+
+    /// This function creates a `std::types::String` variable and appends all
+    /// the given format arguments to it.
+    ///
+    /// The arguments to the `@format()` call are expected to be of types
+    /// `std::types::StringView`. If they aren't, this function will try to create
+    /// StringView's from the values if possible. Currently this is only done for
+    /// a subset of  primitive types.
+    fn compile_format(
+        &mut self,
+        built_in_call: &mut BuiltInCall,
+    ) -> LangResult<AnyValueEnum<'ctx>> {
+        let format_parts = if let Some(format_parts) = &built_in_call.format_parts {
+            format_parts
+        } else {
+            return Err(self.err(
+                format!(
+                    "Found no `format_parts` in @format() call at pos: {:#?}",
+                    built_in_call
+                ),
+                Some(built_in_call.file_pos),
+            ));
+        };
+
+        // TODO: Get path from somewehre, probably as arg to compiler.
+        let mut builder = LangPathBuilder::new();
+        builder.add_path("std").add_path("types");
+        let types_module = builder.build();
+
+        let ty_container = TypeContainer::new(&mut self.analyze_ctx.ty_ctx.ty_env, &types_module)?;
+
+        let mut string_init_call = FnCall::new(
+            "init_size".into(),
+            types_module.clone(),
+            vec![Argument::new(
+                None,
+                None,
+                Expr::Lit(
+                    Lit::Integer("16".into(), 10),
+                    Some(ty_container.u32_type_id),
+                    None,
+                ),
+            )],
+            None,
+            None,
+        );
+        string_init_call.is_method = true;
+        string_init_call.method_adt = Some(ty_container.string_type_id);
+        string_init_call.ret_type = Some(ty_container.result_string_type_id);
+
+        let mut un_op_address = UnOp::new(
+            UnOperator::Address,
+            Box::new(Expr::FnCall(string_init_call)),
+            None,
+        );
+        un_op_address.ret_type = Some(ty_container.string_ptr_type_id);
+
+        let mut string_get_success_call = FnCall::new(
+            "get_success".into(),
+            types_module.clone(),
+            vec![Argument::new(
+                Some("this".into()),
+                None,
+                Expr::Op(Op::UnOp(un_op_address)),
+            )],
+            None,
+            None,
+        );
+        string_get_success_call.is_method = true;
+        string_get_success_call.method_adt = Some(ty_container.result_string_type_id);
+        string_get_success_call.ret_type = Some(ty_container.string_type_id);
+
+        // Create a arbitrary name to reduce the change for collision.
+        let var_name = format!(
+            "format_var_{}_{}_{}",
+            built_in_call.file_pos.file_nr,
+            built_in_call.file_pos.offset,
+            built_in_call.file_pos.line_start
+        );
+        let string_var = Rc::new(RefCell::new(Var::new(
+            var_name.clone(),
+            Some(ty_container.string_type_id),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )));
+        let mut string_var_expr = Expr::Var(string_var.borrow().clone());
+
+        let mut string_var_decl = Stmt::VariableDecl(Rc::clone(&string_var), None);
+        let mut string_var_assign = Stmt::Assignment(
+            AssignOperator::Assignment,
+            Expr::Var(string_var.borrow().clone()),
+            Expr::FnCall(string_get_success_call),
+            None,
+        );
+
+        // Need to insert the variable declaration into the look-up tables so that
+        // other parts of the CodeGen can find it during generation.
+        let var_key = (var_name, self.cur_block_id);
+        self.analyze_ctx
+            .ast_ctx
+            .variables
+            .insert(var_key, string_var);
+        self.compile_stmt(&mut string_var_decl)?;
+        self.compile_stmt(&mut string_var_assign)?;
+
+        let mut string_var_address =
+            UnOp::new(UnOperator::Address, Box::new(string_var_expr.clone()), None);
+        string_var_address.ret_type = Some(ty_container.string_ptr_type_id);
+
+        let string_var_ptr = Expr::Op(Op::UnOp(string_var_address));
+
+        for format_part in format_parts {
+            let expr = match format_part {
+                FormatPart::String(str_lit) => {
+                    self.str_lit_to_string_view(str_lit, &ty_container, &types_module)
+                }
+                FormatPart::Arg(expr) => {
+                    let type_id = expr.get_expr_type()?;
+                    if self.analyze_ctx.ty_ctx.ty_env.is_primitive(type_id)? {
+                        self.primitive_to_string_view(expr, &ty_container, &types_module)?
+                    } else {
+                        expr.clone()
+                    }
+                }
+            };
+
+            self.append_view_to_string(string_var_ptr.clone(), expr, &ty_container, &types_module)?;
+        }
+
+        self.compile_expr(&mut string_var_expr, ExprTy::RValue)
+    }
+
+    fn append_view_to_string(
+        &mut self,
+        this_string_ptr: Expr,
+        string_view_expr: Expr,
+        ty_container: &TypeContainer,
+        types_module: &LangPath,
+    ) -> LangResult<()> {
+        let mut string_append_view_call = FnCall::new(
+            "append_view".into(),
+            types_module.clone(),
+            vec![
+                Argument::new(Some("this".into()), None, this_string_ptr),
+                Argument::new(None, None, string_view_expr),
+            ],
+            None,
+            None,
+        );
+        string_append_view_call.is_method = true;
+        string_append_view_call.method_adt = Some(ty_container.string_type_id);
+        string_append_view_call.ret_type = Some(ty_container.result_u32_type_id);
+
+        self.compile_fn_call(&mut string_append_view_call)?;
+        Ok(())
+    }
+
+    fn str_lit_to_string_view(
+        &mut self,
+        str_lit: &str,
+        ty_container: &TypeContainer,
+        types_module: &LangPath,
+    ) -> Expr {
+        let mut string_view_init = FnCall::new(
+            "new".into(),
+            types_module.clone(),
+            vec![
+                Argument::new(
+                    None,
+                    None,
+                    Expr::Lit(
+                        Lit::String(str_lit.into()),
+                        Some(ty_container.u8_ptr_type_id),
+                        None,
+                    ),
+                ),
+                Argument::new(
+                    None,
+                    None,
+                    Expr::Lit(
+                        Lit::Integer("0".into(), 10),
+                        Some(ty_container.u32_type_id),
+                        None,
+                    ),
+                ),
+                Argument::new(
+                    None,
+                    None,
+                    Expr::Lit(
+                        Lit::Integer(str_lit.len().to_string(), 10),
+                        Some(ty_container.u32_type_id),
+                        None,
+                    ),
+                ),
+            ],
+            None,
+            None,
+        );
+        string_view_init.is_method = true;
+        string_view_init.method_adt = Some(ty_container.string_view_type_id);
+        string_view_init.ret_type = Some(ty_container.string_view_type_id);
+
+        Expr::FnCall(string_view_init)
+    }
+
+    fn primitive_to_string_view(
+        &mut self,
+        primitive_expr: &Expr,
+        ty_container: &TypeContainer,
+        types_module: &LangPath,
+    ) -> LangResult<Expr> {
+        let type_id = primitive_expr.get_expr_type()?;
+        let primitive_name = match self.analyze_ctx.ty_ctx.ty_env.get_inner(type_id)? {
+            InnerTy::I8 => "I8",
+            InnerTy::U8 => "U8",
+            InnerTy::I16 => "I16",
+            InnerTy::U16 => "U16",
+            InnerTy::I32 => "I32",
+            InnerTy::U32 => "U32",
+            InnerTy::F32 => "F32",
+            InnerTy::I64 => "I64",
+            InnerTy::U64 => "U64",
+            InnerTy::F64 => "F64",
+            InnerTy::I128 => "I128",
+            InnerTy::U128 => "U218",
+            _ => panic!("bad format variadic arg type: {:#?}", primitive_expr),
+        };
+
+        let primitive_path = types_module.clone_push(primitive_name, None, None);
+        let primitive_type_id = self.analyze_ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+            InnerTy::Struct(primitive_path),
+            Generics::empty(),
+            TypeInfo::BuiltIn,
+        ))?;
+
+        let mut primitive_to_string_call = FnCall::new(
+            "to_string".into(),
+            types_module.clone(),
+            vec![Argument::new(None, None, primitive_expr.clone())],
+            None,
+            None,
+        );
+        primitive_to_string_call.is_method = true;
+        primitive_to_string_call.method_adt = Some(primitive_type_id);
+        primitive_to_string_call.ret_type = Some(ty_container.result_string_type_id);
+
+        let mut un_op_address = UnOp::new(
+            UnOperator::Address,
+            Box::new(Expr::FnCall(primitive_to_string_call)),
+            None,
+        );
+        un_op_address.ret_type = Some(ty_container.string_ptr_type_id);
+
+        let mut primitive_get_success_call = FnCall::new(
+            "get_success".into(),
+            types_module.clone(),
+            vec![Argument::new(
+                Some("this".into()),
+                None,
+                Expr::Op(Op::UnOp(un_op_address)),
+            )],
+            None,
+            None,
+        );
+        primitive_get_success_call.is_method = true;
+        primitive_get_success_call.method_adt = Some(ty_container.result_string_type_id);
+        primitive_get_success_call.ret_type = Some(ty_container.string_type_id);
+
+        let mut string_as_view = FnCall::new(
+            "as_view".into(),
+            types_module.clone(),
+            vec![Argument::new(
+                Some("this".into()),
+                None,
+                Expr::FnCall(primitive_get_success_call),
+            )],
+            None,
+            None,
+        );
+        string_as_view.is_method = true;
+        string_as_view.method_adt = Some(ty_container.string_type_id);
+        string_as_view.ret_type = Some(ty_container.string_view_type_id);
+
+        Ok(Expr::FnCall(string_as_view))
+    }
+}
+
+/// Used to store types used during code generation of `@format()` calls.
+/// These will be passed around between multiple functions, so only create them
+/// once and keep them in a neat struct for passing around.
+#[derive(Debug)]
+struct TypeContainer {
+    pub u8_type_id: TypeId,
+    pub u8_ptr_type_id: TypeId,
+    pub u32_type_id: TypeId,
+    pub string_type_id: TypeId,
+    pub string_ptr_type_id: TypeId,
+    pub string_view_type_id: TypeId,
+    pub result_string_type_id: TypeId,
+    pub result_u32_type_id: TypeId,
+}
+
+impl TypeContainer {
+    pub fn new(ty_env: &mut TyEnv, types_module: &LangPath) -> LangResult<TypeContainer> {
+        let u8_type_id = ty_env.id(&Ty::CompoundType(
+            InnerTy::U8,
+            Generics::empty(),
+            TypeInfo::BuiltIn,
+        ))?;
+        let u8_ptr_type_id = ty_env.id(&Ty::Pointer(u8_type_id, TypeInfo::BuiltIn))?;
+
+        let u32_type_id = ty_env.id(&Ty::CompoundType(
+            InnerTy::U32,
+            Generics::empty(),
+            TypeInfo::BuiltIn,
+        ))?;
+
+        let string_path = types_module.clone_push("String", None, None);
+        let string_type_id = ty_env.id(&Ty::CompoundType(
+            InnerTy::Struct(string_path),
+            Generics::empty(),
+            TypeInfo::BuiltIn,
+        ))?;
+        let string_ptr_type_id = ty_env.id(&Ty::Pointer(string_type_id, TypeInfo::BuiltIn))?;
+
+        let string_view_path = types_module.clone_push("StringView", None, None);
+        let string_view_type_id = ty_env.id(&Ty::CompoundType(
+            InnerTy::Struct(string_view_path),
+            Generics::empty(),
+            TypeInfo::BuiltIn,
+        ))?;
+
+        let result_path = types_module.clone_push("Result", None, None);
+        let mut gens = Generics::new();
+        gens.insert("T".into(), string_type_id);
+        gens.insert("E".into(), u8_ptr_type_id);
+        let result_string_type_id = ty_env.id(&Ty::CompoundType(
+            InnerTy::Struct(result_path),
+            gens,
+            TypeInfo::BuiltIn,
+        ))?;
+
+        let result_path = types_module.clone_push("Result", None, None);
+        let mut gens = Generics::new();
+        gens.insert("T".into(), u32_type_id);
+        gens.insert("E".into(), u8_ptr_type_id);
+        let result_u32_type_id = ty_env.id(&Ty::CompoundType(
+            InnerTy::Struct(result_path),
+            gens,
+            TypeInfo::BuiltIn,
+        ))?;
+
+        Ok(TypeContainer {
+            u8_type_id,
+            u8_ptr_type_id,
+            u32_type_id,
+            string_type_id,
+            string_ptr_type_id,
+            string_view_type_id,
+            result_string_type_id,
+            result_u32_type_id,
+        })
     }
 }

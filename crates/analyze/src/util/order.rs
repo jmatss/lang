@@ -217,12 +217,8 @@ fn contains_rec(
         return true;
     } else {
         for nested_ident in ref_references {
-            let is_cyclic_dependency = seen_idents.contains(nested_ident);
             seen_idents.insert(nested_ident.clone());
-
-            if is_cyclic_dependency
-                || contains_rec(cur_ident, nested_ident, references, seen_idents)
-            {
+            if contains_rec(cur_ident, nested_ident, references, seen_idents) {
                 return true;
             }
         }
@@ -258,12 +254,8 @@ fn contains_strings_rec(
         return true;
     } else {
         for nested_ident in ref_references {
-            let is_cyclic_dependency = seen_idents.contains(nested_ident);
             seen_idents.insert(nested_ident.clone());
-
-            if is_cyclic_dependency
-                || contains_strings_rec(cur_ident, nested_ident, references, seen_idents)
-            {
+            if contains_strings_rec(cur_ident, nested_ident, references, seen_idents) {
                 return true;
             }
         }

@@ -2,6 +2,8 @@ mod std::types
 
 use std::container::ArrayList
 
+ext fn abs(value: i32) -> u32
+
 /// Converts a `digit` to ascii.
 /// The given `digit` is expected to be a single digit (0-9).
 fn digit_to_ascii(digit: u8) -> u8
@@ -13,51 +15,47 @@ fn digit_to_ascii(digit: u8) -> u8
     return digit + 48
 }
 
-pub struct I8
+pub struct I8;
 impl I8
 {
     pub fn to_string(number: i8) -> Result<String, {u8}>
     {
-        var list_or_error = ArrayList<u8>::init(3)
-        if err is list_or_error.error
-        {
-            return Result::error(err)
-        }
+        var is_negative = number < 0
+        var number_abs = this::abs(number)
 
-        var list = list_or_error.&.get_success()
-        defer list.&.deinit()
+        var buf: [u8: 3]
+        var buf_idx = 0
 
         while true
         {
-            var digit = number % 10
+            var digit = number_abs % 10
             var ascii = digit_to_ascii(digit as u8)
-            list.&.push(ascii)
+            buf.[buf_idx] = ascii
+            buf_idx.++
 
-            number /= 10
-            if number <= 0
+            number_abs /= 10
+            if number_abs == 0
             {
                 break
             }
         }
 
-        var str_or_error = String::init_size(list.len())
+        var str_or_error = String::init_size(buf_idx)
         if err is str_or_error.error
         {
             return Result::error(err)
         }
-
         var str = str_or_error.&.get_success()
-        var idx = list.len() - 1
+
+        if is_negative
+        {
+            str.&.append_ascii(45)  // 45 == '-'
+        }
+
+        var idx = buf_idx - 1
         while true
         {
-            var ascii_or_empty = list.&.get(idx)
-            if _ is ascii_or_empty.empty
-            {
-                var err = "Got back empty from list containing ascii chars"
-                return Result::error(err)
-            }
-
-            var ascii = ascii_or_empty.&.get()
+            var ascii = buf.[idx]
             str.&.append_ascii(ascii)
 
             if idx == 0
@@ -70,53 +68,46 @@ impl I8
 
         return Result::success(str)
     }
+    
+    pub fn abs(value: i8) -> u8
+    {
+        return abs(value as i32) as u8
+    }
 }
 
-pub struct U8
+pub struct U8;
 impl U8
 {
     pub fn to_string(number: u8) -> Result<String, {u8}>
     {
-        var list_or_error = ArrayList<u8>::init(3)
-        if err is list_or_error.error
-        {
-            return Result::error(err)
-        }
-
-        var list = list_or_error.&.get_success()
-        defer list.&.deinit()
+        var buf: [u8: 3]
+        var buf_idx = 0
 
         while true
         {
             var digit = number % 10
             var ascii = digit_to_ascii(digit as u8)
-            list.&.push(ascii)
+            buf.[buf_idx] = ascii
+            buf_idx.++
 
             number /= 10
-            if number <= 0
+            if number == 0
             {
                 break
             }
         }
 
-        var str_or_error = String::init_size(list.len())
+        var str_or_error = String::init_size(buf_idx)
         if err is str_or_error.error
         {
             return Result::error(err)
         }
-
         var str = str_or_error.&.get_success()
-        var idx = list.len() - 1
+
+        var idx = buf_idx - 1
         while true
         {
-            var ascii_or_empty = list.&.get(idx)
-            if _ is ascii_or_empty.empty
-            {
-                var err = "Got back empty from list containing ascii chars"
-                return Result::error(err)
-            }
-
-            var ascii = ascii_or_empty.&.get()
+            var ascii = buf.[idx]
             str.&.append_ascii(ascii)
 
             if idx == 0

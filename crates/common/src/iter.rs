@@ -107,6 +107,10 @@ impl<'a, I: Clone> TokenIter<'a, I> {
         }
     }
 
+    pub fn get_items(&self) -> &[I] {
+        self.iter
+    }
+
     /// Replaces the item at the current position with the value of `item`.
     /// Returns the old token that was replaced.
     pub fn replace(&mut self, item: I) -> Option<I> {

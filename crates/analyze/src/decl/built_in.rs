@@ -162,6 +162,25 @@ pub fn init_built_ins(ty_env: &mut TyEnv) -> LangResult<HashMap<&'static str, Bu
         BuiltIn::new(name, parameters, generics, any_ptr_type_id, false),
     );
 
+    // TODO: Want this to return `std::types::String`, but at the same time
+    //       we don't want to force the user to have to include the string.ren file
+    //       just to compile the code even if `@format()` isn't used.
+    let name = "format";
+    let parameters = vec![Var::new(
+        "format".into(),
+        Some(any_type_id),
+        None,
+        None,
+        None,
+        None,
+        true,
+    )];
+    let generics = None;
+    built_ins.insert(
+        name,
+        BuiltIn::new(name, parameters, generics, any_type_id, true),
+    );
+
     let name = "argc";
     let parameters = Vec::with_capacity(0);
     let generics = None;

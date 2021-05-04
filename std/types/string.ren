@@ -114,7 +114,7 @@ impl String
     /// Appends the contents of a StringView to this String.
     pub fn {this} append_view(str_view: StringView) -> Result<i32, {u8}>
     {
-        return this.append_lit(str_view.ptr, str_view.len())
+        return this.append_lit(str_view.ptr, 0, str_view.len())
     }
 
     /// Appends the given ascii character to this String.

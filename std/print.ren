@@ -6,25 +6,22 @@ extern fn strlen(str: {u8}) -> i32
 
 struct FormatParser
 {
+    str_view: StringView,
     pos: u32,
-    cap: u32,
-    str: {u8},
 }
 
 impl FormatParser
 {
-    fn new(str: {u8}) -> FormatParser
+    fn new(str_view: StringView) -> FormatParser
     {
-        var pos = 0
-        var cap = strlen(str) as u32
-        return FormatParser { pos, cap, str }
+        return FormatParser { str_view, 0 }
     }
 
     fn {this} next_u8() -> Optional<u8>
     {
         var pos = this.*.pos
-        var cap = this.*.cap
-        if pos < cap
+        var len = this.str_view.len
+        if pos < len
         {
             var next_ptr = @ptr_add(this.*.str, pos)
             this.*.pos += 1

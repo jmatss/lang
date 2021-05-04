@@ -6,6 +6,7 @@ use super::{
     op::{BinOperator, Op, UnOperator},
     stmt::Modifier,
 };
+
 use crate::{
     ctx::{ty_ctx::TyCtx, ty_env::TyEnv},
     error::{LangError, LangErrorKind, LangResult},
@@ -561,6 +562,9 @@ pub struct BuiltInCall {
     pub ret_type: Option<TypeId>,
     pub generics: Option<Generics>,
     pub file_pos: FilePosition,
+
+    /// Will only be set for the built-in calls to `@format()`.
+    pub format_parts: Option<Vec<FormatPart>>,
 }
 
 impl BuiltInCall {
@@ -576,8 +580,16 @@ impl BuiltInCall {
             ret_type: None,
             generics,
             file_pos,
+            format_parts: None,
         }
     }
+}
+
+/// Used to represent format information for a built-in `@format()` call.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum FormatPart {
+    String(String),
+    Arg(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

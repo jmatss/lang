@@ -42,6 +42,8 @@ use ty::{
 };
 use util::order::dependency_order_from_ctx;
 
+use crate::post::format::FormatParser;
+
 // TODO: Error if a function that doesn't have a return type has a return in it.
 // TODO: Make it so that one doesn't have to recreate a new AstVisitor for every
 //       analyzing step. They all want to shared the same `analyze_context` but
@@ -182,6 +184,10 @@ pub fn analyze(
     debug!("Running CallArgs");
     let mut call_args = CallArgs::new();
     traverse(&mut ctx, &mut call_args, ast_root)?;
+
+    debug!("Running FormatAnalyzer");
+    let mut format_analyzer = FormatParser::new();
+    traverse(&mut ctx, &mut format_analyzer, ast_root)?;
 
     debug!("Running MatchExhaustAnalyzer");
     let mut exhaust_analyzer = MatchExhaustAnalyzer::new();
