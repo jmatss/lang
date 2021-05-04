@@ -868,10 +868,12 @@ impl Visitor for TypeInferencer {
             }
         };
 
-        // Make sure that the amount of arguments are equal to the amount of parameters.
-        if built_in_call.arguments.len() != built_in.parameters.len() {
+        // Make sure that the amount of arguments are greater or equal to the
+        // amount of parameters (varargs allowed).
+        if built_in_call.arguments.len() < built_in.parameters.len() {
             let err = ctx.ast_ctx.err(format!(
-                "Incorrect amount of arguments given for built-in call to \"{}\". Expected amount: {}, got: {}",
+                "Incorrect amount of arguments given for built-in call to \"{}\". \
+                Expected greater than or equal to: {}, got: {}",
                 &built_in.name,
                 built_in.parameters.len(),
                 built_in_call.arguments.len()
