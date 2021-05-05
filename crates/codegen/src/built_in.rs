@@ -377,7 +377,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         // Create a arbitrary name to reduce the change for collision.
         let var_name = format!(
-            "format_var_{}_{}_{}",
+            "format_{}_{}_{}",
             built_in_call.file_pos.file_nr,
             built_in_call.file_pos.offset,
             built_in_call.file_pos.line_start
@@ -403,7 +403,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         // Need to insert the variable declaration into the look-up tables so that
         // other parts of the CodeGen can find it during generation.
-        let var_key = (var_name, self.cur_block_id);
+        let var_key = (var_name.clone(), self.cur_block_id);
         self.analyze_ctx
             .ast_ctx
             .variables
@@ -417,6 +417,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         let string_var_ptr = Expr::Op(Op::UnOp(string_var_address));
 
+        let mut arg_idx = 0;
         for format_part in format_parts {
             let expr = match format_part {
                 FormatPart::String(str_lit) => {
@@ -425,7 +426,15 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 FormatPart::Arg(expr) => {
                     let type_id = expr.get_expr_type()?;
                     if self.analyze_ctx.ty_ctx.ty_env.is_primitive(type_id)? {
-                        self.primitive_to_string_view(expr, &ty_container, &types_module)?
+                        let expr = self.primitive_to_string_view(
+                            expr,
+                            &var_name,
+                            arg_idx,
+                            &ty_container,
+                            &types_module,
+                        )?;
+                        arg_idx += 1;
+                        expr
                     } else {
                         expr.clone()
                     }
@@ -514,23 +523,28 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     fn primitive_to_string_view(
         &mut self,
         primitive_expr: &Expr,
+        var_name: &str,
+        arg_idx: usize,
         ty_container: &TypeContainer,
         types_module: &LangPath,
     ) -> LangResult<Expr> {
         let type_id = primitive_expr.get_expr_type()?;
-        let primitive_name = match self.analyze_ctx.ty_ctx.ty_env.get_inner(type_id)? {
-            InnerTy::I8 => "I8",
-            InnerTy::U8 => "U8",
-            InnerTy::I16 => "I16",
-            InnerTy::U16 => "U16",
-            InnerTy::I32 => "I32",
-            InnerTy::U32 => "U32",
-            InnerTy::F32 => "F32",
-            InnerTy::I64 => "I64",
-            InnerTy::U64 => "U64",
-            InnerTy::F64 => "F64",
-            InnerTy::I128 => "I128",
-            InnerTy::U128 => "U218",
+        // TODO: What buffer size should floats have? What is their max char size?
+        // `buf_size` is the max amount of bytes that a given primitive type
+        // value can occupy in string form.
+        let (primitive_name, buf_size) = match self.analyze_ctx.ty_ctx.ty_env.get_inner(type_id)? {
+            InnerTy::I8 => ("I8", 4),
+            InnerTy::U8 => ("U8", 3),
+            InnerTy::I16 => ("I16", 6),
+            InnerTy::U16 => ("U16", 5),
+            InnerTy::I32 => ("I32", 11),
+            InnerTy::U32 => ("U32", 10),
+            InnerTy::F32 => ("F32", 0),
+            InnerTy::I64 => ("I64", 20),
+            InnerTy::U64 => ("U64", 19),
+            InnerTy::F64 => ("F64", 0),
+            InnerTy::I128 => ("I128", 40),
+            InnerTy::U128 => ("U128", 39),
             _ => panic!("bad format variadic arg type: {:#?}", primitive_expr),
         };
 
@@ -541,55 +555,63 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             TypeInfo::BuiltIn,
         ))?;
 
-        let mut primitive_to_string_call = FnCall::new(
-            "to_string".into(),
-            types_module.clone(),
-            vec![Argument::new(None, None, primitive_expr.clone())],
-            None,
-            None,
-        );
-        primitive_to_string_call.is_method = true;
-        primitive_to_string_call.method_adt = Some(primitive_type_id);
-        primitive_to_string_call.ret_type = Some(ty_container.result_string_type_id);
+        let arr_type_id = self.analyze_ctx.ty_ctx.ty_env.id(&Ty::Array(
+            ty_container.u8_type_id,
+            Some(Box::new(Expr::Lit(
+                Lit::Integer(buf_size.to_string(), 10),
+                Some(ty_container.u32_type_id),
+                None,
+            ))),
+            TypeInfo::BuiltIn,
+        ))?;
+        let arr_ptr_type_id = self
+            .analyze_ctx
+            .ty_ctx
+            .ty_env
+            .id(&Ty::Pointer(arr_type_id, TypeInfo::BuiltIn))?;
 
-        let mut un_op_address = UnOp::new(
+        let buf_var_name = format!("{}_idx_{}", var_name, arg_idx);
+        let buf_var = Rc::new(RefCell::new(Var::new(
+            buf_var_name.clone(),
+            Some(arr_type_id),
+            None,
+            None,
+            None,
+            None,
+            false,
+        )));
+        let mut buf_var_decl = Stmt::VariableDecl(Rc::clone(&buf_var), None);
+
+        let buf_var_key = (buf_var_name, self.cur_block_id);
+        self.analyze_ctx
+            .ast_ctx
+            .variables
+            .insert(buf_var_key, Rc::clone(&buf_var));
+
+        self.compile_stmt(&mut buf_var_decl)?;
+
+        let mut buf_var_address = UnOp::new(
             UnOperator::Address,
-            Box::new(Expr::FnCall(primitive_to_string_call)),
+            Box::new(Expr::Var(buf_var.borrow().clone())),
             None,
         );
-        un_op_address.ret_type = Some(ty_container.string_ptr_type_id);
+        buf_var_address.ret_type = Some(arr_ptr_type_id);
 
-        let mut primitive_get_success_call = FnCall::new(
-            "get_success".into(),
+        let mut primitive_to_string_view_call = FnCall::new(
+            "to_string_view".into(),
             types_module.clone(),
-            vec![Argument::new(
-                Some("this".into()),
-                None,
-                Expr::Op(Op::UnOp(un_op_address)),
-            )],
+            vec![
+                Argument::new(None, None, primitive_expr.clone()),
+                Argument::new(None, None, Expr::Op(Op::UnOp(buf_var_address))),
+            ],
             None,
             None,
         );
-        primitive_get_success_call.is_method = true;
-        primitive_get_success_call.method_adt = Some(ty_container.result_string_type_id);
-        primitive_get_success_call.ret_type = Some(ty_container.string_type_id);
+        primitive_to_string_view_call.is_method = true;
+        primitive_to_string_view_call.method_adt = Some(primitive_type_id);
+        primitive_to_string_view_call.ret_type = Some(ty_container.string_view_type_id);
 
-        let mut string_as_view = FnCall::new(
-            "as_view".into(),
-            types_module.clone(),
-            vec![Argument::new(
-                Some("this".into()),
-                None,
-                Expr::FnCall(primitive_get_success_call),
-            )],
-            None,
-            None,
-        );
-        string_as_view.is_method = true;
-        string_as_view.method_adt = Some(ty_container.string_type_id);
-        string_as_view.ret_type = Some(ty_container.string_view_type_id);
-
-        Ok(Expr::FnCall(string_as_view))
+        Ok(Expr::FnCall(primitive_to_string_view_call))
     }
 }
 

@@ -69,6 +69,53 @@ impl I8
         return Result::success(str)
     }
     
+    pub fn to_string_view(number: i8, data: {[u8: 4]}) -> StringView
+    {
+        var is_negative = number < 0
+        var number_abs = this::abs(number)
+
+        var buf: [u8: 3]
+        var buf_idx = 0
+
+        while true
+        {
+            var digit = number_abs % 10
+            var ascii = digit_to_ascii(digit as u8)
+            buf.[buf_idx] = ascii
+            buf_idx.++
+
+            number_abs /= 10
+            if number_abs == 0
+            {
+                break
+            }
+        }
+
+        var data_idx = 0
+        if is_negative
+        {
+            data.*.[data_idx] = 45  // 45 == '-'
+            data_idx.++
+        }
+
+        buf_idx.--
+        while true
+        {
+            var ascii = buf.[buf_idx]
+            data.*.[data_idx] = ascii
+            data_idx.++
+
+            if buf_idx == 0
+            {
+                break
+            }
+
+            buf_idx.--
+        }
+
+        return StringView::new(data as {u8}, 0, data_idx)
+    }
+    
     pub fn abs(value: i8) -> u8
     {
         return abs(value as i32) as u8
@@ -119,5 +166,43 @@ impl U8
         }
 
         return Result::success(str)
+    }
+    
+    pub fn to_string_view(number: u8, data: {[u8: 3]}) -> StringView
+    {
+        var buf: [u8: 3]
+        var buf_idx = 0
+
+        while true
+        {
+            var digit = number % 10
+            var ascii = digit_to_ascii(digit as u8)
+            buf.[buf_idx] = ascii
+            buf_idx.++
+
+            number /= 10
+            if number == 0
+            {
+                break
+            }
+        }
+
+        var data_idx = 0
+        buf_idx.--
+        while true
+        {
+            var ascii = buf.[buf_idx]
+            data.*.[data_idx] = ascii
+            data_idx.++
+
+            if buf_idx == 0
+            {
+                break
+            }
+
+            buf_idx.--
+        }
+
+        return StringView::new(data as {u8}, 0, data_idx)
     }
 }
