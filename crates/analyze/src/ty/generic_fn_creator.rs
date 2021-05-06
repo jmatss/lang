@@ -176,9 +176,13 @@ impl Visitor for GenericFnCreator {
                                 .borrow()
                                 .generics
                                 .as_ref()
-                                .map(|n| !n.is_empty())
+                                .map(|gens| !gens.is_empty())
                                 .unwrap_or(false);
-                            let contains_gens_impl = func.borrow().generics.is_some();
+                            let contains_gens_impl = self
+                                .generic_methods
+                                .get(&adt_path)
+                                .map(|impls| impls.contains_key(&func.borrow().name))
+                                .unwrap_or(false);
 
                             if contains_gens_decl && !contains_gens_impl {
                                 if let Err(err) = ctx.ast_ctx.remove_method(
