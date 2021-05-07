@@ -1,0 +1,6 @@
+test54.ren
+..\std\assert.ren
+..\std\print.ren
+..\std\types\optional.ren
+..\std\types\result.ren
+..\std\types\string_view.ren

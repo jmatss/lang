@@ -1,42 +1,48 @@
 mod std
 
-use std::types::Optional
+use std::types::Result
 
-extern fn strlen(str: {u8}) -> i32
+ext fn _write(fd: i32, data: {u8}, len: u32) -> i32
+ext fn fflush(fd: i32) -> i32
 
-struct FormatParser
-{
+pub fn print_fd(
     str_view: StringView,
-    pos: u32,
-}
-
-impl FormatParser
+    fd: i32,
+    line_break: bool = true,
+    flush: bool = false,
+) -> Result<u32, {u8}>
 {
-    fn new(str_view: StringView) -> FormatParser
+    if _write(fd, str_view.ptr, str_view.len()) == -1
     {
-        return FormatParser { str_view, 0 }
-    }
-
-    fn {this} next_u8() -> Optional<u8>
-    {
-        var pos = this.*.pos
-        var len = this.str_view.len
-        if pos < len
-        {
-            var next_ptr = @ptr_add(this.*.str, pos)
-            this.*.pos += 1
-            return Optional::value(next_ptr.*)
-        }
-        else
-        {
-            return Optional::empty()
-        }
-    }
-
-    fn {this} has_next() -> bool
-    {
-        return this.*.pos < this.*.cap
+        return Result::error("Error when writing to fd")
     }
     
-    fn
+    if line_break
+    {
+        // TODO: Make static variable containing value instead.
+        var ascii = 10  // \n
+        if _write(fd, ascii.&, 1) == -1
+        {
+            return Result::error("Error when writing line break to fd")
+        }
+    }
+    
+    if flush and fflush(fd) == -1
+    {
+        return Result::error("Error when flushing to fd")
+    }
+
+    return Result::success(0)
+}
+
+pub fn print(str_view: StringView, line_break: bool = true, flush: bool = false) -> Result<u32, {u8}>
+{
+    var stdout_fd = 1
+    return print_fd(str_view, stdout_fd, line_break)
+}
+
+pub fn eprint(str_view: StringView, line_break: bool = true, flush: bool = false) -> Result<u32, {u8}>
+{
+    var stderr_fd = 2
+    return print_fd(str_view, stderr_fd, line_break)
 }
