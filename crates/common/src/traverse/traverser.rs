@@ -802,21 +802,6 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
     }
 
     fn traverse_type(&mut self, type_id: &mut TypeId) {
-        // TODO: Does the FilePosition need to be updated?
-
-        // TODO: Make safe.
-        /*
-        if let Ok(exprs) = self.ctx.ty_ctx.ty_env.get_exprs_mut(*type_id) {
-            let mut unsafe_exprs = Vec::with_capacity(exprs.len());
-            for expr in exprs {
-                let unsafe_expr = unsafe { (expr as *mut Expr).as_mut().unwrap() };
-                unsafe_exprs.push(unsafe_expr);
-            }
-            for expr in unsafe_exprs {
-                self.traverse_expr(expr);
-            }
-        }
-        */
         if !self.ctx.stop {
             debug!("Visiting type -- {:#?}", type_id);
             self.visitor.visit_type(type_id, &mut self.ctx);

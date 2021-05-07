@@ -266,7 +266,7 @@ fn contains_strings_rec(
 
 pub struct ReferenceCollector {
     pub references: HashMap<LangPath, HashSet<LangPath>>,
-    cur_adt_name: Option<LangPath>,
+    cur_adt_path: Option<LangPath>,
     include_impls: bool,
     full_paths: bool,
     errors: Vec<LangError>,
@@ -276,7 +276,7 @@ impl ReferenceCollector {
     pub fn new(include_impls: bool, full_paths: bool) -> Self {
         Self {
             references: HashMap::default(),
-            cur_adt_name: None,
+            cur_adt_path: None,
             include_impls,
             full_paths,
             errors: Vec::default(),
@@ -397,28 +397,28 @@ impl Visitor for ReferenceCollector {
     }
 
     fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Implement(ident, ..), ..) = ast_token {
-            self.cur_adt_name = Some(ident.clone());
+        if let AstToken::Block(BlockHeader::Implement(impl_path, ..), ..) = ast_token {
+            self.cur_adt_path = Some(impl_path.clone());
         }
     }
 
-    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
+    fn visit_block(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
+            // Need to do this in `visit_block` instead of `visit_fn` since the types
+            // in the function declaration/prototype is traversed before the
+            // `visit_fn` is.
+            //
             // This is a function, not a method. It is not located inside a impl
             // block, so reset the ADT name since it doesn't belong to the ADT.
             if func.borrow().method_adt.is_none() {
-                self.cur_adt_name = None;
+                self.cur_adt_path = None;
             }
         }
     }
 
-    // TODO: Does this logic make sense? This is called every time a type is
-    //       visited. The first if check is impls should be included, but how
-    //       is that enforces? If `self.include_impls` is true, from what I can
-    //       tell types outside of impls might be used??
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
         if self.include_impls {
-            if let Some(cur_adt_name) = &self.cur_adt_name {
+            if let Some(cur_adt_path) = &self.cur_adt_path {
                 let mut references = match ctx
                     .ty_ctx
                     .ty_env
@@ -432,9 +432,9 @@ impl Visitor for ReferenceCollector {
                 };
 
                 // Do not add references to itself.
-                references.remove(cur_adt_name);
+                references.remove(cur_adt_path);
 
-                match self.references.entry(cur_adt_name.clone()) {
+                match self.references.entry(cur_adt_path.clone()) {
                     Entry::Occupied(mut o) => {
                         o.get_mut().extend(references);
                     }
