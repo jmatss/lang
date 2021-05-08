@@ -42,7 +42,7 @@ use ty::{
 };
 use util::order::dependency_order_from_ctx;
 
-use crate::post::format::FormatParser;
+use crate::{post::format::FormatParser, pre::signed_literals::SignedLiteralsAnalyzer};
 
 // TODO: Error if a function that doesn't have a return type has a return in it.
 // TODO: Make it so that one doesn't have to recreate a new AstVisitor for every
@@ -90,6 +90,10 @@ pub fn analyze(
     debug!("Running MainArgsAnalyzer");
     let mut main_analyzer = MainArgsAnalyzer::new();
     traverse(&mut ctx, &mut main_analyzer, ast_root)?;
+
+    debug!("Running SignedLiteralsAnalyzer");
+    let mut signed_literals_analyzer = SignedLiteralsAnalyzer::new();
+    traverse(&mut ctx, &mut signed_literals_analyzer, ast_root)?;
 
     debug!("Running IndexingAnalyzer");
     let mut index_analyzer = IndexingAnalyzer::new();

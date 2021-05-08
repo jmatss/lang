@@ -2049,10 +2049,10 @@ impl TyEnv {
             (Ty::Any(..), _) => Ok(Ordering::Greater),
             (_, Ty::Any(..)) => Ok(Ordering::Less),
 
-            (Ty::CompoundType(inner_a, ..), Ty::CompoundType(inner_b, ..))
+            (Ty::CompoundType(inner_a, _, info_a), Ty::CompoundType(inner_b, _, info_b))
                 if inner_a.is_unknown() && inner_b.is_unknown() =>
             {
-                Ok(self.prec_inner_ty(inner_a, inner_b))
+                self.prec_inner_ty(inner_a, info_a.file_pos(), inner_b, info_b.file_pos())
             }
             (Ty::CompoundType(inner, ..), _) if inner.is_unknown() => Ok(Ordering::Greater),
             (_, Ty::CompoundType(inner, ..)) if inner.is_unknown() => Ok(Ordering::Less),
@@ -2129,10 +2129,10 @@ impl TyEnv {
             (Ty::UnknownMethodGeneric(..), _) => Ok(Ordering::Greater),
             (_, Ty::UnknownMethodGeneric(..)) => Ok(Ordering::Less),
 
-            (Ty::CompoundType(inner_a, ..), Ty::CompoundType(inner_b, ..))
+            (Ty::CompoundType(inner_a, _, info_a), Ty::CompoundType(inner_b, _, info_b))
                 if inner_a.is_unknown_ident() && inner_b.is_unknown_ident() =>
             {
-                Ok(self.prec_inner_ty(inner_a, inner_b))
+                self.prec_inner_ty(inner_a, info_a.file_pos(), inner_b, info_b.file_pos())
             }
             (Ty::CompoundType(inner, ..), _) if inner.is_unknown_ident() => Ok(Ordering::Greater),
             (_, Ty::CompoundType(inner, ..)) if inner.is_unknown_ident() => Ok(Ordering::Less),
@@ -2209,8 +2209,12 @@ impl TyEnv {
             (Ty::Fn(..), _) => Ok(Ordering::Greater),
             (_, Ty::Fn(..)) => Ok(Ordering::Less),
 
-            (Ty::CompoundType(inner_a, gens_a, ..), Ty::CompoundType(inner_b, gens_b, ..)) => {
-                let ord = self.prec_inner_ty(inner_a, inner_b);
+            (
+                Ty::CompoundType(inner_a, gens_a, info_a),
+                Ty::CompoundType(inner_b, gens_b, info_b),
+            ) => {
+                let ord =
+                    self.prec_inner_ty(inner_a, info_a.file_pos(), inner_b, info_b.file_pos())?;
                 if ord != Ordering::Equal {
                     return Ok(ord);
                 }
@@ -2234,8 +2238,14 @@ impl TyEnv {
         }
     }
 
-    fn prec_inner_ty(&self, first_inner_ty: &InnerTy, second_inner_ty: &InnerTy) -> Ordering {
-        match (first_inner_ty, second_inner_ty) {
+    fn prec_inner_ty(
+        &self,
+        first_inner_ty: &InnerTy,
+        first_file_pos: Option<&FilePosition>,
+        second_inner_ty: &InnerTy,
+        second_file_pos: Option<&FilePosition>,
+    ) -> LangResult<Ordering> {
+        Ok(match (first_inner_ty, second_inner_ty) {
             (InnerTy::Unknown(unique_id_a), InnerTy::Unknown(unique_id_b)) => {
                 if unique_id_a != unique_id_b {
                     unique_id_a.cmp(unique_id_b)
@@ -2291,11 +2301,18 @@ impl TyEnv {
             | (InnerTy::I128, InnerTy::I128)
             | (InnerTy::U128, InnerTy::U128) => Ordering::Equal,
 
-            _ => unreachable!(
-                "first_inner_ty: {:#?}, second_inner_ty: {:#?}",
-                first_inner_ty, second_inner_ty
-            ),
-        }
+            _ => {
+                return Err(LangError::new(
+                    format!(
+                        "Tried to map incompatible inner types. First: {:?}, second: {:?}.\n\
+                        First type found at position: {:#?}.\nSecond found at position: {:#?}",
+                        first_inner_ty, second_inner_ty, first_file_pos, second_file_pos
+                    ),
+                    LangErrorKind::AnalyzeError,
+                    None,
+                ))
+            }
+        })
     }
 
     /// Function used when the two types have the same preference. This function

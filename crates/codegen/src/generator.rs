@@ -401,9 +401,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Ty::Array(inner_type_id, dim_opt, ..) => {
                 if let Some(dim) = dim_opt {
                     let lit_dim = match dim.as_ref() {
-                        Expr::Lit(Lit::Integer(num, radix), ..) => {
-                            u32::from_str_radix(num, *radix)?
-                        }
+                        Expr::Lit(Lit::Integer(num, radix), ..) => u32::from_str_radix(num, *radix)
+                            .map_err(|_| {
+                                self.err(
+                                    format!("Invalid integer found in array dimension: {}", num),
+                                    file_pos,
+                                )
+                            })?,
                         _ => {
                             return Err(self.err(
                                 format!(
