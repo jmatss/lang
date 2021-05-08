@@ -271,7 +271,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 //       might not evaluate to true. Change this so that the var
                 //       is declared and initialized ONLY if the expr evals to true.
                 let union_access = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
-                self.compile_var_decl(&var.borrow())?;
+                self.compile_var_decl(&mut var.borrow_mut())?;
                 self.compile_var_store(
                     &var.borrow(),
                     CodeGen::any_into_basic_value(union_access)?,

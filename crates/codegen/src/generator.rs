@@ -217,7 +217,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         }
     }
 
-    pub(super) fn compile_var_decl(&mut self, var: &Var) -> LangResult<()> {
+    pub(super) fn compile_var_decl(&mut self, var: &mut Var) -> LangResult<()> {
         debug!("Compiling var_decl: {:#?}", &var);
 
         // Constants are never "compiled" into instructions, they are handled
@@ -233,28 +233,34 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let global_var = self.module.add_global(
                 CodeGen::any_into_basic_type(var_type)?,
                 Some(AddressSpace::Generic),
-                &var.name,
+                &var.full_name(),
             );
             global_var.set_linkage(Linkage::Private);
 
-            // Zero out contents of globals as default.
-            match var_type {
-                AnyTypeEnum::FloatType(ty) => {
-                    global_var.set_initializer(&BasicValueEnum::FloatValue(ty.const_zero()))
+            if let Some(init_value) = &mut var.value {
+                let any_value = self.compile_expr(init_value, ExprTy::RValue)?;
+                let basic_value = CodeGen::any_into_basic_value(any_value)?;
+                global_var.set_initializer(&basic_value);
+            } else {
+                // If no init value is given, set value to zero if possible.
+                match var_type {
+                    AnyTypeEnum::FloatType(ty) => {
+                        global_var.set_initializer(&BasicValueEnum::FloatValue(ty.const_zero()));
+                    }
+                    AnyTypeEnum::IntType(ty) => {
+                        global_var.set_initializer(&BasicValueEnum::IntValue(ty.const_zero()));
+                    }
+                    AnyTypeEnum::PointerType(ty) => {
+                        global_var.set_initializer(&BasicValueEnum::PointerValue(ty.const_zero()));
+                    }
+                    AnyTypeEnum::StructType(ty) => {
+                        global_var.set_initializer(&BasicValueEnum::StructValue(ty.const_zero()));
+                    }
+                    AnyTypeEnum::VectorType(ty) => {
+                        global_var.set_initializer(&BasicValueEnum::VectorValue(ty.const_zero()));
+                    }
+                    _ => (),
                 }
-                AnyTypeEnum::IntType(ty) => {
-                    global_var.set_initializer(&BasicValueEnum::IntValue(ty.const_zero()))
-                }
-                AnyTypeEnum::PointerType(ty) => {
-                    global_var.set_initializer(&BasicValueEnum::PointerValue(ty.const_zero()))
-                }
-                AnyTypeEnum::StructType(ty) => {
-                    global_var.set_initializer(&BasicValueEnum::StructValue(ty.const_zero()))
-                }
-                AnyTypeEnum::VectorType(ty) => {
-                    global_var.set_initializer(&BasicValueEnum::VectorValue(ty.const_zero()))
-                }
-                _ => (),
             }
 
             let ptr = global_var.as_pointer_value();

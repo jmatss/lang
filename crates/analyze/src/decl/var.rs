@@ -1,7 +1,7 @@
 use std::{collections::hash_map::Entry, rc::Rc};
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
+    ctx::{block_ctx::BlockCtx, traverse_ctx::TraverseCtx},
     error::LangError,
     token::{ast::AstToken, expr::Var, stmt::Stmt},
     traverse::visitor::Visitor,
@@ -62,6 +62,10 @@ impl Visitor for DeclVarAnalyzer {
 
     fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::VariableDecl(var, ..) = stmt {
+            if ctx.block_id == BlockCtx::DEFAULT_BLOCK_ID {
+                var.borrow_mut().is_global = true;
+            }
+
             let key = (var.borrow().name.clone(), ctx.block_id);
             match ctx.ast_ctx.variables.entry(key) {
                 Entry::Vacant(v) => {
