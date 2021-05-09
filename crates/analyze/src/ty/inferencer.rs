@@ -868,12 +868,21 @@ impl Visitor for TypeInferencer {
             }
         };
 
-        // Make sure that the amount of arguments are greater or equal to the
-        // amount of parameters (varargs allowed).
-        if built_in_call.arguments.len() < built_in.parameters.len() {
+        if built_in.is_var_arg && built_in_call.arguments.len() < built_in.parameters.len() {
             let err = ctx.ast_ctx.err(format!(
                 "Incorrect amount of arguments given for built-in call to \"{}\". \
-                Expected greater than or equal to: {}, got: {}",
+                Expected vararg parameter count greater than or equal to: {}, got: {}",
+                &built_in.name,
+                built_in.parameters.len(),
+                built_in_call.arguments.len()
+            ));
+            self.errors.push(err);
+            return;
+        } else if !built_in.is_var_arg && built_in_call.arguments.len() != built_in.parameters.len()
+        {
+            let err = ctx.ast_ctx.err(format!(
+                "Incorrect amount of arguments given for built-in call to \"{}\". \
+                Expected parameter count of: {}, got: {}",
                 &built_in.name,
                 built_in.parameters.len(),
                 built_in_call.arguments.len()
@@ -980,9 +989,9 @@ impl Visitor for TypeInferencer {
             built_in_call.ret_type = Some(built_in_ret_type);
         }
 
-        // TODO: Temporary ugly hack to make `@type` work. Should do this in
-        //       a different way and somewhere else.
         if &built_in_call.name == "type" {
+            // TODO: Temporary ugly hack to make `@type` work. Should do this in
+            //       a different way and somewhere else.
             let type_id = match ctx.ty_ctx.ty_env.id(&Ty::Expr(
                 Box::new(built_in_call.arguments.first().unwrap().value.clone()),
                 TypeInfo::BuiltInCall(built_in_call.file_pos),
@@ -995,13 +1004,11 @@ impl Visitor for TypeInferencer {
             };
 
             built_in_call.ret_type = Some(type_id);
-        }
-
-        // TODO: "Temporary" hack to make the use of `@ptr_add`/`@ptr_sub` "better".
-        //        Currently there are no direct link between the type of the ptr
-        //        argument and the return type (which should have the same type).
-        //        Add that link here.
-        if &built_in_call.name == "ptr_add" || &built_in_call.name == "ptr_sub" {
+        } else if &built_in_call.name == "ptr_add" || &built_in_call.name == "ptr_sub" {
+            // TODO: "Temporary" hack to make the use of `@ptr_add`/`@ptr_sub` "better".
+            //        Currently there are no direct link between the type of the ptr
+            //        argument and the return type (which should have the same type).
+            //        Add that link here.
             let arg_type = built_in_call
                 .arguments
                 .first()
@@ -1010,6 +1017,33 @@ impl Visitor for TypeInferencer {
                 .unwrap();
             let ret_type = built_in_call.ret_type.unwrap();
             self.insert_constraint(ctx, arg_type, ret_type);
+        } else if &built_in_call.name == "array" {
+            // TODO: The return type of the @array call should return a type
+            //       tied to its arguments. Should be done somewhere else in
+            //       the future.
+            let init_val = built_in_call.arguments.get(0).unwrap().value.clone();
+            let init_val_type_id = match init_val.get_expr_type() {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+            let arr_dim = built_in_call.arguments.get(1).unwrap().value.clone();
+
+            let arr_type_id = match ctx.ty_ctx.ty_env.id(&Ty::Array(
+                init_val_type_id,
+                Some(Box::new(arr_dim)),
+                TypeInfo::BuiltInCall(built_in_call.file_pos),
+            )) {
+                Ok(type_id) => type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            built_in_call.ret_type = Some(arr_type_id);
         }
     }
 

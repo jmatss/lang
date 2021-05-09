@@ -8,7 +8,7 @@ use common::{
     path::{LangPath, LangPathBuilder},
     token::{
         expr::Var,
-        expr::{Argument, BuiltInCall, Expr, FnCall, FormatPart},
+        expr::{Argument, ArrayInit, BuiltInCall, Expr, FnCall, FormatPart},
         lit::Lit,
         op::{AssignOperator, Op, UnOp, UnOperator},
         stmt::Stmt,
@@ -170,6 +170,48 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // the rest of the arguments (variadic) are the arguments to the
             // given format string literal.
             "format" => self.compile_format(built_in_call),
+
+            // Creates a instance of an array with a specified size and all values
+            // initialized to a specified value. The array member type is the
+            // generic argument, the first argument is the init value and the
+            // second argument is the array dimension.
+            "array" => {
+                let init_val = built_in_call.arguments.get(0).unwrap().value.clone();
+                let arr_dim = built_in_call.arguments.get(1).unwrap().value.clone();
+
+                // TODO: This logic is copied from `compile_type`, merge them
+                //       in some way.
+                let lit_dim = match &arr_dim {
+                    Expr::Lit(Lit::Integer(num, radix), ..) => u32::from_str_radix(num, *radix)
+                        .map_err(|_| {
+                            self.err(
+                                format!(
+                                    "Invalid integer found in array dimension of @array: {:#?}",
+                                    built_in_call
+                                ),
+                                Some(built_in_call.file_pos),
+                            )
+                        })?,
+                    _ => {
+                        return Err(self.err(
+                            format!(
+                                "TODO: Invalid expression used as array dimension in @array: {:?}",
+                                built_in_call
+                            ),
+                            Some(built_in_call.file_pos),
+                        ))
+                    }
+                };
+
+                let mut args = Vec::with_capacity(lit_dim as usize);
+                for _ in 0..lit_dim {
+                    let arg = Argument::new(None, None, init_val.clone());
+                    args.push(arg)
+                }
+
+                let mut array_init = ArrayInit::new(args, built_in_call.file_pos);
+                self.compile_array_init(&mut array_init)
+            }
 
             // Gets the amount of CLI arguments used when running the program (`argc`).
             // If no `main` function is found in this module, it will be set to 0.
