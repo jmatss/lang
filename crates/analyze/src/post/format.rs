@@ -8,6 +8,7 @@ use common::{
         lit::Lit,
     },
     traverse::visitor::Visitor,
+    ty::{get::get_ident, is::is_primitive, ty_env::TyEnv},
 };
 
 /// Parses and "analyzes" the format string inside `@format(..)` calls.
@@ -156,7 +157,7 @@ impl FormatParser {
         Ok(format_parts)
     }
 
-    fn verify_arg_types(&self, built_in_call: &BuiltInCall, ctx: &TraverseCtx) -> LangResult<()> {
+    fn verify_arg_types(&self, ty_env: &TyEnv, built_in_call: &BuiltInCall) -> LangResult<()> {
         let mut idx = 0;
 
         for arg in &built_in_call.arguments {
@@ -166,14 +167,11 @@ impl FormatParser {
             }
 
             let type_id = arg.value.get_expr_type()?;
-            if !ctx
-                .ty_ctx
-                .ty_env
-                .get_ident(type_id)?
+            if !get_ident(&ty_env, type_id)?
                 .map(|path| path.last().map(|part| part.0 == "StringView"))
                 .flatten()
                 .unwrap_or(false)
-                && !ctx.ty_ctx.ty_env.is_primitive(type_id)?
+                && !is_primitive(&ty_env, type_id)?
             {
                 // Error because the argument type is neither StringView or primitive.
                 LangError::new(
@@ -238,7 +236,7 @@ impl Visitor for FormatParser {
                 }
             }
 
-            if let Err(err) = self.verify_arg_types(&built_in_call, ctx) {
+            if let Err(err) = self.verify_arg_types(&ctx.ty_env.lock().unwrap(), &built_in_call) {
                 self.errors.push(err);
             }
         }

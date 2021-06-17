@@ -6,19 +6,17 @@ mod ty;
 pub mod util;
 //mod unitialized;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 
 use log::debug;
 
 use common::{
-    ctx::{
-        analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx, traverse_ctx::TraverseCtx, ty_ctx::TyCtx,
-        ty_env::TyEnv,
-    },
+    ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx, traverse_ctx::TraverseCtx},
     error::LangError,
     file::{FileId, FileInfo},
     token::ast::AstToken,
     traverse::traverser::traverse,
+    ty::ty_env::TyEnv,
 };
 use decl::{
     adt::DeclTypeAnalyzer, block::BlockAnalyzer, built_in::init_built_ins, func::DeclFnAnalyzer,
@@ -73,19 +71,18 @@ use crate::{post::format::FormatParser, pre::signed_literals::SignedLiteralsAnal
 /// need struct/func information to figure out types for method calls.
 /// "decl_fn_analyzer"/"decl_type_analyzer"/"type..." needs to be ran before
 /// the "call_args" since it needs to access structs, functions and methods.
-pub fn analyze(
+pub fn analyze<'a>(
     ast_root: &mut AstToken,
-    mut ty_env: TyEnv,
+    ty_env: &'a Mutex<TyEnv>,
     file_info: HashMap<FileId, FileInfo>,
-) -> Result<AnalyzeCtx, Vec<LangError>> {
-    let built_ins = init_built_ins(&mut ty_env).map_err(|err| vec![err])?;
+) -> Result<AnalyzeCtx<'a>, Vec<LangError>> {
+    let built_ins = init_built_ins(ty_env).map_err(|err| vec![err])?;
 
     let mut ast_ctx = match AstCtx::new(built_ins, file_info) {
         Ok(ast_ctx) => ast_ctx,
         Err(err) => return Err(vec![err]),
     };
-    let mut ty_ctx = TyCtx::new(ty_env);
-    let mut ctx = TraverseCtx::new(&mut ast_ctx, &mut ty_ctx);
+    let mut ctx = TraverseCtx::new(&mut ast_ctx, ty_env);
 
     debug!("Running MainArgsAnalyzer");
     let mut main_analyzer = MainArgsAnalyzer::new();
@@ -126,7 +123,7 @@ pub fn analyze(
     let mut path_resolver = PathResolver::new();
     traverse(&mut ctx, &mut path_resolver, ast_root)?;
 
-    debug!("running GenericsAnalyzer");
+    debug!("Running GenericsAnalyzer");
     let mut generics_analyzer = GenericsAnalyzer::new();
     traverse(&mut ctx, &mut generics_analyzer, ast_root)?;
 
@@ -205,5 +202,5 @@ pub fn analyze(
 
     debug!("after analyzing -- AST: {:#?}", &ast_root);
 
-    Ok(AnalyzeCtx { ast_ctx, ty_ctx })
+    Ok(AnalyzeCtx { ast_ctx, ty_env })
 }

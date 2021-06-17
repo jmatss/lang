@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use inkwell::module::Linkage;
 
 use analyze::util::order::dependency_order;
@@ -12,7 +14,7 @@ use common::{
 
 use crate::generator::CodeGen;
 
-impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     /// Compile all declarations of types: structs, enums, unions and interfaces.
     /// This will be done at the start of the code generation so that one
     /// doesn't have do declare prototypes manual in the source before the use
@@ -32,8 +34,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             let adt = self
                 .analyze_ctx
                 .ast_ctx
-                .get_adt(&self.analyze_ctx.ty_ctx, adt_path)?;
-            let adt = adt.borrow();
+                .get_adt(&self.analyze_ctx.ty_env.lock().unwrap(), adt_path)?;
+            let adt = adt.as_ref().borrow().read().unwrap();
 
             match adt.kind {
                 AdtKind::Struct => {
@@ -63,7 +65,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             self.cur_block_id = *id;
 
             if let BlockHeader::Fn(func) = header {
-                let func = func.borrow();
+                let func = func.as_ref().borrow().read().unwrap();
 
                 let linkage = if func.modifiers.contains(&Modifier::Public)
                     || (func.name == "main" && func.module.count() == 0)

@@ -1,7 +1,6 @@
 use std::{
-    cell::RefCell,
     collections::{hash_map::Entry, HashMap},
-    rc::Rc,
+    sync::{Arc, RwLock},
 };
 
 use common::{
@@ -81,14 +80,14 @@ impl CallArgs {
         names_are_unique
     }
 
-    fn reorder(&mut self, ast_ctx: &AstCtx, args: &mut Vec<Argument>, params: &[Rc<RefCell<Var>>]) {
+    fn reorder(&mut self, ast_ctx: &AstCtx, args: &mut Vec<Argument>, params: &[Arc<RwLock<Var>>]) {
         if params.is_empty() || !self.names_are_unique(ast_ctx, args) {
             return;
         }
 
         let mut param_name_to_idx = HashMap::new();
         for (idx, param) in params.iter().enumerate() {
-            param_name_to_idx.insert(param.borrow().name.clone(), idx);
+            param_name_to_idx.insert(param.as_ref().read().unwrap().name.clone(), idx);
         }
 
         let mut arg_idx = 0;
@@ -127,7 +126,7 @@ impl CallArgs {
         &self,
         ast_ctx: &AstCtx,
         fn_call: &mut FnCall,
-        params: &[Rc<RefCell<Var>>],
+        params: &[Arc<RwLock<Var>>],
         is_variadic: bool,
     ) -> LangResult<()> {
         // If here are more parameters in the function that there are arguments
@@ -138,7 +137,7 @@ impl CallArgs {
         if !is_variadic && fn_call.arguments.len() < params.len() {
             let start_idx = fn_call.arguments.len();
             for param in params[start_idx..].iter() {
-                let param = param.borrow();
+                let param = param.as_ref().read().unwrap();
 
                 if let Some(default_value) = &param.value {
                     let default_arg =
@@ -177,58 +176,61 @@ impl Visitor for CallArgs {
         // If this is a function contained in a ADT/trait (method), one needs to
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
-        let func_res = if let Some(adt_type_id) = &fn_call.method_adt {
-            let adt_ty = match ctx.ty_ctx.ty_env.ty(*adt_type_id) {
-                Ok(adt_ty) => adt_ty.clone(),
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+        let func_res = {
+            let ty_env_lock = ctx.ty_env.lock().unwrap();
 
-            let full_path = match adt_ty {
-                Ty::CompoundType(inner_ty, gens, ..) => match inner_ty {
-                    InnerTy::Struct(path)
-                    | InnerTy::Enum(path)
-                    | InnerTy::Union(path)
-                    | InnerTy::Trait(path) => {
-                        // TODO: Is this needed? Just want to make sure that the
-                        //       generics are as up-to-date as possible.
-                        path.with_gens(gens)
+            if let Some(adt_type_id) = &fn_call.method_adt {
+                let adt_ty = match ty_env_lock.ty(*adt_type_id) {
+                    Ok(adt_ty) => adt_ty.clone(),
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
                     }
+                };
+
+                let full_path = match adt_ty {
+                    Ty::CompoundType(inner_ty, gens, ..) => match inner_ty {
+                        InnerTy::Struct(path)
+                        | InnerTy::Enum(path)
+                        | InnerTy::Union(path)
+                        | InnerTy::Trait(path) => {
+                            // TODO: Is this needed? Just want to make sure that the
+                            //       generics are as up-to-date as possible.
+                            path.with_gens(gens)
+                        }
+                        _ => {
+                            let err = ctx.ast_ctx.err(format!(
+                                "Bad inner type for func call method_adt: {:#?}",
+                                fn_call
+                            ));
+                            self.errors.push(err);
+                            return;
+                        }
+                    },
                     _ => {
                         let err = ctx.ast_ctx.err(format!(
-                            "Bad inner type for func call method_adt: {:#?}",
+                            "method_adt not valid type for func call: {:#?}",
                             fn_call
                         ));
                         self.errors.push(err);
                         return;
                     }
-                },
-                _ => {
-                    let err = ctx.ast_ctx.err(format!(
-                        "method_adt not valid type for func call: {:#?}",
-                        fn_call
-                    ));
-                    self.errors.push(err);
-                    return;
-                }
-            };
+                };
 
-            ctx.ast_ctx
-                .get_method(&ctx.ty_ctx, &full_path, &fn_call.half_name(&ctx.ty_ctx))
-        } else {
-            let partial_path = fn_call.module.clone_push(
-                &fn_call.name,
-                fn_call.generics.as_ref(),
-                fn_call.file_pos,
-            );
+                ctx.ast_ctx
+                    .get_method(&ty_env_lock, &full_path, &fn_call.half_name(&ty_env_lock))
+            } else {
+                let partial_path = fn_call.module.clone_push(
+                    &fn_call.name,
+                    fn_call.generics.as_ref(),
+                    fn_call.file_pos,
+                );
 
-            let full_path =
-                match ctx
-                    .ast_ctx
-                    .calculate_fn_full_path(&ctx.ty_ctx, &partial_path, ctx.block_id)
-                {
+                let full_path = match ctx.ast_ctx.calculate_fn_full_path(
+                    &ty_env_lock,
+                    &partial_path,
+                    ctx.block_id,
+                ) {
                     Ok(full_path) => full_path,
                     Err(err) => {
                         self.errors.push(err);
@@ -236,7 +238,8 @@ impl Visitor for CallArgs {
                     }
                 };
 
-            ctx.ast_ctx.get_fn(&ctx.ty_ctx, &full_path)
+                ctx.ast_ctx.get_fn(&ty_env_lock, &full_path)
+            }
         };
 
         let func = match func_res {
@@ -247,7 +250,7 @@ impl Visitor for CallArgs {
             }
         };
 
-        let func = func.borrow();
+        let func = func.as_ref().read().unwrap();
 
         // Get the parameters for the function. This will be used to reorder
         // the arguments in the function call correctly.
@@ -284,7 +287,7 @@ impl Visitor for CallArgs {
             unreachable!("Adt init type not compound: {:#?}", adt_init);
         };
 
-        let ret_ty = match ctx.ty_ctx.ty_env.ty(ret_type_id) {
+        let ret_ty = match ctx.ty_env.lock().unwrap().ty(ret_type_id) {
             Ok(ret_ty) => ret_ty.clone(),
             Err(err) => {
                 self.errors.push(err);
@@ -307,19 +310,19 @@ impl Visitor for CallArgs {
                 .module
                 .clone_push(&adt_init.name, generics.as_ref(), adt_init.file_pos);
 
-        let full_path =
-            match ctx
-                .ast_ctx
-                .calculate_adt_full_path(&ctx.ty_ctx, &partial_path, ctx.block_id)
-            {
-                Ok(full_path) => full_path,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+        let full_path = match ctx.ast_ctx.calculate_adt_full_path(
+            &ctx.ty_env.lock().unwrap(),
+            &partial_path,
+            ctx.block_id,
+        ) {
+            Ok(full_path) => full_path,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
 
-        let adt = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, &full_path) {
+        let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock().unwrap(), &full_path) {
             Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);
@@ -327,7 +330,11 @@ impl Visitor for CallArgs {
             }
         };
 
-        self.reorder(&ctx.ast_ctx, &mut adt_init.arguments, &adt.borrow().members);
+        self.reorder(
+            &ctx.ast_ctx,
+            &mut adt_init.arguments,
+            &adt.as_ref().read().unwrap().members,
+        );
 
         // TODO: Should there be default values for structs (?). Arrange that
         //       here in that case.

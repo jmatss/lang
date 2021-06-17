@@ -96,13 +96,13 @@ pub fn get_if_stmt_op(lex_token: &LexToken) -> Option<AssignOperator> {
 
 /// Used during parsing of expression so that both operators and operand can be
 /// stored together in the same container.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Output {
     Operator(Operator),
     Operand(Expr),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Operator {
     BinaryOperator(BinOperator),
     UnaryOperator(UnOperator),

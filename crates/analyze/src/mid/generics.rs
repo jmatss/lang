@@ -4,8 +4,7 @@ use common::{
     path::LangPathPart,
     token::{ast::AstToken, block::BlockHeader},
     traverse::{traverser::traverse, visitor::Visitor},
-    ty::generics::Generics,
-    TypeId,
+    ty::{generics::Generics, replace::replace_gens, to_string::to_string_path, type_id::TypeId},
 };
 
 /// Iterates through "generic" parameters tied to ADTs and functions, and replaces
@@ -37,11 +36,13 @@ impl Visitor for GenericsAnalyzer {
     /// the structure members.
     fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Struct(struct_), ..) = &ast_token {
-            let struct_ = struct_.borrow();
+            let struct_ = struct_.as_ref().read().unwrap();
             if let (Some(generics), members) = (&struct_.generics, &struct_.members) {
                 for member in members {
-                    if let Some(type_id) = member.borrow_mut().ty.as_mut() {
-                        if let Err(err) = ctx.ty_ctx.ty_env.replace_gens(*type_id, generics) {
+                    if let Some(type_id) = member.as_ref().write().unwrap().ty.as_mut() {
+                        if let Err(err) =
+                            replace_gens(&mut ctx.ty_env.lock().unwrap(), *type_id, generics)
+                        {
                             self.errors.push(err);
                         }
                     }
@@ -52,11 +53,13 @@ impl Visitor for GenericsAnalyzer {
 
     fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Union(union), ..) = &ast_token {
-            let union = union.borrow();
+            let union = union.as_ref().read().unwrap();
             if let (Some(generics), members) = (&union.generics, &union.members) {
                 for member in members {
-                    if let Some(type_id) = member.borrow_mut().ty.as_mut() {
-                        if let Err(err) = ctx.ty_ctx.ty_env.replace_gens(*type_id, generics) {
+                    if let Some(type_id) = member.as_ref().write().unwrap().ty.as_mut() {
+                        if let Err(err) =
+                            replace_gens(&mut ctx.ty_env.lock().unwrap(), *type_id, generics)
+                        {
                             self.errors.push(err);
                         }
                     }
@@ -90,14 +93,26 @@ impl Visitor for GenericsAnalyzer {
 
             // TODO: Implement generics for iterfaces and enums (?).
 
-            let adt_generics = if let Ok(adt) = ctx.ast_ctx.get_adt(&ctx.ty_ctx, &full_impl_path) {
-                adt.borrow().generics.clone().unwrap_or_default()
-            } else if ctx.ast_ctx.get_trait(&ctx.ty_ctx, &full_impl_path).is_ok() {
+            let adt_generics = if let Ok(adt) = ctx
+                .ast_ctx
+                .get_adt(&ctx.ty_env.lock().unwrap(), &full_impl_path)
+            {
+                adt.as_ref()
+                    .read()
+                    .unwrap()
+                    .generics
+                    .clone()
+                    .unwrap_or_default()
+            } else if ctx
+                .ast_ctx
+                .get_trait(&ctx.ty_env.lock().unwrap(), &full_impl_path)
+                .is_ok()
+            {
                 Generics::empty()
             } else {
                 let err = ctx.ast_ctx.err(format!(
                     "Unable to find ADT/Trait for impl block with name \"{}\".",
-                    &ctx.ty_ctx.to_string_path(&full_impl_path),
+                    to_string_path(&ctx.ty_env.lock().unwrap(), &full_impl_path),
                 ));
                 self.errors.push(err);
                 return;
@@ -107,7 +122,7 @@ impl Visitor for GenericsAnalyzer {
             // "UnknownIdent"s representing generics to "Generic"s.
             for method in body {
                 let func_generics = if let AstToken::Block(BlockHeader::Fn(func), ..) = method {
-                    func.borrow().generics.clone()
+                    func.as_ref().read().unwrap().generics.clone()
                 } else {
                     None
                 };
@@ -166,7 +181,8 @@ impl<'a> Visitor for FuncGenericsReplacer<'a> {
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        if let Err(err) = ctx.ty_ctx.ty_env.replace_gens(*type_id, self.adt_generics) {
+        if let Err(err) = replace_gens(&mut ctx.ty_env.lock().unwrap(), *type_id, self.adt_generics)
+        {
             self.errors.push(err);
         }
     }

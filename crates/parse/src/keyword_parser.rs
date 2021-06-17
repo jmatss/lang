@@ -1,4 +1,7 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use common::{
     error::LangResult,
@@ -14,9 +17,9 @@ use common::{
         generics::{Generics, GenericsKind},
         inner_ty::InnerTy,
         ty::Ty,
+        type_id::TypeId,
         type_info::TypeInfo,
     },
-    TypeId,
 };
 use lex::token::{Kw, LexTokenKind, Sym};
 
@@ -541,7 +544,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             //       How should this work?
 
             Ok(AstToken::Stmt(Stmt::ExternalDecl(
-                Rc::new(RefCell::new(func)),
+                Arc::new(RwLock::new(func)),
                 Some(file_pos),
             )))
         } else {
@@ -552,7 +555,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
     }
 
-    /// Parses a `var` declaration statement: "var <ident> [: <type>] [= <expr>]"
+    /// Parses a `var`/`const` declaration statement:
+    ///   "[var | const] <ident> [: <type>] [= <expr>]"
     ///
     /// # Examples
     ///
@@ -568,7 +572,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// var x: i32 = 3
     /// ```
     ///
-    /// The "var" keyword has already been consumed when this function is called.
+    /// The "var"/"const" keyword has already been consumed when this function
+    /// is called.
     fn parse_var_decl(
         &mut self,
         is_const: bool,
@@ -592,7 +597,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let parse_type = true;
         let parse_value = true;
-        let var = Rc::new(RefCell::new(self.iter.parse_var(
+        let var = Arc::new(RwLock::new(self.iter.parse_var(
             &ident,
             parse_type,
             parse_value,
@@ -601,7 +606,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             var_file_pos,
         )?));
 
-        if let Some(var_file_pos) = var.borrow().file_pos {
+        if let Some(var_file_pos) = var.as_ref().read().unwrap().file_pos {
             file_pos.set_end(&var_file_pos)?;
         } else {
             unreachable!();
@@ -620,7 +625,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         file_pos: FilePosition,
     ) -> LangResult<AstToken> {
         let func = self.parse_fn_proto(modifiers, file_pos)?;
-        let func_header = BlockHeader::Fn(Rc::new(RefCell::new(func)));
+        let func_header = BlockHeader::Fn(Arc::new(RwLock::new(func)));
         self.iter.next_block(func_header)
     }
 
@@ -740,7 +745,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // Wrap the params into RC & RefCell.
         let params = params
             .iter()
-            .map(|var| Rc::new(RefCell::new(var.clone())))
+            .map(|var| Arc::new(RwLock::new(var.clone())))
             .collect::<Vec<_>>();
         let params_opt = if !params.is_empty() {
             Some(params)
@@ -836,7 +841,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let members = members
             .iter()
-            .map(|m| Rc::new(RefCell::new(m.clone())))
+            .map(|m| Arc::new(RwLock::new(m.clone())))
             .collect::<Vec<_>>();
 
         if is_var_arg {
@@ -850,7 +855,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
 
         let struct_ = Adt::new_struct(name, module, modifiers, members, file_pos, generics, impls);
-        let header = BlockHeader::Struct(Rc::new(RefCell::new(struct_)));
+        let header = BlockHeader::Struct(Arc::new(RwLock::new(struct_)));
 
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);
@@ -891,7 +896,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
 
         const RADIX: u32 = 10;
-        let mut members_rc = Vec::default();
+        let mut members_arc = Vec::default();
 
         // TODO: This should probably be done somewhere else in a better way.
         //       In the future all enums might not be i32 and might not have the
@@ -903,17 +908,18 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // Also assign all members the type `Enum(ident)` and give them their
         // values according to their index position in the enum.
         for (idx, member) in members.iter_mut().enumerate() {
+            let mut ty_env_lock = self.iter.ty_env.lock().unwrap();
             let member_file_pos = member.file_pos.clone().unwrap();
 
             let enum_type_info = (name.clone(), file_pos.to_owned());
             let member_type_info = (member.name.clone(), member_file_pos);
-            let member_value_type_id = self.iter.ty_env.id(&Ty::CompoundType(
+            let member_value_type_id = ty_env_lock.id(&Ty::CompoundType(
                 InnerTy::I32,
                 Generics::empty(),
                 TypeInfo::EnumMember(enum_type_info, member_type_info),
             ))?;
 
-            let enum_type_id = self.iter.ty_env.id(&Ty::CompoundType(
+            let enum_type_id = ty_env_lock.id(&Ty::CompoundType(
                 InnerTy::Enum(full_path.clone()),
                 Generics::empty(),
                 TypeInfo::Enum(member_file_pos.to_owned()),
@@ -926,14 +932,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 None,
             )));
 
-            members_rc.push(Rc::new(RefCell::new(member.clone())));
+            members_arc.push(Arc::new(RwLock::new(member.clone())));
         }
 
         // TODO: How should the type of the enum be decided? Should it be possible
         //       to specify as a generic on the enum declaration? But in that case
         //       it would take a generic impl instead of a generic decl as structs.
         //       Is this ok?
-        let enum_type_id = self.iter.ty_env.id(&Ty::CompoundType(
+        let enum_type_id = self.iter.ty_env.lock().unwrap().id(&Ty::CompoundType(
             InnerTy::Enum(full_path),
             Generics::empty(),
             TypeInfo::Enum(file_pos.to_owned()),
@@ -943,11 +949,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             name,
             module,
             modifiers,
-            members_rc,
+            members_arc,
             file_pos,
             Some(enum_type_id),
         );
-        let header = BlockHeader::Enum(Rc::new(RefCell::new(enum_)));
+        let header = BlockHeader::Enum(Arc::new(RwLock::new(enum_)));
 
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);
@@ -996,7 +1002,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let members = members
             .iter()
-            .map(|m| Rc::new(RefCell::new(m.clone())))
+            .map(|m| Arc::new(RwLock::new(m.clone())))
             .collect::<Vec<_>>();
 
         if is_var_arg {
@@ -1007,7 +1013,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
 
         let union = Adt::new_union(name, module, modifiers, members, file_pos, generics, impls);
-        let header = BlockHeader::Union(Rc::new(RefCell::new(union)));
+        let header = BlockHeader::Union(Arc::new(RwLock::new(union)));
 
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);
@@ -1089,7 +1095,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
 
         let trait_ = Trait::new(name, module, generic_names, file_pos, methods, modifiers);
-        let header = BlockHeader::Trait(Rc::new(RefCell::new(trait_)));
+        let header = BlockHeader::Trait(Arc::new(RwLock::new(trait_)));
 
         let block_id = self.iter.reserve_block_id();
         let body = Vec::with_capacity(0);

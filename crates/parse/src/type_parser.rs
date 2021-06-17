@@ -1,5 +1,4 @@
 use common::{
-    ctx::ty_ctx::TyCtx,
     error::LangResult,
     file::FilePosition,
     path::LangPathBuilder,
@@ -7,10 +6,12 @@ use common::{
     ty::{
         generics::{Generics, GenericsKind},
         inner_ty::InnerTy,
+        to_string::to_string_path,
         ty::Ty,
+        ty_env::TyEnv,
+        type_id::TypeId,
         type_info::TypeInfo,
     },
-    TypeId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 
@@ -95,10 +96,10 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                                 panic!("TODO: Generic decl in type has generics itself.");
                             }
 
-                            let unique_id = self.iter.ty_env.new_unique_id();
+                            let unique_id = self.iter.ty_env.lock().unwrap().new_unique_id();
                             let type_info = TypeInfo::Generic(file_pos);
                             Ok((
-                                self.iter.ty_env.id(&Ty::Generic(
+                                self.iter.ty_env.lock().unwrap().id(&Ty::Generic(
                                     ident.clone(),
                                     unique_id,
                                     type_info,
@@ -107,22 +108,19 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                             ))
                         } else {
                             // TODO: Remove need for this.
-                            let ty_env = std::mem::take(&mut self.iter.ty_env);
-                            let mut tmp_ty_ctx = TyCtx::new(ty_env);
+                            let tmp_ty_env = TyEnv::default();
 
                             let inner_ty = InnerTy::ident_to_type(
-                                &tmp_ty_ctx.to_string_path(&path_builder.build()),
+                                &to_string_path(&tmp_ty_env, &path_builder.build()),
                                 self.iter.current_block_id(),
                             );
 
-                            self.iter.ty_env = std::mem::take(&mut tmp_ty_ctx.ty_env);
-
-                            let type_info = TypeInfo::Default(file_pos);
-
                             Ok((
-                                self.iter
-                                    .ty_env
-                                    .id(&Ty::CompoundType(inner_ty, generics, type_info))?,
+                                self.iter.ty_env.lock().unwrap().id(&Ty::CompoundType(
+                                    inner_ty,
+                                    generics,
+                                    TypeInfo::Default(file_pos),
+                                ))?,
                                 file_pos,
                             ))
                         }
@@ -198,7 +196,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     }
 
                     Ok((
-                        self.iter.ty_env.id(&Ty::Fn(
+                        self.iter.ty_env.lock().unwrap().id(&Ty::Fn(
                             gens,
                             params,
                             ret_type_id,
@@ -230,6 +228,8 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                         Ok((
                             self.iter
                                 .ty_env
+                                .lock()
+                                .unwrap()
                                 .id(&Ty::Expr(Box::new(expr), TypeInfo::Default(file_pos)))?,
                             file_pos,
                         ))
@@ -482,6 +482,8 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                 Ok((
                     self.iter
                         .ty_env
+                        .lock()
+                        .unwrap()
                         .id(&Ty::Pointer(type_id, TypeInfo::Default(file_pos)))?,
                     file_pos,
                 ))
@@ -567,7 +569,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             if let LexTokenKind::Sym(Sym::SquareBracketEnd) = next_token.kind {
                 file_pos.set_end(&next_token.file_pos)?;
                 Ok((
-                    self.iter.ty_env.id(&Ty::Array(
+                    self.iter.ty_env.lock().unwrap().id(&Ty::Array(
                         arr_type_id,
                         size,
                         TypeInfo::Default(file_pos),

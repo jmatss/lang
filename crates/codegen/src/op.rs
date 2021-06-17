@@ -1,4 +1,7 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    borrow::Borrow,
+    sync::{Arc, RwLock},
+};
 
 use inkwell::{
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
@@ -17,7 +20,12 @@ use common::{
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
         stmt::Stmt,
     },
-    ty::ty::Ty,
+    ty::{
+        get::{get_file_pos, get_ident},
+        is::is_signed,
+        to_string::to_string_path,
+        ty::Ty,
+    },
 };
 
 use crate::{expr::ExprTy, generator::CodeGen};
@@ -25,7 +33,7 @@ use crate::{expr::ExprTy, generator::CodeGen};
 // TODO: Check constness for operators. Ex. adding two consts should use a
 //       const add instruction so that the result also is const.
 
-impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     pub(super) fn compile_op(
         &mut self,
         op: &mut Op,
@@ -113,7 +121,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // Since lhs and rhs should be the same type when the signedness actual
         // matters, we can use either one of them to check it.
         let type_id = bin_op.lhs.get_expr_type()?;
-        let is_signed = self.analyze_ctx.ty_ctx.ty_env.is_signed(type_id)?;
+        let is_signed = is_signed(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
 
         Ok(match bin_op.operator {
             BinOperator::In => panic!("TODO: In"),
@@ -271,9 +279,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 //       might not evaluate to true. Change this so that the var
                 //       is declared and initialized ONLY if the expr evals to true.
                 let union_access = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
-                self.compile_var_decl(&mut var.borrow_mut())?;
+                self.compile_var_decl(&mut var.as_ref().borrow().write().unwrap())?;
                 self.compile_var_store(
-                    &var.borrow(),
+                    &var.as_ref().borrow().read().unwrap(),
                     CodeGen::any_into_basic_value(union_access)?,
                 )?;
 
@@ -1321,7 +1329,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let adt_type_id = un_op.value.get_expr_type()?;
-        let adt_ty = self.analyze_ctx.ty_ctx.ty_env.ty(adt_type_id)?.clone();
+        let adt_ty = self
+            .analyze_ctx
+            .ty_env
+            .lock()
+            .unwrap()
+            .ty(adt_type_id)?
+            .clone();
         let full_path = if let Ty::CompoundType(inner_ty, generics, ..) = &adt_ty {
             if inner_ty.is_adt() {
                 let mut full_path = inner_ty.get_ident().unwrap();
@@ -1345,19 +1359,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         if self
             .analyze_ctx
             .ast_ctx
-            .is_struct(&self.analyze_ctx.ty_ctx, &full_path)
+            .is_struct(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
         {
             self.compile_un_op_struct_access(un_op, expr_ty, idx as u32)
         } else if self
             .analyze_ctx
             .ast_ctx
-            .is_union(&self.analyze_ctx.ty_ctx, &full_path)
+            .is_union(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
         {
             let union_ = self
                 .analyze_ctx
                 .ast_ctx
-                .get_adt(&self.analyze_ctx.ty_ctx, &full_path)?;
-            self.compile_un_op_union_access(un_op, expr_ty, idx as u32, Rc::clone(&union_))
+                .get_adt(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)?;
+            self.compile_un_op_union_access(un_op, expr_ty, idx as u32, Arc::clone(&union_))
         } else {
             unreachable!("{:#?}", un_op);
         }
@@ -1432,7 +1446,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         un_op: &mut UnOp,
         expr_ty: ExprTy,
         idx: u32,
-        union_: Rc<RefCell<Adt>>,
+        union_: Arc<RwLock<Adt>>,
     ) -> LangResult<AnyValueEnum<'ctx>> {
         let address_space = AddressSpace::Generic;
 
@@ -1445,15 +1459,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         );
 
         let type_id = union_
+            .as_ref()
             .borrow()
+            .read()
+            .unwrap()
             .members
             .get(idx as usize)
             .unwrap()
+            .as_ref()
             .borrow()
+            .read()
+            .unwrap()
             .ty
             .clone()
             .unwrap();
-        let file_pos = self.analyze_ctx.ty_ctx.ty_env.file_pos(type_id).cloned();
+        let file_pos = get_file_pos(&self.analyze_ctx.ty_env.lock().unwrap(), type_id).cloned();
         let member_ty = self.compile_type(type_id, file_pos)?;
         let basic_member_ty = CodeGen::any_into_basic_type(member_ty)?;
 
@@ -1578,7 +1598,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let full_path = if let Expr::Type(type_id, ..) = un_op.value.as_ref() {
-            self.analyze_ctx.ty_ctx.ty_env.get_ident(*type_id)?.unwrap()
+            get_ident(&self.analyze_ctx.ty_env.lock().unwrap(), *type_id)?.unwrap()
         } else {
             return Err(self.err(
                 format!("Unop value in enum access not a enum type: {:#?}", un_op,),
@@ -1587,36 +1607,37 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         };
 
         let member = self.analyze_ctx.ast_ctx.get_adt_member(
-            &self.analyze_ctx.ty_ctx,
+            &self.analyze_ctx.ty_env.lock().unwrap(),
             &full_path,
             &member_name,
             un_op.file_pos,
         )?;
 
-        let basic_value = if let Some(mut value) = member.borrow().value.clone() {
-            let any_value = self.compile_expr(value.as_mut(), ExprTy::RValue)?;
-            CodeGen::any_into_basic_value(any_value)?
-        } else {
-            return Err(self.err(
-                format!(
-                    "Member of enum \"{}\" has no value set, member: {:#?}",
-                    self.analyze_ctx.ty_ctx.to_string_path(&full_path),
-                    member
-                ),
-                None,
-            ));
-        };
+        let basic_value =
+            if let Some(mut value) = member.as_ref().borrow().read().unwrap().value.clone() {
+                let any_value = self.compile_expr(value.as_mut(), ExprTy::RValue)?;
+                CodeGen::any_into_basic_value(any_value)?
+            } else {
+                return Err(self.err(
+                    format!(
+                        "Member of enum \"{}\" has no value set, member: {:#?}",
+                        to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
+                        member
+                    ),
+                    None,
+                ));
+            };
 
-        let enum_ty = if let Some(enum_ty) = self
-            .module
-            .get_struct_type(&self.analyze_ctx.ty_ctx.to_string_path(&full_path))
-        {
+        let enum_ty = if let Some(enum_ty) = self.module.get_struct_type(&to_string_path(
+            &self.analyze_ctx.ty_env.lock().unwrap(),
+            &full_path,
+        )) {
             enum_ty
         } else {
             return Err(self.err(
                 format!(
                     "Unable to find enum with name \"{}\" in codegen module.",
-                    self.analyze_ctx.ty_ctx.to_string_path(&full_path),
+                    to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
                 ),
                 None,
             ));
@@ -1624,7 +1645,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
 
         debug!(
             "Compiling enum access -- enum_name: {}, member_name: {}, basic_value: {:#?}",
-            self.analyze_ctx.ty_ctx.to_string_path(&full_path),
+            to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
             member_name,
             basic_value
         );

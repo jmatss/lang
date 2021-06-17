@@ -22,13 +22,20 @@ use common::{
         expr::{Expr, Var},
         lit::Lit,
     },
-    ty::{inner_ty::InnerTy, ty::Ty},
-    BlockId, TypeId,
+    ty::{
+        get::get_file_pos,
+        inner_ty::InnerTy,
+        solve::inferred_type,
+        to_string::{to_string_inner_ty, to_string_path, to_string_type_id},
+        ty::Ty,
+        type_id::TypeId,
+    },
+    BlockId,
 };
 
 use crate::expr::ExprTy;
 
-pub(super) struct CodeGen<'a, 'ctx> {
+pub(super) struct CodeGen<'a, 'b, 'ctx> {
     pub context: &'ctx Context,
     pub builder: &'a Builder<'ctx>,
     pub module: &'a Module<'ctx>,
@@ -36,7 +43,7 @@ pub(super) struct CodeGen<'a, 'ctx> {
 
     /// Information parsed during the "Analyzing" stage. This contains ex.
     /// defintions (var, struct, func etc.) and information about the AST blocks.
-    pub analyze_ctx: &'ctx mut AnalyzeCtx,
+    pub analyze_ctx: &'ctx mut AnalyzeCtx<'b>,
 
     /// The ID of the current block that is being compiled.
     pub cur_block_id: BlockId,
@@ -75,9 +82,9 @@ pub(super) struct CodeGen<'a, 'ctx> {
     pub constants: HashMap<(String, BlockId), BasicValueEnum<'ctx>>,
 }
 
-pub fn generate<'a, 'ctx>(
+pub fn generate<'a, 'b, 'ctx>(
     ast_root: &'ctx mut AstToken,
-    analyze_ctx: &'ctx mut AnalyzeCtx,
+    analyze_ctx: &'ctx mut AnalyzeCtx<'b>,
     context: &'ctx Context,
     builder: &'a Builder<'ctx>,
     module: &'a Module<'ctx>,
@@ -131,10 +138,10 @@ pub fn generate<'a, 'ctx>(
     Ok(())
 }
 
-impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     fn new(
         context: &'ctx Context,
-        analyze_ctx: &'ctx mut AnalyzeCtx,
+        analyze_ctx: &'ctx mut AnalyzeCtx<'b>,
         builder: &'a Builder<'ctx>,
         module: &'a Module<'ctx>,
         target_machine: &'a TargetMachine,
@@ -374,8 +381,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Generic;
 
-        let inf_type_id = self.analyze_ctx.ty_ctx.inferred_type(type_id)?;
-        let inf_ty = self.analyze_ctx.ty_ctx.ty_env.ty(inf_type_id)?.clone();
+        let inf_type_id = inferred_type(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
+        let inf_ty = self
+            .analyze_ctx
+            .ty_env
+            .lock()
+            .unwrap()
+            .ty_clone(inf_type_id)?;
 
         Ok(match inf_ty {
             Ty::Pointer(ptr_type_id, ..) => {
@@ -461,7 +473,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             Ty::Fn(_, param_tys, ret_type_id_opt, type_info) => {
                 let mut param_types = Vec::with_capacity(param_tys.len());
                 for param_ty in param_tys {
-                    let file_pos = self.analyze_ctx.ty_ctx.ty_env.file_pos(param_ty).cloned();
+                    let file_pos =
+                        get_file_pos(&self.analyze_ctx.ty_env.lock().unwrap(), param_ty).cloned();
                     let compiled_ty = self.compile_type(param_ty, file_pos)?;
                     param_types.push(CodeGen::any_into_basic_type(compiled_ty)?);
                 }
@@ -491,16 +504,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let last_part = full_path.pop().unwrap();
                         full_path.push(LangPathPart(last_part.0, Some(generics)));
 
-                        if let Some(struct_type) = self
-                            .module
-                            .get_struct_type(&self.analyze_ctx.ty_ctx.to_string_path(&full_path))
-                        {
+                        if let Some(struct_type) = self.module.get_struct_type(&to_string_path(
+                            &self.analyze_ctx.ty_env.lock().unwrap(),
+                            &full_path,
+                        )) {
                             struct_type.clone().into()
                         } else {
                             return Err(self.err(
                                 format!(
                                     "Unable to find custom struct type with name: {}",
-                                    self.analyze_ctx.ty_ctx.to_string_path(&full_path)
+                                    to_string_path(
+                                        &self.analyze_ctx.ty_env.lock().unwrap(),
+                                        &full_path
+                                    )
                                 ),
                                 file_pos,
                             ));
@@ -510,10 +526,10 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                         let last_part = full_path.pop().unwrap();
                         full_path.push(LangPathPart(last_part.0, Some(generics)));
 
-                        if let Some(struct_type) = self
-                            .module
-                            .get_struct_type(&self.analyze_ctx.ty_ctx.to_string_path(&full_path))
-                        {
+                        if let Some(struct_type) = self.module.get_struct_type(&to_string_path(
+                            &self.analyze_ctx.ty_env.lock().unwrap(),
+                            &full_path,
+                        )) {
                             struct_type.clone().into()
                         } else {
                             return Err(self.err(
@@ -554,8 +570,14 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                                 "Invalid inner type during type codegen. \
                                 Type ID: {}, ty: {:?}, inner type: {:#}",
                                 &type_id,
-                                self.analyze_ctx.ty_ctx.to_string_type_id(type_id)?,
-                                self.analyze_ctx.ty_ctx.to_string_inner_ty(&inner_ty),
+                                to_string_type_id(
+                                    &self.analyze_ctx.ty_env.lock().unwrap(),
+                                    type_id
+                                )?,
+                                to_string_inner_ty(
+                                    &self.analyze_ctx.ty_env.lock().unwrap(),
+                                    &inner_ty
+                                ),
                             ),
                             file_pos,
                         ))
@@ -571,9 +593,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     "Invalid type during type codegen. Type ID: {}, inf_type_id: {}, inf_ty: {:#?}",
                     type_id,
                     inf_type_id,
-                    self.analyze_ctx
-                        .ty_ctx
-                        .to_string_type_id(inf_type_id)?,
+                    to_string_type_id(&self.analyze_ctx.ty_env.lock().unwrap(), inf_type_id)?,
                 ),
                     file_pos,
                 ))

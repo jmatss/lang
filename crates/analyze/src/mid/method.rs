@@ -96,7 +96,7 @@ impl Visitor for MethodAnalyzer {
             let last_part = adt_name.last().unwrap();
             let path = module.clone_push(&last_part.0, None, adt_name.file_pos);
 
-            let adt = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, &path) {
+            let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock().unwrap(), &path) {
                 Ok(adt) => adt,
                 Err(err) => {
                     self.errors.push(err);
@@ -105,17 +105,17 @@ impl Visitor for MethodAnalyzer {
             };
 
             self.impl_adt_path = Some(path);
-            self.impl_generics = adt.borrow().generics.clone();
+            self.impl_generics = adt.as_ref().read().unwrap().generics.clone();
         }
     }
 
     fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
-            self.fn_generics = func.borrow().generics.clone();
+            self.fn_generics = func.as_ref().read().unwrap().generics.clone();
 
             // This isn't a method, reset the variable for any impl block
             // because we have left the impl block.
-            if func.borrow().method_adt.is_none() {
+            if func.as_ref().read().unwrap().method_adt.is_none() {
                 self.impl_adt_path = None;
                 self.impl_generics = None;
             }
@@ -129,11 +129,11 @@ impl Visitor for MethodAnalyzer {
         // If that is the case, this is a static function call on that ADT.
         if fn_call.module.count() > 0 {
             let full_path_opt = if let Ok(adt) = ctx.ast_ctx.get_adt_partial(
-                &ctx.ty_ctx,
+                &ctx.ty_env.lock().unwrap(),
                 &fn_call.module.without_gens(),
                 ctx.block_id,
             ) {
-                let adt = adt.borrow();
+                let adt = adt.as_ref().read().unwrap();
                 let fn_call_gens = fn_call.module.last().unwrap().1.as_ref();
                 Some(
                     adt.module
@@ -154,7 +154,7 @@ impl Visitor for MethodAnalyzer {
                     Generics::empty()
                 };
 
-                let type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
                     InnerTy::UnknownIdent(full_path, ctx.block_id),
                     gens,
                     TypeInfo::Default(ctx.file_pos.to_owned()),
@@ -204,7 +204,7 @@ impl Visitor for MethodAnalyzer {
                             }
                         };
 
-                    let type_id = match ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+                    let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
                         InnerTy::UnknownIdent(adt_path.to_owned(), ctx.block_id),
                         new_gens,
                         TypeInfo::None,
@@ -225,8 +225,8 @@ impl Visitor for MethodAnalyzer {
 
             if let Some(fn_gens) = &self.fn_generics {
                 if fn_gens.contains(possible_gen_or_this) {
-                    let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
-                    let type_id = match ctx.ty_ctx.ty_env.id(&Ty::Generic(
+                    let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
+                    let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::Generic(
                         possible_gen_or_this.into(),
                         unique_id,
                         TypeInfo::Default(ctx.file_pos.to_owned()),
@@ -247,8 +247,8 @@ impl Visitor for MethodAnalyzer {
 
             if let Some(impl_gens) = &self.impl_generics {
                 if impl_gens.contains(possible_gen_or_this) {
-                    let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
-                    let type_id = match ctx.ty_ctx.ty_env.id(&Ty::Generic(
+                    let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
+                    let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::Generic(
                         possible_gen_or_this.into(),
                         unique_id,
                         TypeInfo::Default(ctx.file_pos.to_owned()),

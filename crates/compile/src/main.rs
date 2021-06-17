@@ -6,6 +6,7 @@ use codegen::generator;
 use common::{
     error::{LangError, LangErrorKind, LangResult},
     file::{FileId, FileInfo},
+    ty::ty_env::TY_ENV,
 };
 use inkwell::context::Context;
 use lex::lexer;
@@ -78,7 +79,7 @@ fn main() -> LangResult<()> {
 
     // Loop through files and lex+parse them. All files will be incldued in the
     // same LLVM module.
-    let mut parser = ParseTokenIter::new();
+    let mut parser = ParseTokenIter::new(&TY_ENV);
     for input_file in &opts.input_files {
         let path = std::path::Path::new(input_file);
         let filename = path
@@ -150,10 +151,8 @@ fn main() -> LangResult<()> {
         debug!("\nAST after parsing:\n{:#?}", ast_root);
     }
 
-    let ty_env = std::mem::take(&mut parser.ty_env);
-
     let analyze_timer = Instant::now();
-    let mut analyze_ctx = match analyze(&mut ast_root, ty_env, file_info) {
+    let mut analyze_ctx = match analyze(&mut ast_root, &TY_ENV, file_info) {
         Ok(analyze_ctx) => analyze_ctx,
         Err(errs) => {
             for e in errs {

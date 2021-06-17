@@ -1,6 +1,13 @@
 use common::{
-    ctx::traverse_ctx::TraverseCtx, error::LangError, token::expr::FnCall,
+    ctx::traverse_ctx::TraverseCtx,
+    error::LangError,
+    token::expr::FnCall,
     traverse::visitor::Visitor,
+    ty::{
+        contains::contains_generic_shallow,
+        get::get_ident,
+        to_string::{to_string_path, to_string_type_id},
+    },
 };
 
 /// Checks so that all function calls calling functions with generics actually
@@ -37,17 +44,17 @@ impl Visitor for FnGenericsCheck {
         }
 
         if let Some(adt_type_id) = &fn_call.method_adt {
-            if let Ok(true) = ctx.ty_ctx.ty_env.contains_generic_shallow(*adt_type_id) {
+            if let Ok(true) = contains_generic_shallow(&ctx.ty_env.lock().unwrap(), *adt_type_id) {
                 return;
             }
 
-            let adt_path = match ctx.ty_ctx.ty_env.get_ident(*adt_type_id) {
+            let adt_path = match get_ident(&ctx.ty_env.lock().unwrap(), *adt_type_id) {
                 Ok(Some(adt_path)) => adt_path,
                 Ok(None) => {
                     let err = ctx.ast_ctx.err(format!(
                         "Unable to get path for ADT with type ID: {}, ty: {:?}",
                         adt_type_id,
-                        ctx.ty_ctx.to_string_type_id(*adt_type_id),
+                        to_string_type_id(&ctx.ty_env.lock().unwrap(), *adt_type_id),
                     ));
                     self.errors.push(err);
                     return;
@@ -58,18 +65,18 @@ impl Visitor for FnGenericsCheck {
                 }
             };
 
-            let method =
-                match ctx
-                    .ast_ctx
-                    .get_method(&ctx.ty_ctx, &adt_path.without_gens(), &fn_call.name)
-                {
-                    Ok(method) => method,
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
-                };
-            let method = method.borrow();
+            let method = match ctx.ast_ctx.get_method(
+                &ctx.ty_env.lock().unwrap(),
+                &adt_path.without_gens(),
+                &fn_call.name,
+            ) {
+                Ok(method) => method,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+            let method = method.as_ref().read().unwrap();
 
             if let Some(generic_impls) = &method.generics {
                 if generic_impls.is_empty() {
@@ -84,7 +91,7 @@ impl Visitor for FnGenericsCheck {
                             ADT: {}, method name: {}, file_pos: {:#?}",
                             generic_impls.len(),
                             fn_call_generics.len_types(),
-                            ctx.ty_ctx.to_string_path(&adt_path),
+                            to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path),
                             fn_call.name,
                             fn_call.file_pos
                         ));
@@ -96,7 +103,7 @@ impl Visitor for FnGenericsCheck {
                     let err = ctx.ast_ctx.err(format!(
                         "Function declaration specifies generics, but no generics were given when \
                         calling the function. ADT: {}, method name: {}, file_pos: {:#?}",
-                        ctx.ty_ctx.to_string_path(&adt_path),
+                        to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path),
                         fn_call.name,
                         fn_call.file_pos
                     ));

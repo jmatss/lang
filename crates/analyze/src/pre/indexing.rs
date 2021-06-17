@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::sync::{Arc, RwLock};
 
 use log::debug;
 
@@ -101,7 +101,7 @@ impl Visitor for IndexingAnalyzer {
                         };
 
                     let var_decl = Box::new(Stmt::VariableDecl(
-                        Rc::new(RefCell::new(var.clone())),
+                        Arc::new(RwLock::new(var.clone())),
                         var.file_pos,
                     ));
 

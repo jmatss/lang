@@ -1,6 +1,8 @@
-use crate::{file::FilePosition, BlockId};
+use std::sync::Mutex;
 
-use super::{ast_ctx::AstCtx, ty_ctx::TyCtx};
+use crate::{file::FilePosition, ty::ty_env::TyEnv, BlockId};
+
+use super::ast_ctx::AstCtx;
 
 /// Will contain context used during traversing of the AST.
 /// This will be given to all "visit_...()" functions so that the visitor can
@@ -8,7 +10,7 @@ use super::{ast_ctx::AstCtx, ty_ctx::TyCtx};
 #[derive(Debug)]
 pub struct TraverseCtx<'a> {
     pub ast_ctx: &'a mut AstCtx,
-    pub ty_ctx: &'a mut TyCtx,
+    pub ty_env: &'a Mutex<TyEnv>,
 
     /// "deep copy" indicates if any found shared references (ex. RefCount) should
     /// be "deep" copied before the traverser visits it. This comes in handy when
@@ -34,10 +36,10 @@ pub struct TraverseCtx<'a> {
 }
 
 impl<'a> TraverseCtx<'a> {
-    pub fn new(ast_ctx: &'a mut AstCtx, ty_ctx: &'a mut TyCtx) -> Self {
+    pub fn new(ast_ctx: &'a mut AstCtx, ty_env: &'a Mutex<TyEnv>) -> Self {
         Self {
             ast_ctx,
-            ty_ctx,
+            ty_env,
             copy_nr: None,
             block_id: 0,
             file_pos: FilePosition::default(),

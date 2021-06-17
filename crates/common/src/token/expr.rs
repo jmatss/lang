@@ -1,5 +1,3 @@
-use std::hash::Hash;
-
 use super::{
     block::AdtKind,
     lit::Lit,
@@ -8,15 +6,14 @@ use super::{
 };
 
 use crate::{
-    ctx::{ty_ctx::TyCtx, ty_env::TyEnv},
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
     path::{LangPath, LangPathPart},
-    ty::{generics::Generics, ty::Ty},
-    util, BlockId, TypeId,
+    ty::{generics::Generics, to_string::to_string_path, ty::Ty, ty_env::TyEnv},
+    util, TypeId,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     // TODO: Unnecessary to have type here? Bool, string and char types are
     //       implied. For numbers the postfix notation might be converted to a
@@ -357,7 +354,7 @@ impl Expr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Var {
     pub name: String,
     pub ty: Option<TypeId>,
@@ -425,7 +422,7 @@ impl Var {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct FnCall {
     pub name: String,
     pub module: LangPath,
@@ -468,9 +465,9 @@ impl FnCall {
 
     /// Returns the "full name" which is the name containing possible ADT
     /// and generics as well.
-    pub fn full_name(&self, ty_ctx: &TyCtx) -> LangResult<String> {
+    pub fn full_name(&self, ty_env: &TyEnv) -> LangResult<String> {
         if let Some(adt_type_id) = &self.method_adt {
-            let adt_ty = ty_ctx.ty_env.ty(*adt_type_id)?;
+            let adt_ty = ty_env.ty(*adt_type_id)?;
             let (adt_path, adt_generics) =
                 if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
                     if inner_ty.is_adt() {
@@ -492,7 +489,7 @@ impl FnCall {
                 };
 
             Ok(util::to_method_name(
-                ty_ctx,
+                ty_env,
                 &adt_path,
                 adt_generics,
                 &self.name,
@@ -502,22 +499,22 @@ impl FnCall {
             let fn_path = self
                 .module
                 .clone_push(&self.name, self.generics.as_ref(), self.file_pos);
-            Ok(ty_ctx.to_string_path(&fn_path))
+            Ok(to_string_path(ty_env, &fn_path))
         }
     }
 
     /// Returns the "half name" which is the name that does NOT contain anything
     /// related to the structure but will contain function generics (if any).
-    pub fn half_name(&self, ty_ctx: &TyCtx) -> String {
+    pub fn half_name(&self, ty_env: &TyEnv) -> String {
         if let Some(generics) = &self.generics {
-            util::to_generic_name(ty_ctx, &self.name, generics)
+            util::to_generic_name(ty_env, &self.name, generics)
         } else {
             self.name.clone()
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct FnPtr {
     pub name: String,
     pub module: LangPath,
@@ -545,17 +542,17 @@ impl FnPtr {
 
     /// Returns the "full name" which is the name containing possible ADT
     /// and generics as well.
-    pub fn full_name(&self, ty_ctx: &TyCtx) -> LangResult<String> {
+    pub fn full_name(&self, ty_env: &TyEnv) -> LangResult<String> {
         let fn_name_part = LangPathPart(self.name.clone(), self.generics.clone());
         let full_path = self
             .module
             .join(&LangPath::new(vec![fn_name_part], None), self.file_pos);
 
-        Ok(ty_ctx.to_string_path(&full_path))
+        Ok(to_string_path(ty_env, &full_path))
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct BuiltInCall {
     pub name: String,
     pub arguments: Vec<Argument>,
@@ -586,13 +583,13 @@ impl BuiltInCall {
 }
 
 /// Used to represent format information for a built-in `@format()` call.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub enum FormatPart {
     String(String),
     Arg(Expr),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct AdtInit {
     pub name: String,
     pub module: LangPath,
@@ -648,15 +645,15 @@ impl AdtInit {
 
     /// Returns the "full name" which is the name containing possible generics
     /// as well.
-    pub fn full_name(&mut self, ty_ctx: &TyCtx) -> LangResult<String> {
-        let adt_init_generics = if let Some(generics) = self.generics(&ty_ctx.ty_env) {
+    pub fn full_name(&mut self, ty_env: &TyEnv) -> LangResult<String> {
+        let adt_init_generics = if let Some(generics) = self.generics(&ty_env) {
             Some(generics)
         } else {
             None
         };
 
         if let Some(adt_type_id) = &self.ret_type {
-            let adt_ty = ty_ctx.ty_env.ty(*adt_type_id)?;
+            let adt_ty = ty_env.ty(*adt_type_id)?;
             if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
                 let generics = if let Some(adt_init_generics) = adt_init_generics {
                     adt_init_generics
@@ -673,7 +670,7 @@ impl AdtInit {
                 let new_adt_path =
                     adt_path.join(&LangPath::new(vec![new_adt_name], None), self.file_pos);
 
-                Ok(ty_ctx.to_string_path(&new_adt_path))
+                Ok(to_string_path(ty_env, &new_adt_path))
             } else {
                 Err(LangError::new(
                     format!("Unable to get full name for ADT init: {:#?}", self),
@@ -687,7 +684,7 @@ impl AdtInit {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct ArrayInit {
     pub arguments: Vec<Argument>,
     pub ret_type: Option<TypeId>,
@@ -704,7 +701,7 @@ impl ArrayInit {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Argument {
     // Named used for named arguments.
     pub name: Option<String>,
@@ -722,7 +719,7 @@ impl Argument {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub enum AccessInstruction {
     /// The first string is the name of the struct that this var is a member of.
     /// The second string is the name of this member/variable and the u32 is the
@@ -734,21 +731,4 @@ pub enum AccessInstruction {
 
     /// The expression if the index of the array to access.
     ArrayAccess(Expr),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RootVariable {
-    pub name: String,
-    pub decl_block_id: BlockId,
-    pub is_struct: bool,
-}
-
-impl RootVariable {
-    pub fn new(name: String, decl_block_id: BlockId, is_struct: bool) -> Self {
-        Self {
-            name,
-            decl_block_id,
-            is_struct,
-        }
-    }
 }

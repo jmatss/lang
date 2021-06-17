@@ -1,13 +1,16 @@
-use std::collections::{hash_map::Entry, HashMap, HashSet};
+use std::collections::{hash_map::Entry, HashMap};
 
 use log::debug;
 
 use common::{
     ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx, traverse_ctx::TraverseCtx},
-    error::{LangError, LangErrorKind},
+    error::{LangError, LangErrorKind, LangResult},
+    hash::DerefType,
+    hash_set::TyEnvHashSet,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader, stmt::Stmt},
     traverse::visitor::Visitor,
+    ty::ty_env::TyEnv,
     BlockId,
 };
 
@@ -21,7 +24,7 @@ pub struct BlockAnalyzer {
 
     /// Contains all "use" statements found in the blocks with ID `BlockId` that
     /// have been traversed so far.
-    uses: HashMap<BlockId, HashSet<LangPath>>,
+    uses: HashMap<BlockId, TyEnvHashSet<LangPath>>,
 
     /// Will be set to true every time a new file is started to be analyzed.
     /// A "mod" statement must be the first statement in a file, it is not allowed
@@ -64,15 +67,18 @@ impl BlockAnalyzer {
     /// only the "use a" will be contained in the returned set.
     /// The "use b" will not be contained in the uses since it hasn't been
     /// traversed yet.
-    fn get_uses(&self, ast_ctx: &mut AstCtx, id: BlockId) -> HashSet<LangPath> {
-        let mut uses = HashSet::default();
+    fn get_uses(
+        &self,
+        ty_env: &TyEnv,
+        ast_ctx: &mut AstCtx,
+        id: BlockId,
+    ) -> LangResult<TyEnvHashSet<LangPath>> {
+        let mut uses = TyEnvHashSet::default();
 
         let mut cur_id = id;
         while let Some(cur_block_info) = ast_ctx.block_ctxs.get(&cur_id) {
             if let Some(cur_uses) = self.uses.get(&cur_id) {
-                for path in cur_uses.iter() {
-                    uses.insert(path.clone());
-                }
+                uses.extend(ty_env, DerefType::None, cur_uses)?;
             }
 
             if cur_id == BlockCtx::DEFAULT_BLOCK_ID {
@@ -82,7 +88,7 @@ impl BlockAnalyzer {
             cur_id = cur_block_info.parent_id;
         }
 
-        uses
+        Ok(uses)
     }
 
     /// Returns true if the given header is a "root" i.e. a block that creates
@@ -111,7 +117,13 @@ impl BlockAnalyzer {
 
     /// Sets the information about if a statement exists in `block_info`.
     /// Also gathers information about "mod" and "use" statements for blocks.
-    fn analyze_stmt(&mut self, ast_ctx: &mut AstCtx, stmt: &Stmt, id: usize) {
+    fn analyze_stmt(
+        &mut self,
+        ty_env: &TyEnv,
+        ast_ctx: &mut AstCtx,
+        stmt: &Stmt,
+        id: usize,
+    ) -> LangResult<()> {
         let file_pos = ast_ctx.file_pos.to_owned();
         let block_ctx = ast_ctx.block_ctxs.get_mut(&id).unwrap();
 
@@ -127,16 +139,16 @@ impl BlockAnalyzer {
             Stmt::Use(path) => {
                 match self.uses.entry(block_ctx.block_id) {
                     Entry::Occupied(mut o) => {
-                        o.get_mut().insert(path.clone());
+                        o.get_mut().insert(ty_env, DerefType::None, path.clone())?;
                     }
                     Entry::Vacant(v) => {
-                        let mut set = HashSet::default();
-                        set.insert(path.clone());
+                        let mut set = TyEnvHashSet::default();
+                        set.insert(ty_env, DerefType::None, path.clone())?;
                         v.insert(set);
                     }
                 }
 
-                block_ctx.add_use(path.clone());
+                block_ctx.add_use(ty_env, path.clone());
             }
 
             // Module statements are only allowed in the default block (top
@@ -152,8 +164,7 @@ impl BlockAnalyzer {
                         LangErrorKind::AnalyzeError,
                         Some(file_pos),
                     );
-                    self.errors.push(err);
-                    return;
+                    return Err(err);
                 } else if self.module.is_some() {
                     let err = LangError::new(
                         format!(
@@ -163,8 +174,7 @@ impl BlockAnalyzer {
                         LangErrorKind::AnalyzeError,
                         Some(file_pos),
                     );
-                    self.errors.push(err);
-                    return;
+                    return Err(err);
                 } else if !self.is_first_stmt {
                     let err = LangError::new(
                         format!(
@@ -174,8 +184,7 @@ impl BlockAnalyzer {
                         LangErrorKind::AnalyzeError,
                         Some(file_pos),
                     );
-                    self.errors.push(err);
-                    return;
+                    return Err(err);
                 }
 
                 self.module = Some(path.clone());
@@ -186,10 +195,18 @@ impl BlockAnalyzer {
             | Stmt::ExternalDecl(..)
             | Stmt::DeferExec(_) => (),
         }
+
+        Ok(())
     }
 
     // TODO: Do this borrowing of analyze_context in a less ugly way.
-    fn analyze_block(&mut self, ast_ctx: &mut AstCtx, ast_token: &AstToken, parent_id: usize) {
+    fn analyze_block(
+        &mut self,
+        ty_env: &TyEnv,
+        ast_ctx: &mut AstCtx,
+        ast_token: &AstToken,
+        parent_id: usize,
+    ) -> LangResult<()> {
         ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
         if let AstToken::Block(ref header, file_pos, id, body) = &ast_token {
@@ -209,7 +226,7 @@ impl BlockAnalyzer {
                 is_root_block,
                 is_branchable_block,
                 self.module.clone(),
-                self.get_uses(ast_ctx, parent_id),
+                self.get_uses(ty_env, ast_ctx, parent_id)?,
             );
 
             if *id != BlockCtx::DEFAULT_BLOCK_ID {
@@ -248,7 +265,7 @@ impl BlockAnalyzer {
                     | AstToken::Block(h @ BlockHeader::While(..), _, child_id, _)
                     | AstToken::Block(h @ BlockHeader::Test(_), _, child_id, _)
                     | AstToken::Block(h @ BlockHeader::Anonymous, _, child_id, _) => {
-                        self.analyze_block(ast_ctx, child_token, *id);
+                        self.analyze_block(ty_env, ast_ctx, child_token, *id)?;
 
                         if matches!(h, BlockHeader::IfCase(None) | BlockHeader::MatchCase(None)) {
                             contains_exhaustive_block = true;
@@ -263,8 +280,7 @@ impl BlockAnalyzer {
                                 "Unable to get block info for ID {} when in ID {}.",
                                 child_id, id
                             ));
-                            self.errors.push(err);
-                            return;
+                            return Err(err);
                         }
                         child_count += 1;
                     }
@@ -275,11 +291,11 @@ impl BlockAnalyzer {
                     | AstToken::Block(BlockHeader::Union(_), ..)
                     | AstToken::Block(BlockHeader::Trait(_), ..)
                     | AstToken::Block(BlockHeader::Implement(..), ..) => {
-                        self.analyze_block(ast_ctx, child_token, *id);
+                        self.analyze_block(ty_env, ast_ctx, child_token, *id)?;
                     }
 
                     AstToken::Stmt(ref stmt) => {
-                        self.analyze_stmt(ast_ctx, stmt, *id);
+                        self.analyze_stmt(ty_env, ast_ctx, stmt, *id)?;
                     }
 
                     // Reset the "mod" statement when the end of the file is reached.
@@ -309,6 +325,8 @@ impl BlockAnalyzer {
                 block_info.contains_return
             };
         }
+
+        Ok(())
     }
 }
 
@@ -325,7 +343,14 @@ impl Visitor for BlockAnalyzer {
     /// will be used. The reason being that this needs to be called recursively
     /// on blocks, which currently isn't possible to do with the regular traverser.
     fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        self.analyze_block(&mut ctx.ast_ctx, ast_token, usize::MAX);
+        if let Err(err) = self.analyze_block(
+            &ctx.ty_env.lock().unwrap(),
+            &mut ctx.ast_ctx,
+            ast_token,
+            usize::MAX,
+        ) {
+            self.errors.push(err);
+        }
     }
 
     fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {

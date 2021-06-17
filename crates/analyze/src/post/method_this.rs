@@ -3,6 +3,11 @@ use common::{
     error::{LangError, LangResult},
     token::expr::FnCall,
     traverse::visitor::Visitor,
+    ty::{
+        get::get_ident,
+        is::is_pointer,
+        to_string::{to_string_path, to_string_type_id},
+    },
 };
 
 // TODO: Make sure that only one of the `this` modifiers are defined on the
@@ -42,27 +47,24 @@ impl MethodThisAnalyzer {
         };
 
         let adt_type_id = fn_call.method_adt.unwrap();
-        let adt_path = ctx.ty_ctx.ty_env.get_ident(adt_type_id)?.unwrap();
+        let adt_path = get_ident(&ctx.ty_env.lock().unwrap(), adt_type_id)?.unwrap();
 
-        let method = ctx
-            .ast_ctx
-            .get_method(&ctx.ty_ctx, &adt_path, &fn_call.name)?;
-        let method = method.borrow();
+        let method =
+            ctx.ast_ctx
+                .get_method(&ctx.ty_env.lock().unwrap(), &adt_path, &fn_call.name)?;
+        let method = method.as_ref().read().unwrap();
 
-        if method.is_this_by_ref() && !ctx.ty_ctx.ty_env.is_pointer(arg_type_id)? {
+        if method.is_this_by_ref() && !is_pointer(&ctx.ty_env.lock().unwrap(), arg_type_id)? {
             Err(ctx.ast_ctx.err(format!(
                 "Method with name \"{}\" on ADT \"{}\" expected to take `this` by reference. \
                 `this` has unexpected type \"{}\" in method call at position:\n{:#?}",
                 method.name,
-                ctx.ty_ctx.to_string_path(&adt_path),
-                ctx.ty_ctx.to_string_type_id(arg_type_id)?,
+                to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path),
+                to_string_type_id(&ctx.ty_env.lock().unwrap(), arg_type_id)?,
                 first_arg.value.file_pos()
             )))
         } else if method.is_this_by_val()
-            && ctx
-                .ty_ctx
-                .ty_env
-                .get_ident(arg_type_id)
+            && get_ident(&ctx.ty_env.lock().unwrap(), arg_type_id)
                 .ok()
                 .flatten()
                 .is_none()
@@ -71,8 +73,8 @@ impl MethodThisAnalyzer {
                 "Method with name \"{}\" on ADT \"{}\" expected to take `this` by value. \
                 `this` has unexpected type \"{}\" in method call at position:\n{:#?}",
                 method.name,
-                ctx.ty_ctx.to_string_path(&adt_path),
-                ctx.ty_ctx.to_string_type_id(arg_type_id)?,
+                to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path),
+                to_string_type_id(&ctx.ty_env.lock().unwrap(), arg_type_id)?,
                 first_arg.value.file_pos()
             )))
         } else {

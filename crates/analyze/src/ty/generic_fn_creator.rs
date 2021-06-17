@@ -1,10 +1,12 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, sync::Arc};
 
 use log::debug;
 
 use common::{
     ctx::traverse_ctx::TraverseCtx,
     error::LangError,
+    hash::DerefType,
+    hash_map::TyEnvHashMap,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader},
     traverse::{traverser::traverse_with_deep_copy, visitor::Visitor},
@@ -18,13 +20,13 @@ use super::generic_replace::GenericsReplacer;
 pub struct GenericFnCreator {
     /// The first string is the path of the ADT and the second string is the name
     /// of the method.
-    generic_methods: HashMap<LangPath, HashMap<String, Vec<Generics>>>,
+    generic_methods: TyEnvHashMap<LangPath, HashMap<String, Vec<Generics>>>,
 
     errors: Vec<LangError>,
 }
 
 impl GenericFnCreator {
-    pub fn new(generic_methods: HashMap<LangPath, HashMap<String, Vec<Generics>>>) -> Self {
+    pub fn new(generic_methods: TyEnvHashMap<LangPath, HashMap<String, Vec<Generics>>>) -> Self {
         debug!("generic_methods: {:#?}", generic_methods);
 
         Self {
@@ -38,8 +40,14 @@ impl GenericFnCreator {
         ctx: &mut TraverseCtx,
         adt_path: &LangPath,
         impl_body: &mut Vec<AstToken>,
-    ) {
-        if let Some(generic_methods) = self.generic_methods.get(adt_path).cloned() {
+    ) -> Result<(), Vec<LangError>> {
+        let mut generic_methods_opt = self
+            .generic_methods
+            .get(&ctx.ty_env.lock().unwrap(), DerefType::Deep, adt_path)
+            .map_err(|err| vec![err])?
+            .cloned();
+
+        if let Some(generic_methods) = &mut generic_methods_opt {
             let mut idx = 0;
 
             while idx < impl_body.len() {
@@ -48,7 +56,7 @@ impl GenericFnCreator {
 
                 let (method_name, has_gens) =
                     if let AstToken::Block(BlockHeader::Fn(func), ..) = &method {
-                        let func = func.borrow();
+                        let func = func.as_ref().read().unwrap();
                         (
                             func.name.clone(),
                             func.generics
@@ -65,34 +73,40 @@ impl GenericFnCreator {
                 // implementations of the generics and create a new method for
                 // every generic impl.
                 if generic_methods.contains_key(&method_name) {
-                    for method_generics in generic_methods.get(&method_name).unwrap() {
+                    for method_generics in generic_methods.get_mut(&method_name).unwrap() {
                         let mut new_method = method.clone();
 
-                        let mut generics_replacer = GenericsReplacer::new_func(method_generics);
+                        // Before creating the new functions, make sure that the
+                        // generics are fully inferred.
+                        for gen_type_id in method_generics.iter_types_mut() {
+                            let inf_type_id = ctx
+                                .ty_env
+                                .lock()
+                                .unwrap()
+                                .inferred_type(*gen_type_id)
+                                .map_err(|e| vec![e])?;
 
-                        if let Err(mut errs) = traverse_with_deep_copy(
-                            ctx,
-                            &mut generics_replacer,
-                            &mut new_method,
-                            idx,
-                        ) {
-                            self.errors.append(&mut errs);
-                            return;
+                            if *gen_type_id != inf_type_id {
+                                *gen_type_id = inf_type_id;
+                            }
                         }
+
+                        let mut generics_replacer = GenericsReplacer::new_func(method_generics);
+                        traverse_with_deep_copy(ctx, &mut generics_replacer, &mut new_method, idx)?;
 
                         // Set the generic impls on the new copy of the function.
                         let func = if let AstToken::Block(BlockHeader::Fn(func), ..) = &new_method {
-                            func.borrow_mut().generics = Some(method_generics.clone());
-                            Rc::clone(func)
+                            func.as_ref().write().unwrap().generics = Some(method_generics.clone());
+                            Arc::clone(func)
                         } else {
                             panic!()
                         };
 
                         // Insert the method into the structure.
-                        if let Err(err) = ctx.ast_ctx.insert_method(&ctx.ty_ctx, adt_path, func) {
-                            self.errors.push(err);
-                            return;
-                        }
+
+                        ctx.ast_ctx
+                            .insert_method(&ctx.ty_env.lock().unwrap(), adt_path, func)
+                            .map_err(|err| vec![err])?;
 
                         // Insert the method into the AST.
                         impl_body.insert(idx, new_method);
@@ -104,26 +118,18 @@ impl GenericFnCreator {
                     // the method, `idx` will point to the old method with no generic
                     // impls, it should be removed.
                     // Remove it from both the structure and the AST.
-                    if let Err(err) = ctx
-                        .ast_ctx
-                        .remove_method(&ctx.ty_ctx, adt_path, &method_name)
-                    {
-                        self.errors.push(err);
-                        return;
-                    }
+                    ctx.ast_ctx
+                        .remove_method(&ctx.ty_env.lock().unwrap(), adt_path, &method_name)
+                        .map_err(|err| vec![err])?;
 
                     impl_body.remove(idx);
                 } else if has_gens {
                     // If the method has generics, but isn't in the `generic_methods`
                     // map, it means that it is a method that isn't used anywhere
                     // in the code base; remove it.
-                    if let Err(err) = ctx
-                        .ast_ctx
-                        .remove_method(&ctx.ty_ctx, adt_path, &method_name)
-                    {
-                        self.errors.push(err);
-                        return;
-                    }
+                    ctx.ast_ctx
+                        .remove_method(&ctx.ty_env.lock().unwrap(), adt_path, &method_name)
+                        .map_err(|err| vec![err])?;
 
                     impl_body.remove(idx);
                 } else {
@@ -131,6 +137,8 @@ impl GenericFnCreator {
                 }
             }
         }
+
+        Ok(())
     }
 }
 
@@ -157,9 +165,23 @@ impl Visitor for GenericFnCreator {
                     &mut body_token
                 {
                     let adt_path = adt_path.clone();
+                    let contains_key = match self.generic_methods.contains_key(
+                        &ctx.ty_env.lock().unwrap(),
+                        DerefType::Deep,
+                        &adt_path,
+                    ) {
+                        Ok(contains_key) => contains_key,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
 
-                    if self.generic_methods.contains_key(&adt_path) {
-                        self.create_method_instance(ctx, &adt_path, impl_body);
+                    if contains_key {
+                        if let Err(err) = self.create_method_instance(ctx, &adt_path, impl_body) {
+                            self.errors.extend(err);
+                            return;
+                        }
                     }
 
                     // Go through the methods in the impl block one more time.
@@ -173,22 +195,28 @@ impl Visitor for GenericFnCreator {
 
                         if let AstToken::Block(BlockHeader::Fn(func), ..) = method {
                             let contains_gens_decl = func
-                                .borrow()
+                                .as_ref()
+                                .read()
+                                .unwrap()
                                 .generics
                                 .as_ref()
                                 .map(|gens| !gens.is_empty())
                                 .unwrap_or(false);
                             let contains_gens_impl = self
                                 .generic_methods
-                                .get(&adt_path)
-                                .map(|impls| impls.contains_key(&func.borrow().name))
+                                .get(&ctx.ty_env.lock().unwrap(), DerefType::Deep, &adt_path)
+                                .ok()
+                                .flatten()
+                                .map(|impls| {
+                                    impls.contains_key(&func.as_ref().read().unwrap().name)
+                                })
                                 .unwrap_or(false);
 
                             if contains_gens_decl && !contains_gens_impl {
                                 if let Err(err) = ctx.ast_ctx.remove_method(
-                                    &ctx.ty_ctx,
+                                    &ctx.ty_env.lock().unwrap(),
                                     &adt_path,
-                                    &func.borrow().name,
+                                    &func.as_ref().read().unwrap().name,
                                 ) {
                                     self.errors.push(err);
                                     return;

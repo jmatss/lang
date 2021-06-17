@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use crate::{expr::ExprTy, generator::CodeGen};
 use common::{
     error::LangResult,
@@ -5,12 +7,10 @@ use common::{
     path::LangPath,
     token::{expr::Expr, op::AssignOperator, stmt::Stmt},
 };
-use inkwell::{
-    module::Linkage, types::AnyTypeEnum, values::BasicValueEnum, values::InstructionValue,
-};
+use inkwell::{module::Linkage, values::BasicValueEnum, values::InstructionValue};
 use log::debug;
 
-impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     pub(super) fn compile_stmt(&mut self, stmt: &mut Stmt) -> LangResult<()> {
         match stmt {
             Stmt::Return(expr_opt, ..) => self.compile_return(expr_opt),
@@ -29,7 +29,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
 
             Stmt::VariableDecl(var, ..) => {
-                let mut var = var.borrow_mut();
+                let mut var = var.as_ref().borrow().write().unwrap();
 
                 self.compile_var_decl(&mut var)?;
                 if var.is_global {
@@ -51,7 +51,11 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             // TODO: Add other external declares other than func (var, struct etc.)
             Stmt::ExternalDecl(func, file_pos) => {
                 let linkage = Linkage::External;
-                self.compile_fn_proto(&func.borrow(), file_pos.to_owned(), Some(linkage))?;
+                self.compile_fn_proto(
+                    &func.as_ref().borrow().read().unwrap(),
+                    file_pos.to_owned(),
+                    Some(linkage),
+                )?;
                 Ok(())
             }
             Stmt::Assignment(assign_op, lhs, rhs, file_pos) => {

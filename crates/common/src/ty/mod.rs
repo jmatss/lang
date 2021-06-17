@@ -1,5 +1,15 @@
+pub mod contains;
 pub mod generics;
+pub mod get;
 pub mod inner_ty;
+pub mod is;
+pub mod precedence;
+pub mod replace;
+pub mod solve;
 pub mod substitution_sets;
+pub mod to_string;
 pub mod ty;
+pub mod ty_env;
+pub mod ty_interner;
+pub mod type_id;
 pub mod type_info;

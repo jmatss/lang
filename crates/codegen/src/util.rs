@@ -14,7 +14,7 @@ use common::{
 
 use super::generator::CodeGen;
 
-impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     pub(super) fn any_into_basic_value(any_value: AnyValueEnum) -> LangResult<BasicValueEnum> {
         BasicValueEnum::try_from(any_value).map_err(|_| {
             LangError::new(

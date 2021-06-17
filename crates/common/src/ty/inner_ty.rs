@@ -1,10 +1,15 @@
+use std::hash::Hash;
+
 use crate::{
-    ctx::ty_env::SolveCond,
+    error::LangResult,
+    hash::{DerefType, TyEnvHash},
     path::{LangPath, LangPathPart},
     BlockId, UniqueId,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+use super::{ty::SolveCond, ty_env::TyEnv};
+
+#[derive(Debug, Clone)]
 pub enum InnerTy {
     Struct(LangPath),
     Enum(LangPath),
@@ -271,5 +276,67 @@ impl InnerTy {
             | (InnerTy::UnknownFloat(_), InnerTy::UnknownFloat(_)) => true,
             _ => false,
         }
+    }
+}
+
+impl TyEnvHash for InnerTy {
+    fn hash_with_state<H: std::hash::Hasher>(
+        &self,
+        ty_env: &TyEnv,
+        deref_type: DerefType,
+        state: &mut H,
+    ) -> LangResult<()> {
+        match self {
+            InnerTy::Struct(path) => {
+                0.hash(state);
+                path.hash_with_state(ty_env, deref_type, state)?;
+            }
+            InnerTy::Enum(path) => {
+                1.hash(state);
+                path.hash_with_state(ty_env, deref_type, state)?;
+            }
+            InnerTy::Union(path) => {
+                2.hash(state);
+                path.hash_with_state(ty_env, deref_type, state)?;
+            }
+            InnerTy::Trait(path) => {
+                3.hash(state);
+                path.hash_with_state(ty_env, deref_type, state)?;
+            }
+            InnerTy::Void => 4.hash(state),
+            InnerTy::Character => 5.hash(state),
+            InnerTy::String => 6.hash(state),
+            InnerTy::Boolean => 7.hash(state),
+            InnerTy::I8 => 8.hash(state),
+            InnerTy::U8 => 9.hash(state),
+            InnerTy::I16 => 10.hash(state),
+            InnerTy::U16 => 11.hash(state),
+            InnerTy::I32 => 12.hash(state),
+            InnerTy::U32 => 13.hash(state),
+            InnerTy::F32 => 14.hash(state),
+            InnerTy::I64 => 15.hash(state),
+            InnerTy::U64 => 16.hash(state),
+            InnerTy::F64 => 17.hash(state),
+            InnerTy::I128 => 18.hash(state),
+            InnerTy::U128 => 19.hash(state),
+            InnerTy::Unknown(unique_id) => {
+                20.hash(state);
+                unique_id.hash(state);
+            }
+            InnerTy::UnknownIdent(path, block_id) => {
+                21.hash(state);
+                path.hash_with_state(ty_env, deref_type, state)?;
+                block_id.hash(state);
+            }
+            InnerTy::UnknownInt(unique_id, _) => {
+                22.hash(state);
+                unique_id.hash(state);
+            }
+            InnerTy::UnknownFloat(unique_id) => {
+                20.hash(state);
+                unique_id.hash(state);
+            }
+        }
+        Ok(())
     }
 }

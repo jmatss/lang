@@ -1,7 +1,9 @@
+use std::sync::Mutex;
+
 use log::debug;
 
 use common::{
-    ctx::{block_ctx::BlockCtx, ty_env::TyEnv},
+    ctx::block_ctx::BlockCtx,
     error::{LangError, LangErrorKind::ParseError, LangResult},
     file::FilePosition,
     iter::TokenIter,
@@ -12,8 +14,12 @@ use common::{
         expr::{Argument, Expr, Var},
         stmt::Stmt,
     },
-    ty::generics::{Generics, GenericsKind},
-    BlockId, TypeId,
+    ty::{
+        generics::{Generics, GenericsKind},
+        ty_env::TyEnv,
+        type_id::TypeId,
+    },
+    BlockId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 
@@ -78,27 +84,21 @@ pub struct ParseTokenIter<'a> {
     file_pos: FilePosition,
 
     /// Contains information about all types.
-    pub ty_env: TyEnv,
+    pub ty_env: &'a Mutex<TyEnv>,
 
     /// Contains the blocks that are children of the "default" block.
     pub block_body: Vec<AstToken>,
 }
 
-impl<'a> Default for ParseTokenIter<'a> {
-    fn default() -> Self {
-        ParseTokenIter::new()
-    }
-}
-
 impl<'a> ParseTokenIter<'a> {
-    pub fn new() -> Self {
+    pub fn new(ty_env: &'a Mutex<TyEnv>) -> Self {
         let start_block_id = 1;
 
         Self {
             iter: TokenIter::new(<&mut [LexToken]>::default()),
             block_id: start_block_id,
             file_pos: FilePosition::default(),
-            ty_env: TyEnv::default(),
+            ty_env,
             block_body: Vec::default(),
         }
     }

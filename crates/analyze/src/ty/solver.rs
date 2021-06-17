@@ -3,14 +3,22 @@ use std::collections::{HashMap, HashSet};
 use log::debug;
 
 use common::{
-    ctx::{traverse_ctx::TraverseCtx, ty_env::SolveCond},
+    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangResult},
     path::LangPathPart,
     token::op::UnOperator,
     token::{ast::AstToken, expr::FnCall, op::UnOp},
     traverse::visitor::Visitor,
-    ty::ty::Ty,
-    TypeId,
+    ty::{
+        get::get_unsolvable,
+        is::is_solved,
+        replace::convert_defaults,
+        solve::{inferred_type, solve, solve_all_solvable},
+        substitution_sets::sub_sets_debug_print,
+        to_string::to_string_type_id,
+        ty::{SolveCond, Ty},
+        type_id::TypeId,
+    },
 };
 
 /// Tries to solve all types in the type system. If unable to solve all types,
@@ -23,18 +31,20 @@ pub(crate) fn solve_all(ctx: &mut TraverseCtx) -> LangResult<()> {
     let unsolvables = solve_solvable(ctx, SolveCond::new().excl_gen_inst())?;
 
     if let Some(unsolvables) = solve_unsolvable(ctx, unsolvables)? {
+        let ty_env_lock = ctx.ty_env.lock().unwrap();
+
         let mut err_msg = "Unable to solve type system.".to_string();
 
         for (type_id, child_type_ids) in unsolvables {
-            let inf_type_id = ctx.ty_ctx.inferred_type(type_id)?;
+            let inf_type_id = inferred_type(&ty_env_lock, type_id)?;
 
             err_msg.push_str(&format!(
                 "\nUnable to solve type {} ({}). Got back unsolved: {} ({}). ty:\n{:#?}",
                 type_id,
-                ctx.ty_ctx.to_string_type_id(type_id)?,
+                to_string_type_id(&ty_env_lock, type_id)?,
                 inf_type_id,
-                ctx.ty_ctx.to_string_type_id(inf_type_id)?,
-                ctx.ty_ctx.ty_env.ty(inf_type_id)
+                to_string_type_id(&ty_env_lock, inf_type_id)?,
+                ty_env_lock.ty(inf_type_id)
             ));
 
             if !child_type_ids.is_empty() {
@@ -67,12 +77,13 @@ fn solve_solvable(
     ctx: &mut TraverseCtx,
     solve_cond: SolveCond,
 ) -> LangResult<HashMap<TypeId, HashSet<TypeId>>> {
-    ctx.ty_ctx.solve_all(ctx.ast_ctx)?;
+    solve_all_solvable(ctx.ty_env, &ctx.ast_ctx)?;
 
     let mut unsolvables = HashMap::default();
-    for type_id in ctx.ty_ctx.ty_env.all_types() {
-        let mut nested_unsolvables = ctx.ty_ctx.ty_env.get_unsolvable(type_id, solve_cond)?;
 
+    let ty_env_lock = ctx.ty_env.lock().unwrap();
+    for type_id in ty_env_lock.interner.all_types() {
+        let mut nested_unsolvables = get_unsolvable(&ty_env_lock, type_id, solve_cond)?;
         if nested_unsolvables.contains(&type_id) {
             nested_unsolvables.remove(&type_id);
             unsolvables.insert(type_id, nested_unsolvables);
@@ -80,6 +91,7 @@ fn solve_solvable(
             unsolvables.insert(type_id, nested_unsolvables);
         }
     }
+
     Ok(unsolvables)
 }
 
@@ -119,21 +131,21 @@ fn solve_unsolvable(
         for (type_id, child_type_ids) in unsolvables.iter() {
             debug!("solve unsolvable -- type_id: {}", type_id);
 
-            ctx.ty_ctx.solve(ctx.ast_ctx, *type_id)?;
-            let inf_type_id = ctx.ty_ctx.inferred_type(*type_id)?;
+            solve(&ctx.ty_env, ctx.ast_ctx, *type_id)?;
+            let inf_type_id = inferred_type(&ctx.ty_env.lock().unwrap(), *type_id)?;
 
             let check_inf = true;
-            let is_solved = ctx.ty_ctx.ty_env.is_solved(
-                &ctx.ty_ctx.sub_sets,
+            let is_solved_res = is_solved(
+                &ctx.ty_env.lock().unwrap(),
                 inf_type_id,
                 check_inf,
                 *solve_cond,
             )?;
-            if is_solved {
+            if is_solved_res {
                 let mut all_children_solved = true;
                 for child_type_id in child_type_ids {
-                    let child_is_solved = ctx.ty_ctx.ty_env.is_solved(
-                        &ctx.ty_ctx.sub_sets,
+                    let child_is_solved = is_solved(
+                        &ctx.ty_env.lock().unwrap(),
                         *child_type_id,
                         check_inf,
                         *solve_cond,
@@ -192,8 +204,10 @@ impl TypeSolver {
 
     fn end_debug_print(&self, ctx: &mut TraverseCtx) {
         let mut all_type_ids = ctx
-            .ty_ctx
             .ty_env
+            .lock()
+            .unwrap()
+            .interner
             .all_types()
             .into_iter()
             .collect::<Vec<_>>();
@@ -204,16 +218,16 @@ impl TypeSolver {
             all_types_string.push_str(&format!(
                 "\ntype_id: {} - {:?}",
                 type_id,
-                ctx.ty_ctx.to_string_type_id(type_id)
+                to_string_type_id(&ctx.ty_env.lock().unwrap(), type_id)
             ));
         }
 
         debug!(
             "Type solving done.\nforwards: {:#?}\nall types: {}\nsubs:",
-            ctx.ty_ctx.ty_env.get_forwards(),
+            ctx.ty_env.lock().unwrap().forwards(),
             all_types_string
         );
-        ctx.ty_ctx.pretty_print_subs();
+        sub_sets_debug_print(ctx.ty_env)
     }
 }
 
@@ -237,7 +251,7 @@ impl Visitor for TypeSolver {
             return;
         }
 
-        if let Err(err) = ctx.ty_ctx.convert_defaults() {
+        if let Err(err) = convert_defaults(ctx.ty_env) {
             self.errors.push(err);
             self.end_debug_print(ctx);
 
@@ -251,7 +265,7 @@ impl Visitor for TypeSolver {
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        let inf_type_id = match ctx.ty_ctx.inferred_type(*type_id) {
+        let inf_type_id = match inferred_type(&ctx.ty_env.lock().unwrap(), *type_id) {
             Ok(inf_type_id) => inf_type_id,
             Err(err) => {
                 if !self.errors.contains(&err) {
@@ -262,7 +276,7 @@ impl Visitor for TypeSolver {
         };
 
         if *type_id != inf_type_id {
-            match ctx.ty_ctx.ty_env.forward(*type_id, inf_type_id) {
+            match ctx.ty_env.lock().unwrap().forward(*type_id, inf_type_id) {
                 Ok(_) => *type_id = inf_type_id,
                 Err(err) => {
                     if !self.errors.contains(&err) {
@@ -275,7 +289,7 @@ impl Visitor for TypeSolver {
 
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
         if let Some(adt_type_id) = &mut fn_call.method_adt {
-            let adt_ty = match ctx.ty_ctx.ty_env.ty(*adt_type_id) {
+            let adt_ty = match ctx.ty_env.lock().unwrap().ty_clone(*adt_type_id) {
                 Ok(adt_ty) => adt_ty,
                 Err(err) => {
                     self.errors.push(err);
@@ -288,7 +302,7 @@ impl Visitor for TypeSolver {
             // In that case we need to "dereference" the pointer and get the
             // actual ADT type.
             if let Ty::Pointer(actual_adt_type_id, ..) = adt_ty {
-                match ctx.ty_ctx.inferred_type(*actual_adt_type_id) {
+                match inferred_type(&ctx.ty_env.lock().unwrap(), actual_adt_type_id) {
                     Ok(inf_adt_type_id) => *adt_type_id = inf_adt_type_id,
                     Err(err) => self.errors.push(err),
                 }
@@ -312,7 +326,7 @@ impl Visitor for TypeSolver {
                 }
             };
 
-            let inf_type_id = match ctx.ty_ctx.inferred_type(type_id) {
+            let inf_type_id = match inferred_type(&ctx.ty_env.lock().unwrap(), type_id) {
                 Ok(inf_type_id) => inf_type_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -320,8 +334,8 @@ impl Visitor for TypeSolver {
                 }
             };
 
-            let inf_ty = match ctx.ty_ctx.ty_env.ty(inf_type_id) {
-                Ok(ty) => ty.clone(),
+            let inf_ty = match ctx.ty_env.lock().unwrap().ty_clone(inf_type_id) {
+                Ok(ty) => ty,
                 Err(err) => {
                     self.errors.push(err);
                     return;
@@ -335,7 +349,7 @@ impl Visitor for TypeSolver {
                     path_excluding_gens.push(LangPathPart(last_part.0, None));
 
                     let idx = match ctx.ast_ctx.get_adt_member_index(
-                        &ctx.ty_ctx,
+                        &ctx.ty_env.lock().unwrap(),
                         &path_excluding_gens,
                         member_name,
                     ) {

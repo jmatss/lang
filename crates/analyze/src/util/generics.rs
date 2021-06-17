@@ -1,8 +1,10 @@
+use std::borrow::Borrow;
+
 use common::{
     ctx::traverse_ctx::TraverseCtx,
     error::LangResult,
     path::LangPath,
-    ty::{generics::Generics, ty::Ty, type_info::TypeInfo},
+    ty::{generics::Generics, to_string::to_string_path, ty::Ty, type_info::TypeInfo},
 };
 
 /// Combines the generics from a "instance" with the generics from a ADT declaration.
@@ -24,11 +26,12 @@ pub fn combine_generics(
         return Ok(new_gens);
     };
 
-    let adt_gen_names = if let Ok(adt) =
-        ctx.ast_ctx
-            .get_adt_partial(&ctx.ty_ctx, &adt_path.without_gens(), ctx.block_id)
-    {
-        if let Some(adt_gens) = &adt.borrow().generics {
+    let adt_gen_names = if let Ok(adt) = ctx.ast_ctx.get_adt_partial(
+        &ctx.ty_env.lock().unwrap(),
+        &adt_path.without_gens(),
+        ctx.block_id,
+    ) {
+        if let Some(adt_gens) = &adt.as_ref().borrow().read().unwrap().generics {
             adt_gens.iter_names().cloned().collect::<Vec<_>>()
         } else {
             Vec::default()
@@ -41,8 +44,8 @@ pub fn combine_generics(
     // the Generics.
     if gen_impls.is_empty() {
         for gen_name in adt_gen_names {
-            let unique_id = ctx.ty_ctx.ty_env.new_unique_id();
-            let gen_type_id = ctx.ty_ctx.ty_env.id(&Ty::GenericInstance(
+            let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
+            let gen_type_id = ctx.ty_env.lock().unwrap().id(&Ty::GenericInstance(
                 gen_name.clone(),
                 unique_id,
                 TypeInfo::None,
@@ -58,7 +61,7 @@ pub fn combine_generics(
                 gen_impls.len_types(),
                 adt_gen_names.len(),
                 adt_path,
-                ctx.ty_ctx.to_string_path(&fn_call_path),
+                to_string_path(&ctx.ty_env.lock().unwrap(), &fn_call_path),
                 adt_gen_names
             )));
         }

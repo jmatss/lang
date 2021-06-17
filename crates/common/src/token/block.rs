@@ -1,4 +1,7 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use super::{
     expr::{Expr, Var},
@@ -6,21 +9,24 @@ use super::{
 };
 
 use crate::{
-    ctx::ty_ctx::TyCtx, file::FilePosition, path::LangPath, ty::generics::Generics, util, TypeId,
+    file::FilePosition,
+    path::LangPath,
+    ty::{generics::Generics, ty_env::TyEnv},
+    util, TypeId,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum BlockHeader {
     // TODO: Make If(/else/elseif), match, while and loop expression.
     //  So that they can return values and be used in sub expressions.
     // Default == None, i.e. if there are no current block. Ex. at the start of a file.
     Default,
 
-    Fn(Rc<RefCell<Fn>>),
-    Struct(Rc<RefCell<Adt>>),
-    Enum(Rc<RefCell<Adt>>),
-    Union(Rc<RefCell<Adt>>),
-    Trait(Rc<RefCell<Trait>>),
+    Fn(Arc<RwLock<Fn>>),
+    Struct(Arc<RwLock<Adt>>),
+    Enum(Arc<RwLock<Adt>>),
+    Union(Arc<RwLock<Adt>>),
+    Trait(Arc<RwLock<Trait>>),
 
     /// The first LangPath is the path of the ADT that this impl block implements
     /// and the second optional LangPath is the path of the trait if this impl
@@ -97,17 +103,17 @@ pub enum BlockHeader {
 }
 
 /// Represents a Algebraic Data Type (ADT). Struct, enum or union.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Adt {
     /* Values set for all Adt types */
     pub name: String,
     pub module: LangPath,
     pub modifiers: Vec<Modifier>,
-    pub members: Vec<Rc<RefCell<Var>>>,
+    pub members: Vec<Arc<RwLock<Var>>>,
     pub file_pos: FilePosition,
 
     /// The key is the name of the method.
-    pub methods: HashMap<String, Rc<RefCell<Fn>>>,
+    pub methods: HashMap<String, Arc<RwLock<Fn>>>,
     pub kind: AdtKind,
 
     /* Values set for Struct and Union */
@@ -134,7 +140,7 @@ impl Adt {
         name: String,
         module: LangPath,
         modifiers: Vec<Modifier>,
-        members: Vec<Rc<RefCell<Var>>>,
+        members: Vec<Arc<RwLock<Var>>>,
         file_pos: FilePosition,
         generics: Option<Generics>,
         implements: Option<HashMap<String, Vec<TypeId>>>,
@@ -157,7 +163,7 @@ impl Adt {
         name: String,
         module: LangPath,
         modifiers: Vec<Modifier>,
-        members: Vec<Rc<RefCell<Var>>>,
+        members: Vec<Arc<RwLock<Var>>>,
         file_pos: FilePosition,
         generics: Option<Generics>,
         implements: Option<HashMap<String, Vec<TypeId>>>,
@@ -180,7 +186,7 @@ impl Adt {
         name: String,
         module: LangPath,
         modifiers: Vec<Modifier>,
-        members: Vec<Rc<RefCell<Var>>>,
+        members: Vec<Arc<RwLock<Var>>>,
         file_pos: FilePosition,
         enum_ty: Option<TypeId>,
     ) -> Self {
@@ -201,7 +207,7 @@ impl Adt {
     /// Returns the index of the member with name `member_name` of this ADT.
     pub fn member_index(&self, member_name: &str) -> Option<usize> {
         for (idx, member) in self.members.iter().enumerate() {
-            if member.borrow().name == member_name {
+            if member.as_ref().read().unwrap().name == member_name {
                 return Some(idx);
             }
         }
@@ -239,7 +245,7 @@ pub enum TraitCompareError {
     ImplsTypeDiff(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Fn {
     pub name: String,
     pub module: LangPath,
@@ -250,7 +256,7 @@ pub struct Fn {
     /// traits that the specific generic type needs to implement.
     pub implements: Option<HashMap<String, Vec<TypeId>>>,
 
-    pub parameters: Option<Vec<Rc<RefCell<Var>>>>,
+    pub parameters: Option<Vec<Arc<RwLock<Var>>>>,
     pub ret_type: Option<TypeId>,
     pub modifiers: Vec<Modifier>,
     pub is_var_arg: bool,
@@ -269,7 +275,7 @@ impl Fn {
         generics: Option<Generics>,
         file_pos: FilePosition,
         implements: Option<HashMap<String, Vec<TypeId>>>,
-        parameters: Option<Vec<Rc<RefCell<Var>>>>,
+        parameters: Option<Vec<Arc<RwLock<Var>>>>,
         ret_type: Option<TypeId>,
         modifiers: Vec<Modifier>,
         is_var_arg: bool,
@@ -319,7 +325,9 @@ impl Fn {
                     .zip(trait_params)
                     .enumerate()
                 {
-                    if self_param.borrow().ty != other_param.borrow().ty {
+                    if self_param.as_ref().read().unwrap().ty
+                        != other_param.as_ref().read().unwrap().ty
+                    {
                         errors.push(TraitCompareError::ParamTypeDiff(idx, true));
                     }
                 }
@@ -339,7 +347,9 @@ impl Fn {
                 for (idx, (self_param, other_param)) in
                     self_params.iter().zip(trait_params).enumerate()
                 {
-                    if self_param.borrow().ty != other_param.borrow().ty {
+                    if self_param.as_ref().read().unwrap().ty
+                        != other_param.as_ref().read().unwrap().ty
+                    {
                         errors.push(TraitCompareError::ParamTypeDiff(idx, false));
                     }
                 }
@@ -449,9 +459,9 @@ impl Fn {
 
     /// Returns the "half name" which is the name that does NOT contain anything
     /// related to the structure but will contain function generics (if any).
-    pub fn half_name(&self, ty_ctx: &TyCtx) -> String {
+    pub fn half_name(&self, ty_env: &TyEnv) -> String {
         if let Some(generics) = &self.generics {
-            util::to_generic_name(ty_ctx, &self.name, generics)
+            util::to_generic_name(ty_env, &self.name, generics)
         } else {
             self.name.clone()
         }
@@ -474,7 +484,7 @@ impl Fn {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct BuiltIn {
     pub name: &'static str,
     pub parameters: Vec<Var>,
@@ -501,7 +511,7 @@ impl BuiltIn {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Trait {
     pub name: String,
     pub module: LangPath,

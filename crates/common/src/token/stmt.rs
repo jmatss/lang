@@ -1,12 +1,17 @@
+use std::{
+    hash::Hash,
+    sync::{Arc, RwLock},
+};
+
+use crate::{file::FilePosition, path::LangPath};
+
 use super::{
     block::Fn,
     expr::{Expr, Var},
     op::AssignOperator,
 };
-use crate::{file::FilePosition, path::LangPath};
-use std::{cell::RefCell, hash::Hash, rc::Rc};
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone)]
 pub enum Stmt {
     Return(Option<Expr>, Option<FilePosition>),
     /// Yield ~= Break with a value
@@ -40,33 +45,14 @@ pub enum Stmt {
     Assignment(AssignOperator, Expr, Expr, Option<FilePosition>),
 
     /// Used both for "var" and "const" variables.
-    VariableDecl(Rc<RefCell<Var>>, Option<FilePosition>),
+    VariableDecl(Arc<RwLock<Var>>, Option<FilePosition>),
 
     // TODO: Implement extern for variables as well.
     /// Declaration of extern functions.
-    ExternalDecl(Rc<RefCell<Fn>>, Option<FilePosition>),
+    ExternalDecl(Arc<RwLock<Fn>>, Option<FilePosition>),
 }
 
-impl PartialEq for Stmt {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Stmt::Return(a, b), Stmt::Return(c, d)) => a == c && b == d,
-            (Stmt::Break(a), Stmt::Break(b)) | (Stmt::Continue(a), Stmt::Continue(b)) => a == b,
-            (Stmt::Use(a), Stmt::Use(b)) | (Stmt::Module(a), Stmt::Module(b)) => a == b,
-            (Stmt::Yield(a, b), Stmt::Yield(c, d)) | (Stmt::Defer(a, b), Stmt::Defer(c, d)) => {
-                a == c && b == d
-            }
-            (Stmt::DeferExec(a), Stmt::DeferExec(b)) => a == b,
-            (Stmt::Assignment(a1, b1, c1, d1), Stmt::Assignment(e2, f2, g2, h2)) => {
-                a1 == e2 && b1 == f2 && c1 == g2 && d1 == h2
-            }
-            (Stmt::VariableDecl(a, b), Stmt::VariableDecl(c, d)) => a == c && b == d,
-            (Stmt::ExternalDecl(a, b), Stmt::ExternalDecl(c, d)) => a == c && b == d,
-            _ => false,
-        }
-    }
-}
-
+/*
 impl Hash for Stmt {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
@@ -94,11 +80,11 @@ impl Hash for Stmt {
                 d.hash(state);
             }
             Stmt::VariableDecl(a, b) => {
-                a.borrow().hash(state);
+                a.as_ref().read().unwrap().hash(state);
                 b.hash(state);
             }
             Stmt::ExternalDecl(a, b) => {
-                let func = a.borrow();
+                let func = a.as_ref().read().unwrap();
                 func.name.hash(state);
                 func.generics.hash(state);
                 func.ret_type.hash(state);
@@ -110,6 +96,7 @@ impl Hash for Stmt {
         }
     }
 }
+*/
 
 impl Stmt {
     pub fn file_pos(&self) -> Option<&FilePosition> {

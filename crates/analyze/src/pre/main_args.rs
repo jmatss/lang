@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::sync::{Arc, RwLock};
 
 use common::{
     ctx::traverse_ctx::TraverseCtx,
@@ -49,7 +49,7 @@ impl MainArgsAnalyzer {
 
     fn verify_main(&mut self, ctx: &TraverseCtx, func: &Fn) -> LangResult<()> {
         if let Some(ret_type_id) = func.ret_type {
-            let ret_ty = ctx.ty_ctx.ty_env.ty(ret_type_id)?;
+            let ret_ty = ctx.ty_env.lock().unwrap().ty(ret_type_id)?.clone();
             if matches!(ret_ty, Ty::CompoundType(InnerTy::I32, ..)) {
                 if func.parameters.is_none() {
                     Ok(())
@@ -84,14 +84,14 @@ impl MainArgsAnalyzer {
         let mut argc_global = argc_param;
         argc_global.set_global(true);
         argc_global.name = ARGC_GLOBAL_VAR_NAME.into();
-        let argc_global_decl = Stmt::VariableDecl(Rc::new(RefCell::new(argc_global)), None);
+        let argc_global_decl = Stmt::VariableDecl(Arc::new(RwLock::new(argc_global)), None);
 
         let mut argv_global = argv_param;
         let mut generics = Generics::new();
         generics.insert_type(argv_global.ty.unwrap());
         argv_global.set_global(true);
         argv_global.name = ARGV_GLOBAL_VAR_NAME.into();
-        let argv_global_decl = Stmt::VariableDecl(Rc::new(RefCell::new(argv_global)), None);
+        let argv_global_decl = Stmt::VariableDecl(Arc::new(RwLock::new(argv_global)), None);
 
         // If there is a Module statement at the top of this body, need to make
         // sure to insert the declaration below it. The Module MUST be the first
@@ -152,7 +152,7 @@ impl MainArgsAnalyzer {
     /// The first item in the returned tuple is a variable representing `argc`
     /// and the second item represents `argv`.
     fn construct_params(&self, ctx: &mut TraverseCtx) -> LangResult<(Var, Var)> {
-        let i32_type_id = ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+        let i32_type_id = ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
             InnerTy::I32,
             Generics::empty(),
             TypeInfo::None,
@@ -167,18 +167,20 @@ impl MainArgsAnalyzer {
             false,
         );
 
-        let u8_type_id = ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
+        let u8_type_id = ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
             InnerTy::U8,
             Generics::empty(),
             TypeInfo::None,
         ))?;
         let u8_ptr_type_id = ctx
-            .ty_ctx
             .ty_env
+            .lock()
+            .unwrap()
             .id(&Ty::Pointer(u8_type_id, TypeInfo::None))?;
         let u8_ptr_ptr_type_id = ctx
-            .ty_ctx
             .ty_env
+            .lock()
+            .unwrap()
             .id(&Ty::Pointer(u8_ptr_type_id, TypeInfo::None))?;
         let argv_param = Var::new(
             ARGV_PARAM_VAR_NAME.into(),
@@ -216,17 +218,19 @@ impl Visitor for MainArgsAnalyzer {
 
     fn visit_fn(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Fn(func), .., body) = ast_token {
-            if func.borrow().name == "main" && func.borrow().module.count() == 0 {
-                if let Err(err) = self.verify_main(ctx, &func.borrow()) {
+            if func.as_ref().read().unwrap().name == "main"
+                && func.as_ref().read().unwrap().module.count() == 0
+            {
+                if let Err(err) = self.verify_main(ctx, &func.as_ref().read().unwrap()) {
                     self.errors.push(err);
                     return;
                 }
 
                 match self.construct_params(ctx) {
                     Ok((argc_param, argv_param)) => {
-                        func.borrow_mut().parameters = Some(vec![
-                            Rc::new(RefCell::new(argc_param)),
-                            Rc::new(RefCell::new(argv_param)),
+                        func.as_ref().write().unwrap().parameters = Some(vec![
+                            Arc::new(RwLock::new(argc_param)),
+                            Arc::new(RwLock::new(argv_param)),
                         ]);
                     }
                     Err(err) => {

@@ -13,9 +13,9 @@ use common::{
         generics::{Generics, GenericsKind},
         inner_ty::InnerTy,
         ty::Ty,
+        type_id::TypeId,
         type_info::TypeInfo,
     },
-    TypeId,
 };
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 
@@ -730,7 +730,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         let mut adt_path = path_builder.build();
                         adt_path.pop(); // Remove the name of the enum variant.
 
-                        let enum_type_id = self.iter.ty_env.id(&Ty::CompoundType(
+                        let mut ty_env_lock = self.iter.ty_env.lock().unwrap();
+                        let enum_type_id = ty_env_lock.id(&Ty::CompoundType(
                             InnerTy::Enum(adt_path),
                             Generics::empty(),
                             TypeInfo::Default(file_pos.to_owned()),
@@ -775,7 +776,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         // Keep track of the current type id. Parsing the types below might create
         // new types. If it turns out that this isn't a generic list, revert and
         // remove the newly created types.
-        let start_type_id = self.iter.ty_env.current_type_id();
+        let start_type_id = self.iter.ty_env.lock().unwrap().current_type_id();
 
         // If the next token is a  "PointyBracketBegin" it can either be a start
         // of a generic list for structures/function, or it can also be a "LessThan"
@@ -792,9 +793,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     Err(_) => {
                         // Remove types that was created during the process of
                         // figuring out if they were types or not.
-                        let end_type_id = self.iter.ty_env.current_type_id();
+                        let end_type_id = self.iter.ty_env.lock().unwrap().current_type_id();
                         for type_id in start_type_id..end_type_id {
-                            self.iter.ty_env.remove(TypeId(type_id))
+                            self.iter.ty_env.lock().unwrap().remove(TypeId(type_id))
                         }
                         self.iter.rewind_to_pos(pos);
                         None

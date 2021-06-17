@@ -1,7 +1,10 @@
-use std::{cell::RefCell, collections::HashSet, rc::Rc};
+use std::{
+    collections::HashSet,
+    sync::{Arc, RwLock},
+};
 
 use common::{
-    ctx::{traverse_ctx::TraverseCtx, ty_env::SolveCond},
+    ctx::traverse_ctx::TraverseCtx,
     error::LangError,
     path::LangPath,
     token::{
@@ -11,8 +14,15 @@ use common::{
         stmt::Stmt,
     },
     traverse::visitor::Visitor,
-    ty::generics::Generics,
-    BlockId, TypeId,
+    ty::{
+        generics::Generics,
+        is::is_solved,
+        replace::{replace_gen_impls, replace_self},
+        solve::inferred_type,
+        ty::SolveCond,
+        type_id::TypeId,
+    },
+    BlockId,
 };
 
 /// Used when replacing generics in methods containing to a specific generic
@@ -30,7 +40,7 @@ pub struct GenericsReplacer<'a> {
 
     generics_impl: &'a Generics,
 
-    new_adt: Option<Rc<RefCell<Adt>>>,
+    new_adt: Option<Arc<RwLock<Adt>>>,
     old_path: Option<&'a LangPath>,
     new_type_id: Option<TypeId>,
 
@@ -39,7 +49,7 @@ pub struct GenericsReplacer<'a> {
 
 impl<'a> GenericsReplacer<'a> {
     pub fn new_adt(
-        new_adt: Rc<RefCell<Adt>>,
+        new_adt: Arc<RwLock<Adt>>,
         generics_impl: &'a Generics,
         old_path: &'a LangPath,
         new_type_id: TypeId,
@@ -76,10 +86,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        match ctx
-            .ty_ctx
-            .replace_gen_impls(&ctx.ast_ctx, *type_id, &self.generics_impl)
-        {
+        match replace_gen_impls(&ctx.ty_env, &ctx.ast_ctx, *type_id, &self.generics_impl) {
             Ok(Some(new_type_id)) => *type_id = new_type_id,
             Ok(None) => (),
             Err(err) => {
@@ -89,7 +96,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
         }
 
         if let (Some(old_path), Some(new_ty)) = (self.old_path, self.new_type_id) {
-            match ctx.ty_ctx.ty_env.replace_self(*type_id, old_path, new_ty) {
+            match replace_self(&mut ctx.ty_env.lock().unwrap(), *type_id, old_path, new_ty) {
                 Ok(Some(new_type_id)) => *type_id = new_type_id,
                 Ok(None) => (),
                 Err(err) => {
@@ -99,7 +106,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
             }
         }
 
-        let inf_type_id = match ctx.ty_ctx.inferred_type(*type_id) {
+        let inf_type_id = match inferred_type(&ctx.ty_env.lock().unwrap(), *type_id) {
             Ok(inf_type_id) => inf_type_id,
             Err(err) => {
                 self.errors.push(err);
@@ -109,11 +116,12 @@ impl<'a> Visitor for GenericsReplacer<'a> {
 
         let check_inf = true;
         let solve_cond = SolveCond::new();
-        match ctx
-            .ty_ctx
-            .ty_env
-            .is_solved(&ctx.ty_ctx.sub_sets, inf_type_id, check_inf, solve_cond)
-        {
+        match is_solved(
+            &ctx.ty_env.lock().unwrap(),
+            inf_type_id,
+            check_inf,
+            solve_cond,
+        ) {
             Ok(true) => *type_id = inf_type_id,
             Ok(false) => {
                 let err = ctx
@@ -129,11 +137,11 @@ impl<'a> Visitor for GenericsReplacer<'a> {
     /// this function will store the newly copied/created variables.
     fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::VariableDecl(var, ..) = stmt {
-            let old_key = (var.borrow().name.clone(), ctx.block_id);
+            let old_key = (var.as_ref().read().unwrap().name.clone(), ctx.block_id);
             self.modified_variables.insert(old_key);
 
-            let new_key = (var.borrow().full_name(), ctx.block_id);
-            ctx.ast_ctx.variables.insert(new_key, Rc::clone(var));
+            let new_key = (var.as_ref().read().unwrap().full_name(), ctx.block_id);
+            ctx.ast_ctx.variables.insert(new_key, Arc::clone(var));
         }
     }
 
@@ -151,7 +159,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
             };
 
             let new_adt_name = {
-                let new_adt = new_adt.borrow();
+                let new_adt = new_adt.as_ref().read().unwrap();
                 module.clone_push(
                     &new_adt.name,
                     Some(self.generics_impl),
@@ -160,22 +168,26 @@ impl<'a> Visitor for GenericsReplacer<'a> {
             };
 
             if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
-                func.borrow_mut().method_adt = self.new_type_id;
+                func.as_ref().write().unwrap().method_adt = self.new_type_id;
 
                 // Insert a reference from the "new" ADT to this new method.
                 // The name set will be the "half name" containing the generics
                 // for the function.
-                new_adt
-                    .borrow_mut()
-                    .methods
-                    .insert(func.borrow().half_name(&ctx.ty_ctx), Rc::clone(&func));
+                new_adt.as_ref().write().unwrap().methods.insert(
+                    func.as_ref()
+                        .read()
+                        .unwrap()
+                        .half_name(&ctx.ty_env.lock().unwrap()),
+                    Arc::clone(&func),
+                );
 
                 // Inserts a reference to this new method into the `analyze_context`
                 // look-up table.
-                if let Err(err) =
-                    ctx.ast_ctx
-                        .insert_method(&ctx.ty_ctx, &new_adt_name, Rc::clone(&func))
-                {
+                if let Err(err) = ctx.ast_ctx.insert_method(
+                    &ctx.ty_env.lock().unwrap(),
+                    &new_adt_name,
+                    Arc::clone(&func),
+                ) {
                     self.errors.push(err);
                 }
             }

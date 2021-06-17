@@ -1,9 +1,11 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    borrow::Borrow,
+    sync::{Arc, RwLock},
+};
 
 use inkwell::{values::AnyValueEnum, AddressSpace, IntPredicate};
 
 use common::{
-    ctx::ty_env::TyEnv,
     error::LangResult,
     path::{LangPath, LangPathBuilder},
     token::{
@@ -13,8 +15,11 @@ use common::{
         op::{AssignOperator, Op, UnOp, UnOperator},
         stmt::Stmt,
     },
-    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
-    TypeId, ARGC_GLOBAL_VAR_NAME, ARGV_GLOBAL_VAR_NAME,
+    ty::{
+        generics::Generics, get::get_inner, inner_ty::InnerTy, is::is_primitive, ty::Ty,
+        ty_env::TyEnv, type_id::TypeId, type_info::TypeInfo,
+    },
+    ARGC_GLOBAL_VAR_NAME, ARGV_GLOBAL_VAR_NAME,
 };
 
 use crate::{expr::ExprTy, generator::CodeGen};
@@ -25,7 +30,7 @@ enum PtrMathOp {
     Sub,
 }
 
-impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     // TODO: Temporarily treats functions return void as return i32 "0".
     //       Should make a custom value ex rusts "()" instead.
     /// Generates a built-in call. Returns the return value of the compiled
@@ -77,15 +82,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                     if let Expr::Var(var) = &value {
                         let name = var.name.clone();
 
-                        let u8_type_id = self.analyze_ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
-                            InnerTy::U8,
-                            Generics::empty(),
-                            TypeInfo::None,
-                        ))?;
+                        let u8_type_id =
+                            self.analyze_ctx
+                                .ty_env
+                                .lock()
+                                .unwrap()
+                                .id(&Ty::CompoundType(
+                                    InnerTy::U8,
+                                    Generics::empty(),
+                                    TypeInfo::None,
+                                ))?;
                         let ptr_type_id = self
                             .analyze_ctx
-                            .ty_ctx
                             .ty_env
+                            .lock()
+                            .unwrap()
                             .id(&Ty::Pointer(u8_type_id, TypeInfo::None))?;
 
                         let mut expr =
@@ -374,7 +385,8 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         builder.add_path("std").add_path("types");
         let types_module = builder.build();
 
-        let ty_container = TypeContainer::new(&mut self.analyze_ctx.ty_ctx.ty_env, &types_module)?;
+        let ty_container =
+            TypeContainer::new(&mut self.analyze_ctx.ty_env.lock().unwrap(), &types_module)?;
 
         let mut string_init_call = FnCall::new(
             "init_size".into(),
@@ -424,7 +436,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             built_in_call.file_pos.offset,
             built_in_call.file_pos.line_start
         );
-        let string_var = Rc::new(RefCell::new(Var::new(
+        let string_var = Arc::new(RwLock::new(Var::new(
             var_name.clone(),
             Some(ty_container.string_type_id),
             None,
@@ -433,12 +445,12 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             None,
             false,
         )));
-        let mut string_var_expr = Expr::Var(string_var.borrow().clone());
+        let mut string_var_expr = Expr::Var(string_var.as_ref().borrow().read().unwrap().clone());
 
-        let mut string_var_decl = Stmt::VariableDecl(Rc::clone(&string_var), None);
+        let mut string_var_decl = Stmt::VariableDecl(Arc::clone(&string_var), None);
         let mut string_var_assign = Stmt::Assignment(
             AssignOperator::Assignment,
-            Expr::Var(string_var.borrow().clone()),
+            Expr::Var(string_var.as_ref().borrow().read().unwrap().clone()),
             Expr::FnCall(string_get_success_call),
             None,
         );
@@ -467,7 +479,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 }
                 FormatPart::Arg(expr) => {
                     let type_id = expr.get_expr_type()?;
-                    if self.analyze_ctx.ty_ctx.ty_env.is_primitive(type_id)? {
+                    if is_primitive(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)? {
                         let expr = self.primitive_to_string_view(
                             expr,
                             &var_name,
@@ -574,30 +586,36 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         // TODO: What buffer size should floats have? What is their max char size?
         // `buf_size` is the max amount of bytes that a given primitive type
         // value can occupy in string form.
-        let (primitive_name, buf_size) = match self.analyze_ctx.ty_ctx.ty_env.get_inner(type_id)? {
-            InnerTy::I8 => ("I8", 4),
-            InnerTy::U8 => ("U8", 3),
-            InnerTy::I16 => ("I16", 6),
-            InnerTy::U16 => ("U16", 5),
-            InnerTy::I32 => ("I32", 11),
-            InnerTy::U32 => ("U32", 10),
-            InnerTy::F32 => ("F32", 0),
-            InnerTy::I64 => ("I64", 20),
-            InnerTy::U64 => ("U64", 19),
-            InnerTy::F64 => ("F64", 0),
-            InnerTy::I128 => ("I128", 40),
-            InnerTy::U128 => ("U128", 39),
-            _ => panic!("bad format variadic arg type: {:#?}", primitive_expr),
-        };
+        let (primitive_name, buf_size) =
+            match get_inner(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)? {
+                InnerTy::I8 => ("I8", 4),
+                InnerTy::U8 => ("U8", 3),
+                InnerTy::I16 => ("I16", 6),
+                InnerTy::U16 => ("U16", 5),
+                InnerTy::I32 => ("I32", 11),
+                InnerTy::U32 => ("U32", 10),
+                InnerTy::F32 => ("F32", 0),
+                InnerTy::I64 => ("I64", 20),
+                InnerTy::U64 => ("U64", 19),
+                InnerTy::F64 => ("F64", 0),
+                InnerTy::I128 => ("I128", 40),
+                InnerTy::U128 => ("U128", 39),
+                _ => panic!("bad format variadic arg type: {:#?}", primitive_expr),
+            };
 
         let primitive_path = types_module.clone_push(primitive_name, None, None);
-        let primitive_type_id = self.analyze_ctx.ty_ctx.ty_env.id(&Ty::CompoundType(
-            InnerTy::Struct(primitive_path),
-            Generics::empty(),
-            TypeInfo::BuiltIn,
-        ))?;
+        let primitive_type_id = self
+            .analyze_ctx
+            .ty_env
+            .lock()
+            .unwrap()
+            .id(&Ty::CompoundType(
+                InnerTy::Struct(primitive_path),
+                Generics::empty(),
+                TypeInfo::BuiltIn,
+            ))?;
 
-        let arr_type_id = self.analyze_ctx.ty_ctx.ty_env.id(&Ty::Array(
+        let arr_type_id = self.analyze_ctx.ty_env.lock().unwrap().id(&Ty::Array(
             ty_container.u8_type_id,
             Some(Box::new(Expr::Lit(
                 Lit::Integer(buf_size.to_string(), 10),
@@ -608,12 +626,13 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         ))?;
         let arr_ptr_type_id = self
             .analyze_ctx
-            .ty_ctx
             .ty_env
+            .lock()
+            .unwrap()
             .id(&Ty::Pointer(arr_type_id, TypeInfo::BuiltIn))?;
 
         let buf_var_name = format!("{}_idx_{}", var_name, arg_idx);
-        let buf_var = Rc::new(RefCell::new(Var::new(
+        let buf_var = Arc::new(RwLock::new(Var::new(
             buf_var_name.clone(),
             Some(arr_type_id),
             None,
@@ -622,19 +641,19 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             None,
             false,
         )));
-        let mut buf_var_decl = Stmt::VariableDecl(Rc::clone(&buf_var), None);
+        let mut buf_var_decl = Stmt::VariableDecl(Arc::clone(&buf_var), None);
 
         let buf_var_key = (buf_var_name, self.cur_block_id);
         self.analyze_ctx
             .ast_ctx
             .variables
-            .insert(buf_var_key, Rc::clone(&buf_var));
+            .insert(buf_var_key, Arc::clone(&buf_var));
 
         self.compile_stmt(&mut buf_var_decl)?;
 
         let mut buf_var_address = UnOp::new(
             UnOperator::Address,
-            Box::new(Expr::Var(buf_var.borrow().clone())),
+            Box::new(Expr::Var(buf_var.as_ref().borrow().read().unwrap().clone())),
             None,
         );
         buf_var_address.ret_type = Some(arr_ptr_type_id);

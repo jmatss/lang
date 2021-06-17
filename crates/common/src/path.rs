@@ -1,52 +1,14 @@
 use std::{fmt::Debug, hash::Hash};
 
-use crate::{file::FilePosition, ty::generics::Generics};
+use crate::{
+    error::LangResult,
+    file::FilePosition,
+    hash::{DerefType, TyEnvHash},
+    ty::{generics::Generics, ty_env::TyEnv},
+    BlockId,
+};
 
-#[derive(Debug, Clone, Eq)]
-pub struct LangPathPart(pub String, pub Option<Generics>);
-
-impl LangPathPart {
-    pub fn name(&self) -> &str {
-        &self.0
-    }
-
-    pub fn generics(&self) -> &Option<Generics> {
-        &self.1
-    }
-}
-
-impl PartialEq for LangPathPart {
-    /// A empty list of generics and no generics at all is considered equals.
-    fn eq(&self, other: &Self) -> bool {
-        if self.0 != other.0 {
-            return false;
-        }
-
-        let self_gens = match self.1.as_ref() {
-            Some(gens) if !gens.is_empty() => Some(gens),
-            _ => None,
-        };
-        let other_gens = match other.1.as_ref() {
-            Some(gens) if !gens.is_empty() => Some(gens),
-            _ => None,
-        };
-        self_gens == other_gens
-    }
-}
-
-impl Hash for LangPathPart {
-    /// A empty list of generics and no generics at all is considered equals.
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-        if let Some(gens) = self.1.as_ref() {
-            if !gens.is_empty() {
-                gens.hash(state)
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone)]
 pub struct LangPath {
     /// Contains all parts of the path in order.
     pub(crate) parts: Vec<LangPathPart>,
@@ -142,18 +104,6 @@ impl LangPath {
     }
 }
 
-impl PartialEq for LangPath {
-    fn eq(&self, other: &Self) -> bool {
-        self.parts == other.parts
-    }
-}
-
-impl Hash for LangPath {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.parts.hash(state);
-    }
-}
-
 impl Default for LangPath {
     fn default() -> Self {
         LangPath::new(Vec::default(), None)
@@ -172,7 +122,66 @@ impl From<Vec<LangPathPart>> for LangPath {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+impl TyEnvHash for LangPath {
+    fn hash_with_state<H: std::hash::Hasher>(
+        &self,
+        ty_env: &TyEnv,
+        deref_type: DerefType,
+        state: &mut H,
+    ) -> LangResult<()> {
+        for (i, part) in self.parts.iter().enumerate() {
+            i.hash(state);
+            part.hash_with_state(ty_env, deref_type, state)?;
+        }
+        Ok(())
+    }
+}
+
+impl TyEnvHash for (LangPath, BlockId) {
+    fn hash_with_state<H: std::hash::Hasher>(
+        &self,
+        ty_env: &TyEnv,
+        deref_type: DerefType,
+        state: &mut H,
+    ) -> LangResult<()> {
+        self.0.hash_with_state(ty_env, deref_type, state)?;
+        self.1.hash(state);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LangPathPart(pub String, pub Option<Generics>);
+
+impl LangPathPart {
+    pub fn name(&self) -> &str {
+        &self.0
+    }
+
+    pub fn generics(&self) -> &Option<Generics> {
+        &self.1
+    }
+}
+
+impl TyEnvHash for LangPathPart {
+    fn hash_with_state<H: std::hash::Hasher>(
+        &self,
+        ty_env: &TyEnv,
+        deref_type: DerefType,
+        state: &mut H,
+    ) -> LangResult<()> {
+        self.0.hash(state);
+        // A empty list of generics and no generics at all is considered equals.
+        if let Some(gens) = self.1.as_ref() {
+            if !gens.is_empty() {
+                gens.hash_with_state(ty_env, deref_type, state)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct LangPathBuilder {
     parts: Vec<LangPathPart>,
     file_pos: Option<FilePosition>,

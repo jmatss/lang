@@ -6,8 +6,11 @@ use common::{
     path::{LangPath, LangPathPart},
     token::block::TraitCompareError,
     traverse::visitor::Visitor,
-    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty},
-    BlockId, TypeId,
+    ty::{
+        generics::Generics, get::get_ident, inner_ty::InnerTy, solve::inferred_type,
+        to_string::to_string_path, ty::Ty, type_id::TypeId,
+    },
+    BlockId,
 };
 
 /// Checks that all generics that have specified "where implements" clauses
@@ -53,8 +56,10 @@ impl TraitsGenericAnalyzer {
         let last_part = adt_path_with_gens.pop().unwrap();
         adt_path_with_gens.push(LangPathPart(last_part.0, Some(generics.clone())));
 
-        let adt = ctx.ast_ctx.get_adt(&ctx.ty_ctx, &adt_path_with_gens)?;
-        let adt = adt.borrow();
+        let ty_env_lock = ctx.ty_env.lock().unwrap();
+
+        let adt = ctx.ast_ctx.get_adt(&ty_env_lock, &adt_path_with_gens)?;
+        let adt = adt.as_ref().read().unwrap();
 
         // Iterate through all generics for this ADT and make sure that the
         // generics implements the traits specified in the "where" clause.
@@ -76,8 +81,8 @@ impl TraitsGenericAnalyzer {
             // generic with name `gen_name`. This is the type that should implement
             // the traits in `trait_tys`.
             let (generic_adt_name, generic_adt) =
-                if let Ok(Some(ident)) = ctx.ty_ctx.ty_env.get_ident(*gen_type_id) {
-                    (ident.clone(), ctx.ast_ctx.get_adt(&ctx.ty_ctx, &ident)?)
+                if let Ok(Some(ident)) = get_ident(&ty_env_lock, *gen_type_id) {
+                    (ident.clone(), ctx.ast_ctx.get_adt(&ty_env_lock, &ident)?)
                 } else {
                     let trait_names = trait_tys
                         .iter()
@@ -86,18 +91,18 @@ impl TraitsGenericAnalyzer {
                     let err = ctx.ast_ctx.err(format!(
                         "ADT \"{0}\" has \"where\" clause for type \"{1}\" which isn't a ADT. \
                         The type \"{1}\" can therefore not implement the required traits:{2}.",
-                        ctx.ty_ctx.to_string_path(&adt_path_with_gens),
+                        to_string_path(&ty_env_lock, &adt_path_with_gens),
                         gen_type_id.to_string(),
                         trait_names,
                     ));
                     return Err(err);
                 };
-            let generic_adt = generic_adt.borrow();
+            let generic_adt = generic_adt.as_ref().read().unwrap();
 
             let gen_struct_methods = &generic_adt.methods;
 
             for trait_type_id in trait_tys {
-                let trait_ty = ctx.ty_ctx.ty_env.ty(*trait_type_id)?;
+                let trait_ty = ty_env_lock.ty(*trait_type_id)?.clone();
                 let trait_name = if let Ty::CompoundType(InnerTy::Trait(trait_name), ..) = trait_ty
                 {
                     trait_name
@@ -105,15 +110,15 @@ impl TraitsGenericAnalyzer {
                     let err = ctx.ast_ctx.err(format!(
                         "Generic with name \"{}\" on ADT \"{}\" implements non trait type: {:#?}",
                         gen_name,
-                        ctx.ty_ctx.to_string_path(&adt_path_with_gens),
+                        to_string_path(&ty_env_lock, &adt_path_with_gens),
                         trait_type_id
                     ));
                     return Err(err);
                 };
 
-                let trait_ = ctx.ast_ctx.get_trait(&ctx.ty_ctx, trait_name)?;
+                let trait_ = ctx.ast_ctx.get_trait(&ty_env_lock, &trait_name)?;
 
-                for trait_method in &trait_.borrow().methods {
+                for trait_method in &trait_.as_ref().read().unwrap().methods {
                     let method_name = trait_method.name.clone();
 
                     let gen_struct_method =
@@ -124,10 +129,10 @@ impl TraitsGenericAnalyzer {
                                 "Struct \"{0}\" requires that its generic type \"{1}\" implements \
                             the trait \"{2}\". The type \"{3}\" is used as generic \"{1}\", \
                             but it does NOT implement the function \"{4}\" from the trait \"{2}\".",
-                                ctx.ty_ctx.to_string_path(&adt_path_with_gens),
+                                to_string_path(&ty_env_lock, &adt_path_with_gens),
                                 gen_name,
-                                ctx.ty_ctx.to_string_path(&trait_name),
-                                ctx.ty_ctx.to_string_path(&generic_adt_name),
+                                to_string_path(&ty_env_lock, &trait_name),
+                                to_string_path(&ty_env_lock, &generic_adt_name),
                                 method_name
                             ));
                             return Err(err);
@@ -135,15 +140,14 @@ impl TraitsGenericAnalyzer {
 
                     // TODO: Make safe. Gets a borrow error if done as usual,
                     //       there is a mutable borrow already. Where is that?
-                    let struct_method_borrow =
-                        unsafe { gen_struct_method.as_ptr().as_ref().unwrap() };
+                    let struct_method_borrow = gen_struct_method.as_ref().read().unwrap();
 
                     // Make the check to ensure that the trait method are correctly implemented.
                     if let Err(cmp_errors) = struct_method_borrow.trait_cmp(trait_method) {
                         let err_msg_start = format!(
                             "Struct \"{}\"s impl of trait \"{}\"s method \"{}\" is incorrect.\n",
-                            ctx.ty_ctx.to_string_path(&adt_path_with_gens),
-                            ctx.ty_ctx.to_string_path(&trait_name),
+                            to_string_path(&ty_env_lock, &adt_path_with_gens),
+                            to_string_path(&ty_env_lock, &trait_name),
                             method_name,
                         );
                         let err_msg_end = format!(
@@ -170,8 +174,8 @@ impl TraitsGenericAnalyzer {
                                     format!(
                                         "Parameter types at idx {} differs. Struct param type: {:#?}, trait param type: {:#?}",
                                         s_idx,
-                                        struct_method_borrow.parameters.as_ref().unwrap().get(s_idx).unwrap().borrow().ty,
-                                        trait_method.parameters.as_ref().unwrap().get(t_idx).unwrap().borrow().ty,
+                                        struct_method_borrow.parameters.as_ref().unwrap().get(s_idx).unwrap().as_ref().read().unwrap().ty,
+                                        trait_method.parameters.as_ref().unwrap().get(t_idx).unwrap().as_ref().read().unwrap().ty,
                                     )
                                 }
                                 TraitCompareError::ReturnTypeDiff => {
@@ -250,8 +254,9 @@ impl TraitsGenericAnalyzer {
         type_id: TypeId,
         block_id: BlockId,
     ) -> LangResult<()> {
-        let inf_type_id = ctx.ty_ctx.inferred_type(type_id)?;
-        match ctx.ty_ctx.ty_env.ty(inf_type_id)? {
+        let inf_type_id = inferred_type(&ctx.ty_env.lock().unwrap(), type_id)?;
+        let ty_clone = ctx.ty_env.lock().unwrap().ty_clone(inf_type_id)?;
+        match ty_clone {
             Ty::CompoundType(inner_ty, generics, ..) => {
                 for gen_type_id in generics.iter_types() {
                     self.check_adt_traits(ctx, *gen_type_id, block_id)?;
@@ -260,7 +265,7 @@ impl TraitsGenericAnalyzer {
                 match inner_ty {
                     InnerTy::Struct(path) | InnerTy::Union(path) => {
                         if !generics.is_empty() {
-                            self.verify_adt_traits(ctx, path, generics)?;
+                            self.verify_adt_traits(ctx, &path, &generics)?;
                         }
                     }
                     _ => (),
@@ -275,7 +280,7 @@ impl TraitsGenericAnalyzer {
                 {
                     self.check_adt_traits(ctx, expr_type_id, block_id)?;
                 }
-                self.check_adt_traits(ctx, *arr_type_id, block_id)?;
+                self.check_adt_traits(ctx, arr_type_id, block_id)?;
             }
             Ty::Expr(expr, ..) => {
                 if let Ok(expr_type_id) = expr.get_expr_type() {
@@ -285,13 +290,13 @@ impl TraitsGenericAnalyzer {
 
             Ty::Fn(gens, params, ret_ty, ..) => {
                 if let Some(ret_type_id) = ret_ty {
-                    self.check_adt_traits(ctx, *ret_type_id, block_id)?;
+                    self.check_adt_traits(ctx, ret_type_id, block_id)?;
                 }
                 for gen_type_id in gens {
-                    self.check_adt_traits(ctx, *gen_type_id, block_id)?;
+                    self.check_adt_traits(ctx, gen_type_id, block_id)?;
                 }
                 for param_type_id in params {
-                    self.check_adt_traits(ctx, *param_type_id, block_id)?;
+                    self.check_adt_traits(ctx, param_type_id, block_id)?;
                 }
             }
 
@@ -301,7 +306,7 @@ impl TraitsGenericAnalyzer {
             | Ty::UnknownMethodArgument(type_id_i, ..)
             | Ty::UnknownMethodGeneric(type_id_i, ..)
             | Ty::UnknownArrayMember(type_id_i, ..) => {
-                self.check_adt_traits(ctx, *type_id_i, block_id)?;
+                self.check_adt_traits(ctx, type_id_i, block_id)?;
             }
 
             Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => (),

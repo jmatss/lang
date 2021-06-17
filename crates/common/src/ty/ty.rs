@@ -2,11 +2,19 @@ use std::hash::Hash;
 
 use either::Either;
 
-use crate::{file::FilePosition, token::expr::Expr, TypeId, UniqueId};
+use crate::{
+    error::{LangError, LangErrorKind, LangResult},
+    file::FilePosition,
+    hash::{DerefType, TyEnvHash},
+    token::{expr::Expr, lit::Lit},
+    UniqueId,
+};
 
-use super::{generics::Generics, inner_ty::InnerTy, type_info::TypeInfo};
+use super::{
+    generics::Generics, inner_ty::InnerTy, ty_env::TyEnv, type_id::TypeId, type_info::TypeInfo,
+};
 
-#[derive(Debug, Clone, Eq)]
+#[derive(Debug, Clone)]
 pub enum Ty {
     /// A base type that can contain generic types. The first boxed type is
     /// the actual type and the vector of types are the generic types.
@@ -92,6 +100,115 @@ pub enum Ty {
     UnknownArrayMember(TypeId, UniqueId, TypeInfo),
 }
 
+impl TyEnvHash for Ty {
+    fn hash_with_state<H: std::hash::Hasher>(
+        &self,
+        ty_env: &TyEnv,
+        deref_type: DerefType,
+        state: &mut H,
+    ) -> LangResult<()> {
+        match self {
+            Ty::CompoundType(inner_ty, gens, _) => {
+                0.hash(state);
+                inner_ty.hash_with_state(ty_env, deref_type, state)?;
+                gens.hash_with_state(ty_env, deref_type, state)?;
+            }
+            Ty::Pointer(type_id, _) => {
+                1.hash(state);
+                type_id.hash_with_state(ty_env, deref_type, state)?;
+            }
+            Ty::Array(type_id, expr_opt, _) => {
+                2.hash(state);
+                type_id.hash_with_state(ty_env, deref_type, state)?;
+                if let Some(expr) = expr_opt {
+                    if let Some(dim) = arr_dim_hash(&expr)? {
+                        dim.hash(state);
+                    }
+                }
+            }
+            Ty::Fn(gens, pars, ret_opt, _) => {
+                3.hash(state);
+                "gens".hash(state);
+                gens.as_slice().hash_with_state(ty_env, deref_type, state)?;
+                "params".hash(state);
+                pars.as_slice().hash_with_state(ty_env, deref_type, state)?;
+                "ret".hash(state);
+                if let Some(type_id) = ret_opt {
+                    type_id.hash_with_state(ty_env, deref_type, state)?;
+                }
+            }
+            Ty::Any(unique_id, _) => {
+                4.hash(state);
+                unique_id.hash(state);
+            }
+            Ty::Generic(_, unique_id, _) => {
+                5.hash(state);
+                unique_id.hash(state);
+            }
+            Ty::GenericInstance(_, unique_id, _) => {
+                6.hash(state);
+                unique_id.hash(state);
+            }
+            Ty::Expr(expr, _) => {
+                7.hash(state);
+                // TODO: How should this be handled? Will the current solution work
+                //       correctly? Since the "parsing" hash will be different from
+                //       the hash produced when a type is set, there will be two types
+                //       in the TyEnv for the different versions. Will this break
+                //       anything?
+                // If this hashing is done during parsing, expression will not have
+                // their types set at this point. Use a random number to make the
+                // hashes unique.
+                if let Ok(expr_type_id) = expr.get_expr_type() {
+                    expr_type_id.hash_with_state(ty_env, deref_type, state)?;
+                } else {
+                    let rand_number = rand::random::<u64>();
+                    rand_number.hash(state);
+                }
+            }
+            Ty::UnknownAdtMember(.., unique_id, _) => {
+                8.hash(state);
+                unique_id.hash(state);
+            }
+            Ty::UnknownAdtMethod(.., unique_id, _) => {
+                9.hash(state);
+                unique_id.hash(state);
+            }
+            Ty::UnknownMethodArgument(.., unique_id, _) => {
+                10.hash(state);
+                unique_id.hash(state);
+            }
+            Ty::UnknownMethodGeneric(.., unique_id, _) => {
+                11.hash(state);
+                unique_id.hash(state);
+            }
+            Ty::UnknownArrayMember(_, unique_id, _) => {
+                12.hash(state);
+                unique_id.hash(state);
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn arr_dim_hash(expr: &Expr) -> LangResult<Option<u64>> {
+    match expr {
+        Expr::Lit(Lit::Integer(number, radix), _, _) => {
+            u64::from_str_radix(number, *radix).map(Some).map_err(|_| {
+                LangError::new(
+                    format!("Unable to hash array dimension, expr: {:#?}", expr),
+                    LangErrorKind::GeneralError,
+                    expr.file_pos().cloned(),
+                )
+            })
+        }
+
+        // TODO: Add more valid array dimensions in the future.
+        _ => Ok(None),
+    }
+}
+
 impl Ty {
     pub fn type_info(&self) -> &TypeInfo {
         match self {
@@ -168,169 +285,82 @@ impl Ty {
     }
 }
 
-impl Hash for Ty {
-    #[allow(clippy::many_single_char_names)]
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // TODO: Better way to hash other than adding an arbitrary int to make
-        //       the enum variants "unique"?
-        match self {
-            Ty::CompoundType(a, b, _) => {
-                0.hash(state);
-                a.hash(state);
-                b.hash(state);
-            }
-            Ty::Pointer(a, _) => {
-                1.hash(state);
-                a.hash(state);
-            }
-            Ty::Array(a, b, _) => {
-                2.hash(state);
-                a.hash(state);
-                b.hash(state);
-            }
-            Ty::Fn(a, b, c, _) => {
-                3.hash(state);
-                a.hash(state);
-                b.hash(state);
-                c.hash(state);
-            }
-            Ty::Any(a, _) => {
-                4.hash(state);
-                a.hash(state);
-            }
-            Ty::Generic(a, b, _) => {
-                5.hash(state);
-                a.hash(state);
-                b.hash(state);
-            }
-            Ty::GenericInstance(a, b, _) => {
-                6.hash(state);
-                a.hash(state);
-                b.hash(state);
-            }
-            Ty::Expr(a, _) => {
-                7.hash(state);
-                a.hash(state);
-            }
-            Ty::UnknownAdtMember(a, b, c, _) => {
-                8.hash(state);
-                a.hash(state);
-                b.hash(state);
-                c.hash(state);
-            }
-            Ty::UnknownAdtMethod(a, b, c, d, _) => {
-                9.hash(state);
-                a.hash(state);
-                b.hash(state);
-                c.hash(state);
-                d.hash(state);
-            }
-            Ty::UnknownMethodArgument(a, b, c, d, e, _) => {
-                10.hash(state);
-                a.hash(state);
-                b.hash(state);
-                c.hash(state);
-                d.hash(state);
-                e.hash(state);
-            }
-            Ty::UnknownMethodGeneric(a, b, c, d, _) => {
-                11.hash(state);
-                a.hash(state);
-                b.hash(state);
-                c.hash(state);
-                d.hash(state);
-            }
-            Ty::UnknownArrayMember(a, b, _) => {
-                12.hash(state);
-                a.hash(state);
-                b.hash(state);
-            }
+/// Struct used to indicate what counts as solved.
+///
+/// Types that (potentially) can be considered solved:
+///  * Primitives
+///  * ADTs
+///  * Traits
+///  * Pointers containing solved types
+///  * Arrays containing solved types
+///  * Unknown ints (default)
+///  * Unknown floats (default)
+///  * Any
+///  * Generic/GenericInstance
+///  * Unknown ADT/method related types
+///
+/// The list above is all types that possible can be considered solved.
+/// A subset of this list can be used instead depending on the bools set in a
+/// given `SolveCond`. Any bool values set to false will be exluded from being
+/// counted as solvable, meaning that the specific type is always considered
+/// unsolved.
+#[derive(Debug, Clone, Copy)]
+pub struct SolveCond {
+    default: bool,
+    generic: bool,
+    generic_instance: bool,
+    unknown: bool,
+}
+
+impl Default for SolveCond {
+    fn default() -> Self {
+        Self {
+            default: true,
+            generic: true,
+            generic_instance: true,
+            unknown: true,
         }
     }
 }
 
-impl PartialEq for Ty {
-    /// Compares two types. This function is overriden to allow for types (ex.
-    /// generics) to contain type hints that isn't used during the compare.
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Ty::CompoundType(self_inner, self_generics, ..),
-                Ty::CompoundType(other_inner, other_generics, ..),
-            ) => self_inner == other_inner && self_generics == other_generics,
+impl SolveCond {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-            (Ty::Pointer(self_ty, ..), Ty::Pointer(other_ty, ..)) => self_ty == other_ty,
+    pub fn excl_default(mut self) -> Self {
+        self.default = false;
+        self
+    }
 
-            (Ty::Array(self_ty, self_dim, ..), Ty::Array(other_ty, other_dim, ..)) => {
-                self_ty == other_ty && self_dim == other_dim
-            }
+    pub fn excl_gen(mut self) -> Self {
+        self.generic = false;
+        self
+    }
 
-            (
-                Ty::Fn(self_gens, self_params, self_ret, ..),
-                Ty::Fn(other_gens, other_params, other_ret, ..),
-            ) => self_gens == other_gens && self_params == other_params && self_ret == other_ret,
+    pub fn excl_gen_inst(mut self) -> Self {
+        self.generic_instance = false;
+        self
+    }
 
-            (Ty::Any(self_id, ..), Ty::Any(other_id, ..)) => self_id == other_id,
+    pub fn excl_unknown(mut self) -> Self {
+        self.unknown = false;
+        self
+    }
 
-            (Ty::Generic(self_ident, self_id, ..), Ty::Generic(other_ident, other_id, ..)) => {
-                self_ident == other_ident && self_id == other_id
-            }
-            (
-                Ty::GenericInstance(self_ident, self_id, ..),
-                Ty::GenericInstance(other_ident, other_id, ..),
-            ) => self_ident == other_ident && self_id == other_id,
+    pub fn can_solve_default(self) -> bool {
+        self.default
+    }
 
-            (Ty::Expr(self_expr, ..), Ty::Expr(other_expr, ..)) => self_expr == other_expr,
+    pub fn can_solve_gen(self) -> bool {
+        self.generic
+    }
 
-            (
-                Ty::UnknownAdtMember(self_ty, self_ident, self_id, ..),
-                Ty::UnknownAdtMember(other_ty, other_ident, other_id, ..),
-            ) => self_ty == other_ty && self_ident == other_ident && self_id == other_id,
+    pub fn can_solve_gen_inst(self) -> bool {
+        self.generic_instance
+    }
 
-            (
-                Ty::UnknownAdtMethod(self_ty, self_ident, self_gens, self_id, ..),
-                Ty::UnknownAdtMethod(other_ty, other_ident, other_gens, other_id, ..),
-            ) => {
-                self_ty == other_ty
-                    && self_ident == other_ident
-                    && self_gens == other_gens
-                    && self_id == other_id
-            }
-
-            (
-                Ty::UnknownMethodArgument(self_ty, self_ident, self_pos, self_gens, self_id, ..),
-                Ty::UnknownMethodArgument(
-                    other_ty,
-                    other_ident,
-                    other_pos,
-                    other_gens,
-                    other_id,
-                    ..,
-                ),
-            ) => {
-                self_ty == other_ty
-                    && self_ident == other_ident
-                    && self_pos == other_pos
-                    && self_gens == other_gens
-                    && self_id == other_id
-            }
-
-            (
-                Ty::UnknownMethodGeneric(self_ty, self_ident, self_pos, self_id, ..),
-                Ty::UnknownMethodGeneric(other_ty, other_ident, other_pos, other_id, ..),
-            ) => {
-                self_ty == other_ty
-                    && self_ident == other_ident
-                    && self_pos == other_pos
-                    && self_id == other_id
-            }
-
-            (
-                Ty::UnknownArrayMember(self_ty, self_id, ..),
-                Ty::UnknownArrayMember(other_ty, other_id, ..),
-            ) => self_ty == other_ty && self_id == other_id,
-
-            _ => false,
-        }
+    pub fn can_solve_unknown(self) -> bool {
+        self.unknown
     }
 }

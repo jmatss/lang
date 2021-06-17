@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use crate::{
+    file::FilePosition, hash::DerefType, hash_set::TyEnvHashSet, path::LangPath, ty::ty_env::TyEnv,
+    BlockId,
+};
 
-use crate::{file::FilePosition, path::LangPath, BlockId};
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BlockCtx {
     pub block_id: BlockId,
     pub parent_id: BlockId,
@@ -54,7 +55,7 @@ pub struct BlockCtx {
     /// Currently ALL "use" statements declared in a block is accessable from the
     /// whole block, even if the "use" is declared below a statement that uses it,
     /// order doesn't matter. This might change in the future.
-    pub uses: HashSet<LangPath>,
+    pub uses: TyEnvHashSet<LangPath>,
 }
 
 impl BlockCtx {
@@ -67,7 +68,7 @@ impl BlockCtx {
         is_root_block: bool,
         is_branchable_block: bool,
         module: Option<LangPath>,
-        uses: HashSet<LangPath>,
+        uses: TyEnvHashSet<LangPath>,
     ) -> Self {
         Self {
             block_id,
@@ -86,7 +87,12 @@ impl BlockCtx {
         }
     }
 
-    pub fn add_use(&mut self, path: LangPath) {
-        self.uses.insert(path);
+    pub fn add_use(&mut self, ty_env: &TyEnv, path: LangPath) {
+        if let Err(err) = self
+            .uses
+            .insert(ty_env, DerefType::None, path.without_gens())
+        {
+            panic!("add_use -- {:#?}", err)
+        }
     }
 }

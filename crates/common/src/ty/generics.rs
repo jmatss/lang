@@ -1,6 +1,15 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap, hash::Hash, sync::Mutex};
 
-use crate::{ctx::ty_env::TyEnv, error::LangResult, TypeId};
+use crate::{
+    error::LangResult,
+    hash::{DerefType, TyEnvHash},
+    TypeId,
+};
+
+use super::{
+    contains::{contains_generic_shallow, contains_unknown_any_shallow},
+    ty_env::TyEnv,
+};
 
 /// Used to indicate what kind this "Generics" is.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -19,10 +28,10 @@ pub enum GenericsKind {
     Empty,
 }
 
-#[derive(Debug, Clone, Eq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Generics {
-    names: Vec<String>,
-    types: Vec<TypeId>,
+    pub names: Vec<String>,
+    pub types: Vec<TypeId>,
 
     /// A map used to do fast lookups. The key is the name of the generic and
     /// the value is the index of that generic in both `names` and `types`.
@@ -133,12 +142,13 @@ impl Generics {
         self.types.iter_mut()
     }
 
-    pub fn is_solved(&self, ty_env: &mut TyEnv) -> LangResult<bool> {
+    pub fn is_solved(&self, ty_env: &Mutex<TyEnv>) -> LangResult<bool> {
         let mut solved = true;
 
         for type_id in &self.types {
-            if ty_env.contains_unknown_any_shallow(*type_id)?
-                || ty_env.contains_generic_shallow(*type_id)?
+            let ty_env_lock = ty_env.lock().unwrap();
+            if contains_unknown_any_shallow(&ty_env_lock, *type_id)?
+                || contains_generic_shallow(&ty_env_lock, *type_id)?
             {
                 solved = false;
                 break;
@@ -149,37 +159,20 @@ impl Generics {
     }
 }
 
-impl Hash for Generics {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // Ignore names since they might not be set in some instances.
-        for ty in &self.types {
-            ty.hash(state);
+impl TyEnvHash for Generics {
+    fn hash_with_state<H: std::hash::Hasher>(
+        &self,
+        ty_env: &TyEnv,
+        deref_type: DerefType,
+        state: &mut H,
+    ) -> LangResult<()> {
+        if !self.types.is_empty() {
+            for gen_type_id in self.types.iter() {
+                gen_type_id.hash_with_state(ty_env, deref_type, state)?;
+            }
+        } else if !self.names.is_empty() {
+            self.names.hash(state);
         }
-    }
-}
-
-impl PartialEq for Generics {
-    fn eq(&self, other: &Self) -> bool {
-        if self.len_types() != other.len_types() {
-            return false;
-        }
-
-        if self
-            .iter_names()
-            .zip(other.iter_names())
-            .any(|(a, b)| a != b)
-        {
-            return false;
-        }
-
-        if self
-            .iter_types()
-            .zip(other.iter_types())
-            .any(|(a, b)| a != b)
-        {
-            return false;
-        }
-
-        true
+        Ok(())
     }
 }

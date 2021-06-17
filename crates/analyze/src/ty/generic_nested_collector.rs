@@ -1,17 +1,25 @@
-use std::collections::{hash_map::Entry, HashMap};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    hash::Hash,
+};
 
 use common::{
-    ctx::{traverse_ctx::TraverseCtx, ty_env::TyEnv},
+    ctx::traverse_ctx::TraverseCtx,
+    eq::generics_eq,
     error::{LangError, LangResult},
+    hash::{DerefType, TyEnvHash},
+    hash_map::TyEnvHashMap,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader, expr::FnCall},
     traverse::visitor::Visitor,
-    ty::{generics::Generics, ty::Ty},
-    TypeId,
+    ty::{
+        contains::contains_generic_shallow, generics::Generics, get::get_ident, ty::Ty,
+        ty_env::TyEnv, type_id::TypeId,
+    },
 };
 
 /// Used to store information about a nested method containing generics..
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(super) struct NestedMethodInfo {
     /// The name of the function where this specific nested generic was found in.
     pub func_name: String,
@@ -23,13 +31,27 @@ pub(super) struct NestedMethodInfo {
     pub method_adt_path: LangPath,
 }
 
+impl TyEnvHash for NestedMethodInfo {
+    fn hash_with_state<H: std::hash::Hasher>(
+        &self,
+        ty_env: &TyEnv,
+        deref_type: DerefType,
+        state: &mut H,
+    ) -> LangResult<()> {
+        self.func_name.hash(state);
+        self.method_call_name.hash(state);
+        self.method_adt_path
+            .hash_with_state(ty_env, deref_type, state)
+    }
+}
+
 pub(super) struct GenericNestedCollector {
     /// The key String is the name of the function that this type/generic was
     /// found in.
     pub nested_generic_adts: HashMap<String, Vec<TypeId>>,
 
     /// The key contains information about where the types/generics was found.
-    pub nested_generic_methods: HashMap<NestedMethodInfo, Vec<Generics>>,
+    pub nested_generic_methods: TyEnvHashMap<NestedMethodInfo, Vec<Generics>>,
 
     /// Contains the name of the current function that is being visited.
     cur_func_name: String,
@@ -41,7 +63,7 @@ impl GenericNestedCollector {
     pub(super) fn new() -> Self {
         Self {
             nested_generic_adts: HashMap::default(),
-            nested_generic_methods: HashMap::default(),
+            nested_generic_methods: TyEnvHashMap::default(),
             cur_func_name: "".into(),
             errors: Vec::default(),
         }
@@ -52,7 +74,7 @@ impl GenericNestedCollector {
         ty_env: &mut TyEnv,
         type_id: TypeId,
     ) -> LangResult<()> {
-        if !ty_env.contains_generic_shallow(type_id)? {
+        if !contains_generic_shallow(ty_env, type_id)? {
             return Ok(());
         }
 
@@ -60,12 +82,14 @@ impl GenericNestedCollector {
             Ty::CompoundType(inner_ty, generics, _) => {
                 let mut contains_generic = false;
                 for gen_type_id in generics.iter_types() {
-                    if ty_env.contains_generic_shallow(*gen_type_id)? {
+                    if contains_generic_shallow(ty_env, *gen_type_id)? {
                         contains_generic = true;
                     }
                 }
 
-                if contains_generic && inner_ty.is_adt() {
+                if contains_generic
+                    && (inner_ty.is_adt() || inner_ty.is_trait() || inner_ty.is_unknown_ident())
+                {
                     match self.nested_generic_adts.entry(self.cur_func_name.clone()) {
                         Entry::Occupied(mut o) => {
                             if !o.get().contains(&type_id) {
@@ -108,30 +132,50 @@ impl GenericNestedCollector {
 
         let mut contains_nested_generic = false;
         for gen_type_id in method_call_gens.iter_types() {
-            if ty_env.contains_generic_shallow(*gen_type_id)? {
+            if contains_generic_shallow(ty_env, *gen_type_id)? {
                 contains_nested_generic = true;
             }
         }
 
         if contains_nested_generic {
-            let method_adt_path = ty_env
-                .get_ident(*method_call.method_adt.as_ref().unwrap())?
-                .unwrap();
-            let key = NestedMethodInfo {
+            let method_adt_path =
+                get_ident(ty_env, *method_call.method_adt.as_ref().unwrap())?.unwrap();
+
+            let nested_method_info = NestedMethodInfo {
                 func_name: self.cur_func_name.clone(),
                 method_call_name: method_call.name.clone(),
                 method_adt_path,
             };
 
-            match self.nested_generic_methods.entry(key) {
-                Entry::Occupied(mut o) => {
-                    if !o.get().contains(method_call_gens) {
-                        o.get_mut().push(method_call_gens.clone());
+            let contains_key = self.nested_generic_methods.contains_key(
+                ty_env,
+                DerefType::Deep,
+                &nested_method_info,
+            )?;
+
+            if contains_key {
+                let vec_inner = self
+                    .nested_generic_methods
+                    .get_mut(ty_env, DerefType::Deep, &nested_method_info)?
+                    .unwrap();
+
+                let mut contains_gens = false;
+                for gen_inner in vec_inner.iter() {
+                    if generics_eq(ty_env, gen_inner, method_call_gens, DerefType::Deep)? {
+                        contains_gens = true;
                     }
                 }
-                Entry::Vacant(v) => {
-                    v.insert(vec![method_call_gens.clone()]);
+
+                if !contains_gens {
+                    vec_inner.push(method_call_gens.clone());
                 }
+            } else {
+                self.nested_generic_methods.insert(
+                    ty_env,
+                    DerefType::Deep,
+                    nested_method_info,
+                    vec![method_call_gens.clone()],
+                )?;
             }
         }
 
@@ -153,7 +197,7 @@ impl Visitor for GenericNestedCollector {
         // in the function declaration/prototype is traversed before the
         // `visit_fn` is.
         if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
-            self.cur_func_name = func.borrow().name.clone();
+            self.cur_func_name = func.as_ref().read().unwrap().name.clone();
         }
     }
 
@@ -162,13 +206,17 @@ impl Visitor for GenericNestedCollector {
             return;
         }
 
-        if let Err(err) = self.collect_nested_generic_methods(&mut ctx.ty_ctx.ty_env, fn_call) {
+        if let Err(err) =
+            self.collect_nested_generic_methods(&mut ctx.ty_env.lock().unwrap(), fn_call)
+        {
             self.errors.push(err);
         }
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        if let Err(err) = self.collect_nested_generic_adts(&mut ctx.ty_ctx.ty_env, *type_id) {
+        if let Err(err) =
+            self.collect_nested_generic_adts(&mut ctx.ty_env.lock().unwrap(), *type_id)
+        {
             self.errors.push(err);
         }
     }

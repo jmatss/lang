@@ -1,7 +1,7 @@
 use super::{expr::Expr, stmt::Stmt};
 use crate::{file::FilePosition, BlockId, TypeId};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub enum Op {
     BinOp(BinOp),
     UnOp(UnOp),
@@ -16,7 +16,7 @@ impl Op {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct BinOp {
     pub operator: BinOperator,
     pub ret_type: Option<TypeId>,
@@ -44,7 +44,7 @@ impl BinOp {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct UnOp {
     pub operator: UnOperator,
     pub ret_type: Option<TypeId>,
@@ -107,7 +107,7 @@ pub enum BinOperator {
     BoolOr,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub enum UnOperator {
     // Dereference pointer and take address of value (.* and .&).
     Deref,

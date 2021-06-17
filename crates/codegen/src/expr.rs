@@ -14,8 +14,7 @@ use common::{
         expr::{AdtInit, ArrayInit, Expr, FnCall},
         lit::Lit,
     },
-    ty::inner_ty::InnerTy,
-    TypeId,
+    ty::{get::get_inner, inner_ty::InnerTy, to_string::to_string_path, type_id::TypeId},
 };
 
 use crate::generator::CodeGen;
@@ -26,7 +25,7 @@ pub enum ExprTy {
     RValue,
 }
 
-impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     /// Compiles a expression. If this expression is a regular rvalue expression,
     /// it should be evaluated to a "value". If this expression is a lvalue,
     /// the "last" recurisve call to this function should return a pointer to
@@ -166,7 +165,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     ) -> LangResult<IntValue<'ctx>> {
         // TODO: Where should the integer literal conversion be made?
         let inner_ty = if let Some(type_id) = type_id_opt {
-            self.analyze_ctx.ty_ctx.ty_env.get_inner(*type_id)?.clone()
+            let ty_env_lock = self.analyze_ctx.ty_env.lock().unwrap();
+            let fwd_type_id = ty_env_lock.forwarded(*type_id);
+            get_inner(&ty_env_lock, fwd_type_id)?.clone()
         } else {
             InnerTy::default_int()
         };
@@ -232,7 +233,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         file_pos: Option<FilePosition>,
     ) -> LangResult<FloatValue<'ctx>> {
         let inner_ty = if let Some(type_id) = type_id_opt {
-            self.analyze_ctx.ty_ctx.ty_env.get_inner(*type_id)?.clone()
+            let ty_env_lock = self.analyze_ctx.ty_env.lock().unwrap();
+            let fwd_type_id = ty_env_lock.forwarded(*type_id);
+            get_inner(&ty_env_lock, fwd_type_id)?.clone()
         } else {
             InnerTy::default_float()
         };
@@ -295,7 +298,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
         } else if let Some(fn_value) = self
             .module
-            .get_function(&fn_call.full_name(&self.analyze_ctx.ty_ctx)?)
+            .get_function(&fn_call.full_name(&self.analyze_ctx.ty_env.lock().unwrap())?)
         {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
@@ -304,7 +307,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Wrong amount of args given when calling func \"{}\". Expected: {}, got: {}",
-                        &fn_call.full_name(&self.analyze_ctx.ty_ctx)?,
+                        &fn_call.full_name(&self.analyze_ctx.ty_env.lock().unwrap())?,
                         fn_value.count_params(),
                         fn_call.arguments.len()
                     ),
@@ -318,7 +321,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 format!(
                     "Unable to find function with name \"{}\" to call (full name: {:#?}).",
                     &fn_call.name,
-                    &fn_call.full_name(&self.analyze_ctx.ty_ctx)
+                    &fn_call.full_name(&self.analyze_ctx.ty_env.lock().unwrap())
                 ),
                 fn_call.file_pos,
             ));
@@ -349,22 +352,22 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 .module
                 .clone_push(&fn_ptr.name, fn_ptr.generics.as_ref(), fn_ptr.file_pos);
         let full_path = self.analyze_ctx.ast_ctx.calculate_fn_full_path(
-            &self.analyze_ctx.ty_ctx,
+            &self.analyze_ctx.ty_env.lock().unwrap(),
             &partial_path,
             self.cur_block_id,
         )?;
 
-        if let Some(fn_value) = self
-            .module
-            .get_function(&self.analyze_ctx.ty_ctx.to_string_path(&full_path))
-        {
+        if let Some(fn_value) = self.module.get_function(&to_string_path(
+            &self.analyze_ctx.ty_env.lock().unwrap(),
+            &full_path,
+        )) {
             let fn_ptr = fn_value.as_global_value().as_pointer_value();
             Ok(fn_ptr.into())
         } else {
             Err(self.err(
                 format!(
                     "Unable to find function with full name {} (compiling fn pointer).",
-                    self.analyze_ctx.ty_ctx.to_string_path(&full_path)
+                    to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
                 ),
                 fn_ptr.file_pos.to_owned(),
             ))
@@ -376,7 +379,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         &mut self,
         struct_init: &mut AdtInit,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let full_name = struct_init.full_name(&self.analyze_ctx.ty_ctx)?;
+        let full_name = struct_init.full_name(&self.analyze_ctx.ty_env.lock().unwrap())?;
 
         let struct_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
             inner
@@ -463,21 +466,21 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             union_init.file_pos,
         );
         let full_path = self.analyze_ctx.ast_ctx.calculate_adt_full_path(
-            &self.analyze_ctx.ty_ctx,
+            &self.analyze_ctx.ty_env.lock().unwrap(),
             &partial_path,
             self.cur_block_id,
         )?;
 
-        let union_type = if let Some(inner) = self
-            .module
-            .get_struct_type(&self.analyze_ctx.ty_ctx.to_string_path(&full_path))
-        {
+        let union_type = if let Some(inner) = self.module.get_struct_type(&to_string_path(
+            &self.analyze_ctx.ty_env.lock().unwrap(),
+            &full_path,
+        )) {
             inner
         } else {
             return Err(self.err(
                 format!(
                     "Unable to get union with name \"{}\". Union init: {:#?}",
-                    self.analyze_ctx.ty_ctx.to_string_path(&full_path),
+                    to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
                     union_init
                 ),
                 union_init.file_pos,
@@ -489,7 +492,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
         let basic_value = CodeGen::any_into_basic_value(any_value)?;
 
         let tag_idx = self.analyze_ctx.ast_ctx.get_adt_member_index(
-            &self.analyze_ctx.ty_ctx,
+            &self.analyze_ctx.ty_env.lock().unwrap(),
             &full_path,
             &arg.name.as_ref().unwrap(),
         )?;

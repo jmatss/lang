@@ -1,3 +1,5 @@
+use ty::type_id::TypeId;
+
 #[macro_use]
 extern crate log;
 
@@ -6,17 +8,6 @@ pub type BlockId = usize;
 
 /// A arbitrary unique ID.
 pub type UniqueId = u64;
-
-/// A unique ID used to reference specific types. All cmp/eq function only looks
-/// at the unique ID, the scope information is ignored.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-pub struct TypeId(pub u64);
-
-impl std::fmt::Display for TypeId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
 
 pub const ARGC_GLOBAL_VAR_NAME: &str = "_lang_argc_global";
 pub const ARGV_GLOBAL_VAR_NAME: &str = "_lang_argv_global";
@@ -30,8 +21,12 @@ pub const ENV_VAR: &str = "LANG_HOME";
 //pub mod cf_traverser;
 //pub mod cf_visitor;
 pub mod ctx;
+pub mod eq;
 pub mod error;
 pub mod file;
+pub mod hash;
+pub mod hash_map;
+pub mod hash_set;
 pub mod iter;
 pub mod path;
 pub mod token;

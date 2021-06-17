@@ -1,5 +1,5 @@
 use std::{
-    cell::Ref,
+    borrow::Borrow,
     collections::{hash_map::Entry, HashMap, HashSet},
     iter::FromIterator,
 };
@@ -14,7 +14,7 @@ use common::{
         expr::FnCall,
     },
     traverse::visitor::Visitor,
-    ty::{inner_ty::InnerTy, ty::Ty},
+    ty::{get::get_generic_ident, inner_ty::InnerTy, is::is_generic, ty::Ty},
 };
 
 /// Goes through all function calls done on variables with a generic type and
@@ -45,11 +45,7 @@ impl TraitsFnAnalyzer {
     /// to the trait method names that they implement. This information will be used
     /// to verify that any function call on the generic type is valid according to
     /// the "where" clause.
-    fn store_generic_trait_method_names(
-        &mut self,
-        ctx: &TraverseCtx,
-        adt: Ref<Adt>,
-    ) -> LangResult<()> {
+    fn store_generic_trait_method_names(&mut self, ctx: &TraverseCtx, adt: &Adt) -> LangResult<()> {
         let implements = if let Some(implements) = &adt.implements {
             implements
         } else {
@@ -67,7 +63,7 @@ impl TraitsFnAnalyzer {
         // implements.
         for (gen_name, trait_tys) in implements {
             for trait_type_id in trait_tys {
-                let trait_ty = ctx.ty_ctx.ty_env.ty(*trait_type_id)?;
+                let trait_ty = ctx.ty_env.lock().unwrap().ty_clone(*trait_type_id)?;
                 let trait_path = if let Ty::CompoundType(InnerTy::Trait(trait_name), ..) = trait_ty
                 {
                     trait_name
@@ -83,7 +79,7 @@ impl TraitsFnAnalyzer {
 
                 let trait_method_names = match ctx
                     .ast_ctx
-                    .get_trait_method_names(&ctx.ty_ctx, &trait_path.without_gens())
+                    .get_trait_method_names(&ctx.ty_env.lock().unwrap(), &trait_path.without_gens())
                 {
                     Ok(trait_method_names) => trait_method_names,
                     Err(err) => {
@@ -148,15 +144,19 @@ impl Visitor for TraitsFnAnalyzer {
                 }
             };
 
-            let adt = match ctx.ast_ctx.get_adt(&ctx.ty_ctx, &full_impl_path) {
+            let adt = match ctx
+                .ast_ctx
+                .get_adt(&ctx.ty_env.lock().unwrap(), &full_impl_path)
+            {
                 Ok(adt) => adt,
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
             };
+            let adt = adt.as_ref().borrow().read().unwrap();
 
-            if let Err(err) = self.store_generic_trait_method_names(&ctx, adt.borrow()) {
+            if let Err(err) = self.store_generic_trait_method_names(&ctx, &adt) {
                 self.errors.push(err);
             }
         }
@@ -165,7 +165,7 @@ impl Visitor for TraitsFnAnalyzer {
     /// Check any function call in which the `method_adt` is a generic.
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
         if let Some(method_adt_type_id) = &fn_call.method_adt {
-            match ctx.ty_ctx.ty_env.is_generic(*method_adt_type_id) {
+            match is_generic(&ctx.ty_env.lock().unwrap(), *method_adt_type_id) {
                 Ok(true) => (),
                 Ok(false) => return,
                 Err(err) => {
@@ -174,7 +174,8 @@ impl Visitor for TraitsFnAnalyzer {
                 }
             };
 
-            let generic_name = match ctx.ty_ctx.ty_env.get_generic_ident(*method_adt_type_id) {
+            let ty_env_lock = ctx.ty_env.lock().unwrap();
+            let generic_name = match get_generic_ident(&ty_env_lock, *method_adt_type_id) {
                 Ok(name) => name,
                 Err(err) => {
                     self.errors.push(err);

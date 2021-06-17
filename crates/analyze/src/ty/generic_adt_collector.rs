@@ -4,12 +4,22 @@ use log::debug;
 
 use common::{
     ctx::traverse_ctx::TraverseCtx,
-    error::{LangError, LangResult},
+    error::{LangError, LangErrorKind, LangResult},
+    hash::DerefType,
+    hash_map::TyEnvHashMap,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader},
     traverse::{traverser::traverse, visitor::Visitor},
-    ty::ty::Ty,
-    TypeId,
+    ty::{
+        contains::contains_generic_shallow,
+        get::get_ident,
+        is::is_solved,
+        replace::replace_gen_impls,
+        solve::{inferred_type, set_generic_names},
+        to_string::to_string_type_id,
+        ty::{SolveCond, Ty},
+        type_id::TypeId,
+    },
 };
 
 use super::generic_nested_collector::GenericNestedCollector;
@@ -27,7 +37,7 @@ pub struct GenericAdtCollector<'a> {
     /// create new generic ADTs with the specific generic implementations.
     /// The LangPath key is the path of the ADT/type. The TypeId values are the
     /// actual types containing generic implentations/instances.
-    pub generic_adts: HashMap<LangPath, Vec<TypeId>>,
+    pub generic_adts: TyEnvHashMap<LangPath, Vec<TypeId>>,
 
     /// Will contain all NESTED types containing generics. These are types containing
     /// generics that aren't part of the "using" structure.
@@ -62,7 +72,7 @@ pub struct GenericAdtCollector<'a> {
     /// The first LangPath key is the path of the containing ADT (`A` in the example)
     /// and the second String key is the name of the method in which the vector
     /// of types was found in.
-    nested_generic_adts: HashMap<LangPath, HashMap<String, Vec<TypeId>>>,
+    nested_generic_adts: TyEnvHashMap<LangPath, HashMap<String, Vec<TypeId>>>,
 
     /// A list of all ADT's in the dependecy order. This list will be in reverse
     /// order compared to how it is calculated. This means that ADT `A` depending
@@ -76,8 +86,8 @@ pub struct GenericAdtCollector<'a> {
 impl<'a> GenericAdtCollector<'a> {
     pub fn new(dependency_order_rev: &'a [LangPath]) -> Self {
         Self {
-            generic_adts: HashMap::default(),
-            nested_generic_adts: HashMap::default(),
+            generic_adts: TyEnvHashMap::default(),
+            nested_generic_adts: TyEnvHashMap::default(),
             dependency_order_rev,
             errors: Vec::default(),
         }
@@ -92,16 +102,16 @@ impl<'a> GenericAdtCollector<'a> {
         // Do not create a "copy" of the actual ADT type that contains the
         // generic declarations, should only create "copies" for the ADTs
         // that "implements" the generics.
-        if ctx.ty_ctx.ty_env.contains_generic_shallow(type_id)? {
+        if contains_generic_shallow(&ctx.ty_env.lock().unwrap(), type_id)? {
             return Ok(());
         }
 
-        let ty = ctx.ty_ctx.ty_env.ty(type_id)?.clone();
+        let ty_clone = ctx.ty_env.lock().unwrap().ty_clone(type_id)?;
 
-        let adt_path = match ty {
+        let adt_path_with_gens = match ty_clone {
             Ty::CompoundType(inner_ty, gens, ..) if !gens.is_empty() => {
                 if let Some(adt_path) = inner_ty.get_ident() {
-                    adt_path
+                    adt_path.without_gens()
                 } else {
                     return Ok(());
                 }
@@ -114,24 +124,39 @@ impl<'a> GenericAdtCollector<'a> {
             _ => return Ok(()),
         };
 
-        // Set names of generics if they aren't set already.
-        ctx.ty_ctx.set_generic_names(&ctx.ast_ctx, type_id)?;
+        let mut ty_env_lock = ctx.ty_env.lock().unwrap();
 
-        match self.generic_adts.entry(adt_path.without_gens()) {
-            Entry::Occupied(mut o) => {
-                if !o.get().contains(&type_id) {
-                    o.get_mut().push(type_id);
-                }
+        // Set names of generics if they aren't set already.
+        set_generic_names(&mut ty_env_lock, &ctx.ast_ctx, type_id)?;
+
+        let deref_type = DerefType::None;
+        let contains_key =
+            self.generic_adts
+                .contains_key(&ty_env_lock, deref_type, &adt_path_with_gens)?;
+
+        if contains_key {
+            let type_ids = self
+                .generic_adts
+                .get_mut(&ty_env_lock, deref_type, &adt_path_with_gens)?
+                .unwrap();
+
+            if !type_ids.contains(&type_id) {
+                type_ids.push(type_id);
             }
-            Entry::Vacant(v) => {
-                v.insert(vec![type_id]);
-            }
+        } else {
+            let type_ids = vec![type_id];
+            self.generic_adts
+                .insert(&ty_env_lock, deref_type, adt_path_with_gens, type_ids)?;
         }
 
         Ok(())
     }
 
-    fn collect_nested(&mut self, ctx: &mut TraverseCtx, ast_tokens: &mut Vec<AstToken>) {
+    fn collect_nested(
+        &mut self,
+        ctx: &mut TraverseCtx,
+        ast_tokens: &mut [AstToken],
+    ) -> LangResult<()> {
         for ast_token in ast_tokens {
             // Need to do this ugly hack to make the borrow checker happy.
             // We wan't to borrow the `adt_path` and use it in the logic below,
@@ -139,7 +164,11 @@ impl<'a> GenericAdtCollector<'a> {
             // `adt_path`.
             let impl_opt = match ast_token {
                 AstToken::Block(BlockHeader::Implement(adt_path, _), ..) => {
-                    if ctx.ast_ctx.get_adt(&ctx.ty_ctx, adt_path).is_ok() {
+                    if ctx
+                        .ast_ctx
+                        .get_adt(&ctx.ty_env.lock().unwrap(), adt_path)
+                        .is_ok()
+                    {
                         Some(adt_path.clone())
                     } else {
                         None
@@ -150,131 +179,209 @@ impl<'a> GenericAdtCollector<'a> {
             };
 
             if let Some(adt_path) = impl_opt {
+                let adt_path_without_gens = adt_path.without_gens();
+
                 let mut collector = GenericNestedCollector::new();
                 if let Err(mut errs) = traverse(ctx, &mut collector, ast_token) {
                     self.errors.append(&mut errs);
                 }
 
+                let ty_env_lock = ctx.ty_env.lock().unwrap();
+
                 for (method_name, type_ids) in collector.nested_generic_adts.iter() {
                     for type_id in type_ids {
-                        match self.nested_generic_adts.entry(adt_path.without_gens()) {
-                            Entry::Occupied(mut o_outer) => {
-                                match o_outer.get_mut().entry(method_name.clone()) {
-                                    Entry::Occupied(mut o_inner) => {
-                                        if !o_inner.get().contains(type_id) {
-                                            o_inner.get_mut().push(*type_id);
-                                        }
-                                    }
-                                    Entry::Vacant(v_inner) => {
-                                        v_inner.insert(vec![*type_id]);
+                        let deref_type = DerefType::None;
+                        let contains_key = self.nested_generic_adts.contains_key(
+                            &ty_env_lock,
+                            deref_type,
+                            &adt_path_without_gens,
+                        )?;
+
+                        if contains_key {
+                            let inner_map = self
+                                .nested_generic_adts
+                                .get_mut(&ty_env_lock, deref_type, &adt_path_without_gens)?
+                                .unwrap();
+
+                            match inner_map.entry(method_name.clone()) {
+                                Entry::Occupied(mut o_inner) => {
+                                    if !o_inner.get().contains(type_id) {
+                                        o_inner.get_mut().push(*type_id);
                                     }
                                 }
+                                Entry::Vacant(v_inner) => {
+                                    v_inner.insert(vec![*type_id]);
+                                }
                             }
-                            Entry::Vacant(v_outer) => {
-                                let mut m = HashMap::default();
-                                m.insert(method_name.clone(), vec![*type_id]);
-                                v_outer.insert(m);
-                            }
+                        } else {
+                            let mut m = HashMap::default();
+                            m.insert(method_name.clone(), vec![*type_id]);
+                            self.nested_generic_adts.insert(
+                                &ty_env_lock,
+                                deref_type,
+                                adt_path_without_gens.clone(),
+                                m,
+                            )?;
                         }
                     }
                 }
             }
         }
+
+        Ok(())
     }
 
-    fn convert_nested_to_regular(&mut self, ctx: &mut TraverseCtx) {
+    fn convert_nested_to_regular(&mut self, ctx: &mut TraverseCtx) -> LangResult<()> {
         debug!("self.nested_generic_adts: {:#?}", self.nested_generic_adts);
 
         // Converts all `self.nested_generic_adts` into regular `self.generic_adts`.
         for adt_path in self.dependency_order_rev.iter() {
-            let nested_gen_adt = if self.nested_generic_adts.contains_key(adt_path) {
-                self.nested_generic_adts.remove(adt_path).unwrap()
-            } else {
-                continue;
+            let adt_path_without_gens = adt_path.without_gens();
+
+            let nested_gen_adt = {
+                let deref_type = DerefType::None;
+                let ty_env_lock = ctx.ty_env.lock().unwrap();
+
+                if self.nested_generic_adts.contains_key(
+                    &ty_env_lock,
+                    deref_type,
+                    &adt_path_without_gens,
+                )? {
+                    self.nested_generic_adts
+                        .remove(&ty_env_lock, deref_type, &adt_path_without_gens)?
+                        .unwrap()
+                } else {
+                    continue;
+                }
             };
 
             for nested_adt_type_ids in nested_gen_adt.values() {
                 for nested_adt_type_id in nested_adt_type_ids {
-                    let nested_adt_path = match ctx.ty_ctx.ty_env.get_ident(*nested_adt_type_id) {
-                        Ok(Some(path)) => path,
-                        Ok(None) => {
-                            let err = ctx.ast_ctx.err(format!(
+                    let path_res = get_ident(&ctx.ty_env.lock().unwrap(), *nested_adt_type_id)?;
+                    let nested_adt_path_without_gens = match path_res {
+                        Some(path) => path.without_gens(),
+                        None => {
+                            return Err(ctx.ast_ctx.err(format!(
                                 "Nested ADT type doesn't contain ident: {:#?}",
                                 nested_adt_type_id
-                            ));
-                            self.errors.push(err);
-                            return;
-                        }
-                        Err(err) => {
-                            self.errors.push(err);
-                            return;
+                            )));
                         }
                     };
 
-                    if let Err(err) = self.convert_nested_adt_from_adt(
+                    self.convert_nested_adt_from_adt(
                         ctx,
-                        &adt_path,
+                        &adt_path_without_gens,
                         *nested_adt_type_id,
-                        &nested_adt_path,
-                    ) {
-                        self.errors.push(err);
-                    }
+                        &nested_adt_path_without_gens,
+                    )?;
                 }
             }
         }
+
+        Ok(())
     }
 
     fn convert_nested_adt_from_adt(
         &mut self,
         ctx: &mut TraverseCtx,
-        adt_path: &LangPath,
+        adt_path_without_gens: &LangPath,
         nested_adt_type_id: TypeId,
-        nested_adt_path: &LangPath,
+        nested_adt_path_without_gens: &LangPath,
     ) -> LangResult<()> {
-        let gen_adt_type_ids =
-            if let Some(gen_adt_type_ids) = self.generic_adts.get(&adt_path.without_gens()) {
-                gen_adt_type_ids.clone()
-            } else {
-                // This can happen if there are no implementation of a
-                // ADT that contains generics.
-                return Ok(());
-            };
+        let gen_adt_type_ids = if let Some(gen_adt_type_ids) = self.generic_adts.get(
+            &ctx.ty_env.lock().unwrap(),
+            DerefType::None,
+            &adt_path_without_gens,
+        )? {
+            gen_adt_type_ids.clone()
+        } else {
+            // This can happen if there are no implementation of the `outer` ADT.
+            // If that is the case, the `inner` nested ADT will never be used.
+            return Ok(());
+        };
 
-        // Go through all implementations of the ADT `adt_path` and use those
-        // generic instances to create new ADT instances for the nested one.
-        // This will be done for all generics of the outer ADT.
+        // Go through all implementations of the ADT `adt_path_without_gens` and
+        // use those generic instances to create new ADT instances for the nested
+        // one.
         for gen_adt_type_id in gen_adt_type_ids {
-            let gen_adt_ty = ctx.ty_ctx.ty_env.ty(gen_adt_type_id)?.clone();
+            set_generic_names(
+                &mut ctx.ty_env.lock().unwrap(),
+                &ctx.ast_ctx,
+                gen_adt_type_id,
+            )?;
 
-            let generics = if let Ty::CompoundType(_, generics, ..) = gen_adt_ty {
+            let gen_adt_ty = ctx.ty_env.lock().unwrap().ty_clone(gen_adt_type_id)?;
+
+            let gens = if let Ty::CompoundType(_, generics, ..) = gen_adt_ty {
                 generics
             } else {
-                let err = ctx.ast_ctx.err(format!(
+                return Err(ctx.ast_ctx.err(format!(
                     "Generic instance type not compound: {:#?}",
                     gen_adt_type_id
-                ));
-                return Err(err);
+                )));
             };
 
-            let nested_adt_type_id = if let Some(new_type_id) =
-                ctx.ty_ctx
-                    .replace_gen_impls(&ctx.ast_ctx, nested_adt_type_id, &generics)?
+            let new_nested_adt_type_id = if let Some(new_type_id) =
+                replace_gen_impls(&ctx.ty_env, &ctx.ast_ctx, nested_adt_type_id, &gens)?
             {
                 new_type_id
             } else {
-                nested_adt_type_id
+                let ty_env_lock = ctx.ty_env.lock().unwrap();
+
+                // Since we at this point knows that `nested_adt_type_id` contains
+                // generics; if no Generic/GenericInstance was replaced in the
+                // if-statement above, it means that the `generics` variable gotten
+                // from the ADT doesn't have a replacement for that generic.
+                //
+                // Since generics from function declaration are solved already,
+                // this should be an already solved generic. Assume that is the
+                // case and the inferred type will replace this generic just before
+                // the new ADT is created in `generic_adt_creator.rs`.
+                let check_inf = true;
+                let solve_cond = SolveCond::new().excl_gen_inst().excl_gen();
+                if is_solved(&ty_env_lock, nested_adt_type_id, check_inf, solve_cond)? {
+                    nested_adt_type_id
+                } else {
+                    return Err(LangError::new(
+                        format!(
+                            "Found unsolvable generics when converting nested ADT to ADT. \
+                            Nested ADT ty: {:#?}, generic instances to replace with: {:#?}",
+                            ty_env_lock.ty(nested_adt_type_id),
+                            gens
+                        ),
+                        LangErrorKind::AnalyzeError,
+                        None,
+                    ));
+                }
             };
 
-            match self.generic_adts.entry(nested_adt_path.without_gens()) {
-                Entry::Occupied(mut o) => {
-                    if !o.get().contains(&nested_adt_type_id) {
-                        o.get_mut().push(nested_adt_type_id);
-                    }
+            let ty_env_lock = ctx.ty_env.lock().unwrap();
+
+            let deref_type = DerefType::None;
+            let contains_key = self.generic_adts.contains_key(
+                &ty_env_lock,
+                deref_type,
+                nested_adt_path_without_gens,
+            )?;
+
+            if contains_key {
+                let type_ids = self
+                    .generic_adts
+                    .get_mut(&ty_env_lock, deref_type, nested_adt_path_without_gens)?
+                    .unwrap();
+
+                if !type_ids.contains(&new_nested_adt_type_id) {
+                    type_ids.push(new_nested_adt_type_id);
                 }
-                Entry::Vacant(v) => {
-                    v.insert(vec![nested_adt_type_id]);
-                }
-            };
+            } else {
+                let new_nested_adt_type_ids = vec![new_nested_adt_type_id];
+                self.generic_adts.insert(
+                    &ty_env_lock,
+                    deref_type,
+                    nested_adt_path_without_gens.clone(),
+                    new_nested_adt_type_ids,
+                )?;
+            }
         }
 
         Ok(())
@@ -285,13 +392,13 @@ impl<'a> GenericAdtCollector<'a> {
     /// convert every type to its final string from and compare those to find
     /// duplicates instead of comparing type IDs.
     fn remove_duplicates(&mut self, ctx: &TraverseCtx) -> LangResult<()> {
-        for (_, type_ids) in self.generic_adts.iter_mut() {
+        for type_ids in self.generic_adts.values_mut() {
             let mut seen_ty_strings = HashSet::new();
             let mut i = 0;
 
             while i < type_ids.len() {
                 let type_id = *type_ids.get(i).unwrap();
-                let ty_string = ctx.ty_ctx.to_string_type_id(type_id)?;
+                let ty_string = to_string_type_id(&ctx.ty_env.lock().unwrap(), type_id)?;
 
                 if seen_ty_strings.contains(&ty_string) {
                     type_ids.swap_remove(i);
@@ -317,7 +424,9 @@ impl<'a> Visitor for GenericAdtCollector<'a> {
 
     fn visit_default_block(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
         if let AstToken::Block(BlockHeader::Default, .., body) = &mut ast_token {
-            self.collect_nested(ctx, body);
+            if let Err(err) = self.collect_nested(ctx, body) {
+                self.errors.push(err);
+            }
         }
     }
 
@@ -328,7 +437,10 @@ impl<'a> Visitor for GenericAdtCollector<'a> {
     }
 
     fn visit_end(&mut self, ctx: &mut TraverseCtx) {
-        self.convert_nested_to_regular(ctx);
+        if let Err(err) = self.convert_nested_to_regular(ctx) {
+            self.errors.push(err);
+            return;
+        }
 
         debug!(
             "Before removal of duplicates -- self.generic_adts: {:#?}",
@@ -342,7 +454,7 @@ impl<'a> Visitor for GenericAdtCollector<'a> {
 
         for type_ids in self.generic_adts.values_mut() {
             for type_id in type_ids {
-                match ctx.ty_ctx.inferred_type(*type_id) {
+                match inferred_type(&ctx.ty_env.lock().unwrap(), *type_id) {
                     Ok(inf_type_id) => *type_id = inf_type_id,
                     Err(err) => self.errors.push(err),
                 }

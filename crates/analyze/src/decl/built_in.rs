@@ -1,42 +1,42 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 
 use common::{
-    ctx::ty_env::TyEnv,
     error::LangResult,
     token::{block::BuiltIn, expr::Var},
-    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
+    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, ty_env::TyEnv, type_info::TypeInfo},
 };
 
 /// Stores information about all built-in functions into a hashmap.
-pub fn init_built_ins(ty_env: &mut TyEnv) -> LangResult<HashMap<&'static str, BuiltIn>> {
+pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str, BuiltIn>> {
+    let mut ty_env_lock = ty_env.lock().unwrap();
     let mut built_ins = HashMap::with_capacity(9);
 
-    let unique_id = ty_env.new_unique_id();
-    let any_type_id = ty_env.id(&Ty::Any(unique_id, TypeInfo::BuiltIn))?;
-    let any_ptr_type_id = ty_env.id(&Ty::Pointer(any_type_id, TypeInfo::BuiltIn))?;
-    let u32_type_id = ty_env.id(&Ty::CompoundType(
+    let unique_id = ty_env_lock.new_unique_id();
+    let any_type_id = ty_env_lock.id(&Ty::Any(unique_id, TypeInfo::BuiltIn))?;
+    let any_ptr_type_id = ty_env_lock.id(&Ty::Pointer(any_type_id, TypeInfo::BuiltIn))?;
+    let u32_type_id = ty_env_lock.id(&Ty::CompoundType(
         InnerTy::U32,
         Generics::empty(),
         TypeInfo::BuiltIn,
     ))?;
-    let u8_type_id = ty_env.id(&Ty::CompoundType(
+    let u8_type_id = ty_env_lock.id(&Ty::CompoundType(
         InnerTy::U8,
         Generics::empty(),
         TypeInfo::BuiltIn,
     ))?;
-    let u8_ptr_type_id = ty_env.id(&Ty::Pointer(u8_type_id, TypeInfo::BuiltIn))?;
-    let u8_ptr_ptr_type_id = ty_env.id(&Ty::Pointer(u8_ptr_type_id, TypeInfo::BuiltIn))?;
-    let bool_type_id = ty_env.id(&Ty::CompoundType(
+    let u8_ptr_type_id = ty_env_lock.id(&Ty::Pointer(u8_type_id, TypeInfo::BuiltIn))?;
+    let u8_ptr_ptr_type_id = ty_env_lock.id(&Ty::Pointer(u8_ptr_type_id, TypeInfo::BuiltIn))?;
+    let bool_type_id = ty_env_lock.id(&Ty::CompoundType(
         InnerTy::Boolean,
         Generics::empty(),
         TypeInfo::BuiltIn,
     ))?;
-    let string_type_id = ty_env.id(&Ty::CompoundType(
+    let string_type_id = ty_env_lock.id(&Ty::CompoundType(
         InnerTy::String,
         Generics::empty(),
         TypeInfo::BuiltIn,
     ))?;
-    let void_type_id = ty_env.id(&Ty::CompoundType(
+    let void_type_id = ty_env_lock.id(&Ty::CompoundType(
         InnerTy::Void,
         Generics::empty(),
         TypeInfo::BuiltIn,
