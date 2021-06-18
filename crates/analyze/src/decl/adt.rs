@@ -44,28 +44,22 @@ impl DeclTypeAnalyzer {
             module.clone_push(&adt_lock.name, None, Some(adt_lock.file_pos))
         };
 
+        let ty_env_lock = ctx.ty_env.lock().unwrap();
+
         // TODO: Add file positions to error message.
-        if ctx
-            .ast_ctx
-            .get_adt(&ctx.ty_env.lock().unwrap(), &adt_full_path)
-            .is_ok()
-        {
-            let err = ctx.ast_ctx.err(format!(
+        if ctx.ast_ctx.get_adt(&ty_env_lock, &adt_full_path).is_ok() {
+            return Err(ctx.ast_ctx.err(format!(
                 "A ADT with name \"{}\" already defined.",
-                to_string_path(&ctx.ty_env.lock().unwrap(), &adt_full_path)
-            ));
-            return Err(err);
+                to_string_path(&ty_env_lock, &adt_full_path)
+            )));
         }
 
         let parent_id = ctx.ast_ctx.get_parent_id(id)?;
 
         let key = (adt_full_path, parent_id);
-        ctx.ast_ctx.adts.insert(
-            &ctx.ty_env.lock().unwrap(),
-            DerefType::None,
-            key,
-            Arc::clone(adt),
-        )?;
+        ctx.ast_ctx
+            .adts
+            .insert(&ty_env_lock, DerefType::None, key, Arc::clone(adt))?;
 
         Ok(())
     }
@@ -135,26 +129,27 @@ impl Visitor for DeclTypeAnalyzer {
                 }
             };
 
+            let ty_env_lock = ctx.ty_env.lock().unwrap();
+
             // TODO: Add file positions to error message.
             if ctx
                 .ast_ctx
-                .get_trait(&ctx.ty_env.lock().unwrap(), &trait_full_path)
+                .get_trait(&ty_env_lock, &trait_full_path)
                 .is_ok()
             {
-                let err = ctx.ast_ctx.err(format!(
+                self.errors.push(ctx.ast_ctx.err(format!(
                     "A trait with name \"{}\" already defined.",
-                    to_string_path(&ctx.ty_env.lock().unwrap(), &trait_full_path)
-                ));
-                self.errors.push(err);
+                    to_string_path(&ty_env_lock, &trait_full_path)
+                )));
+                return;
             }
 
             let key = (trait_full_path, parent_id);
-            if let Err(err) = ctx.ast_ctx.traits.insert(
-                &ctx.ty_env.lock().unwrap(),
-                DerefType::None,
-                key,
-                Arc::clone(trait_),
-            ) {
+            if let Err(err) =
+                ctx.ast_ctx
+                    .traits
+                    .insert(&ty_env_lock, DerefType::None, key, Arc::clone(trait_))
+            {
                 self.errors.push(err);
             }
         }
