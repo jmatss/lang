@@ -201,7 +201,7 @@ One can specify a `impl` block for any ADT or trait. This impl-block will contai
 
 
 ### Struct
-Compiles into a regular C struct, no reordering of the members are done.
+Compiles into a regular C struct, no reordering of the members are done. The generics are "static dispatch" which means that the generic types are determined at compile time and a copy of the struct is created for every unique instance of a generic implementation.
 
 #### Declaration
 ```
