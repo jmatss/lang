@@ -271,7 +271,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 }
 
                 // Function pointer.
-                LexTokenKind::Kw(Kw::Function) => {
+                LexTokenKind::Kw(Kw::FunctionPointer) => {
                     let mut expr_file_pos = lex_token.file_pos.to_owned();
 
                     let mut module = self

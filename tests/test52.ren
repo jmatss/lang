@@ -1,4 +1,3 @@
-use std::container::ArrayList
 use std::types::String
 
 ext fn printf(format: {u8}, ...) -> i32

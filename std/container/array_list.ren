@@ -139,6 +139,7 @@ impl Disposable for ArrayList
         if not @is_null(this.*.ptr)
         {
             Allocator::deinit<u8>(this.*.ptr as {u8})
+            this.*.ptr = @null<{u8}>()
         }
     }
 }

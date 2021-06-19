@@ -71,6 +71,7 @@ pub enum Kw {
     Defer,
 
     Function,
+    FunctionPointer,
     Test,
 }
 
@@ -243,6 +244,7 @@ impl LexToken {
             "defer" => LexTokenKind::Kw(Kw::Defer),
 
             "fn" => LexTokenKind::Kw(Kw::Function),
+            "fnptr" => LexTokenKind::Kw(Kw::FunctionPointer),
             "test" => LexTokenKind::Kw(Kw::Test),
 
             _ => return None,

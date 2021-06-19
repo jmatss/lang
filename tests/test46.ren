@@ -35,16 +35,16 @@ fn test_fn4(func: fn(i32) -> f32) -> f32
 
 fn main() -> i32
 {
-    var fn1_impl_ptr = fn test_fn1_impl
+    var fn1_impl_ptr = fnptr test_fn1_impl
     test_fn1(fn1_impl_ptr)
 
-    test_fn2(fn test_fn2_impl)
+    test_fn2(fnptr test_fn2_impl)
 
-    var result3 = test_fn3(fn test_fn3_impl)
+    var result3 = test_fn3(fnptr test_fn3_impl)
     printf("result3: %d", result3 as i32)
     std::assert(result3 == 3)
 
-    var result4 = test_fn4(fn test_fn4_impl)
+    var result4 = test_fn4(fnptr test_fn4_impl)
     printf("\nresult4: %f", result4 as f64)
     std::assert(result4 == 4.4)
 

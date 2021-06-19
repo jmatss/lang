@@ -87,7 +87,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 Some(kw_file_pos),
             )),
 
-            Kw::Implements | Kw::Where | Kw::Else => Err(self.iter.err(
+            Kw::Implements | Kw::Where | Kw::Else | Kw::FunctionPointer => Err(self.iter.err(
                 format!(
                     "Unexpected keyword when parsing keyword start: {:#?}",
                     keyword
