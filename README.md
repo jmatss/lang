@@ -1,9 +1,48 @@
-# Prerequisites
-llvm 10
-*TODO: Write more*
+# Requirements
+The strictest requirements can be found in the crate `codegen` because it depends on the crate https://github.com/TheDan64/inkwell to interact with LLVM. This implicitly makes the requirements for this project (copied from `inkwell`):
+
+ * Rust 1.42+
+ * Rust Stable, Beta, or Nightly
+ * LLVM 10.0 (the current LLVM version used by this project)
+
+For settings up LLVM, the project https://gitlab.com/taricorp/llvm-sys.rs contains good instructions on how to install and setup LLVM correctly (`llvm-sys` is a dependency of `inkwell`).
+
+This project outputs object files, so if you want to create an executable, an external linker is needed. Some files in the `std` library depends on `libc`, so that might also be a requirement depending on the functionality used from the `std` library.
+
 
 # Build
-*TODO: Write*
+Runs the few existing unit tests and builds the project.
+```
+cargo build
+```
+
+
+# Run
+```
+> lang.exe --help
+
+USAGE:
+    lang.exe [FLAGS] [OPTIONS] [INPUTS]...
+
+FLAGS:
+    -a, --ast         Set to print AST.
+    -h, --help        Prints help information
+    -l, --llvm        Set to dump/print the generated LLVM IR code.
+    -O, --optimize    Set to run optimization of the LLVM IR.
+    -V, --version     Prints version information
+
+OPTIONS:
+    -i, --input <FILE>       A file containing a list of input files. Relative paths inside the file will be resolved
+                             relative to this file path.
+    -m, --module <module>    Set the name of the LLVM module. [default: lang_module]
+    -o, --output <NAME>      The output name of the produced object file. [default: a.o]
+
+ARGS:
+    <INPUTS>...    List of input files.
+```
+
+The batch file `scripts/run_tests.bat` can be used to compile and run the system-tests in `tests`. Since the batch file is a hacky solution, it most likely requires some modifications to run on other systems. For example the linker to use and path to the compiler will probably have to be changed.
+
 
 # Language Information
 
