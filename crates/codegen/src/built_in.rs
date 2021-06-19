@@ -183,9 +183,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             "format" => self.compile_format(built_in_call),
 
             // Creates a instance of an array with a specified size and all values
-            // initialized to a specified value. The array member type is the
-            // generic argument, the first argument is the init value and the
-            // second argument is the array dimension.
+            // initialized to a specified value.
             "array" => {
                 let init_val = built_in_call.arguments.get(0).unwrap().value.clone();
                 let arr_dim = built_in_call.arguments.get(1).unwrap().value.clone();
