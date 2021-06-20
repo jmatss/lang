@@ -1,5 +1,4 @@
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
     iter::TokenIter,
@@ -7,9 +6,10 @@ use common::{
         expr::{Argument, BuiltInCall, Expr, FormatPart},
         lit::Lit,
     },
-    traverse::visitor::Visitor,
     ty::{get::get_ident, is::is_primitive, ty_env::TyEnv},
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Parses and "analyzes" the format string inside `@format(..)` calls.
 /// This information will be inserted into the `BuiltInCall` and will be used

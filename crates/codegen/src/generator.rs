@@ -504,10 +504,12 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                         let last_part = full_path.pop().unwrap();
                         full_path.push(LangPathPart(last_part.0, Some(generics)));
 
-                        if let Some(struct_type) = self.module.get_struct_type(&to_string_path(
+                        let struct_type_opt = self.module.get_struct_type(&to_string_path(
                             &self.analyze_ctx.ty_env.lock().unwrap(),
                             &full_path,
-                        )) {
+                        ));
+
+                        if let Some(struct_type) = struct_type_opt {
                             struct_type.clone().into()
                         } else {
                             return Err(self.err(
@@ -526,10 +528,12 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                         let last_part = full_path.pop().unwrap();
                         full_path.push(LangPathPart(last_part.0, Some(generics)));
 
-                        if let Some(struct_type) = self.module.get_struct_type(&to_string_path(
+                        let struct_type_opt = self.module.get_struct_type(&to_string_path(
                             &self.analyze_ctx.ty_env.lock().unwrap(),
                             &full_path,
-                        )) {
+                        ));
+
+                        if let Some(struct_type) = struct_type_opt {
                             struct_type.clone().into()
                         } else {
                             return Err(self.err(
@@ -565,22 +569,18 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     InnerTy::U128 => AnyTypeEnum::IntType(self.context.i128_type()),
 
                     _ => {
+                        let ty =
+                            to_string_type_id(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
+                        let inner_ty =
+                            to_string_inner_ty(&self.analyze_ctx.ty_env.lock().unwrap(), &inner_ty);
                         return Err(self.err(
                             format!(
                                 "Invalid inner type during type codegen. \
                                 Type ID: {}, ty: {:?}, inner type: {:#}",
-                                &type_id,
-                                to_string_type_id(
-                                    &self.analyze_ctx.ty_env.lock().unwrap(),
-                                    type_id
-                                )?,
-                                to_string_inner_ty(
-                                    &self.analyze_ctx.ty_env.lock().unwrap(),
-                                    &inner_ty
-                                ),
+                                &type_id, ty, inner_ty,
                             ),
                             file_pos,
-                        ))
+                        ));
                     }
                 }
             }

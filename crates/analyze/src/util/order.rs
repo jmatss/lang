@@ -8,7 +8,7 @@ use either::Either;
 use log::debug;
 
 use common::{
-    ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx, traverse_ctx::TraverseCtx},
+    ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx},
     eq::path_eq,
     error::{CyclicDependencyError, LangError, LangErrorKind, LangResult},
     hash::DerefType,
@@ -20,10 +20,11 @@ use common::{
         block::{Adt, BlockHeader},
         expr::Var,
     },
-    traverse::{traverser::traverse, visitor::Visitor},
     ty::{get::get_adt_and_trait_paths, to_string::to_string_path, ty_env::TyEnv, type_id::TypeId},
     BlockId,
 };
+
+use crate::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor};
 
 // TODO: Merge function taking TraverCtx or AnalyzeCtx.
 

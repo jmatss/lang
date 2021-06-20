@@ -3,16 +3,17 @@ use std::collections::{hash_map::Entry, HashMap};
 use log::debug;
 
 use common::{
-    ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx, traverse_ctx::TraverseCtx},
+    ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx},
     error::{LangError, LangErrorKind, LangResult},
     hash::DerefType,
     hash_set::TyEnvHashSet,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader, stmt::Stmt},
-    traverse::visitor::Visitor,
     ty::ty_env::TyEnv,
     BlockId,
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Visits all blocks and gathers information related to them. It will add
 /// "BlockInfo"s into the analyze context containing information about block

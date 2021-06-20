@@ -1,12 +1,13 @@
 use std::collections::{hash_map::Entry, HashMap};
 
 use common::{
-    ctx::{ast_ctx::AstCtx, traverse_ctx::TraverseCtx},
+    ctx::ast_ctx::AstCtx,
     error::LangError,
     token::{ast::AstToken, block::BlockHeader, expr::Expr, stmt::Stmt},
-    traverse::visitor::Visitor,
     BlockId,
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Iterates through all "Defer" stmts and inserts new "DeferExec" stmts in the
 /// AST where needed. This will for example be before branching away from the

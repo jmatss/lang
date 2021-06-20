@@ -1,11 +1,12 @@
 use std::borrow::Borrow;
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::LangResult,
     path::LangPath,
     ty::{generics::Generics, to_string::to_string_path, ty::Ty, type_info::TypeInfo},
 };
+
+use crate::traverse_ctx::TraverseCtx;
 
 /// Combines the generics from a "instance" with the generics from a ADT declaration.
 /// Given a ADT with partial path `adt_path`, combines the nams of the ADT generic

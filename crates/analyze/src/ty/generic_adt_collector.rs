@@ -3,13 +3,11 @@ use std::collections::{hash_map::Entry, HashMap, HashSet};
 use log::debug;
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangErrorKind, LangResult},
     hash::DerefType,
     hash_map::TyEnvHashMap,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader},
-    traverse::{traverser::traverse, visitor::Visitor},
     ty::{
         contains::contains_generic_shallow,
         get::get_ident,
@@ -21,6 +19,8 @@ use common::{
         type_id::TypeId,
     },
 };
+
+use crate::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor};
 
 use super::generic_nested_collector::GenericNestedCollector;
 

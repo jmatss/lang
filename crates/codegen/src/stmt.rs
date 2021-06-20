@@ -7,7 +7,11 @@ use common::{
     error::LangResult,
     file::FilePosition,
     path::LangPath,
-    token::{expr::Expr, op::AssignOperator, stmt::Stmt},
+    token::{
+        expr::Expr,
+        op::AssignOperator,
+        stmt::{ExternalDecl, Stmt},
+    },
 };
 
 use crate::{expr::ExprTy, generator::CodeGen};
@@ -50,14 +54,21 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
                 Ok(())
             }
-            // TODO: Add other external declares other than func (var, struct etc.)
-            Stmt::ExternalDecl(func, file_pos) => {
-                let linkage = Linkage::External;
-                self.compile_fn_proto(
-                    &func.as_ref().borrow().read().unwrap(),
-                    file_pos.to_owned(),
-                    Some(linkage),
-                )?;
+            // TODO: Add other external declares other than func & struct (var etc.)
+            Stmt::ExternalDecl(ext_decl, file_pos) => {
+                match ext_decl {
+                    ExternalDecl::Fn(func) => {
+                        let linkage = Linkage::External;
+                        self.compile_fn_proto(
+                            &func.as_ref().borrow().read().unwrap(),
+                            file_pos.to_owned(),
+                            Some(linkage),
+                        )?;
+                    }
+                    ExternalDecl::Struct(struct_) => {
+                        self.compile_struct(&struct_.as_ref().borrow().read().unwrap())?;
+                    }
+                }
                 Ok(())
             }
             Stmt::Assignment(assign_op, lhs, rhs, file_pos) => {

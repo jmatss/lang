@@ -5,7 +5,6 @@ use std::{
     sync::{Arc, RwLock, RwLockWriteGuard},
 };
 
-use backtrace::Backtrace;
 use log::Level;
 
 use crate::{

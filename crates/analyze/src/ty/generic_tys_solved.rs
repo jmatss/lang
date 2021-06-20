@@ -1,15 +1,15 @@
 use std::collections::HashSet;
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangErrorKind, LangResult},
     token::ast::AstToken,
-    traverse::visitor::Visitor,
     ty::{
         get::get_file_pos, substitution_sets::sub_sets_debug_print, ty::Ty, ty_env::TyEnv,
         type_id::TypeId,
     },
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// This checker should be ran after every generic related step is done.
 /// At this point there should be no generic types in the AST, they should all

@@ -2,8 +2,11 @@ mod decl;
 mod mid;
 mod post;
 mod pre;
+mod traverse_ctx;
+mod traverser;
 mod ty;
 pub mod util;
+mod visitor;
 //mod unitialized;
 
 use std::{collections::HashMap, sync::Mutex};
@@ -11,11 +14,10 @@ use std::{collections::HashMap, sync::Mutex};
 use log::debug;
 
 use common::{
-    ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx, traverse_ctx::TraverseCtx},
+    ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx},
     error::LangError,
     file::{FileId, FileInfo},
     token::ast::AstToken,
-    traverse::traverser::traverse,
     ty::ty_env::TyEnv,
 };
 use decl::{
@@ -40,7 +42,12 @@ use ty::{
 };
 use util::order::dependency_order_from_ctx;
 
-use crate::{post::format::FormatParser, pre::signed_literals::SignedLiteralsAnalyzer};
+use crate::{
+    post::{ext_struct_init::ExtStructInit, format::FormatParser},
+    pre::signed_literals::SignedLiteralsAnalyzer,
+    traverse_ctx::TraverseCtx,
+    traverser::traverse,
+};
 
 // TODO: Error if a function that doesn't have a return type has a return in it.
 // TODO: Make it so that one doesn't have to recreate a new AstVisitor for every
@@ -173,6 +180,10 @@ pub fn analyze<'a>(
     debug!("Running GenericTysSolvedChecker");
     let mut generic_ty_solved_check = GenericTysSolvedChecker::new();
     traverse(&mut ctx, &mut generic_ty_solved_check, ast_root)?;
+
+    debug!("Running ExtStructInit");
+    let mut ext_struct_init = ExtStructInit::new();
+    traverse(&mut ctx, &mut ext_struct_init, ast_root)?;
 
     debug!("Running MethodThisAnalyzer");
     let mut method_this_analyzer = MethodThisAnalyzer::new();

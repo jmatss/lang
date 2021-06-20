@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use common::{
-    ctx::{block_ctx::BlockCtx, traverse_ctx::TraverseCtx},
+    ctx::block_ctx::BlockCtx,
     error::{LangError, LangResult},
     hash::DerefType,
     path::{LangPath, LangPathPart},
@@ -9,16 +9,17 @@ use common::{
     token::{
         ast::AstToken,
         block::{AdtKind, BlockHeader, Fn},
-        stmt::Modifier,
         stmt::Stmt,
+        stmt::{ExternalDecl, Modifier},
     },
-    traverse::visitor::Visitor,
     ty::{
         generics::Generics, inner_ty::InnerTy, to_string::to_string_path, ty::Ty,
         type_info::TypeInfo,
     },
     BlockId,
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Gathers information about all function/method declarations found in the AST
 /// and inserts them into the `analyze_context`. This includes external function
@@ -307,7 +308,7 @@ impl Visitor for DeclFnAnalyzer {
     }
 
     fn visit_extern_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
-        if let Stmt::ExternalDecl(func, ..) = stmt {
+        if let Stmt::ExternalDecl(ExternalDecl::Fn(func), ..) = stmt {
             // TODO: Should probably check that if there are multiple extern
             //       declarations of a function that they have the same
             //       parameters & return type.

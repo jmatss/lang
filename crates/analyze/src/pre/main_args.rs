@@ -1,7 +1,6 @@
 use std::sync::{Arc, RwLock};
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangResult},
     token::{
         ast::AstToken,
@@ -10,10 +9,11 @@ use common::{
         op::AssignOperator,
         stmt::Stmt,
     },
-    traverse::visitor::Visitor,
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
     ARGC_GLOBAL_VAR_NAME, ARGC_PARAM_VAR_NAME, ARGV_GLOBAL_VAR_NAME, ARGV_PARAM_VAR_NAME,
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// This analyzer "handles" the main function and the CLI arguments passed to
 /// the program.

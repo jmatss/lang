@@ -3,15 +3,15 @@ use std::{collections::HashMap, sync::Arc};
 use log::debug;
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::LangError,
     hash::DerefType,
     hash_map::TyEnvHashMap,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader},
-    traverse::{traverser::traverse_with_deep_copy, visitor::Visitor},
     ty::generics::Generics,
 };
+
+use crate::{traverse_ctx::TraverseCtx, traverser::traverse_with_deep_copy, visitor::Visitor};
 
 use super::generic_replace::GenericsReplacer;
 

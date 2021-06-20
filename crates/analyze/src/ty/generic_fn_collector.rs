@@ -3,14 +3,12 @@ use std::collections::{hash_map::Entry, HashMap, HashSet};
 use log::debug;
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     eq::{generics_eq, path_eq},
     error::{LangError, LangErrorKind, LangResult},
     hash::DerefType,
     hash_map::TyEnvHashMap,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader, expr::FnCall},
-    traverse::{traverser::traverse, visitor::Visitor},
     ty::{
         contains::contains_generic_with_name, generics::Generics, get::get_ident,
         replace::replace_gen_impls, to_string::to_string_path, ty_env::TyEnv, type_id::TypeId,
@@ -18,6 +16,8 @@ use common::{
 };
 
 use crate::util::order::order_step2_strings;
+
+use crate::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor};
 
 use super::generic_nested_collector::{GenericNestedCollector, NestedMethodInfo};
 

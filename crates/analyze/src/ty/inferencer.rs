@@ -8,7 +8,6 @@ use either::Either;
 use log::debug;
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::LangError,
     file::FilePosition,
     token::{
@@ -20,7 +19,6 @@ use common::{
         stmt::Modifier,
         stmt::Stmt,
     },
-    traverse::visitor::Visitor,
     ty::{
         generics::Generics,
         get::{get_file_pos, get_file_pos_mut, get_generics},
@@ -35,7 +33,7 @@ use common::{
     },
 };
 
-use crate::util::generics::combine_generics;
+use crate::{traverse_ctx::TraverseCtx, util::generics::combine_generics, visitor::Visitor};
 
 /// Infers types for exprs that doesn't have a type explicitly set.
 /// For more information about the algorithm, see:

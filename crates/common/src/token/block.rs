@@ -111,6 +111,7 @@ pub struct Adt {
     pub modifiers: Vec<Modifier>,
     pub members: Vec<Arc<RwLock<Var>>>,
     pub file_pos: FilePosition,
+    pub has_definition: bool,
 
     /// The key is the name of the method.
     pub methods: HashMap<String, Arc<RwLock<Fn>>>,
@@ -142,6 +143,7 @@ impl Adt {
         modifiers: Vec<Modifier>,
         members: Vec<Arc<RwLock<Var>>>,
         file_pos: FilePosition,
+        has_definition: bool,
         generics: Option<Generics>,
         implements: Option<HashMap<String, Vec<TypeId>>>,
     ) -> Self {
@@ -151,6 +153,7 @@ impl Adt {
             modifiers,
             members,
             file_pos,
+            has_definition,
             kind: AdtKind::Struct,
             methods: HashMap::default(),
             generics,
@@ -165,6 +168,7 @@ impl Adt {
         modifiers: Vec<Modifier>,
         members: Vec<Arc<RwLock<Var>>>,
         file_pos: FilePosition,
+        has_definition: bool,
         generics: Option<Generics>,
         implements: Option<HashMap<String, Vec<TypeId>>>,
     ) -> Self {
@@ -174,6 +178,7 @@ impl Adt {
             modifiers,
             members,
             file_pos,
+            has_definition,
             kind: AdtKind::Union,
             methods: HashMap::default(),
             generics,
@@ -188,6 +193,7 @@ impl Adt {
         modifiers: Vec<Modifier>,
         members: Vec<Arc<RwLock<Var>>>,
         file_pos: FilePosition,
+        has_definition: bool,
         enum_ty: Option<TypeId>,
     ) -> Self {
         Self {
@@ -196,6 +202,7 @@ impl Adt {
             modifiers,
             members,
             file_pos,
+            has_definition,
             kind: AdtKind::Enum,
             methods: HashMap::default(),
             generics: None,

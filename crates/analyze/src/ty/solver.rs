@@ -3,12 +3,10 @@ use std::collections::{HashMap, HashSet};
 use log::debug;
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangResult},
     path::LangPathPart,
     token::op::UnOperator,
     token::{ast::AstToken, expr::FnCall, op::UnOp},
-    traverse::visitor::Visitor,
     ty::{
         get::get_unsolvable,
         is::is_solved,
@@ -20,6 +18,8 @@ use common::{
         type_id::TypeId,
     },
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Tries to solve all types in the type system. If unable to solve all types,
 /// a error will be returned.

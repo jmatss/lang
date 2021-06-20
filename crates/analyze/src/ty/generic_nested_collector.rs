@@ -4,19 +4,19 @@ use std::{
 };
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     eq::generics_eq,
     error::{LangError, LangResult},
     hash::{DerefType, TyEnvHash},
     hash_map::TyEnvHashMap,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader, expr::FnCall},
-    traverse::visitor::Visitor,
     ty::{
         contains::contains_generic_shallow, generics::Generics, get::get_ident, ty::Ty,
         ty_env::TyEnv, type_id::TypeId,
     },
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Used to store information about a nested method containing generics..
 #[derive(Debug, Clone)]

@@ -3,15 +3,15 @@ use std::sync::{Arc, RwLock};
 use log::debug;
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangErrorKind},
     token::{
         expr::Expr,
         op::{BinOperator, Op, UnOp, UnOperator},
         stmt::Stmt,
     },
-    traverse::visitor::Visitor,
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Rewrites "access" operations to make them "easier" to work with.
 /// Binary ADT member indexing and union "is" matches will be written into

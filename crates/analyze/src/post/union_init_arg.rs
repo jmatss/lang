@@ -1,9 +1,9 @@
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::LangError,
     token::{block::AdtKind, expr::AdtInit},
-    traverse::visitor::Visitor,
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Makes sure that all union initializations are correct. A union construction
 /// must have exactly one argument, and that argument must be named. The union

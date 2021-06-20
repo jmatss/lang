@@ -1,5 +1,4 @@
-use crate::{
-    ctx::traverse_ctx::TraverseCtx,
+use common::{
     error::LangError,
     token::{
         ast::AstToken,
@@ -7,8 +6,10 @@ use crate::{
         op::{BinOp, UnOp},
         stmt::Stmt,
     },
-    TypeId,
+    ty::type_id::TypeId,
 };
+
+use crate::traverse_ctx::TraverseCtx;
 
 #[allow(unused_variables)]
 pub trait Visitor {

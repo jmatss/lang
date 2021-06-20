@@ -3,8 +3,9 @@ use std::{
     time::Instant,
 };
 
-use crate::{
-    ctx::traverse_ctx::TraverseCtx,
+use log::debug;
+
+use common::{
     error::{LangError, LangErrorKind},
     token::{
         ast::AstToken,
@@ -13,9 +14,10 @@ use crate::{
         op::{Op, UnOperator},
         stmt::Stmt,
     },
-    ty::{get::get_exprs_mut, ty_env::TY_ENV},
-    TypeId,
+    ty::{get::get_exprs_mut, ty_env::TY_ENV, type_id::TypeId},
 };
+
+use crate::traverse_ctx::TraverseCtx;
 
 use super::visitor::Visitor;
 

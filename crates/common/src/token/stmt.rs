@@ -6,7 +6,7 @@ use std::{
 use crate::{file::FilePosition, path::LangPath};
 
 use super::{
-    block::Fn,
+    block::{Adt, Fn},
     expr::{Expr, Var},
     op::AssignOperator,
 };
@@ -49,7 +49,13 @@ pub enum Stmt {
 
     // TODO: Implement extern for variables as well.
     /// Declaration of extern functions.
-    ExternalDecl(Arc<RwLock<Fn>>, Option<FilePosition>),
+    ExternalDecl(ExternalDecl, Option<FilePosition>),
+}
+
+#[derive(Debug, Clone)]
+pub enum ExternalDecl {
+    Fn(Arc<RwLock<Fn>>),
+    Struct(Arc<RwLock<Adt>>),
 }
 
 /*

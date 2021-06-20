@@ -5,7 +5,6 @@ use std::{
 };
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangResult},
     path::LangPathPart,
     token::{
@@ -13,9 +12,10 @@ use common::{
         block::{Adt, BlockHeader},
         expr::FnCall,
     },
-    traverse::visitor::Visitor,
     ty::{get::get_generic_ident, inner_ty::InnerTy, is::is_generic, ty::Ty},
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Goes through all function calls done on variables with a generic type and
 /// makes sure that the function names can be found in traits required on the

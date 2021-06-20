@@ -1,14 +1,14 @@
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
     error::{LangError, LangResult},
     token::expr::FnCall,
-    traverse::visitor::Visitor,
     ty::{
         get::get_ident,
         is::is_pointer,
         to_string::{to_string_path, to_string_type_id},
     },
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 // TODO: Make sure that only one of the `this` modifiers are defined on the
 //       function. Currently multiple modifiers can be specified without a error.

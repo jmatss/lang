@@ -1,18 +1,20 @@
 use std::sync::{Arc, RwLock};
 
 use common::{
-    ctx::traverse_ctx::TraverseCtx,
+    ctx::block_ctx::BlockCtx,
     error::{LangError, LangResult},
     hash::DerefType,
     path::LangPath,
     token::{
         ast::AstToken,
         block::{Adt, BlockHeader},
+        stmt::{ExternalDecl, Stmt},
     },
-    traverse::visitor::Visitor,
     ty::to_string::to_string_path,
     BlockId,
 };
+
+use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Gathers information about all type declarations found in the AST and inserts
 /// them into the `analyze_context`. This includes structs, enums, unions and traits.
@@ -152,6 +154,30 @@ impl Visitor for DeclTypeAnalyzer {
             {
                 self.errors.push(err);
             }
+        }
+    }
+
+    fn visit_extern_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
+        if let Stmt::ExternalDecl(ExternalDecl::Struct(struct_), ..) = stmt {
+            // TODO: Should probably check that if there are multiple extern
+            //       declarations of a struct.
+            // External declarations should always be in the default block.
+            let key = {
+                let struct_ = struct_.as_ref().read().unwrap();
+                let path = struct_
+                    .module
+                    .clone_push(&struct_.name, None, Some(struct_.file_pos));
+                (path, BlockCtx::DEFAULT_BLOCK_ID)
+            };
+
+            if let Err(err) = ctx.ast_ctx.adts.insert(
+                &ctx.ty_env.lock().unwrap(),
+                DerefType::Shallow,
+                key,
+                Arc::clone(struct_),
+            ) {
+                self.errors.push(err);
+            };
         }
     }
 }

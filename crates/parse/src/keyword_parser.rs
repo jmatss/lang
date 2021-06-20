@@ -6,12 +6,13 @@ use std::{
 use common::{
     error::LangResult,
     file::FilePosition,
+    path::LangPath,
     token::{
         ast::AstToken,
         block::{Adt, BlockHeader, Fn, Trait},
         expr::Expr,
         lit::Lit,
-        stmt::{Modifier, Stmt},
+        stmt::{ExternalDecl, Modifier, Stmt},
     },
     ty::{
         generics::{Generics, GenericsKind},
@@ -523,13 +524,51 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     fn parse_external(
         &mut self,
         modifiers: Vec<Modifier>,
-        file_pos: FilePosition,
+        mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
         if let Some(lex_token) = self.iter.next_skip_space_line() {
-            let func = match lex_token.kind {
+            let ext_decl = match lex_token.kind {
                 LexTokenKind::Kw(Kw::Function) => {
-                    self.parse_fn_proto(modifiers, lex_token.file_pos)?
+                    // TODO: This doesn't include the function prototype into the
+                    //       file_pos, only the extern keyword. The function
+                    //       prototype currently doesn't store/keep any information
+                    //       about its file_pos. How should this work?
+                    ExternalDecl::Fn(Arc::new(RwLock::new(
+                        self.parse_fn_proto(modifiers, lex_token.file_pos)?,
+                    )))
                 }
+
+                LexTokenKind::Kw(Kw::Struct) => {
+                    // TODO: Should the ident be parsed as a `LangPath` instead?
+                    //       Is there a possiblity that the external declaration
+                    //       is inside a module/namespace?
+                    let next_lex_token = self.iter.next_skip_space_line();
+                    let ident = if let Some(LexTokenKind::Ident(ident)) =
+                        next_lex_token.clone().map(|t| t.kind)
+                    {
+                        ident
+                    } else {
+                        return Err(self.iter.err(
+                            format!("Expected ident after `ext struct`, found: {:?}", lex_token),
+                            Some(lex_token.file_pos),
+                        ));
+                    };
+
+                    file_pos.set_end(&next_lex_token.unwrap().file_pos)?;
+
+                    let has_definition = false;
+                    ExternalDecl::Struct(Arc::new(RwLock::new(Adt::new_struct(
+                        ident,
+                        LangPath::empty(),
+                        modifiers,
+                        Vec::with_capacity(0),
+                        file_pos,
+                        has_definition,
+                        None,
+                        None,
+                    ))))
+                }
+
                 _ => {
                     return Err(self.iter.err(
                         format!("Invalid keyword after external keyword: {:?}", lex_token),
@@ -538,15 +577,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 }
             };
 
-            // TODO: This doesn't include the function prototype into the file_pos,
-            //       only the extern keyword. The function prototype currently
-            //       doesn't store/keep any information about its file_pos.
-            //       How should this work?
-
-            Ok(AstToken::Stmt(Stmt::ExternalDecl(
-                Arc::new(RwLock::new(func)),
-                Some(file_pos),
-            )))
+            Ok(AstToken::Stmt(Stmt::ExternalDecl(ext_decl, Some(file_pos))))
         } else {
             Err(self.iter.err(
                 "Received None lex token after external keyword.".into(),
@@ -854,7 +885,17 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             ));
         }
 
-        let struct_ = Adt::new_struct(name, module, modifiers, members, file_pos, generics, impls);
+        let has_definition = true;
+        let struct_ = Adt::new_struct(
+            name,
+            module,
+            modifiers,
+            members,
+            file_pos,
+            has_definition,
+            generics,
+            impls,
+        );
         let header = BlockHeader::Struct(Arc::new(RwLock::new(struct_)));
 
         let block_id = self.iter.reserve_block_id();
@@ -945,12 +986,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             TypeInfo::Enum(file_pos.to_owned()),
         ))?;
 
+        let has_definition = true;
         let enum_ = Adt::new_enum(
             name,
             module,
             modifiers,
             members_arc,
             file_pos,
+            has_definition,
             Some(enum_type_id),
         );
         let header = BlockHeader::Enum(Arc::new(RwLock::new(enum_)));
@@ -1012,7 +1055,17 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             ));
         }
 
-        let union = Adt::new_union(name, module, modifiers, members, file_pos, generics, impls);
+        let has_definition = true;
+        let union = Adt::new_union(
+            name,
+            module,
+            modifiers,
+            members,
+            file_pos,
+            has_definition,
+            generics,
+            impls,
+        );
         let header = BlockHeader::Union(Arc::new(RwLock::new(union)));
 
         let block_id = self.iter.reserve_block_id();

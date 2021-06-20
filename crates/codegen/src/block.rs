@@ -22,7 +22,13 @@ use common::{
         block::{Adt, BlockHeader, Fn},
         expr::{Expr, Var},
     },
-    ty::{inner_ty::InnerTy, to_string::to_string_path, ty::Ty, ty_env::TyEnv, type_id::TypeId},
+    ty::{
+        inner_ty::InnerTy,
+        to_string::{to_string_path, to_string_type_id},
+        ty::Ty,
+        ty_env::TyEnv,
+        type_id::TypeId,
+    },
     util, BlockId,
 };
 
@@ -436,6 +442,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 .lock()
                 .unwrap()
                 .ty_clone(*adt_type_id)?;
+
             if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
                 let adt_path_without_module =
@@ -931,12 +938,15 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             }
         }
 
-        let packed = false;
         let struct_ty = self.context.opaque_struct_type(&to_string_path(
             &self.analyze_ctx.ty_env.lock().unwrap(),
             &full_path,
         ));
-        struct_ty.set_body(member_types.as_ref(), packed);
+
+        if struct_.has_definition {
+            let packed = false;
+            struct_ty.set_body(member_types.as_ref(), packed);
+        }
 
         Ok(())
     }
