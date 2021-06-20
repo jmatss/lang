@@ -134,7 +134,6 @@ version = "0.1.0"
 dependencies = [
  "backtrace",
  "either",
- "env_logger",
  "lazy_static",
  "log",
  "rand",
