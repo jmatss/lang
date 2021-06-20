@@ -1,0 +1,5 @@
+// Need to link to `libc` for this test.
+ext struct FILE
+ext fn fopen(pathname: {u8}, mode: {u8}) -> {FILE}
+
+fn main() -> i32 { return 0 }
