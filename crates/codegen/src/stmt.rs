@@ -1,14 +1,16 @@
 use std::borrow::Borrow;
 
-use crate::{expr::ExprTy, generator::CodeGen};
+use inkwell::{module::Linkage, values::BasicValueEnum, values::InstructionValue};
+use log::debug;
+
 use common::{
     error::LangResult,
     file::FilePosition,
     path::LangPath,
     token::{expr::Expr, op::AssignOperator, stmt::Stmt},
 };
-use inkwell::{module::Linkage, values::BasicValueEnum, values::InstructionValue};
-use log::debug;
+
+use crate::{expr::ExprTy, generator::CodeGen};
 
 impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     pub(super) fn compile_stmt(&mut self, stmt: &mut Stmt) -> LangResult<()> {

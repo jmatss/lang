@@ -13,4 +13,3 @@ either = "1.6.1"
 
 analyze = { path = "../analyze" }
 common = { path = "../common" }
-parse = { path = "../parse" }

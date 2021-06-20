@@ -125,7 +125,6 @@ dependencies = [
  "either",
  "inkwell",
  "log",
- "parse",
 ]
 
 [[package]]
