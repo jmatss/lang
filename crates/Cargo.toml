@@ -2,7 +2,7 @@
 members = [
     "compile",
     "analyze",
-    "codegen",
+    "codegen_llvm",
     "common",
     "lex",
     "parse",

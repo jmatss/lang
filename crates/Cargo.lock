@@ -117,7 +117,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "codegen"
+name = "codegen_llvm"
 version = "0.1.0"
 dependencies = [
  "analyze",
@@ -229,7 +229,7 @@ dependencies = [
  "analyze",
  "backtrace",
  "clap",
- "codegen",
+ "codegen_llvm",
  "common",
  "env_logger",
  "inkwell",

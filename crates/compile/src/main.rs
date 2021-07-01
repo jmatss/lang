@@ -2,7 +2,7 @@ mod compiler;
 
 use analyze::analyze;
 use clap::{App, Arg};
-use codegen::generator;
+use codegen_llvm::generator;
 use common::{
     error::{LangError, LangErrorKind, LangResult},
     file::{FileId, FileInfo},
