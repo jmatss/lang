@@ -3,6 +3,7 @@ members = [
     "compile",
     "analyze",
     "codegen_llvm",
+    "codegen_wasm",
     "common",
     "lex",
     "parse",
