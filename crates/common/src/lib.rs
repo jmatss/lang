@@ -30,5 +30,6 @@ pub mod hash_set;
 pub mod iter;
 pub mod path;
 pub mod token;
+pub mod traverse;
 pub mod ty;
 pub mod util;

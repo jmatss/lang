@@ -1,10 +1,9 @@
 use common::{
     error::{LangError, LangErrorKind},
     token::expr::AdtInit,
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::get::get_ident,
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Makes sure that there are no initializations of externaly declared structs.
 /// Since we have no idea about the members of the struct and its size during

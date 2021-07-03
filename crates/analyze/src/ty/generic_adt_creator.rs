@@ -13,6 +13,7 @@ use common::{
         ast::AstToken,
         block::{AdtKind, BlockHeader},
     },
+    traverse::{traverse_ctx::TraverseCtx, traverser::traverse_with_deep_copy, visitor::Visitor},
     ty::{
         replace::{replace_gen_impls, replace_self},
         solve::set_generic_names,
@@ -24,8 +25,6 @@ use common::{
     },
     BlockId,
 };
-
-use crate::{traverse_ctx::TraverseCtx, traverser::traverse_with_deep_copy, visitor::Visitor};
 
 use super::generic_replace::GenericsReplacer;
 

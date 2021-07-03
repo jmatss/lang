@@ -4,14 +4,13 @@ use common::{
     error::{LangError, LangResult},
     path::{LangPath, LangPathPart},
     token::block::TraitCompareError,
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
         generics::Generics, get::get_ident, inner_ty::InnerTy, solve::inferred_type,
         to_string::to_string_path, ty::Ty, type_id::TypeId,
     },
     BlockId,
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Checks that all generics that have specified "where implements" clauses
 /// actual are instances of types that implements the specified trait and all

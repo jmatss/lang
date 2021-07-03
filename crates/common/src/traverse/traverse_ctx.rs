@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use common::{ctx::ast_ctx::AstCtx, file::FilePosition, ty::ty_env::TyEnv, BlockId};
+use crate::{ctx::ast_ctx::AstCtx, file::FilePosition, ty::ty_env::TyEnv, BlockId};
 
 /// Will contain context used during traversing of the AST.
 /// This will be given to all "visit_...()" functions so that the visitor can

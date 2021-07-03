@@ -5,6 +5,7 @@ use common::{
         block::BlockHeader,
         expr::{AdtInit, FnCall},
     },
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
         get::{get_inner, get_inner_mut},
         to_string::to_string_path,
@@ -13,8 +14,6 @@ use common::{
     },
     BlockId,
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Tries to solve partial paths (LangPath) in the code. This is done by trying
 /// to prepend "use" statements with paths found in the code. If a match is found,

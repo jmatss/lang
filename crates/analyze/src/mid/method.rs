@@ -7,10 +7,11 @@ use common::{
         expr::{Argument, Expr, FnCall},
         op::{BinOperator, Op},
     },
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
 };
 
-use crate::{traverse_ctx::TraverseCtx, util::generics::combine_generics, visitor::Visitor};
+use crate::util::generics::combine_generics;
 
 /// Iterates through all method calls and inserts "this"/"self" into the calls
 /// as the first argument. The bin ops representing the method call will be

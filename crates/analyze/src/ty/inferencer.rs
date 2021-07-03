@@ -19,6 +19,7 @@ use common::{
         stmt::Modifier,
         stmt::Stmt,
     },
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
         generics::Generics,
         get::{get_file_pos, get_file_pos_mut, get_generics},
@@ -33,7 +34,7 @@ use common::{
     },
 };
 
-use crate::{traverse_ctx::TraverseCtx, util::generics::combine_generics, visitor::Visitor};
+use crate::util::generics::combine_generics;
 
 /// Infers types for exprs that doesn't have a type explicitly set.
 /// For more information about the algorithm, see:

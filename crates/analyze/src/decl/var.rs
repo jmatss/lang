@@ -4,10 +4,9 @@ use common::{
     ctx::block_ctx::BlockCtx,
     error::LangError,
     token::{ast::AstToken, expr::Var, stmt::Stmt},
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     BlockId,
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Gathers information about all variable declarations found in the AST and
 /// inserts them into the `analyze_context`.

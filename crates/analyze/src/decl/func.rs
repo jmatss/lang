@@ -12,14 +12,13 @@ use common::{
         stmt::Stmt,
         stmt::{ExternalDecl, Modifier},
     },
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
         generics::Generics, inner_ty::InnerTy, to_string::to_string_path, ty::Ty,
         type_info::TypeInfo,
     },
     BlockId,
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Gathers information about all function/method declarations found in the AST
 /// and inserts them into the `analyze_context`. This includes external function

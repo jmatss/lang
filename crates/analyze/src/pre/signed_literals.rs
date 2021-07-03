@@ -5,9 +5,8 @@ use common::{
         lit::Lit,
         op::{Op, UnOperator},
     },
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Rewrites any unary operators for integer & float literals where the `UnOperator`
 /// is `UnOperator::Negative`. The unary operation will be removed and a minus sign

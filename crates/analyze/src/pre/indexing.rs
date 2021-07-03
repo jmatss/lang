@@ -9,9 +9,8 @@ use common::{
         op::{BinOperator, Op, UnOp, UnOperator},
         stmt::Stmt,
     },
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Rewrites "access" operations to make them "easier" to work with.
 /// Binary ADT member indexing and union "is" matches will be written into

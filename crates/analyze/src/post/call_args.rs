@@ -13,10 +13,9 @@ use common::{
         block::AdtKind,
         expr::{AdtInit, Var},
     },
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{inner_ty::InnerTy, ty::Ty},
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Iterates through all function and method calls and re-orders all named
 /// arguments so that they are put in the correct index position so that

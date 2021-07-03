@@ -1,14 +1,13 @@
 use common::{
     error::LangError,
     token::expr::FnCall,
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
         contains::contains_generic_shallow,
         get::get_ident,
         to_string::{to_string_path, to_string_type_id},
     },
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Checks so that all function calls calling functions with generics actually
 /// specifies generics at the call site. This is needed because infering the

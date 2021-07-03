@@ -2,10 +2,9 @@ use common::{
     error::LangError,
     path::LangPathPart,
     token::{ast::AstToken, block::BlockHeader},
+    traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
     ty::{generics::Generics, replace::replace_gens, to_string::to_string_path, type_id::TypeId},
 };
-
-use crate::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor};
 
 /// Iterates through "generic" parameters tied to ADTs and functions, and replaces
 /// the uses of the generics with "Generic" types instead of the parsed

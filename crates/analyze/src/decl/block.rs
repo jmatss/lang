@@ -9,11 +9,10 @@ use common::{
     hash_set::TyEnvHashSet,
     path::LangPath,
     token::{ast::AstToken, block::BlockHeader, stmt::Stmt},
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::ty_env::TyEnv,
     BlockId,
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Visits all blocks and gathers information related to them. It will add
 /// "BlockInfo"s into the analyze context containing information about block

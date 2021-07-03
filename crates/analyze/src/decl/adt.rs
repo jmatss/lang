@@ -10,11 +10,10 @@ use common::{
         block::{Adt, BlockHeader},
         stmt::{ExternalDecl, Stmt},
     },
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::to_string::to_string_path,
     BlockId,
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Gathers information about all type declarations found in the AST and inserts
 /// them into the `analyze_context`. This includes structs, enums, unions and traits.

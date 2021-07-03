@@ -6,10 +6,9 @@ use common::{
         expr::{Argument, BuiltInCall, Expr, FormatPart},
         lit::Lit,
     },
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{get::get_ident, is::is_primitive, ty_env::TyEnv},
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Parses and "analyzes" the format string inside `@format(..)` calls.
 /// This information will be inserted into the `BuiltInCall` and will be used

@@ -5,7 +5,7 @@ use std::{
 
 use log::debug;
 
-use common::{
+use crate::{
     error::{LangError, LangErrorKind},
     token::{
         ast::AstToken,
@@ -17,9 +17,7 @@ use common::{
     ty::{get::get_exprs_mut, ty_env::TY_ENV, type_id::TypeId},
 };
 
-use crate::traverse_ctx::TraverseCtx;
-
-use super::visitor::Visitor;
+use super::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Traverses AST nodes staring from the node `ast_token` with the context found
 /// in `ctx`.  For every AST node traversed, `visitor` will be called depending

@@ -12,6 +12,7 @@ use common::{
         expr::Var,
         stmt::Stmt,
     },
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
         generics::Generics,
         is::is_solved,
@@ -22,8 +23,6 @@ use common::{
     },
     BlockId,
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 /// Used when replacing generics in methods containing to a specific generic
 /// implementation. This will be used to replace all types in the body of the

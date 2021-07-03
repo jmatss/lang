@@ -20,11 +20,10 @@ use common::{
         block::{Adt, BlockHeader},
         expr::Var,
     },
+    traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
     ty::{get::get_adt_and_trait_paths, to_string::to_string_path, ty_env::TyEnv, type_id::TypeId},
     BlockId,
 };
-
-use crate::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor};
 
 // TODO: Merge function taking TraverCtx or AnalyzeCtx.
 

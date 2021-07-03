@@ -2,11 +2,8 @@ mod decl;
 mod mid;
 mod post;
 mod pre;
-mod traverse_ctx;
-mod traverser;
 mod ty;
 pub mod util;
-mod visitor;
 //mod unitialized;
 
 use std::{collections::HashMap, sync::Mutex};
@@ -18,6 +15,7 @@ use common::{
     error::LangError,
     file::{FileId, FileInfo},
     token::ast::AstToken,
+    traverse::{traverse_ctx::TraverseCtx, traverser::traverse},
     ty::ty_env::TyEnv,
 };
 use decl::{
@@ -45,8 +43,6 @@ use util::order::dependency_order_from_ctx;
 use crate::{
     post::{ext_struct_init::ExtStructInit, format::FormatParser},
     pre::signed_literals::SignedLiteralsAnalyzer,
-    traverse_ctx::TraverseCtx,
-    traverser::traverse,
 };
 
 // TODO: Error if a function that doesn't have a return type has a return in it.

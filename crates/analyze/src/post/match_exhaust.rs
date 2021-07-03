@@ -10,10 +10,9 @@ use common::{
         expr::Expr,
         op::{Op, UnOperator},
     },
+    traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{inner_ty::InnerTy, ty::Ty},
 };
-
-use crate::{traverse_ctx::TraverseCtx, visitor::Visitor};
 
 // TODO: Currently only implemented for hardcoded match case expression values
 //       since then you have a "known" set of values at this part of the compiler
