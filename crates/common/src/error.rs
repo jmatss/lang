@@ -1,12 +1,9 @@
-use crate::{file::FilePosition, ENV_VAR};
+use crate::file::FilePosition;
 use backtrace::Backtrace;
 use log::Level;
 use std::error::Error;
 use std::fmt;
-use std::{
-    env::VarError,
-    fmt::{Display, Formatter},
-};
+use std::fmt::{Display, Formatter};
 
 pub type LangResult<T> = Result<T, LangError>;
 
@@ -87,6 +84,12 @@ impl Display for LangError {
     }
 }
 
+impl From<String> for LangError {
+    fn from(e: String) -> Self {
+        LangError::new(e, LangErrorKind::GeneralError, None)
+    }
+}
+
 impl From<std::num::ParseIntError> for LangError {
     fn from(e: std::num::ParseIntError) -> Self {
         LangError::new(e.to_string(), LangErrorKind::CodeGenError, None)
@@ -102,15 +105,5 @@ impl From<std::num::ParseFloatError> for LangError {
 impl From<std::io::Error> for LangError {
     fn from(e: std::io::Error) -> Self {
         LangError::new(e.to_string(), LangErrorKind::LexError, None)
-    }
-}
-
-impl From<VarError> for LangError {
-    fn from(e: VarError) -> Self {
-        LangError::new(
-            format!("{}: {}", e, ENV_VAR),
-            LangErrorKind::GeneralError,
-            None,
-        )
     }
 }
