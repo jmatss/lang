@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// Concatenates a ADT name and a method name to create the name that will
-/// be used to refer to this function. The name is concatenated with a dash.
+/// be used to refer to this function. The names are concatenated with a dot.
 pub fn to_method_name(
     ty_env: &TyEnv,
     adt_path: &LangPath,
@@ -27,7 +27,7 @@ pub fn to_method_name(
         method_name.into()
     };
 
-    format!("{}-{}", adt_generic_name, method_generic_name)
+    format!("{}.{}", adt_generic_name, method_generic_name)
 }
 
 /// Adds the `copy_nr` information to the end of a variable name. This will come
