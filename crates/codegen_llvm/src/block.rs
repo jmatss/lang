@@ -22,13 +22,7 @@ use common::{
         block::{Adt, BlockHeader, Fn},
         expr::{Expr, Var},
     },
-    ty::{
-        inner_ty::InnerTy,
-        to_string::{to_string_path, to_string_type_id},
-        ty::Ty,
-        ty_env::TyEnv,
-        type_id::TypeId,
-    },
+    ty::{inner_ty::InnerTy, to_string::to_string_path, ty::Ty, ty_env::TyEnv, type_id::TypeId},
     util, BlockId,
 };
 
@@ -555,7 +549,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // block should be created.
         if let Some(block_ctx) = self.analyze_ctx.ast_ctx.block_ctxs.get(&id) {
             self.cur_basic_block =
-                if !block_ctx.all_children_contains_returns || !block_ctx.contains_return {
+                if !block_ctx.all_children_contains_return || !block_ctx.contains_return {
                     let merge_block = self.context.append_basic_block(cur_func, "anon.merge");
                     self.merge_blocks.insert(id, merge_block);
 
@@ -628,7 +622,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // to end up in the merge block in that case, so it would just be empty.
         let merge_block_opt = if let Some(block_ctx) = self.analyze_ctx.ast_ctx.block_ctxs.get(&id)
         {
-            if !block_ctx.all_children_contains_returns {
+            if !block_ctx.all_children_contains_return {
                 let merge_block = self
                     .context
                     .insert_basic_block_after(prev_block, "if.merge");

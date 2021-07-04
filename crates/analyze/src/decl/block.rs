@@ -238,15 +238,21 @@ impl BlockAnalyzer {
             // When iterating through all tokens, look at the If and Ifcases
             // and keep track if all their children contains return statements.
             //
-            // The `contains_exhaustive_blocks` is used to indicate that the given
-            // block has child blocks that are "exhaustive". This will be used for
+            // The `all_paths_exhausted` is used to indicate that the given block
+            // have child blocks that are "exhaustive". This will be used for
             // if and match-statements to see if they have a else/default block.
-            // If they don't, the assumption is that all the children doesn't contain
-            // returns since every path isn't covered.
-            // All other blocks other than "if" and "match" is assumed to be
-            // a exhaustive block.
-            let mut all_children_contains_returns = true;
-            let mut contains_exhaustive_block =
+            // If they don't, we can't be sure that all paths are covered and we
+            // have to make the assumption that we can't be sure that the block
+            // will always branch even in situations when all its children
+            // contain branch instructions. This might be an incorrect assumption,
+            // but in those cases we reject valid programs rather than allow
+            // potential invalid ones.
+            //
+            // All other blocks (other than "if" and "match") are assumed to be
+            // exhaustive blocks since all their execution paths will always
+            // be "followed"/ran.
+            let mut all_children_contains_return = true;
+            let mut all_paths_exhausted =
                 !matches!(header, BlockHeader::If | BlockHeader::Match(_));
             let mut child_count = 0;
 
@@ -267,13 +273,14 @@ impl BlockAnalyzer {
                     | AstToken::Block(h @ BlockHeader::Anonymous, _, child_id, _) => {
                         self.analyze_block(ty_env, ast_ctx, child_token, *id)?;
 
+                        // True for "else" in a if-block and "default" in a match-block.
                         if matches!(h, BlockHeader::IfCase(None) | BlockHeader::MatchCase(None)) {
-                            contains_exhaustive_block = true;
+                            all_paths_exhausted = true;
                         }
 
                         if let Some(child_block_info) = ast_ctx.block_ctxs.get(&child_id) {
-                            if !child_block_info.all_children_contains_returns {
-                                all_children_contains_returns = false;
+                            if !child_block_info.all_children_contains_return {
+                                all_children_contains_return = false;
                             }
                         } else {
                             let err = ast_ctx.err(format!(
@@ -319,8 +326,8 @@ impl BlockAnalyzer {
             // for the current block. If this block doesn't have any children,
             // the value will be set to true if this block itself contains a return.
             let block_info = ast_ctx.block_ctxs.get_mut(id).unwrap();
-            block_info.all_children_contains_returns = if child_count > 0 {
-                all_children_contains_returns && contains_exhaustive_block
+            block_info.all_children_contains_return = if child_count > 0 {
+                all_children_contains_return && all_paths_exhausted
             } else {
                 block_info.contains_return
             };

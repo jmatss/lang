@@ -165,7 +165,7 @@ impl DeferAnalyzer {
 
             // The end of the blocks scope has been reached. Any defers declared
             // in this scope should be executed at this point.
-            if !block_ctx.all_children_contains_returns {
+            if !block_ctx.all_children_contains_return {
                 match block_header {
                     BlockHeader::Anonymous
                     | BlockHeader::If

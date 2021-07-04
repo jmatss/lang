@@ -22,10 +22,10 @@ pub struct BlockCtx {
     pub contains_defer: bool,
 
     /// Contains information about the control flow of children. If all children
-    /// contains a branch instruction, this block doesn't not need to add a
+    /// contains a return instruction, this block doesn't not need to add a
     /// implicit "terminator" at the end of the basic block, since there is no
     /// logical path that leads to the end of this block.
-    pub all_children_contains_returns: bool,
+    pub all_children_contains_return: bool,
 
     /// A "block root" is a block that starts a new scope that contains blocks that
     /// only have access to items inside this scope.
@@ -79,7 +79,7 @@ impl BlockCtx {
             contains_break: false,
             contains_continue: false,
             contains_defer: false,
-            all_children_contains_returns: false,
+            all_children_contains_return: false,
             is_root_block,
             is_branchable_block,
             module,
