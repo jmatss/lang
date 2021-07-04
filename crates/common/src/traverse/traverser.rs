@@ -14,7 +14,7 @@ use crate::{
         op::{Op, UnOperator},
         stmt::Stmt,
     },
-    ty::{get::get_exprs_mut, ty_env::TY_ENV, type_id::TypeId},
+    ty::{get::get_exprs_mut, type_id::TypeId},
 };
 
 use super::{traverse_ctx::TraverseCtx, visitor::Visitor};
@@ -814,7 +814,7 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             //       expression found in types in a separate data-structure and
             //       only store IDs/references to those expression inside the
             //       types.
-            let ty_exprs = match get_exprs_mut(&mut TY_ENV.lock().unwrap(), *type_id) {
+            let ty_exprs = match get_exprs_mut(&mut self.ctx.ty_env.lock().unwrap(), *type_id) {
                 Ok(ty_exprs) => ty_exprs,
                 Err(err) => {
                     self.errors.push(err);
