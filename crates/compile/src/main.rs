@@ -170,7 +170,7 @@ fn main() -> LangResult<()> {
     analyze_ctx.ast_ctx.debug_print();
 
     let generate_timer = Instant::now();
-    let target_machine = compiler::setup_target()?;
+    let target_machine = compiler::setup_target(&opts.target_triple)?;
     let context = Context::create();
     let builder = context.create_builder();
     let module = context.create_module(&opts.module_name);
@@ -217,6 +217,7 @@ struct Options {
     input_files_list: Option<String>,
     output_file: String,
     module_name: String,
+    target_triple: Option<String>,
     optimize: bool,
     llvm: bool,
     ast: bool,
@@ -258,6 +259,14 @@ fn parse_opts() -> Options {
                 .long("optimize")
                 .help("Set to run optimization of the LLVM IR.")
                 .takes_value(false)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("triple")
+                .short("t")
+                .long("triple")
+                .help("Target triple.")
+                .takes_value(true)
                 .required(false),
         )
         .arg(
@@ -303,6 +312,7 @@ fn parse_opts() -> Options {
         input_files_list,
         output_file: matches.value_of("output").unwrap().into(),
         module_name: matches.value_of("module").unwrap().into(),
+        target_triple: matches.value_of("triple").map(|t| t.into()),
         optimize: matches.is_present("optimize"),
         llvm: matches.is_present("llvm"),
         ast: matches.is_present("ast"),

@@ -1,7 +1,9 @@
 use inkwell::{
     module::Module,
     passes::PassManager,
-    targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
+    targets::{
+        CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple,
+    },
     values::FunctionValue,
     OptimizationLevel,
 };
@@ -10,13 +12,27 @@ use common::error::{LangError, LangErrorKind};
 
 use crate::LangResult;
 
-pub fn setup_target() -> LangResult<TargetMachine> {
+pub fn setup_target(target_triple: &Option<String>) -> LangResult<TargetMachine> {
     Target::initialize_all(&InitializationConfig::default());
 
-    // TODO: Allow the user to specify target from command line.
-    let triple = TargetMachine::get_default_triple();
-    let cpu = TargetMachine::get_host_cpu_name().to_string();
-    let features = TargetMachine::get_host_cpu_features().to_string();
+    // TODO: Possible to get feature list from target triple? Currently always
+    //       set to empty when custom triple is give.
+    let (triple, cpu, features) = if let Some(triple_str) = target_triple {
+        (
+            TargetTriple::create(triple_str),
+            triple_str.to_string(),
+            String::with_capacity(0),
+        )
+    } else {
+        (
+            TargetMachine::get_default_triple(),
+            TargetMachine::get_host_cpu_name().to_string(),
+            TargetMachine::get_host_cpu_features().to_string(),
+        )
+    };
+
+    // TODO: Should these be configurable? What difference does changing the
+    //       optimization level here vs doing it "manually" at a later stage?
     let level = OptimizationLevel::Default;
     let reloc_mode = RelocMode::Default;
     let code_model = CodeModel::Default;
