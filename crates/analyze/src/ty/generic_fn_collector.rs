@@ -8,7 +8,11 @@ use common::{
     hash::DerefType,
     hash_map::TyEnvHashMap,
     path::LangPath,
-    token::{ast::AstToken, block::BlockHeader, expr::FnCall},
+    token::{
+        ast::AstToken,
+        block::{Block, BlockHeader},
+        expr::FnCall,
+    },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
     ty::{
         contains::contains_generic_with_name, generics::Generics, get::get_ident,
@@ -126,9 +130,9 @@ impl<'a> GenericFnCollector<'a> {
                 new_gens.insert(name.clone(), *ty);
             }
 
-            let ty_env_lock = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock().unwrap();
             let contains_key = self.generic_methods.contains_key(
-                &ty_env_lock,
+                &ty_env_guard,
                 DerefType::None,
                 &adt_path.without_gens(),
             )?;
@@ -138,14 +142,14 @@ impl<'a> GenericFnCollector<'a> {
             if contains_key {
                 let map_inner = self
                     .generic_methods
-                    .get_mut(&ty_env_lock, DerefType::None, &adt_path.without_gens())?
+                    .get_mut(&ty_env_guard, DerefType::None, &adt_path.without_gens())?
                     .unwrap();
 
                 match map_inner.entry(method_name) {
                     Entry::Occupied(mut vec_inner) => {
                         let mut contains_gens = false;
                         for inner_gens in vec_inner.get() {
-                            if generics_eq(&ty_env_lock, inner_gens, &new_gens, DerefType::Deep)? {
+                            if generics_eq(&ty_env_guard, inner_gens, &new_gens, DerefType::Deep)? {
                                 contains_gens = true;
                                 break;
                             }
@@ -163,7 +167,7 @@ impl<'a> GenericFnCollector<'a> {
                 let mut map_inner = HashMap::default();
                 map_inner.insert(method_name, vec![new_gens]);
                 self.generic_methods.insert(
-                    &ty_env_lock,
+                    &ty_env_guard,
                     DerefType::None,
                     adt_path.without_gens(),
                     map_inner,
@@ -194,7 +198,10 @@ impl<'a> GenericFnCollector<'a> {
             // but at the same time borrow the `ast_token` which contains the
             // `adt_path`.
             let impl_opt = match ast_token {
-                AstToken::Block(BlockHeader::Implement(adt_path, _), ..) => {
+                AstToken::Block(Block {
+                    header: BlockHeader::Implement(adt_path, _),
+                    ..
+                }) => {
                     if ctx
                         .ast_ctx
                         .get_adt(&ctx.ty_env.lock().unwrap(), adt_path)
@@ -222,9 +229,9 @@ impl<'a> GenericFnCollector<'a> {
                     .zip(collector.nested_generic_methods.values())
                 {
                     for gens in gens_vec {
-                        let ty_env_lock = ctx.ty_env.lock().unwrap();
+                        let ty_env_guard = ctx.ty_env.lock().unwrap();
                         let contains_key = self.nested_generic_methods.contains_key(
-                            &ty_env_lock,
+                            &ty_env_guard,
                             DerefType::None,
                             &adt_path.without_gens(),
                         )?;
@@ -234,23 +241,23 @@ impl<'a> GenericFnCollector<'a> {
                         if contains_key {
                             let map_inner = self
                                 .nested_generic_methods
-                                .get_mut(&ty_env_lock, DerefType::None, &adt_path.without_gens())?
+                                .get_mut(&ty_env_guard, DerefType::None, &adt_path.without_gens())?
                                 .unwrap();
 
                             let contains_key_inner = map_inner.contains_key(
-                                &ty_env_lock,
+                                &ty_env_guard,
                                 DerefType::Deep,
                                 nested_info,
                             )?;
 
                             if contains_key_inner {
                                 let vec_inner = map_inner
-                                    .get_mut(&ty_env_lock, DerefType::Deep, nested_info)?
+                                    .get_mut(&ty_env_guard, DerefType::Deep, nested_info)?
                                     .unwrap();
 
                                 let mut contains_gens = false;
                                 for gen_inner in vec_inner.iter() {
-                                    if generics_eq(&ty_env_lock, gen_inner, gens, DerefType::Deep)?
+                                    if generics_eq(&ty_env_guard, gen_inner, gens, DerefType::Deep)?
                                     {
                                         contains_gens = true;
                                     }
@@ -261,7 +268,7 @@ impl<'a> GenericFnCollector<'a> {
                                 }
                             } else {
                                 map_inner.insert(
-                                    &ty_env_lock,
+                                    &ty_env_guard,
                                     DerefType::None,
                                     nested_info.clone(),
                                     vec![gens.clone()],
@@ -270,13 +277,13 @@ impl<'a> GenericFnCollector<'a> {
                         } else {
                             let mut map_outer = TyEnvHashMap::default();
                             map_outer.insert(
-                                &ty_env_lock,
+                                &ty_env_guard,
                                 DerefType::None,
                                 nested_info.clone(),
                                 vec![gens.clone()],
                             )?;
                             self.nested_generic_methods.insert(
-                                &ty_env_lock,
+                                &ty_env_guard,
                                 DerefType::None,
                                 adt_path.without_gens(),
                                 map_outer,
@@ -453,11 +460,11 @@ impl<'a> GenericFnCollector<'a> {
 
                 match map_inner.entry(method_call_name.clone()) {
                     Entry::Occupied(mut o_inner) => {
-                        let ty_env_lock = ctx.ty_env.lock().unwrap();
+                        let ty_env_guard = ctx.ty_env.lock().unwrap();
 
                         let mut contains_gens = false;
                         for inner_gens in o_inner.get() {
-                            if generics_eq(&ty_env_lock, inner_gens, &new_gens, DerefType::Deep)? {
+                            if generics_eq(&ty_env_guard, inner_gens, &new_gens, DerefType::Deep)? {
                                 contains_gens = true;
                                 break;
                             }
@@ -564,8 +571,13 @@ impl<'a> Visitor for GenericFnCollector<'a> {
         }
     }
 
-    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Default, .., body) = &mut ast_token {
+    fn visit_default_block(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Default,
+            body,
+            ..
+        } = &mut block
+        {
             if let Err(err) = self.collect_nested(ctx, body) {
                 self.errors.push(err);
             }

@@ -7,8 +7,7 @@ use common::{
     error::LangError,
     path::LangPath,
     token::{
-        ast::AstToken,
-        block::{Adt, BlockHeader},
+        block::{Adt, Block, BlockHeader},
         expr::Var,
         stmt::Stmt,
     },
@@ -146,7 +145,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
 
     /// Since this `GenericsReplacer` is called with `deep_copy` set to true,
     /// this logic inserts a reference from the new ADT type to the new method.
-    fn visit_fn(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
+    fn visit_fn(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
         if let Some(new_adt) = &self.new_adt {
             let module = match ctx.ast_ctx.get_module(ctx.block_id) {
                 Ok(Some(module)) => module,
@@ -166,7 +165,11 @@ impl<'a> Visitor for GenericsReplacer<'a> {
                 )
             };
 
-            if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
+            if let Block {
+                header: BlockHeader::Fn(func),
+                ..
+            } = block
+            {
                 func.as_ref().write().unwrap().method_adt = self.new_type_id;
 
                 // Insert a reference from the "new" ADT to this new method.

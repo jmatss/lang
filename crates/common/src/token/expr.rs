@@ -1,5 +1,5 @@
 use super::{
-    block::AdtKind,
+    block::{AdtKind, Block},
     lit::Lit,
     op::{BinOperator, Op, UnOperator},
     stmt::Modifier,
@@ -32,6 +32,8 @@ pub enum Expr {
     ArrayInit(ArrayInit),
     //MacroCall(Option<MacroCall>),
     Op(Op),
+    // The TypeId is the type that will be yielded from the block.
+    Block(Box<Block>, Option<TypeId>),
 }
 
 impl Expr {
@@ -196,6 +198,7 @@ impl Expr {
                 Op::BinOp(bin_op) => bin_op.file_pos.as_ref(),
                 Op::UnOp(un_op) => un_op.file_pos.as_ref(),
             },
+            Expr::Block(block, ..) => Some(&block.file_pos),
         }
     }
 
@@ -212,6 +215,7 @@ impl Expr {
                 Op::BinOp(bin_op) => bin_op.file_pos.as_mut(),
                 Op::UnOp(un_op) => un_op.file_pos.as_mut(),
             },
+            Expr::Block(block, ..) => Some(&mut block.file_pos),
         }
     }
 

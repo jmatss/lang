@@ -2,6 +2,7 @@ use crate::{
     error::LangError,
     token::{
         ast::AstToken,
+        block::Block,
         expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, Var},
         op::{BinOp, UnOp},
         stmt::Stmt,
@@ -19,7 +20,7 @@ pub trait Visitor {
 
     /* TOP LEVEL */
     fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_block(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
+    fn visit_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
     fn visit_expr(&mut self, expr: &mut Expr, ctx: &mut TraverseCtx) {}
     fn visit_stmt(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {}
     fn visit_eof(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
@@ -27,21 +28,21 @@ pub trait Visitor {
     fn visit_end(&mut self, ctx: &mut TraverseCtx) {}
 
     /* BLOCKS */
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_fn(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_enum(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_trait(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_anon(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_if(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_if_case(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_match(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_match_case(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_for(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_while(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
-    fn visit_test(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {}
+    fn visit_default_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_fn(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_struct(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_enum(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_union(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_trait(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_impl(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_anon(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_if(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_if_case(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_match(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_match_case(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_for(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_while(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
+    fn visit_test(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {}
 
     /* STATEMENTS */
     fn visit_return(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {}

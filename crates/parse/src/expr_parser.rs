@@ -5,7 +5,8 @@ use common::{
     file::FilePosition,
     path::LangPathBuilder,
     token::{
-        block::AdtKind,
+        ast::AstToken,
+        block::{AdtKind, BlockHeader},
         expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, FnPtr},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
@@ -20,6 +21,7 @@ use common::{
 use lex::token::{Kw, LexToken, LexTokenKind, Sym};
 
 use crate::{
+    keyword_parser::KeyworkParser,
     parser::ParseTokenIter,
     token::{Fix, Operator, Output},
     type_parser::TypeParser,
@@ -72,30 +74,62 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         // This will be used if a more accurate/precise file_pos can't be used.
         let first_file_pos = iter.peek_file_pos()?;
 
-        let mut expr_parser = Self {
-            iter,
-            token_count: 0,
-            outputs: Vec::new(),
-            operators: Vec::new(),
-            stop_conds,
-            prev_was_operand: false,
-            prev: None,
-            parenthesis_count: 0,
-        };
+        // True if this is a block that should be treated as a expression.
+        // Else: For any other type of expr, parse it as a normal expression.
+        if let Some((LexTokenKind::Kw(keyword @ Kw::If), kw_file_pos)) =
+            iter.peek_skip_space_line().map(|t| (t.kind, t.file_pos))
+        {
+            let ast_token = KeyworkParser::parse(iter, keyword, kw_file_pos)?;
 
-        match expr_parser.shunting_yard()? {
-            // (was_empty, expr_file_pos_opt)
-            (false, Some(mut file_pos)) => {
-                debug!("Outputs: {:#?}", &expr_parser.outputs);
-                expr_parser.rev_polish_to_expr(&mut file_pos).map(Some)
+            let block = if let AstToken::Block(block) = ast_token {
+                block
+            } else {
+                return Err(iter.err(
+                    format!(
+                        "Parsed if-block to AstToken that wasn't Block: {:#?}",
+                        ast_token
+                    ),
+                    ast_token.file_pos().cloned(),
+                ));
+            };
+
+            if !matches!(block.header, BlockHeader::If) {
+                return Err(iter.err(
+                    format!(
+                        "Parsed if-block to AstToken that wasn't if-block: {:#?}",
+                        block
+                    ),
+                    Some(block.file_pos),
+                ));
             }
 
-            (true, _) => Ok(None),
+            Ok(Some(Expr::Block(Box::new(block), None)))
+        } else {
+            let mut expr_parser = Self {
+                iter,
+                token_count: 0,
+                outputs: Vec::new(),
+                operators: Vec::new(),
+                stop_conds,
+                prev_was_operand: false,
+                prev: None,
+                parenthesis_count: 0,
+            };
 
-            (false, None) => Err(expr_parser.iter.err(
-                "Expr wasn't empty, but got back None expr_file_pos.".into(),
-                Some(first_file_pos),
-            )),
+            match expr_parser.shunting_yard()? {
+                // (was_empty, expr_file_pos_opt)
+                (false, Some(mut file_pos)) => {
+                    debug!("Outputs: {:#?}", &expr_parser.outputs);
+                    expr_parser.rev_polish_to_expr(&mut file_pos).map(Some)
+                }
+
+                (true, _) => Ok(None),
+
+                (false, None) => Err(expr_parser.iter.err(
+                    "Expr wasn't empty, but got back None expr_file_pos.".into(),
+                    Some(first_file_pos),
+                )),
+            }
         }
     }
 
@@ -730,8 +764,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         let mut adt_path = path_builder.build();
                         adt_path.pop(); // Remove the name of the enum variant.
 
-                        let mut ty_env_lock = self.iter.ty_env.lock().unwrap();
-                        let enum_type_id = ty_env_lock.id(&Ty::CompoundType(
+                        let mut ty_env_guard = self.iter.ty_env.lock().unwrap();
+                        let enum_type_id = ty_env_guard.id(&Ty::CompoundType(
                             InnerTy::Enum(adt_path),
                             Generics::empty(),
                             TypeInfo::Default(file_pos.to_owned()),

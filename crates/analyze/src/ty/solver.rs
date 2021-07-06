@@ -6,7 +6,7 @@ use common::{
     error::{LangError, LangResult},
     path::LangPathPart,
     token::op::UnOperator,
-    token::{ast::AstToken, expr::FnCall, op::UnOp},
+    token::{block::Block, expr::FnCall, op::UnOp},
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
         get::get_unsolvable,
@@ -30,20 +30,20 @@ pub(crate) fn solve_all(ctx: &mut TraverseCtx) -> LangResult<()> {
     let unsolvables = solve_solvable(ctx, SolveCond::new().excl_gen_inst())?;
 
     if let Some(unsolvables) = solve_unsolvable(ctx, unsolvables)? {
-        let ty_env_lock = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock().unwrap();
 
         let mut err_msg = "Unable to solve type system.".to_string();
 
         for (type_id, child_type_ids) in unsolvables {
-            let inf_type_id = inferred_type(&ty_env_lock, type_id)?;
+            let inf_type_id = inferred_type(&ty_env_guard, type_id)?;
 
             err_msg.push_str(&format!(
                 "\nUnable to solve type {} ({}). Got back unsolved: {} ({}). ty:\n{:#?}",
                 type_id,
-                to_string_type_id(&ty_env_lock, type_id)?,
+                to_string_type_id(&ty_env_guard, type_id)?,
                 inf_type_id,
-                to_string_type_id(&ty_env_lock, inf_type_id)?,
-                ty_env_lock.ty(inf_type_id)
+                to_string_type_id(&ty_env_guard, inf_type_id)?,
+                ty_env_guard.ty(inf_type_id)
             ));
 
             if !child_type_ids.is_empty() {
@@ -80,9 +80,9 @@ fn solve_solvable(
 
     let mut unsolvables = HashMap::default();
 
-    let ty_env_lock = ctx.ty_env.lock().unwrap();
-    for type_id in ty_env_lock.interner.all_types() {
-        let mut nested_unsolvables = get_unsolvable(&ty_env_lock, type_id, solve_cond)?;
+    let ty_env_guard = ctx.ty_env.lock().unwrap();
+    for type_id in ty_env_guard.interner.all_types() {
+        let mut nested_unsolvables = get_unsolvable(&ty_env_guard, type_id, solve_cond)?;
         if nested_unsolvables.contains(&type_id) {
             nested_unsolvables.remove(&type_id);
             unsolvables.insert(type_id, nested_unsolvables);
@@ -239,8 +239,8 @@ impl Visitor for TypeSolver {
         }
     }
 
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        debug!("before solving -- AST: {:#?}", &ast_token);
+    fn visit_default_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        debug!("before solving -- AST: {:#?}", &block);
 
         if let Err(err) = solve_all(ctx) {
             self.errors.push(err);

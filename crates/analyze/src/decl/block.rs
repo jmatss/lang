@@ -8,7 +8,11 @@ use common::{
     hash::DerefType,
     hash_set::TyEnvHashSet,
     path::LangPath,
-    token::{ast::AstToken, block::BlockHeader, stmt::Stmt},
+    token::{
+        ast::AstToken,
+        block::{Block, BlockHeader},
+        stmt::Stmt,
+    },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::ty_env::TyEnv,
     BlockId,
@@ -204,134 +208,140 @@ impl BlockAnalyzer {
         &mut self,
         ty_env: &TyEnv,
         ast_ctx: &mut AstCtx,
-        ast_token: &AstToken,
+        block: &Block,
         parent_id: usize,
     ) -> LangResult<()> {
-        ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
+        ast_ctx.file_pos = block.file_pos;
 
-        if let AstToken::Block(ref header, file_pos, id, body) = &ast_token {
-            let is_root_block = self.is_root(header);
-            let is_branchable_block = self.is_branchable(header);
+        let is_root_block = self.is_root(&block.header);
+        let is_branchable_block = self.is_branchable(&block.header);
 
-            // OBS! The "module" and "uses" set at this point might not be the
-            //      final values. The module might not be set at this point (ex.
-            //      if this is the first block being traversed in a new fule) and
-            //      the uses that is fetched with the `get_uses` only contains
-            //      the "use"s that have been seen/traversed.
-            //      These values might be updated when statements in this block
-            //      is traversed further down in this function.
-            let mut block_ctx = BlockCtx::new(
-                *id,
-                file_pos.to_owned(),
-                is_root_block,
-                is_branchable_block,
-                self.module.clone(),
-                self.get_uses(ty_env, ast_ctx, parent_id)?,
-            );
+        // OBS! The "module" and "uses" set at this point might not be the
+        //      final values. The module might not be set at this point (ex.
+        //      if this is the first block being traversed in a new fule) and
+        //      the uses that is fetched with the `get_uses` only contains
+        //      the "use"s that have been seen/traversed.
+        //      These values might be updated when statements in this block
+        //      is traversed further down in this function.
+        let mut block_ctx = BlockCtx::new(
+            block.id,
+            block.file_pos.to_owned(),
+            is_root_block,
+            is_branchable_block,
+            self.module.clone(),
+            self.get_uses(ty_env, ast_ctx, parent_id)?,
+        );
 
-            if *id != BlockCtx::DEFAULT_BLOCK_ID {
-                block_ctx.parent_id = parent_id;
-            }
-
-            ast_ctx.block_ctxs.insert(*id, block_ctx);
-
-            // When iterating through all tokens, look at the If and Ifcases
-            // and keep track if all their children contains return statements.
-            //
-            // The `all_paths_exhausted` is used to indicate that the given block
-            // have child blocks that are "exhaustive". This will be used for
-            // if and match-statements to see if they have a else/default block.
-            // If they don't, we can't be sure that all paths are covered and we
-            // have to make the assumption that we can't be sure that the block
-            // will always branch even in situations when all its children
-            // contain branch instructions. This might be an incorrect assumption,
-            // but in those cases we reject valid programs rather than allow
-            // potential invalid ones.
-            //
-            // All other blocks (other than "if" and "match") are assumed to be
-            // exhaustive blocks since all their execution paths will always
-            // be "followed"/ran.
-            let mut all_children_contains_return = true;
-            let mut all_paths_exhausted =
-                !matches!(header, BlockHeader::If | BlockHeader::Match(_));
-            let mut child_count = 0;
-
-            for child_token in body.iter() {
-                // TODO: Fix ugly hack. If this token is a EOF, the `self.is_first_stmt`
-                //       shouldn't be reset.
-                let mut is_eof = false;
-
-                match child_token {
-                    AstToken::Block(h @ BlockHeader::If, _, child_id, _)
-                    | AstToken::Block(h @ BlockHeader::IfCase(_), _, child_id, _)
-                    | AstToken::Block(h @ BlockHeader::Fn(_), _, child_id, _)
-                    | AstToken::Block(h @ BlockHeader::Match(_), _, child_id, _)
-                    | AstToken::Block(h @ BlockHeader::MatchCase(_), _, child_id, _)
-                    | AstToken::Block(h @ BlockHeader::For(..), _, child_id, _)
-                    | AstToken::Block(h @ BlockHeader::While(..), _, child_id, _)
-                    | AstToken::Block(h @ BlockHeader::Test(_), _, child_id, _)
-                    | AstToken::Block(h @ BlockHeader::Anonymous, _, child_id, _) => {
-                        self.analyze_block(ty_env, ast_ctx, child_token, *id)?;
-
-                        // True for "else" in a if-block and "default" in a match-block.
-                        if matches!(h, BlockHeader::IfCase(None) | BlockHeader::MatchCase(None)) {
-                            all_paths_exhausted = true;
-                        }
-
-                        if let Some(child_block_info) = ast_ctx.block_ctxs.get(&child_id) {
-                            if !child_block_info.all_children_contains_return {
-                                all_children_contains_return = false;
-                            }
-                        } else {
-                            let err = ast_ctx.err(format!(
-                                "Unable to get block info for ID {} when in ID {}.",
-                                child_id, id
-                            ));
-                            return Err(err);
-                        }
-                        child_count += 1;
-                    }
-
-                    AstToken::Block(BlockHeader::Default, ..)
-                    | AstToken::Block(BlockHeader::Struct(_), ..)
-                    | AstToken::Block(BlockHeader::Enum(_), ..)
-                    | AstToken::Block(BlockHeader::Union(_), ..)
-                    | AstToken::Block(BlockHeader::Trait(_), ..)
-                    | AstToken::Block(BlockHeader::Implement(..), ..) => {
-                        self.analyze_block(ty_env, ast_ctx, child_token, *id)?;
-                    }
-
-                    AstToken::Stmt(ref stmt) => {
-                        self.analyze_stmt(ty_env, ast_ctx, stmt, *id)?;
-                    }
-
-                    // Reset the "mod" statement when the end of the file is reached.
-                    AstToken::EOF => {
-                        self.module = None;
-                        self.is_first_stmt = true;
-                        is_eof = true;
-                    }
-
-                    AstToken::Empty | AstToken::Comment(..) | AstToken::Expr(_) => {
-                        // Do nothing.
-                    }
-                }
-
-                if self.is_first_stmt && !is_eof {
-                    self.is_first_stmt = false;
-                }
-            }
-
-            // Set the flag to indicate if all children contains return statements
-            // for the current block. If this block doesn't have any children,
-            // the value will be set to true if this block itself contains a return.
-            let block_info = ast_ctx.block_ctxs.get_mut(id).unwrap();
-            block_info.all_children_contains_return = if child_count > 0 {
-                all_children_contains_return && all_paths_exhausted
-            } else {
-                block_info.contains_return
-            };
+        if block.id != BlockCtx::DEFAULT_BLOCK_ID {
+            block_ctx.parent_id = parent_id;
         }
+
+        ast_ctx.block_ctxs.insert(block.id, block_ctx);
+
+        // When iterating through all tokens, look at the If and Ifcases
+        // and keep track if all their children contains return statements.
+        //
+        // The `all_paths_exhausted` is used to indicate that the given block
+        // have child blocks that are "exhaustive". This will be used for
+        // if and match-statements to see if they have a else/default block.
+        // If they don't, we can't be sure that all paths are covered and we
+        // have to make the assumption that we can't be sure that the block
+        // will always branch even in situations when all its children
+        // contain branch instructions. This might be an incorrect assumption,
+        // but in those cases we reject valid programs rather than allow
+        // potential invalid ones.
+        //
+        // All other blocks (other than "if" and "match") are assumed to be
+        // exhaustive blocks since all their execution paths will always
+        // be "followed"/ran.
+        let mut all_children_contains_return = true;
+        let mut all_paths_exhausted =
+            !matches!(&block.header, BlockHeader::If | BlockHeader::Match(_));
+        let mut child_count = 0;
+
+        for child_token in block.body.iter() {
+            // TODO: Fix ugly hack. If this token is a EOF, the `self.is_first_stmt`
+            //       shouldn't be reset.
+            let mut is_eof = false;
+
+            match child_token {
+                AstToken::Block(child_block) => {
+                    match &child_block.header {
+                        BlockHeader::If
+                        | BlockHeader::IfCase(..)
+                        | BlockHeader::Fn(..)
+                        | BlockHeader::Match(..)
+                        | BlockHeader::MatchCase(..)
+                        | BlockHeader::For(..)
+                        | BlockHeader::While(..)
+                        | BlockHeader::Test(..)
+                        | BlockHeader::Anonymous => {
+                            self.analyze_block(ty_env, ast_ctx, child_block, block.id)?;
+
+                            // True for "else" in a if-block and "default" in a match-block.
+                            if matches!(
+                                child_block.header,
+                                BlockHeader::IfCase(None) | BlockHeader::MatchCase(None)
+                            ) {
+                                all_paths_exhausted = true;
+                            }
+
+                            if let Some(child_block_info) = ast_ctx.block_ctxs.get(&child_block.id)
+                            {
+                                if !child_block_info.all_children_contains_return {
+                                    all_children_contains_return = false;
+                                }
+                            } else {
+                                let err = ast_ctx.err(format!(
+                                    "Unable to get block info for ID {} when in ID {}.",
+                                    child_block.id, block.id
+                                ));
+                                return Err(err);
+                            }
+                            child_count += 1;
+                        }
+
+                        BlockHeader::Default
+                        | BlockHeader::Struct(..)
+                        | BlockHeader::Enum(..)
+                        | BlockHeader::Union(..)
+                        | BlockHeader::Trait(..)
+                        | BlockHeader::Implement(..) => {
+                            self.analyze_block(ty_env, ast_ctx, child_block, block.id)?;
+                        }
+                    }
+                }
+
+                AstToken::Stmt(ref stmt) => {
+                    self.analyze_stmt(ty_env, ast_ctx, stmt, block.id)?;
+                }
+
+                // Reset the "mod" statement when the end of the file is reached.
+                AstToken::EOF => {
+                    self.module = None;
+                    self.is_first_stmt = true;
+                    is_eof = true;
+                }
+
+                AstToken::Empty | AstToken::Comment(..) | AstToken::Expr(_) => {
+                    // Do nothing.
+                }
+            }
+
+            if self.is_first_stmt && !is_eof {
+                self.is_first_stmt = false;
+            }
+        }
+
+        // Set the flag to indicate if all children contains return statements
+        // for the current block. If this block doesn't have any children,
+        // the value will be set to true if this block itself contains a return.
+        let block_info = ast_ctx.block_ctxs.get_mut(&block.id).unwrap();
+        block_info.all_children_contains_return = if child_count > 0 {
+            all_children_contains_return && all_paths_exhausted
+        } else {
+            block_info.contains_return
+        };
 
         Ok(())
     }
@@ -349,11 +359,11 @@ impl Visitor for BlockAnalyzer {
     /// All traversing is done from the default block, no other visit function
     /// will be used. The reason being that this needs to be called recursively
     /// on blocks, which currently isn't possible to do with the regular traverser.
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
+    fn visit_default_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
         if let Err(err) = self.analyze_block(
             &ctx.ty_env.lock().unwrap(),
             &mut ctx.ast_ctx,
-            ast_token,
+            block,
             usize::MAX,
         ) {
             self.errors.push(err);

@@ -7,7 +7,7 @@ use common::{
     error::LangResult,
     token::{
         ast::AstToken,
-        block::{AdtKind, BlockHeader},
+        block::{AdtKind, Block, BlockHeader},
         stmt::Modifier,
     },
 };
@@ -61,7 +61,13 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     pub(super) fn compile_fn_decl(&mut self, mut ast_token: &mut AstToken) -> LangResult<()> {
         self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
-        if let AstToken::Block(header, file_pos, id, ref mut body) = &mut ast_token {
+        if let AstToken::Block(Block {
+            header,
+            body,
+            id,
+            file_pos,
+        }) = &mut ast_token
+        {
             self.cur_block_id = *id;
 
             if let BlockHeader::Fn(func) = header {

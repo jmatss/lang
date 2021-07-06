@@ -11,7 +11,7 @@ use common::{
     path::LangPath,
     token::{
         ast::AstToken,
-        block::{AdtKind, BlockHeader},
+        block::{AdtKind, Block, BlockHeader},
     },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse_with_deep_copy, visitor::Visitor},
     ty::{
@@ -202,7 +202,12 @@ impl GenericAdtCreator {
                 // added after the EOF token.
                 body.insert(
                     old_idx + 1,
-                    AstToken::Block(header, file_pos.to_owned(), old_id, adt_body),
+                    AstToken::Block(Block {
+                        header,
+                        body: adt_body,
+                        id: old_id,
+                        file_pos: file_pos.to_owned(),
+                    }),
                 );
             }
 
@@ -294,11 +299,11 @@ impl GenericAdtCreator {
                 // Make a clone of the old implement block and change the name of
                 // this new impl block to contain the generics.
                 let mut new_impl_token = old_impl_token.clone();
-                let (new_impl_body, new_path) = if let AstToken::Block(
-                    BlockHeader::Implement(new_impl_path, ..),
-                    ..,
-                    new_impl_body,
-                ) = &mut new_impl_token
+                let (new_impl_body, new_path) = if let AstToken::Block(Block {
+                    header: BlockHeader::Implement(new_impl_path, ..),
+                    body: new_impl_body,
+                    ..
+                }) = &mut new_impl_token
                 {
                     let new_path = old_path.with_gens(gens.clone());
                     *new_impl_path = new_path.clone();
@@ -330,7 +335,11 @@ impl GenericAdtCreator {
                 // New instances will be created for all shared references (see
                 // `set_deep_copy(true)` in `AstTraverser`).
                 for method in new_impl_body {
-                    if let AstToken::Block(BlockHeader::Fn(..), ..) = method {
+                    if let AstToken::Block(Block {
+                        header: BlockHeader::Fn(..),
+                        ..
+                    }) = method
+                    {
                         if let Err(mut errs) =
                             traverse_with_deep_copy(ctx, &mut generics_replacer, method, new_idx)
                         {
@@ -409,8 +418,14 @@ impl Visitor for GenericAdtCreator {
     //       to find another better way to do this. Will probably have to
     //       implement some helper functions to modify the AST, remove/add etc.
     /// Create new ADTs for generic implementations.
-    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Default, _, parent_id, body) = &mut ast_token {
+    fn visit_default_block(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Default,
+            id: parent_id,
+            body,
+            ..
+        } = &mut block
+        {
             let mut i = 0;
 
             // Iterate through all the ADTs in the AST.
@@ -418,7 +433,13 @@ impl Visitor for GenericAdtCreator {
                 let body_token = body.get(i).cloned().expect("Known to be in bounds.");
 
                 // Modify and create the new ADTs. The old ADT will also be removed.
-                if let AstToken::Block(header, file_pos, old_id, ..) = &body_token {
+                if let AstToken::Block(Block {
+                    header,
+                    file_pos,
+                    id: old_id,
+                    ..
+                }) = &body_token
+                {
                     match header {
                         BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
                             let full_path = {
@@ -505,8 +526,11 @@ impl Visitor for GenericAdtCreator {
                 // generics. These new impl blocks will contain the actual generic
                 // implementations/instances. The old impl blocks containing the
                 // generic placeholders will be removed.
-                if let AstToken::Block(BlockHeader::Implement(adt_path, _), _, old_id, _) =
-                    &body_token
+                if let AstToken::Block(Block {
+                    header: BlockHeader::Implement(adt_path, _),
+                    id: old_id,
+                    ..
+                }) = &body_token
                 {
                     let full_path = {
                         let module = match ctx.ast_ctx.get_module(*old_id) {

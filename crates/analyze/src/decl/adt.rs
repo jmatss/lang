@@ -7,7 +7,7 @@ use common::{
     path::LangPath,
     token::{
         ast::AstToken,
-        block::{Adt, BlockHeader},
+        block::{Adt, Block, BlockHeader},
         stmt::{ExternalDecl, Stmt},
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
@@ -45,13 +45,13 @@ impl DeclTypeAnalyzer {
             module.clone_push(&adt_lock.name, None, Some(adt_lock.file_pos))
         };
 
-        let ty_env_lock = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock().unwrap();
 
         // TODO: Add file positions to error message.
-        if ctx.ast_ctx.get_adt(&ty_env_lock, &adt_full_path).is_ok() {
+        if ctx.ast_ctx.get_adt(&ty_env_guard, &adt_full_path).is_ok() {
             return Err(ctx.ast_ctx.err(format!(
                 "A ADT with name \"{}\" already defined.",
-                to_string_path(&ty_env_lock, &adt_full_path)
+                to_string_path(&ty_env_guard, &adt_full_path)
             )));
         }
 
@@ -60,7 +60,7 @@ impl DeclTypeAnalyzer {
         let key = (adt_full_path, parent_id);
         ctx.ast_ctx
             .adts
-            .insert(&ty_env_lock, DerefType::None, key, Arc::clone(adt))?;
+            .insert(&ty_env_guard, DerefType::None, key, Arc::clone(adt))?;
 
         Ok(())
     }
@@ -79,24 +79,39 @@ impl Visitor for DeclTypeAnalyzer {
         ctx.ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
     }
 
-    fn visit_struct(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Struct(struct_), _, id, ..) = &mut ast_token {
+    fn visit_struct(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Struct(struct_),
+            id,
+            ..
+        } = &mut block
+        {
             if let Err(err) = self.decl_new_adt(ctx, struct_, *id) {
                 self.errors.push(err);
             }
         }
     }
 
-    fn visit_enum(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Enum(enum_), _, id, ..) = &mut ast_token {
+    fn visit_enum(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Enum(enum_),
+            id,
+            ..
+        } = &mut block
+        {
             if let Err(err) = self.decl_new_adt(ctx, enum_, *id) {
                 self.errors.push(err);
             }
         }
     }
 
-    fn visit_union(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Union(union), _, id, ..) = &mut ast_token {
+    fn visit_union(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Union(union),
+            id,
+            ..
+        } = &mut block
+        {
             if let Err(err) = self.decl_new_adt(ctx, union, *id) {
                 self.errors.push(err);
             }
@@ -104,11 +119,16 @@ impl Visitor for DeclTypeAnalyzer {
     }
 
     // TODO: Merge logic with ADTs.
-    fn visit_trait(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Trait(trait_), _, trait_id, ..) = &mut ast_token {
+    fn visit_trait(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Trait(trait_),
+            id,
+            ..
+        } = &mut block
+        {
             // The trait will be added in the scope of its parent, so fetch
             // the block id for the parent.
-            let parent_id = match ctx.ast_ctx.get_parent_id(*trait_id) {
+            let parent_id = match ctx.ast_ctx.get_parent_id(*id) {
                 Ok(parent_id) => parent_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -116,7 +136,7 @@ impl Visitor for DeclTypeAnalyzer {
                 }
             };
 
-            let trait_full_path = match ctx.ast_ctx.get_module(*trait_id) {
+            let trait_full_path = match ctx.ast_ctx.get_module(*id) {
                 Ok(module_opt) => {
                     let module = module_opt.unwrap_or_else(LangPath::empty);
                     trait_.as_ref().write().unwrap().module = module.clone();
@@ -130,17 +150,17 @@ impl Visitor for DeclTypeAnalyzer {
                 }
             };
 
-            let ty_env_lock = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock().unwrap();
 
             // TODO: Add file positions to error message.
             if ctx
                 .ast_ctx
-                .get_trait(&ty_env_lock, &trait_full_path)
+                .get_trait(&ty_env_guard, &trait_full_path)
                 .is_ok()
             {
                 self.errors.push(ctx.ast_ctx.err(format!(
                     "A trait with name \"{}\" already defined.",
-                    to_string_path(&ty_env_lock, &trait_full_path)
+                    to_string_path(&ty_env_guard, &trait_full_path)
                 )));
                 return;
             }
@@ -149,7 +169,7 @@ impl Visitor for DeclTypeAnalyzer {
             if let Err(err) =
                 ctx.ast_ctx
                     .traits
-                    .insert(&ty_env_lock, DerefType::None, key, Arc::clone(trait_))
+                    .insert(&ty_env_guard, DerefType::None, key, Arc::clone(trait_))
             {
                 self.errors.push(err);
             }

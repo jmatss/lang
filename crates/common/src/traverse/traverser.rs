@@ -6,10 +6,10 @@ use std::{
 use log::debug;
 
 use crate::{
-    error::{LangError, LangErrorKind},
+    error::LangError,
     token::{
         ast::AstToken,
-        block::BlockHeader,
+        block::{Block, BlockHeader},
         expr::Expr,
         op::{Op, UnOperator},
         stmt::Stmt,
@@ -127,11 +127,11 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
         }
 
         match &mut ast_token {
-            AstToken::Block(..) => {
-                self.traverse_block(ast_token);
-                if let AstToken::Block(.., id, body) = ast_token {
-                    for body_token in body {
-                        self.ctx.block_id = *id;
+            AstToken::Block(block) => {
+                self.traverse_block(block);
+                if let AstToken::Block(block) = ast_token {
+                    for body_token in &mut block.body {
+                        self.ctx.block_id = block.id;
                         self.traverse_token(body_token);
                     }
                 }
@@ -153,355 +153,336 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
         self.ctx.file_pos = old_pos;
     }
 
-    fn traverse_block(&mut self, mut ast_token: &mut AstToken) {
+    fn traverse_block(&mut self, block: &mut Block) {
         let old_pos = self.ctx.file_pos.to_owned();
-        if let Some(file_pos) = ast_token.file_pos() {
-            self.ctx.file_pos = file_pos.to_owned();
-        }
 
-        if let AstToken::Block(.., id, _) = ast_token {
-            self.ctx.block_id = *id;
-        }
+        self.ctx.file_pos = block.file_pos.to_owned();
+        self.ctx.block_id = block.id;
 
-        debug!("Visiting block -- {:#?}", ast_token);
+        debug!("Visiting block -- {:#?}", block);
         if !self.ctx.stop {
-            self.visitor.visit_block(ast_token, &mut self.ctx);
+            self.visitor.visit_block(block, &mut self.ctx);
         } else {
             return;
         }
 
-        match &mut ast_token {
-            AstToken::Block(header, ..) => match header {
-                BlockHeader::Default => {
-                    debug!("Visiting default block");
-                    if !self.ctx.stop {
-                        self.visitor.visit_default_block(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
+        match &mut block.header {
+            BlockHeader::Default => {
+                debug!("Visiting default block");
+                if !self.ctx.stop {
+                    self.visitor.visit_default_block(block, &mut self.ctx);
+                } else {
+                    return;
                 }
-                BlockHeader::Fn(func) => {
-                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                        let mut new_func = func.as_ref().read().unwrap().clone();
+            }
+            BlockHeader::Fn(func) => {
+                if let Some(deep_copy_nr) = self.ctx.copy_nr {
+                    let mut new_func = func.as_ref().read().unwrap().clone();
 
-                        if let Some(params) = &mut new_func.parameters {
-                            for param in params {
-                                let mut new_param = param.as_ref().read().unwrap().clone();
-                                new_param.set_copy_nr(deep_copy_nr);
-                                *param = Arc::new(RwLock::new(new_param));
-                            }
-                        }
-
-                        *func = Arc::new(RwLock::new(new_func));
-                    }
-
-                    // TODO: Iterate through the `generics`.
-                    if let Some(params) = &mut func.as_ref().write().unwrap().parameters {
+                    if let Some(params) = &mut new_func.parameters {
                         for param in params {
-                            if let Some(type_id) = &mut param.as_ref().write().unwrap().ty {
-                                self.traverse_type(type_id);
-                            }
-                            if let Some(value) = &mut param.as_ref().write().unwrap().value {
-                                self.traverse_expr(value);
-                            }
-
-                            // Iterate through the parameters of functions as
-                            // variable declarations. One have to temporary wrap
-                            // them in a `Stmt::VariableDecl` for it to work
-                            // smoothly.
-                            let file_pos = param.as_ref().read().unwrap().file_pos.to_owned();
-                            let mut var_decl = Stmt::VariableDecl(Arc::clone(param), file_pos);
-                            if !self.ctx.stop {
-                                self.visitor.visit_var_decl(&mut var_decl, &mut self.ctx);
-                            } else {
-                                return;
-                            }
+                            let mut new_param = param.as_ref().read().unwrap().clone();
+                            new_param.set_copy_nr(deep_copy_nr);
+                            *param = Arc::new(RwLock::new(new_param));
                         }
                     }
 
-                    if let Some(generic_impls) = &mut func.as_ref().write().unwrap().generics {
-                        for ty in generic_impls.iter_types_mut() {
-                            self.traverse_type(ty);
-                        }
-                    }
-
-                    if let Some(ret_type_id) = &mut func.as_ref().write().unwrap().ret_type {
-                        self.traverse_type(ret_type_id);
-                    }
-
-                    if let Some(adt_type_id) = &mut func.as_ref().write().unwrap().method_adt {
-                        self.traverse_type(adt_type_id);
-                    }
-
-                    debug!("Visiting func");
-                    if !self.ctx.stop {
-                        self.visitor.visit_fn(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
+                    *func = Arc::new(RwLock::new(new_func));
                 }
-                BlockHeader::Struct(struct_) => {
-                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                        let mut new_struct = struct_.as_ref().read().unwrap().clone();
 
-                        for member in new_struct.members.iter_mut() {
-                            let mut new_member = member.as_ref().read().unwrap().clone();
-                            new_member.set_copy_nr(deep_copy_nr);
-                            *member = Arc::new(RwLock::new(new_member));
+                // TODO: Iterate through the `generics`.
+                if let Some(params) = &mut func.as_ref().write().unwrap().parameters {
+                    for param in params {
+                        if let Some(type_id) = &mut param.as_ref().write().unwrap().ty {
+                            self.traverse_type(type_id);
                         }
-
-                        *struct_ = Arc::new(RwLock::new(new_struct));
-                    }
-
-                    // TODO: Visit `implements`?
-                    for member in struct_.as_ref().write().unwrap().members.iter_mut() {
-                        if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                            let mut new_member = member.as_ref().read().unwrap().clone();
-                            new_member.set_copy_nr(deep_copy_nr);
-                            *member = Arc::new(RwLock::new(new_member));
-                        }
-
-                        if let Some(ty) = &mut member.as_ref().write().unwrap().ty {
-                            self.traverse_type(ty);
-                        }
-                        if let Some(value) = &mut member.as_ref().write().unwrap().value {
+                        if let Some(value) = &mut param.as_ref().write().unwrap().value {
                             self.traverse_expr(value);
                         }
-                    }
 
-                    if let Some(gens) = &mut struct_.as_ref().write().unwrap().generics {
-                        for ty in gens.iter_types_mut() {
-                            self.traverse_type(ty);
+                        // Iterate through the parameters of functions as
+                        // variable declarations. One have to temporary wrap
+                        // them in a `Stmt::VariableDecl` for it to work
+                        // smoothly.
+                        let file_pos = param.as_ref().read().unwrap().file_pos.to_owned();
+                        let mut var_decl = Stmt::VariableDecl(Arc::clone(param), file_pos);
+                        if !self.ctx.stop {
+                            self.visitor.visit_var_decl(&mut var_decl, &mut self.ctx);
+                        } else {
+                            return;
                         }
                     }
-
-                    if let Some(impls) = &mut struct_.as_ref().write().unwrap().implements {
-                        for tys in impls.values_mut() {
-                            for ty in tys {
-                                self.traverse_type(ty);
-                            }
-                        }
-                    }
-
-                    debug!("Visiting struct");
-                    if !self.ctx.stop {
-                        self.visitor.visit_struct(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
                 }
-                BlockHeader::Enum(enum_) => {
-                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                        let mut new_enum = enum_.as_ref().read().unwrap().clone();
 
-                        for member in new_enum.members.iter_mut() {
-                            let mut new_member = member.as_ref().read().unwrap().clone();
-                            new_member.set_copy_nr(deep_copy_nr);
-                            *member = Arc::new(RwLock::new(new_member));
-                        }
-
-                        *enum_ = Arc::new(RwLock::new(new_enum));
-                    }
-
-                    // TODO: Visit possible generics?
-                    for member in enum_.as_ref().write().unwrap().members.iter_mut() {
-                        if let Some(ty) = &mut member.as_ref().write().unwrap().ty {
-                            self.traverse_type(ty);
-                        }
-                    }
-
-                    debug!("Visiting enum");
-                    if !self.ctx.stop {
-                        self.visitor.visit_enum(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
-                }
-                BlockHeader::Union(union) => {
-                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                        let mut new_union = union.as_ref().read().unwrap().clone();
-
-                        for member in new_union.members.iter_mut() {
-                            let mut new_member = member.as_ref().read().unwrap().clone();
-                            new_member.set_copy_nr(deep_copy_nr);
-                            *member = Arc::new(RwLock::new(new_member));
-                        }
-
-                        *union = Arc::new(RwLock::new(new_union));
-                    }
-
-                    for member in union.as_ref().write().unwrap().members.iter_mut() {
-                        if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                            let mut new_member = member.as_ref().read().unwrap().clone();
-                            new_member.set_copy_nr(deep_copy_nr);
-                            *member = Arc::new(RwLock::new(new_member));
-                        }
-
-                        if let Some(ty) = &mut member.as_ref().write().unwrap().ty {
-                            self.traverse_type(ty);
-                        }
-                        if let Some(value) = &mut member.as_ref().write().unwrap().value {
-                            self.traverse_expr(value);
-                        }
-                    }
-
-                    if let Some(gens) = &mut union.as_ref().write().unwrap().generics {
-                        for ty in gens.iter_types_mut() {
-                            self.traverse_type(ty);
-                        }
-                    }
-
-                    if let Some(impls) = &mut union.as_ref().write().unwrap().implements {
-                        for tys in impls.values_mut() {
-                            for ty in tys {
-                                if self.ctx.stop {
-                                    return;
-                                }
-                                self.traverse_type(ty);
-                            }
-                        }
-                    }
-
-                    debug!("Visiting union");
-                    if !self.ctx.stop {
-                        self.visitor.visit_union(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
-                }
-                BlockHeader::Trait(_) => {
-                    // TODO: Visit containing methods?
-
-                    debug!("Visiting trait");
-                    if !self.ctx.stop {
-                        self.visitor.visit_trait(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
-                }
-                BlockHeader::Implement(..) => {
-                    debug!("Visiting impl");
-                    if !self.ctx.stop {
-                        self.visitor.visit_impl(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
-                }
-                BlockHeader::Anonymous => {
-                    debug!("Visiting anon");
-                    if !self.ctx.stop {
-                        self.visitor.visit_anon(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
-                }
-                BlockHeader::If => {
-                    debug!("Visiting if");
-                    if !self.ctx.stop {
-                        self.visitor.visit_if(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
-                }
-                BlockHeader::IfCase(expr_opt) => {
-                    if let Some(expr) = expr_opt {
-                        self.traverse_expr(expr);
-                    }
-                    debug!("Visiting if case");
-                    if !self.ctx.stop {
-                        self.visitor.visit_if_case(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
-                }
-                BlockHeader::Match(expr) => {
-                    self.traverse_expr(expr);
-                    debug!("Visiting match");
-                    if !self.ctx.stop {
-                        self.visitor.visit_match(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
-                }
-                BlockHeader::MatchCase(expr_opt) => {
-                    if let Some(expr) = expr_opt {
-                        self.traverse_expr(expr);
-                    }
-                    debug!("Visiting match case");
-                    if !self.ctx.stop {
-                        self.visitor.visit_match_case(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
-                }
-                BlockHeader::For(var, expr) => {
-                    if let Some(ty) = &mut var.ty {
+                if let Some(generic_impls) = &mut func.as_ref().write().unwrap().generics {
+                    for ty in generic_impls.iter_types_mut() {
                         self.traverse_type(ty);
                     }
+                }
 
-                    self.traverse_expr(expr);
-                    debug!("Visiting for");
-                    if !self.ctx.stop {
-                        self.visitor.visit_for(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
+                if let Some(ret_type_id) = &mut func.as_ref().write().unwrap().ret_type {
+                    self.traverse_type(ret_type_id);
                 }
-                BlockHeader::While(expr_opt) => {
-                    if let Some(expr) = expr_opt {
-                        self.traverse_expr(expr);
-                    }
-                    debug!("Visiting while");
-                    if !self.ctx.stop {
-                        self.visitor.visit_while(ast_token, &mut self.ctx);
-                    } else {
-                        return;
-                    }
+
+                if let Some(adt_type_id) = &mut func.as_ref().write().unwrap().method_adt {
+                    self.traverse_type(adt_type_id);
                 }
-                BlockHeader::Test(func) => {
+
+                debug!("Visiting func");
+                if !self.ctx.stop {
+                    self.visitor.visit_fn(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::Struct(struct_) => {
+                if let Some(deep_copy_nr) = self.ctx.copy_nr {
+                    let mut new_struct = struct_.as_ref().read().unwrap().clone();
+
+                    for member in new_struct.members.iter_mut() {
+                        let mut new_member = member.as_ref().read().unwrap().clone();
+                        new_member.set_copy_nr(deep_copy_nr);
+                        *member = Arc::new(RwLock::new(new_member));
+                    }
+
+                    *struct_ = Arc::new(RwLock::new(new_struct));
+                }
+
+                // TODO: Visit `implements`?
+                for member in struct_.as_ref().write().unwrap().members.iter_mut() {
                     if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                        if let Some(params) = &mut func.parameters {
-                            for param in params {
-                                let mut new_param = param.as_ref().read().unwrap().clone();
-                                new_param.set_copy_nr(deep_copy_nr);
-                                *param = Arc::new(RwLock::new(new_param));
-                            }
+                        let mut new_member = member.as_ref().read().unwrap().clone();
+                        new_member.set_copy_nr(deep_copy_nr);
+                        *member = Arc::new(RwLock::new(new_member));
+                    }
+
+                    if let Some(ty) = &mut member.as_ref().write().unwrap().ty {
+                        self.traverse_type(ty);
+                    }
+                    if let Some(value) = &mut member.as_ref().write().unwrap().value {
+                        self.traverse_expr(value);
+                    }
+                }
+
+                if let Some(gens) = &mut struct_.as_ref().write().unwrap().generics {
+                    for ty in gens.iter_types_mut() {
+                        self.traverse_type(ty);
+                    }
+                }
+
+                if let Some(impls) = &mut struct_.as_ref().write().unwrap().implements {
+                    for tys in impls.values_mut() {
+                        for ty in tys {
+                            self.traverse_type(ty);
                         }
                     }
+                }
 
-                    // TODO: Iterate through the `generics`.
+                debug!("Visiting struct");
+                if !self.ctx.stop {
+                    self.visitor.visit_struct(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::Enum(enum_) => {
+                if let Some(deep_copy_nr) = self.ctx.copy_nr {
+                    let mut new_enum = enum_.as_ref().read().unwrap().clone();
+
+                    for member in new_enum.members.iter_mut() {
+                        let mut new_member = member.as_ref().read().unwrap().clone();
+                        new_member.set_copy_nr(deep_copy_nr);
+                        *member = Arc::new(RwLock::new(new_member));
+                    }
+
+                    *enum_ = Arc::new(RwLock::new(new_enum));
+                }
+
+                // TODO: Visit possible generics?
+                for member in enum_.as_ref().write().unwrap().members.iter_mut() {
+                    if let Some(ty) = &mut member.as_ref().write().unwrap().ty {
+                        self.traverse_type(ty);
+                    }
+                }
+
+                debug!("Visiting enum");
+                if !self.ctx.stop {
+                    self.visitor.visit_enum(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::Union(union) => {
+                if let Some(deep_copy_nr) = self.ctx.copy_nr {
+                    let mut new_union = union.as_ref().read().unwrap().clone();
+
+                    for member in new_union.members.iter_mut() {
+                        let mut new_member = member.as_ref().read().unwrap().clone();
+                        new_member.set_copy_nr(deep_copy_nr);
+                        *member = Arc::new(RwLock::new(new_member));
+                    }
+
+                    *union = Arc::new(RwLock::new(new_union));
+                }
+
+                for member in union.as_ref().write().unwrap().members.iter_mut() {
+                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
+                        let mut new_member = member.as_ref().read().unwrap().clone();
+                        new_member.set_copy_nr(deep_copy_nr);
+                        *member = Arc::new(RwLock::new(new_member));
+                    }
+
+                    if let Some(ty) = &mut member.as_ref().write().unwrap().ty {
+                        self.traverse_type(ty);
+                    }
+                    if let Some(value) = &mut member.as_ref().write().unwrap().value {
+                        self.traverse_expr(value);
+                    }
+                }
+
+                if let Some(gens) = &mut union.as_ref().write().unwrap().generics {
+                    for ty in gens.iter_types_mut() {
+                        self.traverse_type(ty);
+                    }
+                }
+
+                if let Some(impls) = &mut union.as_ref().write().unwrap().implements {
+                    for tys in impls.values_mut() {
+                        for ty in tys {
+                            if self.ctx.stop {
+                                return;
+                            }
+                            self.traverse_type(ty);
+                        }
+                    }
+                }
+
+                debug!("Visiting union");
+                if !self.ctx.stop {
+                    self.visitor.visit_union(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::Trait(_) => {
+                // TODO: Visit containing methods?
+
+                debug!("Visiting trait");
+                if !self.ctx.stop {
+                    self.visitor.visit_trait(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::Implement(..) => {
+                debug!("Visiting impl");
+                if !self.ctx.stop {
+                    self.visitor.visit_impl(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::Anonymous => {
+                debug!("Visiting anon");
+                if !self.ctx.stop {
+                    self.visitor.visit_anon(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::If => {
+                debug!("Visiting if");
+                if !self.ctx.stop {
+                    self.visitor.visit_if(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::IfCase(expr_opt) => {
+                if let Some(expr) = expr_opt {
+                    self.traverse_expr(expr);
+                }
+                debug!("Visiting if case");
+                if !self.ctx.stop {
+                    self.visitor.visit_if_case(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::Match(expr) => {
+                self.traverse_expr(expr);
+                debug!("Visiting match");
+                if !self.ctx.stop {
+                    self.visitor.visit_match(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::MatchCase(expr_opt) => {
+                if let Some(expr) = expr_opt {
+                    self.traverse_expr(expr);
+                }
+                debug!("Visiting match case");
+                if !self.ctx.stop {
+                    self.visitor.visit_match_case(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::For(var, expr) => {
+                if let Some(ty) = &mut var.ty {
+                    self.traverse_type(ty);
+                }
+
+                self.traverse_expr(expr);
+                debug!("Visiting for");
+                if !self.ctx.stop {
+                    self.visitor.visit_for(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::While(expr_opt) => {
+                if let Some(expr) = expr_opt {
+                    self.traverse_expr(expr);
+                }
+                debug!("Visiting while");
+                if !self.ctx.stop {
+                    self.visitor.visit_while(block, &mut self.ctx);
+                } else {
+                    return;
+                }
+            }
+            BlockHeader::Test(func) => {
+                if let Some(deep_copy_nr) = self.ctx.copy_nr {
                     if let Some(params) = &mut func.parameters {
                         for param in params {
-                            if let Some(ty) = &mut param.as_ref().write().unwrap().ty {
-                                self.traverse_type(ty);
-                            }
+                            let mut new_param = param.as_ref().read().unwrap().clone();
+                            new_param.set_copy_nr(deep_copy_nr);
+                            *param = Arc::new(RwLock::new(new_param));
                         }
                     }
+                }
 
-                    if let Some(ret_ty) = &mut func.ret_type {
-                        self.traverse_type(ret_ty);
-                    }
-
-                    debug!("Visiting test");
-                    if !self.ctx.stop {
-                        self.visitor.visit_test(ast_token, &mut self.ctx);
-                    } else {
-                        return;
+                // TODO: Iterate through the `generics`.
+                if let Some(params) = &mut func.parameters {
+                    for param in params {
+                        if let Some(ty) = &mut param.as_ref().write().unwrap().ty {
+                            self.traverse_type(ty);
+                        }
                     }
                 }
-            },
-            _ => {
-                // TODO: Is it possible that `self.traverse_context.file_pos`
-                //       contains a old FilePosition at this point.
-                let err = LangError::new(
-                    format!(
-                        "Expected block token when traversing block, got: {:?}",
-                        ast_token
-                    ),
-                    LangErrorKind::GeneralError,
-                    Some(self.ctx.file_pos),
-                );
-                self.errors.push(err);
+
+                if let Some(ret_ty) = &mut func.ret_type {
+                    self.traverse_type(ret_ty);
+                }
+
+                debug!("Visiting test");
+                if !self.ctx.stop {
+                    self.visitor.visit_test(block, &mut self.ctx);
+                } else {
+                    return;
+                }
             }
         }
 
@@ -652,6 +633,12 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                 }
             }
             Expr::Type(ty, ..) => self.traverse_type(ty),
+            Expr::Block(block, type_id_opt) => {
+                self.traverse_block(block);
+                if let Some(type_id) = type_id_opt {
+                    self.traverse_type(type_id);
+                }
+            }
         }
 
         self.ctx.file_pos = old_pos;

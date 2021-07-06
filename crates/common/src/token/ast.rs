@@ -1,5 +1,6 @@
-use super::{block::BlockHeader, expr::Expr, stmt::Stmt};
-use crate::{file::FilePosition, BlockId};
+use crate::file::FilePosition;
+
+use super::{block::Block, expr::Expr, stmt::Stmt};
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone)]
@@ -7,7 +8,7 @@ pub enum AstToken {
     // TODO: Rust/C block (statement/expression (?)).
     Expr(Expr),
     Stmt(Stmt),
-    Block(BlockHeader, FilePosition, BlockId, Vec<AstToken>),
+    Block(Block),
     Comment(String, CommentType, FilePosition),
     /// Will be set for removed tokens, should be ignored when visited.
     Empty,
@@ -28,9 +29,8 @@ impl AstToken {
         match self {
             AstToken::Expr(expr) => expr.file_pos(),
             AstToken::Stmt(stmt) => stmt.file_pos(),
-
-            AstToken::Comment(.., file_pos) | AstToken::Block(_, file_pos, ..) => Some(file_pos),
-
+            AstToken::Block(block) => Some(&block.file_pos),
+            AstToken::Comment(.., file_pos) => Some(file_pos),
             AstToken::Empty | AstToken::EOF => None,
         }
     }

@@ -6,7 +6,7 @@ use common::{
     path::LangPath,
     token::{
         ast::AstToken,
-        block::BlockHeader,
+        block::{Block, BlockHeader},
         expr::Expr,
         op::{Op, UnOperator},
     },
@@ -68,7 +68,11 @@ impl MatchExhaustAnalyzer {
         // This loop will return error if any of the case expressions isn't a
         // "EnumAccess" since it isn't supported atm (should be in the future).
         for match_case in match_cases {
-            if let AstToken::Block(BlockHeader::MatchCase(Some(expr)), ..) = match_case {
+            if let AstToken::Block(Block {
+                header: BlockHeader::MatchCase(Some(expr)),
+                ..
+            }) = match_case
+            {
                 if let Expr::Op(Op::UnOp(op)) = expr {
                     if let UnOperator::EnumAccess(name, ..) = &op.operator {
                         member_names.remove(name);
@@ -80,7 +84,11 @@ impl MatchExhaustAnalyzer {
                     "Expected match case expression to be enum member, was: {:#?}",
                     match_case
                 )));
-            } else if let AstToken::Block(BlockHeader::MatchCase(None), ..) = match_case {
+            } else if let AstToken::Block(Block {
+                header: BlockHeader::MatchCase(None),
+                ..
+            }) = match_case
+            {
                 // "default" block found. This case handles all possible values,
                 // this match case exhaust all possible cases/values.
                 return Ok(());
@@ -120,8 +128,13 @@ impl Visitor for MatchExhaustAnalyzer {
     /// Currently supported types:
     ///   ints
     ///   enums
-    fn visit_match(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Match(match_expr), _, _, match_cases) = ast_token {
+    fn visit_match(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Match(match_expr),
+            body: match_cases,
+            ..
+        } = block
+        {
             let type_id = match match_expr.get_expr_type() {
                 Ok(type_id) => type_id,
                 Err(err) => {

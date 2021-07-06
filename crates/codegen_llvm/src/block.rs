@@ -19,7 +19,7 @@ use common::{
     path::LangPath,
     token::{
         ast::AstToken,
-        block::{Adt, BlockHeader, Fn},
+        block::{Adt, Block, BlockHeader, Fn},
         expr::{Expr, Var},
     },
     ty::{inner_ty::InnerTy, to_string::to_string_path, ty::Ty, ty_env::TyEnv, type_id::TypeId},
@@ -191,33 +191,32 @@ impl CodeGenTy {
 }
 
 impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
-    pub(super) fn compile_block(
-        &mut self,
-        header: &mut BlockHeader,
-        file_pos: &FilePosition,
-        id: BlockId,
-        body: &mut [AstToken],
-    ) -> LangResult<()> {
-        self.cur_block_id = id;
+    pub(super) fn compile_block(&mut self, block: &mut Block) -> LangResult<()> {
+        self.cur_block_id = block.id;
 
-        match header {
+        match &mut block.header {
             BlockHeader::Default => {
-                for token in body {
+                for token in &mut block.body {
                     self.compile(token)?;
-                    self.cur_block_id = id;
+                    self.cur_block_id = block.id;
                 }
             }
             BlockHeader::Fn(func) => {
-                self.compile_fn(&func.as_ref().borrow().read().unwrap(), file_pos, id, body)?;
+                self.compile_fn(
+                    &func.as_ref().borrow().read().unwrap(),
+                    &block.file_pos,
+                    block.id,
+                    &mut block.body,
+                )?;
             }
             BlockHeader::Implement(..) => {
-                for mut ast_token in body {
-                    if let AstToken::Block(
-                        BlockHeader::Fn(func),
-                        func_file_pos,
-                        func_id,
-                        func_body,
-                    ) = &mut ast_token
+                for mut ast_token in &mut block.body {
+                    if let AstToken::Block(Block {
+                        header: BlockHeader::Fn(func),
+                        body: func_body,
+                        id: func_id,
+                        file_pos: func_file_pos,
+                    }) = &mut ast_token
                     {
                         self.compile_fn(
                             &func.as_ref().borrow().read().unwrap(),
@@ -229,24 +228,24 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             }
             BlockHeader::Anonymous => {
-                self.compile_anon(file_pos, id, body)?;
+                self.compile_anon(&block.file_pos, block.id, &mut block.body)?;
             }
 
             BlockHeader::If => {
-                self.compile_if(file_pos, id, body)?;
+                self.compile_if(&block.file_pos, block.id, &mut block.body)?;
             }
             BlockHeader::IfCase(_) => {
                 return Err(self.err(
                     "Unexpected IfCase in compile_block".into(),
-                    Some(file_pos.to_owned()),
+                    Some(block.file_pos.to_owned()),
                 ));
             }
 
-            BlockHeader::Match(expr) => self.compile_match(expr, id, body)?,
+            BlockHeader::Match(expr) => self.compile_match(expr, block.id, &mut block.body)?,
             BlockHeader::MatchCase(_) => {
                 return Err(self.err(
                     "Unexpected MatchCase in compile_block".into(),
-                    Some(file_pos.to_owned()),
+                    Some(block.file_pos.to_owned()),
                 ));
             }
 
@@ -258,13 +257,18 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             }
 
             //BlockHeader::For(var, expr) => self.compile_for(var, expr),
-            BlockHeader::While(expr_opt) => self.compile_while(expr_opt, file_pos, id, body)?,
+            BlockHeader::While(expr_opt) => {
+                self.compile_while(expr_opt, &block.file_pos, block.id, &mut block.body)?
+            }
 
             //BlockHeader::With(expr) => self.compile_with(expr),
             //BlockHeader::Defer(expr) => self.compile_defer(expr),
 
             //BlockHeader::Test(test_func) => self.compile_test_func(expr),
-            _ => panic!("{}", format!("TODO: compile_block type: {:?}", header)),
+            _ => panic!(
+                "{}",
+                format!("TODO: compile_block type: {:?}", block.header)
+            ),
         }
 
         Ok(())
@@ -296,6 +300,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         func_id: BlockId,
         body: &mut [AstToken],
     ) -> LangResult<()> {
+        let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+
         let module = self
             .analyze_ctx
             .ast_ctx
@@ -303,16 +309,11 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             .unwrap_or_default();
 
         let fn_name = if let Some(adt_type_id) = &func.method_adt {
-            let adt_ty = self
-                .analyze_ctx
-                .ty_env
-                .lock()
-                .unwrap()
-                .ty_clone(*adt_type_id)?;
+            let adt_ty = ty_env_guard.ty_clone(*adt_type_id)?;
             if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
                 util::to_method_name(
-                    &self.analyze_ctx.ty_env.lock().unwrap(),
+                    &ty_env_guard,
                     &adt_path.last().cloned().unwrap().into(),
                     Some(&adt_gens),
                     &func.name,
@@ -327,16 +328,16 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         let full_path = module.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos));
 
-        let fn_val = if let Some(fn_val) = self.module.get_function(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        )) {
+        let fn_val = if let Some(fn_val) = self
+            .module
+            .get_function(&to_string_path(&ty_env_guard, &full_path))
+        {
             fn_val
         } else {
             return Err(self.err(
                 format!(
                     "Unable to find function with name \"{}\".",
-                    to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
+                    to_string_path(&ty_env_guard, &full_path)
                 ),
                 Some(file_pos.to_owned()),
             ));
@@ -378,6 +379,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             let key = (param.as_ref().borrow().read().unwrap().full_name(), func_id);
             self.variables.insert(key, ptr);
         }
+
+        std::mem::drop(ty_env_guard);
 
         // Compile the tokens in the body of the function.
         for token in body {
@@ -430,12 +433,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             .unwrap_or_default();
 
         let fn_name = if let Some(adt_type_id) = &func.method_adt {
-            let adt_ty = self
-                .analyze_ctx
-                .ty_env
-                .lock()
-                .unwrap()
-                .ty_clone(*adt_type_id)?;
+            let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+            let adt_ty = ty_env_guard.ty_clone(*adt_type_id)?;
 
             if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
@@ -443,7 +442,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     LangPath::new(vec![adt_path.last().unwrap().clone()], None);
 
                 util::to_method_name(
-                    &self.analyze_ctx.ty_env.lock().unwrap(),
+                    &ty_env_guard,
                     &adt_path_without_module,
                     Some(&adt_gens),
                     &func.name,
@@ -593,7 +592,11 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let mut branch_info = BranchInfo::new();
         branch_info.if_branches.push(cur_block);
         for (i, if_case) in body.iter().enumerate() {
-            if let AstToken::Block(BlockHeader::IfCase(expr_opt), ..) = &if_case {
+            if let AstToken::Block(Block {
+                header: BlockHeader::IfCase(expr_opt),
+                ..
+            }) = &if_case
+            {
                 // Skip adding a branch block if this is the first case (since it
                 // has the branch block `cur_block`). Also only add a branch block
                 // if this `if_case` contains a expression that can be "branched on".
@@ -642,8 +645,12 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         for (index, mut if_case) in body.iter_mut().enumerate() {
             self.cur_block_id = id;
 
-            if let AstToken::Block(BlockHeader::IfCase(expr_opt), file_pos, inner_id, inner_body) =
-                &mut if_case
+            if let AstToken::Block(Block {
+                header: BlockHeader::IfCase(expr_opt),
+                body: inner_body,
+                id: inner_id,
+                file_pos,
+            }) = &mut if_case
             {
                 self.compile_if_case(
                     expr_opt,
@@ -764,8 +771,11 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         for mut match_case in body.iter_mut() {
             self.cur_block_id = id;
 
-            if let AstToken::Block(BlockHeader::MatchCase(Some(case_expr)), .., inner_body) =
-                &mut match_case
+            if let AstToken::Block(Block {
+                header: BlockHeader::MatchCase(Some(case_expr)),
+                body: inner_body,
+                ..
+            }) = &mut match_case
             {
                 let cur_block = self.cur_basic_block.unwrap();
                 let match_case_block = self
@@ -803,7 +813,11 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
 
                 cases.push((value, match_case_block));
-            } else if let AstToken::Block(BlockHeader::MatchCase(None), ..) = &match_case {
+            } else if let AstToken::Block(Block {
+                header: BlockHeader::MatchCase(None),
+                ..
+            }) = &match_case
+            {
                 // Default block will be handled in logic below. Ignore for now.
             } else {
                 return Err(self.err(
@@ -825,8 +839,12 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         for mut match_case in body.iter_mut() {
             self.cur_block_id = id;
 
-            if let AstToken::Block(BlockHeader::MatchCase(None), file_pos, _, inner_body) =
-                &mut match_case
+            if let AstToken::Block(Block {
+                header: BlockHeader::MatchCase(None),
+                body: inner_body,
+                file_pos,
+                ..
+            }) = &mut match_case
             {
                 if default_block_opt.is_some() {
                     return Err(self.err(

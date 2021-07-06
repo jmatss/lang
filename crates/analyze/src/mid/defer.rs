@@ -3,7 +3,12 @@ use std::collections::{hash_map::Entry, HashMap};
 use common::{
     ctx::ast_ctx::AstCtx,
     error::LangError,
-    token::{ast::AstToken, block::BlockHeader, expr::Expr, stmt::Stmt},
+    token::{
+        ast::AstToken,
+        block::{Block, BlockHeader},
+        expr::Expr,
+        stmt::Stmt,
+    },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     BlockId,
 };
@@ -115,71 +120,75 @@ impl DeferAnalyzer {
         self.get_defers(ast_ctx, id, |x| x)
     }
 
-    fn traverse_block(&mut self, ast_ctx: &AstCtx, mut ast_token: &mut AstToken) {
-        if let AstToken::Block(block_header, _, id, body) = &mut ast_token {
-            let mut i = 0;
-            while i < body.len() {
-                let child_token = &mut body[i];
-                match child_token {
-                    // If the token is a "Defer" statement, store the defer
-                    // in the `self.defer_stmts`.
-                    AstToken::Stmt(Stmt::Defer(expr, ..)) => {
-                        self.store_defer(expr.clone(), *id);
-                    }
+    fn traverse_token_block(&mut self, ast_ctx: &AstCtx, ast_token: &mut AstToken) {
+        if let AstToken::Block(block) = ast_token {
+            self.traverse_block(ast_ctx, block);
+        }
+    }
 
-                    // This is a branch out of the current function, return all
-                    // "outstanding" defers and add them before this return.
-                    AstToken::Stmt(Stmt::Return(..)) => {
-                        if let Some(defers) = self.get_defers_all_parents(ast_ctx, *id) {
-                            self.insert_defers_into_ast(&mut i, body, defers);
-                        }
-                    }
-
-                    // A branch out of a local scope, get the "outstanding"
-                    // deferes introduces in this scope.
-                    AstToken::Stmt(Stmt::Yield(..))
-                    | AstToken::Stmt(Stmt::Break(..))
-                    | AstToken::Stmt(Stmt::Continue(..)) => {
-                        if let Some(defers) = self.get_defers_until_branchable(ast_ctx, *id) {
-                            self.insert_defers_into_ast(&mut i, body, defers);
-                        }
-                    }
-
-                    // For all other tokens, traverse recursively so that the
-                    // defers are introduced in the correct scope.
-                    _ => self.traverse_block(ast_ctx, child_token),
+    fn traverse_block(&mut self, ast_ctx: &AstCtx, block: &mut Block) {
+        let mut i = 0;
+        while i < block.body.len() {
+            let child_token = &mut block.body[i];
+            match child_token {
+                // If the token is a "Defer" statement, store the defer
+                // in the `self.defer_stmts`.
+                AstToken::Stmt(Stmt::Defer(expr, ..)) => {
+                    self.store_defer(expr.clone(), block.id);
                 }
-                i += 1;
+
+                // This is a branch out of the current function, return all
+                // "outstanding" defers and add them before this return.
+                AstToken::Stmt(Stmt::Return(..)) => {
+                    if let Some(defers) = self.get_defers_all_parents(ast_ctx, block.id) {
+                        self.insert_defers_into_ast(&mut i, &mut block.body, defers);
+                    }
+                }
+
+                // A branch out of a local scope, get the "outstanding"
+                // deferes introduces in this scope.
+                AstToken::Stmt(Stmt::Yield(..))
+                | AstToken::Stmt(Stmt::Break(..))
+                | AstToken::Stmt(Stmt::Continue(..)) => {
+                    if let Some(defers) = self.get_defers_until_branchable(ast_ctx, block.id) {
+                        self.insert_defers_into_ast(&mut i, &mut block.body, defers);
+                    }
+                }
+
+                // For all other tokens, traverse recursively so that the
+                // defers are introduced in the correct scope.
+                _ => self.traverse_token_block(ast_ctx, child_token),
             }
+            i += 1;
+        }
 
-            let block_ctx = if let Some(block_ctx) = ast_ctx.block_ctxs.get(id) {
-                block_ctx
-            } else {
-                let err = ast_ctx.err(format!(
-                    "Unable to find block info for block with ID: {}",
-                    id
-                ));
-                self.errors.push(err);
-                return;
-            };
+        let block_ctx = if let Some(block_ctx) = ast_ctx.block_ctxs.get(&block.id) {
+            block_ctx
+        } else {
+            let err = ast_ctx.err(format!(
+                "Unable to find block info for block with ID: {}",
+                block.id
+            ));
+            self.errors.push(err);
+            return;
+        };
 
-            // The end of the blocks scope has been reached. Any defers declared
-            // in this scope should be executed at this point.
-            if !block_ctx.all_children_contains_return {
-                match block_header {
-                    BlockHeader::Anonymous
-                    | BlockHeader::If
-                    | BlockHeader::IfCase(_)
-                    | BlockHeader::Match(_)
-                    | BlockHeader::MatchCase(_)
-                    | BlockHeader::For(_, _)
-                    | BlockHeader::While(_) => {
-                        if let Some(defers) = self.get_defers_curr_block(ast_ctx, *id) {
-                            self.push_defers_into_ast(body, defers);
-                        }
+        // The end of the blocks scope has been reached. Any defers declared
+        // in this scope should be executed at this point.
+        if !block_ctx.all_children_contains_return {
+            match &block.header {
+                BlockHeader::Anonymous
+                | BlockHeader::If
+                | BlockHeader::IfCase(_)
+                | BlockHeader::Match(_)
+                | BlockHeader::MatchCase(_)
+                | BlockHeader::For(_, _)
+                | BlockHeader::While(_) => {
+                    if let Some(defers) = self.get_defers_curr_block(ast_ctx, block.id) {
+                        self.push_defers_into_ast(&mut block.body, defers);
                     }
-                    _ => (),
                 }
+                _ => (),
             }
         }
     }
@@ -194,7 +203,7 @@ impl Visitor for DeferAnalyzer {
         }
     }
 
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        self.traverse_block(&ctx.ast_ctx, ast_token);
+    fn visit_default_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        self.traverse_block(&ctx.ast_ctx, block);
     }
 }

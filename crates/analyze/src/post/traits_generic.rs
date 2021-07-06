@@ -55,9 +55,9 @@ impl TraitsGenericAnalyzer {
         let last_part = adt_path_with_gens.pop().unwrap();
         adt_path_with_gens.push(LangPathPart(last_part.0, Some(generics.clone())));
 
-        let ty_env_lock = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock().unwrap();
 
-        let adt = ctx.ast_ctx.get_adt(&ty_env_lock, &adt_path_with_gens)?;
+        let adt = ctx.ast_ctx.get_adt(&ty_env_guard, &adt_path_with_gens)?;
         let adt = adt.as_ref().read().unwrap();
 
         // Iterate through all generics for this ADT and make sure that the
@@ -80,8 +80,8 @@ impl TraitsGenericAnalyzer {
             // generic with name `gen_name`. This is the type that should implement
             // the traits in `trait_tys`.
             let (generic_adt_name, generic_adt) =
-                if let Ok(Some(ident)) = get_ident(&ty_env_lock, *gen_type_id) {
-                    (ident.clone(), ctx.ast_ctx.get_adt(&ty_env_lock, &ident)?)
+                if let Ok(Some(ident)) = get_ident(&ty_env_guard, *gen_type_id) {
+                    (ident.clone(), ctx.ast_ctx.get_adt(&ty_env_guard, &ident)?)
                 } else {
                     let trait_names = trait_tys
                         .iter()
@@ -90,7 +90,7 @@ impl TraitsGenericAnalyzer {
                     let err = ctx.ast_ctx.err(format!(
                         "ADT \"{0}\" has \"where\" clause for type \"{1}\" which isn't a ADT. \
                         The type \"{1}\" can therefore not implement the required traits:{2}.",
-                        to_string_path(&ty_env_lock, &adt_path_with_gens),
+                        to_string_path(&ty_env_guard, &adt_path_with_gens),
                         gen_type_id.to_string(),
                         trait_names,
                     ));
@@ -101,7 +101,7 @@ impl TraitsGenericAnalyzer {
             let gen_struct_methods = &generic_adt.methods;
 
             for trait_type_id in trait_tys {
-                let trait_ty = ty_env_lock.ty(*trait_type_id)?.clone();
+                let trait_ty = ty_env_guard.ty(*trait_type_id)?.clone();
                 let trait_name = if let Ty::CompoundType(InnerTy::Trait(trait_name), ..) = trait_ty
                 {
                     trait_name
@@ -109,13 +109,13 @@ impl TraitsGenericAnalyzer {
                     let err = ctx.ast_ctx.err(format!(
                         "Generic with name \"{}\" on ADT \"{}\" implements non trait type: {:#?}",
                         gen_name,
-                        to_string_path(&ty_env_lock, &adt_path_with_gens),
+                        to_string_path(&ty_env_guard, &adt_path_with_gens),
                         trait_type_id
                     ));
                     return Err(err);
                 };
 
-                let trait_ = ctx.ast_ctx.get_trait(&ty_env_lock, &trait_name)?;
+                let trait_ = ctx.ast_ctx.get_trait(&ty_env_guard, &trait_name)?;
 
                 for trait_method in &trait_.as_ref().read().unwrap().methods {
                     let method_name = trait_method.name.clone();
@@ -128,10 +128,10 @@ impl TraitsGenericAnalyzer {
                                 "Struct \"{0}\" requires that its generic type \"{1}\" implements \
                             the trait \"{2}\". The type \"{3}\" is used as generic \"{1}\", \
                             but it does NOT implement the function \"{4}\" from the trait \"{2}\".",
-                                to_string_path(&ty_env_lock, &adt_path_with_gens),
+                                to_string_path(&ty_env_guard, &adt_path_with_gens),
                                 gen_name,
-                                to_string_path(&ty_env_lock, &trait_name),
-                                to_string_path(&ty_env_lock, &generic_adt_name),
+                                to_string_path(&ty_env_guard, &trait_name),
+                                to_string_path(&ty_env_guard, &generic_adt_name),
                                 method_name
                             ));
                             return Err(err);
@@ -145,8 +145,8 @@ impl TraitsGenericAnalyzer {
                     if let Err(cmp_errors) = struct_method_borrow.trait_cmp(trait_method) {
                         let err_msg_start = format!(
                             "Struct \"{}\"s impl of trait \"{}\"s method \"{}\" is incorrect.\n",
-                            to_string_path(&ty_env_lock, &adt_path_with_gens),
-                            to_string_path(&ty_env_lock, &trait_name),
+                            to_string_path(&ty_env_guard, &adt_path_with_gens),
+                            to_string_path(&ty_env_guard, &trait_name),
                             method_name,
                         );
                         let err_msg_end = format!(

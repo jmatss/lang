@@ -177,10 +177,10 @@ impl Visitor for CallArgs {
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
         let func_res = {
-            let ty_env_lock = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock().unwrap();
 
             if let Some(adt_type_id) = &fn_call.method_adt {
-                let adt_ty = match ty_env_lock.ty(*adt_type_id) {
+                let adt_ty = match ty_env_guard.ty(*adt_type_id) {
                     Ok(adt_ty) => adt_ty.clone(),
                     Err(err) => {
                         self.errors.push(err);
@@ -218,7 +218,7 @@ impl Visitor for CallArgs {
                 };
 
                 ctx.ast_ctx
-                    .get_method(&ty_env_lock, &full_path, &fn_call.half_name(&ty_env_lock))
+                    .get_method(&ty_env_guard, &full_path, &fn_call.half_name(&ty_env_guard))
             } else {
                 let partial_path = fn_call.module.clone_push(
                     &fn_call.name,
@@ -227,7 +227,7 @@ impl Visitor for CallArgs {
                 );
 
                 let full_path = match ctx.ast_ctx.calculate_fn_full_path(
-                    &ty_env_lock,
+                    &ty_env_guard,
                     &partial_path,
                     ctx.block_id,
                 ) {
@@ -238,7 +238,7 @@ impl Visitor for CallArgs {
                     }
                 };
 
-                ctx.ast_ctx.get_fn(&ty_env_lock, &full_path)
+                ctx.ast_ctx.get_fn(&ty_env_guard, &full_path)
             }
         };
 

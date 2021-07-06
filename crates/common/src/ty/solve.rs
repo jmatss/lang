@@ -59,10 +59,10 @@ pub fn insert_constraint(
     type_id_b: TypeId,
 ) -> LangResult<()> {
     let (type_id_a, is_any_a, type_id_b, is_any_b) = {
-        let ty_env_lock = ty_env.lock().unwrap();
+        let ty_env_guard = ty_env.lock().unwrap();
 
-        let type_id_a = ty_env_lock.forwarded(type_id_a);
-        let type_id_b = ty_env_lock.forwarded(type_id_b);
+        let type_id_a = ty_env_guard.forwarded(type_id_a);
+        let type_id_b = ty_env_guard.forwarded(type_id_b);
 
         if type_id_a == type_id_b {
             return Ok(());
@@ -71,13 +71,13 @@ pub fn insert_constraint(
         debug!(
             "insert_constraint -- type_id_a: {}, ty_a: {:#?}\ntype_id_b: {}, ty_b: {:#?}",
             type_id_a,
-            ty_env_lock.ty(type_id_a)?,
+            ty_env_guard.ty(type_id_a)?,
             type_id_b,
-            ty_env_lock.ty(type_id_b)?,
+            ty_env_guard.ty(type_id_b)?,
         );
 
-        let is_any_a = is_any(&ty_env_lock, type_id_a)?;
-        let is_any_b = is_any(&ty_env_lock, type_id_b)?;
+        let is_any_a = is_any(&ty_env_guard, type_id_a)?;
+        let is_any_b = is_any(&ty_env_guard, type_id_b)?;
 
         (type_id_a, is_any_a, type_id_b, is_any_b)
     };
@@ -112,17 +112,17 @@ fn insert_constraint_inner(
     inf_type_id: TypeId,
 ) -> LangResult<()> {
     let (ty, inf_ty) = {
-        let ty_env_lock = ty_env.lock().unwrap();
+        let ty_env_guard = ty_env.lock().unwrap();
 
-        let type_id = ty_env_lock.forwarded(type_id);
-        let inf_type_id = ty_env_lock.forwarded(inf_type_id);
+        let type_id = ty_env_guard.forwarded(type_id);
+        let inf_type_id = ty_env_guard.forwarded(inf_type_id);
 
         if type_id == inf_type_id {
             return Ok(());
         }
 
-        let ty = ty_env_lock.ty(type_id)?.clone();
-        let inf_ty = ty_env_lock.ty(inf_type_id)?.clone();
+        let ty = ty_env_guard.ty(type_id)?.clone();
+        let inf_ty = ty_env_guard.ty(inf_type_id)?.clone();
 
         (ty, inf_ty)
     };
@@ -377,14 +377,14 @@ fn solve_compound(
 
     // Solve the inner structure type.
     if let InnerTy::UnknownIdent(path, block_id) = inner_ty {
-        let ty_env_lock = ty_env.lock().unwrap();
+        let ty_env_guard = ty_env.lock().unwrap();
 
         let full_path_opt = if let Ok(full_path) =
-            ast_ctx.calculate_adt_full_path(&ty_env_lock, &path.without_gens(), *block_id)
+            ast_ctx.calculate_adt_full_path(&ty_env_guard, &path.without_gens(), *block_id)
         {
             Some(full_path)
         } else if let Ok(full_path) =
-            ast_ctx.calculate_trait_full_path(&ty_env_lock, &path, *block_id)
+            ast_ctx.calculate_trait_full_path(&ty_env_guard, &path, *block_id)
         {
             Some(full_path)
         } else {
@@ -397,13 +397,13 @@ fn solve_compound(
             let last_part = full_path_with_gens.pop().unwrap();
             full_path_with_gens.push(LangPathPart(last_part.0, Some(generics.clone())));
 
-            let new_inner_type_id = if ast_ctx.is_struct(&ty_env_lock, &full_path) {
+            let new_inner_type_id = if ast_ctx.is_struct(&ty_env_guard, &full_path) {
                 Some(InnerTy::Struct(full_path_with_gens))
-            } else if ast_ctx.is_enum(&ty_env_lock, &full_path) {
+            } else if ast_ctx.is_enum(&ty_env_guard, &full_path) {
                 Some(InnerTy::Enum(full_path_with_gens))
-            } else if ast_ctx.is_union(&ty_env_lock, &full_path) {
+            } else if ast_ctx.is_union(&ty_env_guard, &full_path) {
                 Some(InnerTy::Union(full_path_with_gens))
-            } else if ast_ctx.is_trait(&ty_env_lock, &full_path) {
+            } else if ast_ctx.is_trait(&ty_env_guard, &full_path) {
                 Some(InnerTy::Trait(full_path_with_gens))
             } else {
                 None
@@ -562,11 +562,11 @@ fn solve_unknown_adt_member(
     };
 
     let mut new_type_id = {
-        let ty_env_lock = ty_env.lock().unwrap();
-        let file_pos = get_file_pos(&ty_env_lock, *adt_type_id).cloned();
+        let ty_env_guard = ty_env.lock().unwrap();
+        let file_pos = get_file_pos(&ty_env_guard, *adt_type_id).cloned();
         ast_ctx
             .get_adt_member(
-                &ty_env_lock,
+                &ty_env_guard,
                 &adt_path.without_gens(),
                 &member_name,
                 file_pos,

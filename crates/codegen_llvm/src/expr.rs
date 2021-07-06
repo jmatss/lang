@@ -87,6 +87,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 ExprTy::LValue => self.get_var_ptr(&var).map(|x| x.into()),
                 ExprTy::RValue => self.compile_var_load(&var).map(|x| x.into()),
             },
+            Expr::Block(_, _) => todo!("codegen: Expr::Block"),
         }?;
 
         self.prev_expr = Some(any_value);
@@ -165,9 +166,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     ) -> LangResult<IntValue<'ctx>> {
         // TODO: Where should the integer literal conversion be made?
         let inner_ty = if let Some(type_id) = type_id_opt {
-            let ty_env_lock = self.analyze_ctx.ty_env.lock().unwrap();
-            let fwd_type_id = ty_env_lock.forwarded(*type_id);
-            get_inner(&ty_env_lock, fwd_type_id)?.clone()
+            let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+            let fwd_type_id = ty_env_guard.forwarded(*type_id);
+            get_inner(&ty_env_guard, fwd_type_id)?.clone()
         } else {
             InnerTy::default_int()
         };
@@ -233,9 +234,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         file_pos: Option<FilePosition>,
     ) -> LangResult<FloatValue<'ctx>> {
         let inner_ty = if let Some(type_id) = type_id_opt {
-            let ty_env_lock = self.analyze_ctx.ty_env.lock().unwrap();
-            let fwd_type_id = ty_env_lock.forwarded(*type_id);
-            get_inner(&ty_env_lock, fwd_type_id)?.clone()
+            let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+            let fwd_type_id = ty_env_guard.forwarded(*type_id);
+            get_inner(&ty_env_guard, fwd_type_id)?.clone()
         } else {
             InnerTy::default_float()
         };

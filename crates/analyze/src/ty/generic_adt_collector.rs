@@ -7,7 +7,10 @@ use common::{
     hash::DerefType,
     hash_map::TyEnvHashMap,
     path::LangPath,
-    token::{ast::AstToken, block::BlockHeader},
+    token::{
+        ast::AstToken,
+        block::{Block, BlockHeader},
+    },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
     ty::{
         contains::contains_generic_shallow,
@@ -123,20 +126,20 @@ impl<'a> GenericAdtCollector<'a> {
             _ => return Ok(()),
         };
 
-        let mut ty_env_lock = ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
 
         // Set names of generics if they aren't set already.
-        set_generic_names(&mut ty_env_lock, &ctx.ast_ctx, type_id)?;
+        set_generic_names(&mut ty_env_guard, &ctx.ast_ctx, type_id)?;
 
         let deref_type = DerefType::None;
         let contains_key =
             self.generic_adts
-                .contains_key(&ty_env_lock, deref_type, &adt_path_with_gens)?;
+                .contains_key(&ty_env_guard, deref_type, &adt_path_with_gens)?;
 
         if contains_key {
             let type_ids = self
                 .generic_adts
-                .get_mut(&ty_env_lock, deref_type, &adt_path_with_gens)?
+                .get_mut(&ty_env_guard, deref_type, &adt_path_with_gens)?
                 .unwrap();
 
             if !type_ids.contains(&type_id) {
@@ -145,7 +148,7 @@ impl<'a> GenericAdtCollector<'a> {
         } else {
             let type_ids = vec![type_id];
             self.generic_adts
-                .insert(&ty_env_lock, deref_type, adt_path_with_gens, type_ids)?;
+                .insert(&ty_env_guard, deref_type, adt_path_with_gens, type_ids)?;
         }
 
         Ok(())
@@ -162,7 +165,10 @@ impl<'a> GenericAdtCollector<'a> {
             // but at the same time borrow the `ast_token` which contains the
             // `adt_path`.
             let impl_opt = match ast_token {
-                AstToken::Block(BlockHeader::Implement(adt_path, _), ..) => {
+                AstToken::Block(Block {
+                    header: BlockHeader::Implement(adt_path, _),
+                    ..
+                }) => {
                     if ctx
                         .ast_ctx
                         .get_adt(&ctx.ty_env.lock().unwrap(), adt_path)
@@ -185,13 +191,13 @@ impl<'a> GenericAdtCollector<'a> {
                     self.errors.append(&mut errs);
                 }
 
-                let ty_env_lock = ctx.ty_env.lock().unwrap();
+                let ty_env_guard = ctx.ty_env.lock().unwrap();
 
                 for (method_name, type_ids) in collector.nested_generic_adts.iter() {
                     for type_id in type_ids {
                         let deref_type = DerefType::None;
                         let contains_key = self.nested_generic_adts.contains_key(
-                            &ty_env_lock,
+                            &ty_env_guard,
                             deref_type,
                             &adt_path_without_gens,
                         )?;
@@ -199,7 +205,7 @@ impl<'a> GenericAdtCollector<'a> {
                         if contains_key {
                             let inner_map = self
                                 .nested_generic_adts
-                                .get_mut(&ty_env_lock, deref_type, &adt_path_without_gens)?
+                                .get_mut(&ty_env_guard, deref_type, &adt_path_without_gens)?
                                 .unwrap();
 
                             match inner_map.entry(method_name.clone()) {
@@ -216,7 +222,7 @@ impl<'a> GenericAdtCollector<'a> {
                             let mut m = HashMap::default();
                             m.insert(method_name.clone(), vec![*type_id]);
                             self.nested_generic_adts.insert(
-                                &ty_env_lock,
+                                &ty_env_guard,
                                 deref_type,
                                 adt_path_without_gens.clone(),
                                 m,
@@ -239,15 +245,15 @@ impl<'a> GenericAdtCollector<'a> {
 
             let nested_gen_adt = {
                 let deref_type = DerefType::None;
-                let ty_env_lock = ctx.ty_env.lock().unwrap();
+                let ty_env_guard = ctx.ty_env.lock().unwrap();
 
                 if self.nested_generic_adts.contains_key(
-                    &ty_env_lock,
+                    &ty_env_guard,
                     deref_type,
                     &adt_path_without_gens,
                 )? {
                     self.nested_generic_adts
-                        .remove(&ty_env_lock, deref_type, &adt_path_without_gens)?
+                        .remove(&ty_env_guard, deref_type, &adt_path_without_gens)?
                         .unwrap()
                 } else {
                     continue;
@@ -325,7 +331,7 @@ impl<'a> GenericAdtCollector<'a> {
             {
                 new_type_id
             } else {
-                let ty_env_lock = ctx.ty_env.lock().unwrap();
+                let ty_env_guard = ctx.ty_env.lock().unwrap();
 
                 // Since we at this point knows that `nested_adt_type_id` contains
                 // generics; if no Generic/GenericInstance was replaced in the
@@ -338,14 +344,14 @@ impl<'a> GenericAdtCollector<'a> {
                 // the new ADT is created in `generic_adt_creator.rs`.
                 let check_inf = true;
                 let solve_cond = SolveCond::new().excl_gen_inst().excl_gen();
-                if is_solved(&ty_env_lock, nested_adt_type_id, check_inf, solve_cond)? {
+                if is_solved(&ty_env_guard, nested_adt_type_id, check_inf, solve_cond)? {
                     nested_adt_type_id
                 } else {
                     return Err(LangError::new(
                         format!(
                             "Found unsolvable generics when converting nested ADT to ADT. \
                             Nested ADT ty: {:#?}, generic instances to replace with: {:#?}",
-                            ty_env_lock.ty(nested_adt_type_id),
+                            ty_env_guard.ty(nested_adt_type_id),
                             gens
                         ),
                         LangErrorKind::AnalyzeError,
@@ -354,11 +360,11 @@ impl<'a> GenericAdtCollector<'a> {
                 }
             };
 
-            let ty_env_lock = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock().unwrap();
 
             let deref_type = DerefType::None;
             let contains_key = self.generic_adts.contains_key(
-                &ty_env_lock,
+                &ty_env_guard,
                 deref_type,
                 nested_adt_path_without_gens,
             )?;
@@ -366,7 +372,7 @@ impl<'a> GenericAdtCollector<'a> {
             if contains_key {
                 let type_ids = self
                     .generic_adts
-                    .get_mut(&ty_env_lock, deref_type, nested_adt_path_without_gens)?
+                    .get_mut(&ty_env_guard, deref_type, nested_adt_path_without_gens)?
                     .unwrap();
 
                 if !type_ids.contains(&new_nested_adt_type_id) {
@@ -375,7 +381,7 @@ impl<'a> GenericAdtCollector<'a> {
             } else {
                 let new_nested_adt_type_ids = vec![new_nested_adt_type_id];
                 self.generic_adts.insert(
-                    &ty_env_lock,
+                    &ty_env_guard,
                     deref_type,
                     nested_adt_path_without_gens.clone(),
                     new_nested_adt_type_ids,
@@ -421,8 +427,13 @@ impl<'a> Visitor for GenericAdtCollector<'a> {
         }
     }
 
-    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Default, .., body) = &mut ast_token {
+    fn visit_default_block(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Default,
+            body,
+            ..
+        } = &mut block
+        {
             if let Err(err) = self.collect_nested(ctx, body) {
                 self.errors.push(err);
             }

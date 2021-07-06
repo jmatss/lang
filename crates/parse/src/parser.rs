@@ -10,7 +10,7 @@ use common::{
     path::{LangPath, LangPathBuilder},
     token::{
         ast::AstToken,
-        block::BlockHeader,
+        block::{Block, BlockHeader},
         expr::{Argument, Expr, Var},
         stmt::Stmt,
     },
@@ -108,12 +108,12 @@ impl<'a> ParseTokenIter<'a> {
     pub fn take_root_block(&mut self) -> AstToken {
         self.block_body.push(AstToken::EOF);
 
-        AstToken::Block(
-            BlockHeader::Default,
-            FilePosition::default(),
-            BlockCtx::DEFAULT_BLOCK_ID,
-            std::mem::take(&mut self.block_body),
-        )
+        AstToken::Block(Block {
+            header: BlockHeader::Default,
+            body: std::mem::take(&mut self.block_body),
+            id: BlockCtx::DEFAULT_BLOCK_ID,
+            file_pos: FilePosition::default(),
+        })
     }
 
     pub fn parse(&mut self, lex_tokens: &mut [LexToken]) -> Result<(), Vec<LangError>> {
@@ -308,7 +308,12 @@ impl<'a> ParseTokenIter<'a> {
             block_tokens.push(token);
         }
 
-        Ok(AstToken::Block(header, file_pos, block_id, block_tokens))
+        Ok(AstToken::Block(Block {
+            header,
+            body: block_tokens,
+            id: block_id,
+            file_pos,
+        }))
     }
 
     /// Peeks at the next token in the iterator and returns its FilePosition.

@@ -2,8 +2,7 @@ use common::{
     error::LangError,
     path::LangPath,
     token::{
-        ast::AstToken,
-        block::BlockHeader,
+        block::{Block, BlockHeader},
         expr::{Argument, Expr, FnCall},
         op::{BinOperator, Op},
     },
@@ -81,8 +80,13 @@ impl Visitor for MethodAnalyzer {
         }
     }
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Implement(adt_name, ..), _, id, _) = ast_token {
+    fn visit_impl(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Implement(adt_name, ..),
+            id,
+            ..
+        } = block
+        {
             let module = match ctx.ast_ctx.get_module(*id) {
                 Ok(Some(module)) => module,
                 Ok(None) => LangPath::default(),
@@ -108,8 +112,12 @@ impl Visitor for MethodAnalyzer {
         }
     }
 
-    fn visit_fn(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
+    fn visit_fn(&mut self, block: &mut Block, _ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Fn(func),
+            ..
+        } = block
+        {
             self.fn_generics = func.as_ref().read().unwrap().generics.clone();
 
             // This isn't a method, reset the variable for any impl block

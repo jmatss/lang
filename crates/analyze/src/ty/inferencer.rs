@@ -12,7 +12,7 @@ use common::{
     file::FilePosition,
     token::{
         ast::AstToken,
-        block::{AdtKind, BlockHeader, Fn},
+        block::{AdtKind, Block, BlockHeader, Fn},
         expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, Var},
         lit::Lit,
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
@@ -457,11 +457,11 @@ impl Visitor for TypeInferencer {
             };
 
             if gens_was_updated {
-                let mut ty_env_lock = ctx.ty_env.lock().unwrap();
-                match ty_env_lock.id(&adt_ty_clone) {
+                let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+                match ty_env_guard.id(&adt_ty_clone) {
                     Ok(new_adt_type_id) => {
                         if adt_type_id != new_adt_type_id {
-                            if let Err(err) = ty_env_lock.forward(adt_type_id, new_adt_type_id) {
+                            if let Err(err) = ty_env_guard.forward(adt_type_id, new_adt_type_id) {
                                 self.errors.push(err);
                                 return;
                             }
@@ -1782,8 +1782,12 @@ impl Visitor for TypeInferencer {
         }
     }
 
-    fn visit_fn(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Fn(func), ..) = &mut ast_token {
+    fn visit_fn(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Fn(func),
+            ..
+        } = &mut block
+        {
             let func_ref = func.as_ref().borrow().write().unwrap();
 
             // If this is a method and the first argument is named "this", set
@@ -1837,8 +1841,12 @@ impl Visitor for TypeInferencer {
     /// Tie the generics in this specific struct to each other with constraints.
     /// Ties the generics in the struct members, method parameters and method
     /// return types.
-    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Struct(adt), ..) = &ast_token {
+    fn visit_struct(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Struct(adt),
+            ..
+        } = &block
+        {
             let adt = adt.as_ref().borrow().read().unwrap();
 
             // Populate this map with the "Generic(ident)" types where the key
@@ -1987,8 +1995,12 @@ impl Visitor for TypeInferencer {
         }
     }
 
-    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Union(adt), ..) = &ast_token {
+    fn visit_union(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Union(adt),
+            ..
+        } = &block
+        {
             let adt = adt.as_ref().borrow().read().unwrap();
 
             // Populate this map with the "Generic(ident)" types where the key
@@ -2189,16 +2201,24 @@ impl Visitor for TypeInferencer {
 
     /// Save the current match expr in a place so that the match cases in the body
     /// can access the type of the expr.
-    fn visit_match(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Match(expr), ..) = &ast_token {
+    fn visit_match(&mut self, block: &mut Block, _ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Match(expr),
+            ..
+        } = &block
+        {
             self.cur_match_expr = Some(expr.clone());
         }
     }
 
     /// Need to make sure that the match expr and the match case exprs have the
     /// same type. Add it as a constraint.
-    fn visit_match_case(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::MatchCase(match_case_expr), ..) = &mut ast_token {
+    fn visit_match_case(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::MatchCase(match_case_expr),
+            ..
+        } = &mut block
+        {
             if let Some(match_expr) = self.cur_match_expr.clone() {
                 let match_expr_type_id = match match_expr.get_expr_type() {
                     Ok(expr_ty) => expr_ty,

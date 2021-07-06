@@ -146,9 +146,9 @@ impl Generics {
         let mut solved = true;
 
         for type_id in &self.types {
-            let ty_env_lock = ty_env.lock().unwrap();
-            if contains_unknown_any_shallow(&ty_env_lock, *type_id)?
-                || contains_generic_shallow(&ty_env_lock, *type_id)?
+            let ty_env_guard = ty_env.lock().unwrap();
+            if contains_unknown_any_shallow(&ty_env_guard, *type_id)?
+                || contains_generic_shallow(&ty_env_guard, *type_id)?
             {
                 solved = false;
                 break;

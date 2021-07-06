@@ -8,7 +8,7 @@ use common::{
     token::expr::Var,
     token::{
         ast::AstToken,
-        block::{AdtKind, BlockHeader, Fn},
+        block::{AdtKind, Block, BlockHeader, Fn},
         stmt::Stmt,
         stmt::{ExternalDecl, Modifier},
     },
@@ -192,49 +192,52 @@ impl Visitor for DeclFnAnalyzer {
     /// Marks the functions in this implement block with the name of the implement
     /// block. This lets one differentiate between functions and methods by checking
     /// the `method_struct` field in "Function"s.
-    fn visit_impl(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
+    fn visit_impl(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
         // TODO: This won't work for all cases. The `impl_path` doesn't consider
         //       the module path or "use"s.
 
-        let (impl_path, body) =
-            if let AstToken::Block(BlockHeader::Implement(impl_path, _), .., body) = &mut ast_token
-            {
-                (impl_path, body)
-            } else {
-                return;
-            };
+        let (impl_path, body) = if let Block {
+            header: BlockHeader::Implement(impl_path, _),
+            body,
+            ..
+        } = &mut block
+        {
+            (impl_path, body)
+        } else {
+            return;
+        };
 
         let mut partial_path = impl_path.clone();
         let last_part = partial_path.pop().unwrap();
         partial_path.push(LangPathPart(last_part.0, None));
 
-        let mut ty_env_lock = ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
 
         let inner_ty = {
             if let Ok(full_path) =
                 ctx.ast_ctx
-                    .calculate_adt_full_path(&ty_env_lock, impl_path, ctx.block_id)
+                    .calculate_adt_full_path(&ty_env_guard, impl_path, ctx.block_id)
             {
-                if ctx.ast_ctx.is_struct(&ty_env_lock, &full_path) {
+                if ctx.ast_ctx.is_struct(&ty_env_guard, &full_path) {
                     InnerTy::Struct(full_path)
-                } else if ctx.ast_ctx.is_enum(&ty_env_lock, &full_path) {
+                } else if ctx.ast_ctx.is_enum(&ty_env_guard, &full_path) {
                     InnerTy::Enum(full_path)
-                } else if ctx.ast_ctx.is_union(&ty_env_lock, &full_path) {
+                } else if ctx.ast_ctx.is_union(&ty_env_guard, &full_path) {
                     InnerTy::Union(full_path)
                 } else {
                     unreachable!("full_path: {:#?}", full_path);
                 }
             } else if let Ok(full_path) =
                 ctx.ast_ctx
-                    .calculate_trait_full_path(&ty_env_lock, impl_path, ctx.block_id)
+                    .calculate_trait_full_path(&ty_env_guard, impl_path, ctx.block_id)
             {
                 InnerTy::Trait(full_path)
             } else {
                 let err = ctx.ast_ctx.err_adt(
-                    &ty_env_lock,
+                    &ty_env_guard,
                     format!(
                         "Unable to find ADT with path: {}",
-                        to_string_path(&ty_env_lock, &partial_path)
+                        to_string_path(&ty_env_guard, &partial_path)
                     ),
                     &partial_path,
                 );
@@ -244,7 +247,7 @@ impl Visitor for DeclFnAnalyzer {
         };
 
         let impl_type_id =
-            match ty_env_lock.id(&Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None)) {
+            match ty_env_guard.id(&Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None)) {
                 Ok(impl_type_id) => impl_type_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -255,12 +258,16 @@ impl Visitor for DeclFnAnalyzer {
         for mut body_token in body {
             if body_token.is_skippable() {
                 // skip
-            } else if let AstToken::Block(BlockHeader::Fn(func), ..) = &mut body_token {
+            } else if let AstToken::Block(Block {
+                header: BlockHeader::Fn(func),
+                ..
+            }) = &mut body_token
+            {
                 func.as_ref().write().unwrap().method_adt = Some(impl_type_id);
             } else {
                 let err = ctx.ast_ctx.err(format!(
                     "AST token in impl block with name \"{}\" not a function: {:?}",
-                    to_string_path(&ty_env_lock, impl_path),
+                    to_string_path(&ty_env_guard, impl_path),
                     body_token
                 ));
                 self.errors.push(err);
@@ -268,8 +275,13 @@ impl Visitor for DeclFnAnalyzer {
         }
     }
 
-    fn visit_fn(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Fn(func), _, func_id, ..) = &mut ast_token {
+    fn visit_fn(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Fn(func),
+            id: func_id,
+            ..
+        } = &mut block
+        {
             let adt_ty = if let Some(adt_type_id) = func.as_ref().read().unwrap().method_adt {
                 match ctx.ty_env.lock().unwrap().ty(adt_type_id) {
                     Ok(adt_ty) => Some(adt_ty.clone()),

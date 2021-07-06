@@ -17,7 +17,7 @@ use common::{
     path::LangPath,
     token::{
         ast::AstToken,
-        block::{Adt, BlockHeader},
+        block::{Adt, Block, BlockHeader},
         expr::Var,
     },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
@@ -355,8 +355,12 @@ impl Visitor for ReferenceCollector {
         }
     }
 
-    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Struct(adt), ..) = ast_token {
+    fn visit_struct(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Struct(adt),
+            ..
+        } = block
+        {
             let adt_path = match self.adt_path(ctx.ast_ctx, adt, ctx.block_id) {
                 Ok(adt_path) => adt_path,
                 Err(err) => {
@@ -374,8 +378,12 @@ impl Visitor for ReferenceCollector {
         }
     }
 
-    fn visit_enum(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Enum(adt), ..) = ast_token {
+    fn visit_enum(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Enum(adt),
+            ..
+        } = block
+        {
             let adt_path = match self.adt_path(ctx.ast_ctx, adt, ctx.block_id) {
                 Ok(adt_path) => adt_path,
                 Err(err) => {
@@ -393,8 +401,12 @@ impl Visitor for ReferenceCollector {
         }
     }
 
-    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Union(adt), ..) = ast_token {
+    fn visit_union(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Union(adt),
+            ..
+        } = block
+        {
             let adt_path = match self.adt_path(ctx.ast_ctx, adt, ctx.block_id) {
                 Ok(adt_path) => adt_path,
                 Err(err) => {
@@ -412,14 +424,22 @@ impl Visitor for ReferenceCollector {
         }
     }
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Implement(impl_path, ..), ..) = ast_token {
+    fn visit_impl(&mut self, block: &mut Block, _ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Implement(impl_path, ..),
+            ..
+        } = block
+        {
             self.cur_adt_path = Some(impl_path.clone());
         }
     }
 
-    fn visit_block(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
+    fn visit_block(&mut self, block: &mut Block, _ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Fn(func),
+            ..
+        } = block
+        {
             // Need to do this in `visit_block` instead of `visit_fn` since the types
             // in the function declaration/prototype is traversed before the
             // `visit_fn` is.
@@ -435,10 +455,10 @@ impl Visitor for ReferenceCollector {
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
         if self.include_impls {
             if let Some(cur_adt_path) = &self.cur_adt_path {
-                let ty_env_lock = &ctx.ty_env.lock().unwrap();
+                let ty_env_guard = &ctx.ty_env.lock().unwrap();
 
                 let mut references =
-                    match get_adt_and_trait_paths(&ty_env_lock, *type_id, self.full_paths) {
+                    match get_adt_and_trait_paths(&ty_env_guard, *type_id, self.full_paths) {
                         Ok(paths) => paths,
                         Err(err) => {
                             self.errors.push(err);
@@ -447,7 +467,7 @@ impl Visitor for ReferenceCollector {
                     };
 
                 // Do not add references to itself.
-                if let Err(err) = references.remove(&ty_env_lock, DerefType::Deep, cur_adt_path) {
+                if let Err(err) = references.remove(&ty_env_guard, DerefType::Deep, cur_adt_path) {
                     self.errors.push(err);
                     return;
                 }
@@ -455,7 +475,7 @@ impl Visitor for ReferenceCollector {
                 let contains_key =
                     match self
                         .references
-                        .contains_key(&ty_env_lock, DerefType::Deep, cur_adt_path)
+                        .contains_key(&ty_env_guard, DerefType::Deep, cur_adt_path)
                     {
                         Ok(contains_key) => contains_key,
                         Err(err) => {
@@ -467,16 +487,16 @@ impl Visitor for ReferenceCollector {
                 if contains_key {
                     let self_references = self
                         .references
-                        .get_mut(&ty_env_lock, DerefType::Deep, cur_adt_path)
+                        .get_mut(&ty_env_guard, DerefType::Deep, cur_adt_path)
                         .unwrap()
                         .unwrap();
                     if let Err(err) =
-                        self_references.extend(&ty_env_lock, DerefType::Deep, &references)
+                        self_references.extend(&ty_env_guard, DerefType::Deep, &references)
                     {
                         self.errors.push(err);
                     }
                 } else if let Err(err) = self.references.insert(
-                    &ty_env_lock,
+                    &ty_env_guard,
                     DerefType::Deep,
                     cur_adt_path.clone(),
                     references,

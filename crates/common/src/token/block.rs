@@ -4,6 +4,7 @@ use std::{
 };
 
 use super::{
+    ast::AstToken,
     expr::{Expr, Var},
     stmt::Modifier,
 };
@@ -12,8 +13,16 @@ use crate::{
     file::FilePosition,
     path::LangPath,
     ty::{generics::Generics, ty_env::TyEnv},
-    util, TypeId,
+    util, BlockId, TypeId,
 };
+
+#[derive(Debug, Clone)]
+pub struct Block {
+    pub header: BlockHeader,
+    pub body: Vec<AstToken>,
+    pub id: BlockId,
+    pub file_pos: FilePosition,
+}
 
 #[derive(Debug, Clone)]
 pub enum BlockHeader {

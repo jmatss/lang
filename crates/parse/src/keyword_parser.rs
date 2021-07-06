@@ -9,7 +9,7 @@ use common::{
     path::LangPath,
     token::{
         ast::AstToken,
-        block::{Adt, BlockHeader, Fn, Trait},
+        block::{Adt, Block, BlockHeader, Fn, Trait},
         expr::Expr,
         lit::Lit,
         stmt::{ExternalDecl, Modifier, Stmt},
@@ -200,12 +200,12 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             }
         }
 
-        Ok(AstToken::Block(
-            BlockHeader::If,
+        Ok(AstToken::Block(Block {
+            header: BlockHeader::If,
+            body: if_cases,
+            id: block_id,
             file_pos,
-            block_id,
-            if_cases,
-        ))
+        }))
     }
 
     /// Parses a `Match` block and all its cases.
@@ -286,12 +286,12 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
 
         if !match_cases.is_empty() {
-            Ok(AstToken::Block(
-                BlockHeader::Match(match_expr),
+            Ok(AstToken::Block(Block {
+                header: BlockHeader::Match(match_expr),
+                body: match_cases,
+                id: block_id,
                 file_pos,
-                block_id,
-                match_cases,
-            ))
+            }))
         } else {
             Err(self.iter.err(
                 format!(
@@ -896,12 +896,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             generics,
             impls,
         );
-        let header = BlockHeader::Struct(Arc::new(RwLock::new(struct_)));
 
-        let block_id = self.iter.reserve_block_id();
-        let body = Vec::with_capacity(0);
-
-        Ok(AstToken::Block(header, file_pos, block_id, body))
+        Ok(AstToken::Block(Block {
+            header: BlockHeader::Struct(Arc::new(RwLock::new(struct_))),
+            body: Vec::with_capacity(0),
+            id: self.iter.reserve_block_id(),
+            file_pos,
+        }))
     }
 
     // TODO: Should it possible to set values to the individual enum variants?
@@ -949,18 +950,18 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // Also assign all members the type `Enum(ident)` and give them their
         // values according to their index position in the enum.
         for (idx, member) in members.iter_mut().enumerate() {
-            let mut ty_env_lock = self.iter.ty_env.lock().unwrap();
+            let mut ty_env_guard = self.iter.ty_env.lock().unwrap();
             let member_file_pos = member.file_pos.clone().unwrap();
 
             let enum_type_info = (name.clone(), file_pos.to_owned());
             let member_type_info = (member.name.clone(), member_file_pos);
-            let member_value_type_id = ty_env_lock.id(&Ty::CompoundType(
+            let member_value_type_id = ty_env_guard.id(&Ty::CompoundType(
                 InnerTy::I32,
                 Generics::empty(),
                 TypeInfo::EnumMember(enum_type_info, member_type_info),
             ))?;
 
-            let enum_type_id = ty_env_lock.id(&Ty::CompoundType(
+            let enum_type_id = ty_env_guard.id(&Ty::CompoundType(
                 InnerTy::Enum(full_path.clone()),
                 Generics::empty(),
                 TypeInfo::Enum(member_file_pos.to_owned()),
@@ -996,12 +997,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             has_definition,
             Some(enum_type_id),
         );
-        let header = BlockHeader::Enum(Arc::new(RwLock::new(enum_)));
 
-        let block_id = self.iter.reserve_block_id();
-        let body = Vec::with_capacity(0);
-
-        Ok(AstToken::Block(header, file_pos, block_id, body))
+        Ok(AstToken::Block(Block {
+            header: BlockHeader::Enum(Arc::new(RwLock::new(enum_))),
+            body: Vec::with_capacity(0),
+            id: self.iter.reserve_block_id(),
+            file_pos,
+        }))
     }
 
     /// Parses a union header.
@@ -1066,12 +1068,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             generics,
             impls,
         );
-        let header = BlockHeader::Union(Arc::new(RwLock::new(union)));
 
-        let block_id = self.iter.reserve_block_id();
-        let body = Vec::with_capacity(0);
-
-        Ok(AstToken::Block(header, file_pos, block_id, body))
+        Ok(AstToken::Block(Block {
+            header: BlockHeader::Union(Arc::new(RwLock::new(union))),
+            body: Vec::with_capacity(0),
+            id: self.iter.reserve_block_id(),
+            file_pos,
+        }))
     }
 
     // TODO: Generics
@@ -1146,14 +1149,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
 
         let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
-
         let trait_ = Trait::new(name, module, generic_names, file_pos, methods, modifiers);
-        let header = BlockHeader::Trait(Arc::new(RwLock::new(trait_)));
 
-        let block_id = self.iter.reserve_block_id();
-        let body = Vec::with_capacity(0);
-
-        Ok(AstToken::Block(header, file_pos, block_id, body))
+        Ok(AstToken::Block(Block {
+            header: BlockHeader::Trait(Arc::new(RwLock::new(trait_))),
+            body: Vec::with_capacity(0),
+            id: self.iter.reserve_block_id(),
+            file_pos,
+        }))
     }
 
     // TODO: Generics
@@ -1183,9 +1186,19 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         // Iterate through the tokens in the body and make sure that all tokens
         // are functions.
-        if let AstToken::Block(BlockHeader::Implement(..), file_pos, _, body) = &impl_token {
+        if let AstToken::Block(Block {
+            header: BlockHeader::Implement(..),
+            body,
+            file_pos,
+            ..
+        }) = &impl_token
+        {
             for ast_token in body {
-                if let AstToken::Block(BlockHeader::Fn(_), ..) = ast_token {
+                if let AstToken::Block(Block {
+                    header: BlockHeader::Fn(_),
+                    ..
+                }) = ast_token
+                {
                     // Do nothing, the token is of correct type.
                 } else if ast_token.is_skippable() {
                 } else {

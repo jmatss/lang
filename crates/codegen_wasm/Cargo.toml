@@ -8,3 +8,6 @@ edition = "2018"
 
 [dependencies]
 leb128 = "0.2.1"
+
+common = { path = "../common" }
+parse = { path = "../parse" }

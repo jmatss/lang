@@ -8,8 +8,7 @@ use common::{
     error::{LangError, LangResult},
     path::LangPathPart,
     token::{
-        ast::AstToken,
-        block::{Adt, BlockHeader},
+        block::{Adt, Block, BlockHeader},
         expr::FnCall,
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
@@ -123,8 +122,12 @@ impl Visitor for TraitsFnAnalyzer {
         }
     }
 
-    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Implement(impl_path, ..), ..) = ast_token {
+    fn visit_impl(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Implement(impl_path, ..),
+            ..
+        } = block
+        {
             let full_impl_path = match ctx.ast_ctx.get_module(ctx.block_id) {
                 Ok(Some(mut full_impl_path)) => {
                     let impl_ident = impl_path.last().unwrap().0.clone();
@@ -173,8 +176,8 @@ impl Visitor for TraitsFnAnalyzer {
                 }
             };
 
-            let ty_env_lock = ctx.ty_env.lock().unwrap();
-            let generic_name = match get_generic_ident(&ty_env_lock, *method_adt_type_id) {
+            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let generic_name = match get_generic_ident(&ty_env_guard, *method_adt_type_id) {
                 Ok(name) => name,
                 Err(err) => {
                     self.errors.push(err);

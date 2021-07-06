@@ -1,7 +1,7 @@
-mod instr;
-mod section;
-mod types;
-mod util;
+pub(crate) mod instr;
+pub(crate) mod section;
+pub(crate) mod types;
+pub(crate) mod util;
 
 // https://webassembly.github.io/spec/core/binary/index.html
 

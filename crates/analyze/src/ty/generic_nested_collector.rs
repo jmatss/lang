@@ -9,7 +9,10 @@ use common::{
     hash::{DerefType, TyEnvHash},
     hash_map::TyEnvHashMap,
     path::LangPath,
-    token::{ast::AstToken, block::BlockHeader, expr::FnCall},
+    token::{
+        block::{Block, BlockHeader},
+        expr::FnCall,
+    },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
         contains::contains_generic_shallow, generics::Generics, get::get_ident, ty::Ty,
@@ -191,11 +194,15 @@ impl Visitor for GenericNestedCollector {
         }
     }
 
-    fn visit_block(&mut self, ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
+    fn visit_block(&mut self, block: &mut Block, _ctx: &mut TraverseCtx) {
         // Need to do this in `visit_block` instead of `visit_fn` since the types
         // in the function declaration/prototype is traversed before the
         // `visit_fn` is.
-        if let AstToken::Block(BlockHeader::Fn(func), ..) = ast_token {
+        if let Block {
+            header: BlockHeader::Fn(func),
+            ..
+        } = block
+        {
             self.cur_func_name = func.as_ref().read().unwrap().name.clone();
         }
     }

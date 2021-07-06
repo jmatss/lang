@@ -1,7 +1,10 @@
 use common::{
     error::LangError,
     path::LangPathPart,
-    token::{ast::AstToken, block::BlockHeader},
+    token::{
+        ast::AstToken,
+        block::{Block, BlockHeader},
+    },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
     ty::{generics::Generics, replace::replace_gens, to_string::to_string_path, type_id::TypeId},
 };
@@ -33,8 +36,12 @@ impl Visitor for GenericsAnalyzer {
 
     /// "Rewrites" the types of the generic member types to "Generic"s for
     /// the structure members.
-    fn visit_struct(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Struct(struct_), ..) = &ast_token {
+    fn visit_struct(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Struct(struct_),
+            ..
+        } = &block
+        {
             let struct_ = struct_.as_ref().read().unwrap();
             if let (Some(generics), members) = (&struct_.generics, &struct_.members) {
                 for member in members {
@@ -50,8 +57,12 @@ impl Visitor for GenericsAnalyzer {
         }
     }
 
-    fn visit_union(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Union(union), ..) = &ast_token {
+    fn visit_union(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Union(union),
+            ..
+        } = &block
+        {
             let union = union.as_ref().read().unwrap();
             if let (Some(generics), members) = (&union.generics, &union.members) {
                 for member in members {
@@ -70,8 +81,13 @@ impl Visitor for GenericsAnalyzer {
     /// "Rewrites" generics parsed as "UnknownIdent"s to "Generic"s by matching
     /// the identifiers with known names for the generics defined on the structure.
     /// This will be done for both the method headers and everything in their bodies.
-    fn visit_impl(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Implement(impl_path, _), .., body) = ast_token {
+    fn visit_impl(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Implement(impl_path, ..),
+            body,
+            ..
+        } = block
+        {
             let full_impl_path = match ctx.ast_ctx.get_module(ctx.block_id) {
                 Ok(Some(mut full_impl_path)) => {
                     let impl_ident = impl_path.last().unwrap().0.clone();
@@ -120,10 +136,14 @@ impl Visitor for GenericsAnalyzer {
             // Iterate through the body of one method at a time and replace all
             // "UnknownIdent"s representing generics to "Generic"s.
             for method in body {
-                let func_generics = if let AstToken::Block(BlockHeader::Fn(func), ..) = method {
+                let func_generics = if let AstToken::Block(Block {
+                    header: BlockHeader::Fn(func),
+                    ..
+                }) = method
+                {
                     func.as_ref().read().unwrap().generics.clone()
                 } else {
-                    None
+                    panic!("Not method in impl block: {:#?}", method);
                 };
 
                 // No generics declared on either ADT/Trait or function, early skip.

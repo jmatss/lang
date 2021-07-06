@@ -112,14 +112,14 @@ pub fn replace_gen_impls(
 
         Ty::GenericInstance(ident, unique_id, ..) => {
             if let Some(impl_type_id) = generics_impl.get(ident) {
-                let ty_env_lock = ty_env.lock().unwrap();
-                match ty_env_lock.ty(impl_type_id)?.clone() {
+                let ty_env_guard = ty_env.lock().unwrap();
+                match ty_env_guard.ty(impl_type_id)?.clone() {
                     Ty::Generic(..) => false,
                     Ty::GenericInstance(_, impl_unique_id, ..) if impl_unique_id == *unique_id => {
                         false
                     }
                     _ => {
-                        ty_clone = ty_env_lock.ty(impl_type_id)?.clone();
+                        ty_clone = ty_env_guard.ty(impl_type_id)?.clone();
                         true
                     }
                 }

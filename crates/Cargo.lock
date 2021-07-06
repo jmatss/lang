@@ -131,7 +131,9 @@ dependencies = [
 name = "codegen_wasm"
 version = "0.1.0"
 dependencies = [
+ "common",
  "leb128",
+ "parse",
 ]
 
 [[package]]

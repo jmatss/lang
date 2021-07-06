@@ -173,13 +173,13 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
 
         match &mut ast_token {
-            AstToken::Block(header, file_pos, id, ref mut body) => {
-                self.compile_block(header, file_pos, *id, body)?;
+            AstToken::Block(block) => {
+                self.compile_block(block)?;
             }
-            AstToken::Stmt(ref mut stmt) => {
+            AstToken::Stmt(stmt) => {
                 self.compile_stmt(stmt)?;
             }
-            AstToken::Expr(ref mut expr) => {
+            AstToken::Expr(expr) => {
                 self.compile_expr(expr, ExprTy::RValue)?;
             }
             AstToken::Empty | AstToken::Comment(..) | AstToken::EOF => (),

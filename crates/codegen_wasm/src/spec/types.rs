@@ -49,7 +49,7 @@ impl Bytes for ResultType {
 }
 
 // First ResultType is parameters, second is return type.
-pub struct FuncType(ResultType, ResultType);
+pub struct FuncType(pub ResultType, pub ResultType);
 
 impl Bytes for FuncType {
     fn to_bytes(&self) -> Vec<u8> {
@@ -61,7 +61,7 @@ impl Bytes for FuncType {
 }
 
 // First is min, second is optional max.
-pub struct Limits(u32, Option<u32>);
+pub struct Limits(pub u32, pub Option<u32>);
 
 impl Bytes for Limits {
     fn to_bytes(&self) -> Vec<u8> {
@@ -79,7 +79,7 @@ impl Bytes for Limits {
     }
 }
 
-pub struct TableType(RefType, Limits);
+pub struct TableType(pub RefType, pub Limits);
 
 impl Bytes for TableType {
     fn to_bytes(&self) -> Vec<u8> {
@@ -89,7 +89,7 @@ impl Bytes for TableType {
     }
 }
 
-pub struct MemType(Limits);
+pub struct MemType(pub Limits);
 
 impl Bytes for MemType {
     fn to_bytes(&self) -> Vec<u8> {
@@ -97,7 +97,7 @@ impl Bytes for MemType {
     }
 }
 
-pub struct GlobalType(ValType, Mut);
+pub struct GlobalType(pub ValType, pub Mut);
 
 impl Bytes for GlobalType {
     fn to_bytes(&self) -> Vec<u8> {
@@ -107,7 +107,7 @@ impl Bytes for GlobalType {
     }
 }
 
-pub struct Name(String);
+pub struct Name(pub String);
 
 impl Bytes for Name {
     fn to_bytes(&self) -> Vec<u8> {
@@ -132,8 +132,8 @@ impl Bytes for BlockType {
 }
 
 pub struct MemArg {
-    align: u32,
-    offset: u32,
+    pub align: u32,
+    pub offset: u32,
 }
 
 impl Bytes for MemArg {
@@ -146,15 +146,15 @@ impl Bytes for MemArg {
 }
 
 // TODO: Macros
-pub struct TypeIdx(u32);
-pub struct FuncIdx(u32);
-pub struct TableIdx(u32);
-pub struct MemIdx(u32);
-pub struct GlobalIdx(u32);
-pub struct ElemIdx(u32);
-pub struct DataIdx(u32);
-pub struct LocalIdx(u32);
-pub struct LabelIdx(u32);
+pub struct TypeIdx(pub u32);
+pub struct FuncIdx(pub u32);
+pub struct TableIdx(pub u32);
+pub struct MemIdx(pub u32);
+pub struct GlobalIdx(pub u32);
+pub struct ElemIdx(pub u32);
+pub struct DataIdx(pub u32);
+pub struct LocalIdx(pub u32);
+pub struct LabelIdx(pub u32);
 
 macro_rules! impl_leb128_trait {
     ($t:ty) => {

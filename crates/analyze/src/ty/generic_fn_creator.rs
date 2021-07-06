@@ -7,7 +7,10 @@ use common::{
     hash::DerefType,
     hash_map::TyEnvHashMap,
     path::LangPath,
-    token::{ast::AstToken, block::BlockHeader},
+    token::{
+        ast::AstToken,
+        block::{Block, BlockHeader},
+    },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse_with_deep_copy, visitor::Visitor},
     ty::generics::Generics,
 };
@@ -53,18 +56,21 @@ impl GenericFnCreator {
                 // TODO: Change so that every method doesn't need to be cloned.
                 let method = impl_body.get(idx).cloned().unwrap();
 
-                let (method_name, has_gens) =
-                    if let AstToken::Block(BlockHeader::Fn(func), ..) = &method {
-                        let func = func.as_ref().read().unwrap();
-                        (
-                            func.name.clone(),
-                            func.generics
-                                .as_ref()
-                                .map_or(false, |gens| !gens.is_empty()),
-                        )
-                    } else {
-                        panic!()
-                    };
+                let (method_name, has_gens) = if let AstToken::Block(Block {
+                    header: BlockHeader::Fn(func),
+                    ..
+                }) = &method
+                {
+                    let func = func.as_ref().read().unwrap();
+                    (
+                        func.name.clone(),
+                        func.generics
+                            .as_ref()
+                            .map_or(false, |gens| !gens.is_empty()),
+                    )
+                } else {
+                    panic!()
+                };
 
                 // If this method exists in `generic_methods`, this is a method
                 // with generics that is used somewhere in the code base with
@@ -94,7 +100,11 @@ impl GenericFnCreator {
                         traverse_with_deep_copy(ctx, &mut generics_replacer, &mut new_method, idx)?;
 
                         // Set the generic impls on the new copy of the function.
-                        let func = if let AstToken::Block(BlockHeader::Fn(func), ..) = &new_method {
+                        let func = if let AstToken::Block(Block {
+                            header: BlockHeader::Fn(func),
+                            ..
+                        }) = &new_method
+                        {
                             func.as_ref().write().unwrap().generics = Some(method_generics.clone());
                             Arc::clone(func)
                         } else {
@@ -150,8 +160,13 @@ impl Visitor for GenericFnCreator {
         }
     }
 
-    fn visit_default_block(&mut self, mut ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Default, .., body) = &mut ast_token {
+    fn visit_default_block(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Default,
+            body,
+            ..
+        } = &mut block
+        {
             let mut i = 0;
 
             // Iterate through all the implement blocks in the AST. For every method
@@ -160,8 +175,11 @@ impl Visitor for GenericFnCreator {
             while i < body.len() {
                 let mut body_token = body.get_mut(i).expect("Known to be in bounds.");
 
-                if let AstToken::Block(BlockHeader::Implement(adt_path, _), .., impl_body) =
-                    &mut body_token
+                if let AstToken::Block(Block {
+                    header: BlockHeader::Implement(adt_path, _),
+                    body: impl_body,
+                    ..
+                }) = &mut body_token
                 {
                     let adt_path = adt_path.clone();
                     let contains_key = match self.generic_methods.contains_key(
@@ -192,7 +210,11 @@ impl Visitor for GenericFnCreator {
                     while idx < impl_body.len() {
                         let method = impl_body.get(idx).unwrap();
 
-                        if let AstToken::Block(BlockHeader::Fn(func), ..) = method {
+                        if let AstToken::Block(Block {
+                            header: BlockHeader::Fn(func),
+                            ..
+                        }) = method
+                        {
                             let contains_gens_decl = func
                                 .as_ref()
                                 .read()
@@ -235,6 +257,6 @@ impl Visitor for GenericFnCreator {
     }
 
     // TODO: Implement similar generic logic as for structs.
-    fn visit_trait(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {}
-    fn visit_enum(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {}
+    fn visit_trait(&mut self, _block: &mut Block, _ctx: &mut TraverseCtx) {}
+    fn visit_enum(&mut self, _block: &mut Block, _ctx: &mut TraverseCtx) {}
 }

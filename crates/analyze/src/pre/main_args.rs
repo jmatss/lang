@@ -4,7 +4,7 @@ use common::{
     error::{LangError, LangResult},
     token::{
         ast::AstToken,
-        block::{BlockHeader, Fn},
+        block::{Block, BlockHeader, Fn},
         expr::{Expr, Var},
         op::AssignOperator,
         stmt::Stmt,
@@ -207,16 +207,19 @@ impl Visitor for MainArgsAnalyzer {
     /// Insert the global declarations for `argc` and `argv`. These will store
     /// the arguments as static so that they can be accessed from anywhere in
     /// the code.
-    fn visit_default_block(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(.., body) = ast_token {
-            if let Err(err) = self.insert_args_decl(ctx, body) {
-                self.errors.push(err);
-            }
+    fn visit_default_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Err(err) = self.insert_args_decl(ctx, &mut block.body) {
+            self.errors.push(err);
         }
     }
 
-    fn visit_fn(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        if let AstToken::Block(BlockHeader::Fn(func), .., body) = ast_token {
+    fn visit_fn(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Fn(func),
+            body,
+            ..
+        } = block
+        {
             if func.as_ref().read().unwrap().name == "main"
                 && func.as_ref().read().unwrap().module.count() == 0
             {
