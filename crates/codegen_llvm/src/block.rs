@@ -368,6 +368,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             )));
         }
 
+        std::mem::drop(ty_env_guard);
+
         // TODO: How does this work with variadic parameters? Currently varargs
         //       aren't supported for functions written in the language itself,
         //       it is only allowed in external functions (for C interop).
@@ -379,8 +381,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             let key = (param.as_ref().borrow().read().unwrap().full_name(), func_id);
             self.variables.insert(key, ptr);
         }
-
-        std::mem::drop(ty_env_guard);
 
         // Compile the tokens in the body of the function.
         for token in body {
