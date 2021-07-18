@@ -79,6 +79,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         if let Some((LexTokenKind::Kw(keyword @ Kw::If), kw_file_pos)) =
             iter.peek_skip_space_line().map(|t| (t.kind, t.file_pos))
         {
+            iter.next_skip_space_line(); // Consume the `If` keyword.
             let ast_token = KeyworkParser::parse(iter, keyword, kw_file_pos)?;
 
             let block = if let AstToken::Block(block) = ast_token {
