@@ -5,6 +5,7 @@ use spec::types::GlobalIdx;
 use common::{ctx::ast_ctx::AstCtx, BlockId};
 
 mod fn_collector;
+mod func;
 mod module;
 mod spec;
 

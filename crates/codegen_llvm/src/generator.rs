@@ -30,7 +30,7 @@ use common::{
         ty::Ty,
         type_id::TypeId,
     },
-    BlockId,
+    util, BlockId,
 };
 
 use crate::expr::ExprTy;
@@ -412,25 +412,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             //       a single integer literal
             Ty::Array(inner_type_id, dim_opt, ..) => {
                 if let Some(dim) = dim_opt {
-                    let lit_dim = match dim.as_ref() {
-                        Expr::Lit(Lit::Integer(num, radix), ..) => u32::from_str_radix(num, *radix)
-                            .map_err(|_| {
-                                self.err(
-                                    format!("Invalid integer found in array dimension: {}", num),
-                                    file_pos,
-                                )
-                            })?,
-                        _ => {
-                            return Err(self.err(
-                                format!(
-                                    "TODO: Invalid expression used as array dimension: {:?}",
-                                    dim
-                                ),
-                                file_pos,
-                            ))
-                        }
-                    };
-
+                    let lit_dim = util::get_array_dim(&dim, file_pos)?;
                     match self.compile_type(inner_type_id, file_pos)? {
                         AnyTypeEnum::ArrayType(ty) => ty.array_type(lit_dim).into(),
                         AnyTypeEnum::FloatType(ty) => ty.array_type(lit_dim).into(),

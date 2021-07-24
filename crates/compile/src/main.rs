@@ -169,6 +169,10 @@ fn main() -> LangResult<()> {
     }
     analyze_ctx.ast_ctx.debug_print();
 
+    let ir_module = ir_builder::build_module("MODULE_NAME".into(), &mut analyze_ctx, &mut ast_root);
+    println!("## {:#?} ##", ir_module);
+    std::process::exit(0);
+
     let generate_timer = Instant::now();
     let target_machine = compiler::setup_target(&opts.target_triple)?;
     let context = Context::create();

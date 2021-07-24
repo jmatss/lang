@@ -3,7 +3,7 @@ use super::{
     Bytes, UnSignedLeb128,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum NumType {
     I32 = 0x7f,
@@ -12,20 +12,21 @@ pub enum NumType {
     F64 = 0x7c,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum RefType {
     FuncRef = 0x70,
     ExternRef = 0x6f,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum Mut {
     Const = 0x00,
     Var = 0x01,
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum ValType {
     NumType(NumType),
     RefType(RefType),
@@ -40,6 +41,7 @@ impl Bytes for ValType {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct ResultType(Vec<ValType>);
 
 impl Bytes for ResultType {
@@ -49,6 +51,7 @@ impl Bytes for ResultType {
 }
 
 // First ResultType is parameters, second is return type.
+#[derive(Clone, Debug)]
 pub struct FuncType(pub ResultType, pub ResultType);
 
 impl Bytes for FuncType {
@@ -61,6 +64,7 @@ impl Bytes for FuncType {
 }
 
 // First is min, second is optional max.
+#[derive(Clone, Debug)]
 pub struct Limits(pub u32, pub Option<u32>);
 
 impl Bytes for Limits {
@@ -79,6 +83,7 @@ impl Bytes for Limits {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct TableType(pub RefType, pub Limits);
 
 impl Bytes for TableType {
@@ -89,6 +94,7 @@ impl Bytes for TableType {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct MemType(pub Limits);
 
 impl Bytes for MemType {
@@ -97,6 +103,7 @@ impl Bytes for MemType {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct GlobalType(pub ValType, pub Mut);
 
 impl Bytes for GlobalType {
@@ -107,7 +114,19 @@ impl Bytes for GlobalType {
     }
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Name(pub String);
+
+impl Name {
+    /// Concatenaes two `Name`s, adding two collons between them.
+    pub fn combine(first: &Name, second: &Name) -> Name {
+        let mut new_string = String::with_capacity(first.0.len() + 2 + second.0.len());
+        new_string.push_str(&first.0);
+        new_string.push_str("::");
+        new_string.push_str(&second.0);
+        Name(new_string)
+    }
+}
 
 impl Bytes for Name {
     fn to_bytes(&self) -> Vec<u8> {
@@ -115,6 +134,7 @@ impl Bytes for Name {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum BlockType {
     EmptyType,
     ValType(ValType),
@@ -131,6 +151,7 @@ impl Bytes for BlockType {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct MemArg {
     pub align: u32,
     pub offset: u32,
@@ -146,14 +167,23 @@ impl Bytes for MemArg {
 }
 
 // TODO: Macros
+#[derive(Clone, Debug)]
 pub struct TypeIdx(pub u32);
+#[derive(Clone, Debug)]
 pub struct FuncIdx(pub u32);
+#[derive(Clone, Debug)]
 pub struct TableIdx(pub u32);
+#[derive(Clone, Debug)]
 pub struct MemIdx(pub u32);
+#[derive(Clone, Debug)]
 pub struct GlobalIdx(pub u32);
+#[derive(Clone, Debug)]
 pub struct ElemIdx(pub u32);
+#[derive(Clone, Debug)]
 pub struct DataIdx(pub u32);
+#[derive(Clone, Debug)]
 pub struct LocalIdx(pub u32);
+#[derive(Clone, Debug)]
 pub struct LabelIdx(pub u32);
 
 macro_rules! impl_leb128_trait {

@@ -8,6 +8,7 @@ use super::{
     Bytes,
 };
 
+#[derive(Clone, Debug)]
 pub struct Expr(Vec<Instr>);
 
 impl Bytes for Expr {
@@ -21,6 +22,7 @@ impl Bytes for Expr {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum Instr {
     Unreachable,
     Nop,

@@ -16,5 +16,7 @@ clap = "2.33.3"
 analyze = { path = "../analyze" }
 codegen_llvm = { path = "../codegen_llvm" }
 common = { path = "../common" }
+ir = { path = "../ir" }
+ir_builder = { path = "../ir_builder" }
 lex = { path = "../lex" }
 parse = { path = "../parse" }

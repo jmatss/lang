@@ -5,6 +5,8 @@ members = [
     "codegen_llvm",
     "codegen_wasm",
     "common",
+    "ir",
+    "ir_builder",
     "lex",
     "parse",
 ]
