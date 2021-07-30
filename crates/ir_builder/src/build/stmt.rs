@@ -3,9 +3,9 @@ use common::{
     file::FilePosition,
     token::{expr::Expr, op::AssignOperator, stmt::Stmt},
 };
-use ir::{ExprTy, instruction::EndInstr};
+use ir::{instruction::EndInstr, ExprTy};
 
-use crate::{into_err, state::BuildState};
+use crate::state::BuildState;
 
 pub(crate) fn build_stmt(state: &mut BuildState, stmt: &Stmt) -> LangResult<()> {
     match stmt {
@@ -98,9 +98,7 @@ fn build_assign(
     let value = match oper {
         AssignOperator::Assignment => rhs_val,
         // TODO: Check so that the types are valid for these operations.
-        AssignOperator::AssignAdd => {
-            
-        }
+        AssignOperator::AssignAdd => {}
         AssignOperator::AssignSub => todo!(),
         AssignOperator::AssignMul => todo!(),
         AssignOperator::AssignDiv => todo!(),

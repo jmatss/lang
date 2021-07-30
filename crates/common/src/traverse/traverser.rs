@@ -200,6 +200,9 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                             self.traverse_expr(value);
                         }
 
+                        // TODO: Change how this is done, is vert confusing. Best to probably add
+                        //       a VarDecl instruction in the AST for every param instead of temporary
+                        //       doing it when traversing.
                         // Iterate through the parameters of functions as
                         // variable declarations. One have to temporary wrap
                         // them in a `Stmt::VariableDecl` for it to work

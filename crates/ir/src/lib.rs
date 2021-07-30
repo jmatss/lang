@@ -46,6 +46,13 @@ impl Deref for DataIdx {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum VarIdx {
+    Global(GlobalVarIdx),
+    Local(LocalVarIdx),
+    Param(ParamVarIdx),
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct GlobalVarIdx(pub usize);
 
@@ -57,14 +64,21 @@ impl Deref for GlobalVarIdx {
     }
 }
 
-/// This is used for both parameters and localy declared variables.
-/// Their indices are independant, this means that they will contain the same
-/// inner usize and it is up to the "user" to make sure to distinguish between
-/// local and parameter indices when needed.
 #[derive(Debug, Clone, Copy)]
 pub struct LocalVarIdx(pub usize);
 
 impl Deref for LocalVarIdx {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ParamVarIdx(pub usize);
+
+impl Deref for ParamVarIdx {
     type Target = usize;
 
     fn deref(&self) -> &Self::Target {

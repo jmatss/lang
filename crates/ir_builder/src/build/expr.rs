@@ -4,7 +4,7 @@ use common::{
         expr::{Expr, FnCall},
         lit::Lit,
     },
-    ty::{get::get_inner, inner_ty::InnerTy, ty::Ty, type_id::TypeId},
+    ty::{get::get_inner, inner_ty::InnerTy, type_id::TypeId},
 };
 use ir::{
     decl::ty::Type,
@@ -26,7 +26,7 @@ fn build_expr(state: &mut BuildState, expr: &Expr, expr_ty: ExprTy) -> LangResul
     let value = match expr {
         Expr::Lit(lit, type_id_opt, ..) => build_lit(state, lit, type_id_opt.as_ref())?,
         Expr::Var(_) => todo!(),
-        Expr::FnCall(fn_call) => build_fn_call(state, fn_call),
+        Expr::FnCall(fn_call) => build_fn_call(state, fn_call)?,
         Expr::FnPtr(_) => todo!(),
         Expr::BuiltInCall(_) => todo!(),
         Expr::AdtInit(_) => todo!(),
@@ -148,5 +148,9 @@ fn build_fn_call(state: &mut BuildState, fn_call: &FnCall) -> LangResult<Val> {
         arg_vals.push(arg_val);
     }
 
-    let a = if fn_call.is_fn_ptr_call {};
+    let a = if fn_call.is_fn_ptr_call {
+        let var_idx = state.get_var(&fn_call.name, state.cur_block_id)?;
+        let key = (fn_call.name.clone())
+        fn_call
+    };
 }

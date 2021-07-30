@@ -21,13 +21,14 @@ use ir::{
     },
     error::IrError,
     module::Module,
+    GlobalVarIdx, LocalVarIdx,
 };
 
 use crate::{
     build::block::build_block,
     collect::{
         adt::collect_type_decls, ext::collect_extern_decls, func::collect_func_decls,
-        global::collect_global_vars,
+        global::collect_globals, local::collect_locals_and_params,
     },
     state::BuildState,
 };
@@ -59,17 +60,16 @@ pub fn build_module(
     let mut module = Module::new(module_name);
 
     let ast_ctx = &mut analyze_ctx.ast_ctx;
-    let ty_env_mutex = analyze_ctx.ty_env;
-    collect_extern_decls(&mut module, ast_ctx, ty_env_mutex, ast_root)?;
+    let ty_env = analyze_ctx.ty_env;
 
-    let globals = {
-        let ty_env_guard = ty_env_mutex.lock().unwrap();
-        collect_type_decls(&mut module, ast_ctx, &ty_env_guard).map_err(|e| vec![e])?;
-        collect_func_decls(&mut module, ast_ctx, &ty_env_guard, ast_root).map_err(|e| vec![e])?;
-        collect_global_vars(&mut module, ast_ctx, &ty_env_guard).map_err(|e| vec![e])?
-    };
+    collect_extern_decls(&mut module, ast_ctx, ty_env, ast_root)?;
+    collect_type_decls(&mut module, ast_ctx, ty_env).map_err(|e| vec![e])?;
+    collect_func_decls(&mut module, ast_ctx, ty_env, ast_root).map_err(|e| vec![e])?;
+    let globals = collect_globals(&mut module, ast_ctx, ty_env).map_err(|e| vec![e])?;
+    let locals_and_params =
+        collect_locals_and_params(&mut module, ast_ctx, ty_env, ast_root).map_err(|e| vec![e])?;
 
-    let mut build_state = BuildState::new(&mut module, analyze_ctx);
+    let mut build_state = BuildState::new(&mut module, analyze_ctx, globals, locals_and_params);
     build_token(&mut build_state, ast_root).map_err(|e| vec![e])?;
 
     Ok(module)

@@ -1,4 +1,4 @@
-use crate::{decl::ty::Type, DataIdx, Val};
+use crate::{decl::ty::Type, DataIdx, Val, VarIdx};
 
 #[derive(Debug, Clone)]
 pub enum Instr {
@@ -14,7 +14,7 @@ pub enum ExprInstr {
     /// The first String is the name of the function to call and the vector of
     /// `Val`s are the arguments.
     FnCall(String, Vec<Val>),
-    /// For `FnPtrCall`, the first `Val` is the temporary variule containing the
+    /// For `FnPtrCall`, the first `Val` is the temporary variable containing the
     /// function pointer to call and the vector of `Val`s are the arguments.
     FnPtrCall(Val, Vec<Val>),
 

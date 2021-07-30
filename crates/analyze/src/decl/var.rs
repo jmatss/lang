@@ -9,7 +9,8 @@ use common::{
 };
 
 /// Gathers information about all variable declarations found in the AST and
-/// inserts them into the `analyze_context`.
+/// inserts them into the `analyze_context`. Params are also included since
+/// they are considered `VariableDecl`s as well.
 ///
 /// Also ensures that all uses of a variable `x` are done after the declaration
 /// of the variable. If that is not the case, a error will be returned.

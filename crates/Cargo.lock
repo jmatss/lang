@@ -246,6 +246,7 @@ name = "ir_builder"
 version = "0.1.0"
 dependencies = [
  "common",
+ "either",
  "ir",
  "log",
 ]

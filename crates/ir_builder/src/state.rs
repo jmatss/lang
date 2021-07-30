@@ -5,11 +5,19 @@ use common::{
     error::{LangError, LangErrorKind, LangResult},
     BlockId,
 };
-use ir::{basic_block::BasicBlock, decl::func::Func, module::Module, Val};
+use either::Either;
+use ir::{
+    basic_block::BasicBlock, decl::func::Func, module::Module, GlobalVarIdx, LocalVarIdx,
+    ParamVarIdx, Val, VarIdx,
+};
 
 pub(crate) struct BuildState<'ctx, 'a> {
     pub module: &'a mut Module,
     pub analyze_ctx: &'a mut AnalyzeCtx<'ctx>,
+
+    pub globals: HashMap<String, GlobalVarIdx>,
+    pub locals_and_params:
+        HashMap<String, HashMap<(String, BlockId), Either<LocalVarIdx, ParamVarIdx>>>,
 
     /// The ID of the current block that we are in.
     /// OBS! A `BlockId` is completly unrelated to a `BasicBlock`. This ID is
@@ -45,10 +53,20 @@ pub(crate) struct BuildState<'ctx, 'a> {
 }
 
 impl<'ctx, 'a> BuildState<'ctx, 'a> {
-    pub fn new(module: &'a mut Module, analyze_ctx: &'a mut AnalyzeCtx<'ctx>) -> Self {
+    pub fn new(
+        module: &'a mut Module,
+        analyze_ctx: &'a mut AnalyzeCtx<'ctx>,
+        globals: HashMap<String, GlobalVarIdx>,
+        locals_and_params: HashMap<
+            String,
+            HashMap<(String, BlockId), Either<LocalVarIdx, ParamVarIdx>>,
+        >,
+    ) -> Self {
         Self {
             module,
             analyze_ctx,
+            globals,
+            locals_and_params,
             cur_block_id: 0,
             cur_basic_block_name: None,
             cur_func_name: None,
@@ -166,6 +184,85 @@ impl<'ctx, 'a> BuildState<'ctx, 'a> {
     pub fn new_val(&mut self) -> Val {
         self.val += 1;
         Val(self.val)
+    }
+
+    // TODO: Merge with `get()`.
+    /// Given a name of a variable `ident` and a block scope `id`, returns
+    /// the IR index of the given variable.
+    /// This can either be a global, function parameter or local variable.
+    pub fn get_var(&self, ident: &str, id: BlockId) -> LangResult<VarIdx> {
+        if let Some(global_var_idx) = self.globals.get(ident) {
+            Ok(VarIdx::Global(*global_var_idx))
+        } else {
+            self.get_local_var(ident, id)
+        }
+    }
+
+    /// Given a name of a local variable `ident` and a block scope `id`, returns
+    /// the index of the variable. This can either be a local or parameter.
+    fn get_local_var(&self, ident: &str, id: BlockId) -> LangResult<VarIdx> {
+        let func_name = if let Some(cur_func_name) = &self.cur_func_name {
+            cur_func_name
+        } else {
+            return Err(LangError::new(
+                format!("Unable to find var with name \"{}\" (not in func)", ident),
+                LangErrorKind::IrError,
+                None,
+            ));
+        };
+
+        let func_entry = if let Some(func_entry) = self.locals_and_params.get(func_name) {
+            func_entry
+        } else {
+            return Err(LangError::new(
+                format!(
+                    "Unable to find var with name \"{}\" (currently in empty func \"{}\")",
+                    ident, func_name
+                ),
+                LangErrorKind::IrError,
+                None,
+            ));
+        };
+
+        self.get_local_var_rec(func_entry, func_name, ident, id)
+    }
+
+    fn get_local_var_rec(
+        &self,
+        func_entry: &HashMap<(String, BlockId), Either<LocalVarIdx, ParamVarIdx>>,
+        func_name: &str,
+        ident: &str,
+        id: BlockId,
+    ) -> LangResult<VarIdx> {
+        if let Some(idx) = func_entry.get(&(ident.into(), id)) {
+            Ok(match idx {
+                Either::Left(local_var_idx) => VarIdx::Local(*local_var_idx),
+                Either::Right(param_var_idx) => VarIdx::Param(*param_var_idx),
+            })
+        } else if id == BlockCtx::DEFAULT_BLOCK_ID {
+            return Err(LangError::new(
+                format!(
+                    "Unable to find var with name \"{}\" (currently in func \"{}\")",
+                    ident, func_name
+                ),
+                LangErrorKind::IrError,
+                None,
+            ));
+        } else {
+            // Unable to find declaration in the current block scope. See
+            // recursively if the declaration exists in a parent scope.
+            let parent_id = self.analyze_ctx.ast_ctx.get_parent_id(id)?;
+
+            if id != parent_id {
+                self.get_local_var_rec(func_entry, func_name, ident, parent_id)
+            } else {
+                Err(LangError::new(
+                    format!("Block with id {} is its own parent in block info.", id),
+                    LangErrorKind::IrError,
+                    None,
+                ))
+            }
+        }
     }
 }
 

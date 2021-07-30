@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 
 use common::{
     ctx::ast_ctx::AstCtx,
@@ -14,11 +14,12 @@ use crate::to_ir_type;
 /// corresponding `GlobalVarIdx` of the variable in the module.
 /// This is needed since the names of the variables aren't stored in the module,
 /// it only uses indices.
-pub(crate) fn collect_global_vars(
+pub(crate) fn collect_globals(
     module: &mut Module,
     ast_ctx: &AstCtx,
-    ty_env: &TyEnv,
+    ty_env: &Mutex<TyEnv>,
 ) -> LangResult<HashMap<String, GlobalVarIdx>> {
+    let ty_env_guard = ty_env.lock().unwrap();
     let mut globals = HashMap::default();
     for var in ast_ctx.variables.values() {
         let var = var.as_ref().read().unwrap();
@@ -33,11 +34,10 @@ pub(crate) fn collect_global_vars(
                 ));
             };
 
-            let ir_type = to_ir_type(ast_ctx, ty_env, type_id)?;
+            let ir_type = to_ir_type(ast_ctx, &ty_env_guard, type_id)?;
             let global_var_idx = module.add_global_var(ir_type);
             globals.insert(var.name.clone(), global_var_idx);
         }
     }
-
     Ok(globals)
 }
