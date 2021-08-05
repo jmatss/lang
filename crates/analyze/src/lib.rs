@@ -6,7 +6,7 @@ mod ty;
 pub mod util;
 //mod unitialized;
 
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::HashMap, process::exit, sync::Mutex};
 
 use log::debug;
 
@@ -79,6 +79,27 @@ pub fn analyze<'a>(
     ty_env: &'a Mutex<TyEnv>,
     file_info: HashMap<FileId, FileInfo>,
 ) -> Result<AnalyzeCtx<'a>, Vec<LangError>> {
+    // TODO: Add analyzer step to check so that someone doesn't take the address
+    //       of a parameter and doesn't dereference a non-pointer.
+    //       Since being able to take the address of a parameter requires it to
+    //       be stack-allocated, that is not something that paramters are as
+    //       default (they are stored in registers as default). It might also
+    //       be confusing being able to take the address of a parameter since
+    //       the person writing the code might expect derefering and writing to
+    //       the memory would modify the argument at the call-site of the function,
+    //       but in reality the address would just point to a temporary stack
+    //       allocation done just to be able to get an address.
+    //
+    //       The better option is to not allow being able to take the address of
+    //       parameters. If an user really wants to take the address of a parameter,
+    //       the user would have to make a manual temporary variable (stack
+    //       allocation) and take the address of that. This is the same logic that
+    //       the compiler could do behind the scenes to allow for taking the
+    //       address of parameters, but in this case the user are 100% sure what
+    //       is going on while if the compiler did it, it would be hidden from
+    //       the user who wrote the code.
+    exit(1);
+
     let built_ins = init_built_ins(ty_env).map_err(|err| vec![err])?;
 
     let mut ast_ctx = match AstCtx::new(built_ins, file_info) {

@@ -37,6 +37,12 @@ use crate::{
 // TODO: Need to verify that value in while loop evaluates to i1/bool.
 // TODO: Verify types when doing building "special" assign stmt (ex. +=, -= etc.).
 // TODO: Verify types for integer/float literals.
+// TODO: Make sure that the amount of arguments used when calling a function is
+//       correct (need to consider variadic arguments, also check types).
+// TODO: Make sure that function pointer calls are done on pointers.
+// TODO: Check if struct/union init is const. This should probably be done for
+//       more things ex. variables as well.
+// TODO: Check so that lhs and rhs have the same type (or ar compatible).
 //
 //
 //

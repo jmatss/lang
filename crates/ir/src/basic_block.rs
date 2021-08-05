@@ -41,8 +41,8 @@ impl BasicBlock {
         self.end_instruction.as_ref()
     }
 
-    pub fn set_end_instruction(&mut self, end_instr: Option<EndInstr>) {
-        self.end_instruction = end_instr;
+    pub fn set_end_instruction(&mut self, end_instr: EndInstr) {
+        self.end_instruction = Some(end_instr);
     }
 
     pub fn has_end_instruction(&self) -> bool {

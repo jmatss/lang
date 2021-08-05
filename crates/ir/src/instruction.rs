@@ -14,31 +14,75 @@ pub enum ExprInstr {
     /// The first String is the name of the function to call and the vector of
     /// `Val`s are the arguments.
     FnCall(String, Vec<Val>),
+
     /// For `FnPtrCall`, the first `Val` is the temporary variable containing the
     /// function pointer to call and the vector of `Val`s are the arguments.
     FnPtrCall(Val, Vec<Val>),
 
+    FnPtr(String),
+
+    /// Gets the value stored inside the variable with index `VarIdx`.
+    Var(VarIdx),
+
     Op(Type, Op),
+
+    /// Needs to be the first instruction of a basic block. This expr instruction
+    /// will be assigned one of the `Val`s inside the vector depending on which
+    /// basic block we arrived from.
+    ///
+    /// The String in the tuple is a label of a basic block, and the Val is the
+    /// value that will be assigned to this phi if we arrived from the corresponding
+    /// basic block.
+    ///
+    /// # Example
+    ///
+    /// If we have a phi-instruction that looks like this at the start of a block:
+    /// ```
+    /// res = Phi[(Block1, 123), (Block2, 456)]
+    /// ```
+    /// If the previos block that we came from was `Block1`, the value 123 will
+    /// be assigned to `res`. If we arrived from `Block2`, the value 456 will be
+    /// assigned to `res`.
+    ///
+    /// OBS! The phi-instruction must be exhaustive meaning that all possible
+    ///      blocks that we can arrive from must have a entry in the phi-instruction.
+    Phi(Vec<(String, Val)>),
+
+    /// Casts the value `Val` to the type `Type`.
+    Cast(Type, Val),
+
+    Cmp(Cmp, Val, Val, Signed),
+
+    Add(Val, Val),
+    Sub(Val, Val),
+    Mul(Val, Val),
+    Div(Val, Val, Signed),
+    Mod(Val, Val, Signed),
+    BitAnd(Val, Val),
+    BitOr(Val, Val),
+    BitXor(Val, Val),
+    Shl(Val, Val),
+    Shr(Val, Val, Signed),
+
+    Deref(Val),
+    Address(Val),
+
+    /// Expectes `Val` to be pointer/address to the integer that is to be
+    /// incremented/decremented.
+    Inc(Val),
+    Dec(Val),
+
     StructInit(Type, Vec<Val>),
 
     /// The first `Type` is the union type, the `usize` is the index for the
     /// member to be initialized and `Val` is the init value.
     UnionInit(Type, usize, Val),
+
+    ArrayInit(Type, Vec<Val>),
 }
 
 #[derive(Debug, Clone)]
-pub enum StmtInstr {
-    Add(Val, Val),
-    Sub(Val, Val),
-    Mul(Val, Val),
-    Div(Val, Val),
-    Mod(Val, Val),
-    BitAnd(Val, Val),
-    BitOr(Val, Val),
-    BitXor(Val, Val),
-    Shl(Val, Val),
-    Shr(Val, Val),
-}
+pub enum StmtInstr {}
 
 #[derive(Debug, Clone)]
 pub enum EndInstr {
@@ -128,4 +172,20 @@ pub enum UnOper {
 
     BitComplement,
     BoolNot,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Cmp {
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Lte,
+    Gte,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum Signed {
+    True,
+    False,
 }

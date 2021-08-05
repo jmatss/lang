@@ -1,11 +1,15 @@
 use common::{
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
-    token::{expr::Expr, op::AssignOperator, stmt::Stmt},
+    token::{
+        expr::{Expr, Var},
+        op::AssignOperator,
+        stmt::Stmt,
+    },
 };
 use ir::{instruction::EndInstr, ExprTy};
 
-use crate::state::BuildState;
+use crate::{into_err, state::BuildState};
 
 pub(crate) fn build_stmt(state: &mut BuildState, stmt: &Stmt) -> LangResult<()> {
     match stmt {
@@ -48,9 +52,9 @@ fn build_return(
         None
     };
 
-    let end_instr = EndInstr::Return(expr_val_opt);
-    let cur_block = state.cur_basic_block_mut()?;
-    cur_block.set_end_instruction(Some(end_instr));
+    state
+        .cur_basic_block_mut()?
+        .set_end_instruction(EndInstr::Return(expr_val_opt));
 
     Ok(())
 }
@@ -65,16 +69,14 @@ fn build_yield(
 
 fn build_break(state: &mut BuildState, file_pos: Option<&FilePosition>) -> LangResult<()> {
     let merge_block = state.get_branchable_merge_block(state.cur_block_id)?;
-    let end_instr = Some(EndInstr::Branch(merge_block.name.clone()));
-    merge_block.set_end_instruction(end_instr);
+    merge_block.set_end_instruction(EndInstr::Branch(merge_block.name.clone()));
     Ok(())
 }
 
 fn build_continue(state: &mut BuildState, file_pos: Option<&FilePosition>) -> LangResult<()> {
     if let Some(branch_block_name) = &state.cur_branch_block_name {
         let cur_block = state.cur_basic_block_mut()?;
-        let end_instr = Some(EndInstr::Branch(branch_block_name.clone()));
-        cur_block.set_end_instruction(end_instr);
+        cur_block.set_end_instruction(EndInstr::Branch(branch_block_name.clone()));
         Ok(())
     } else {
         Err(LangError::new(

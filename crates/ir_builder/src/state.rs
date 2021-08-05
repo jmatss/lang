@@ -48,7 +48,7 @@ pub(crate) struct BuildState<'ctx, 'a> {
     //       for the whole module, but it is possible to reset this count for
     //       every new func.
     /// A number used to create `Val` structs. For every new `Val` created, this
-    /// `val` be incremented to ensure that every new `Val` is unique.
+    /// `val` will be incremented to ensure that every new `Val` is unique.
     val: usize,
 }
 

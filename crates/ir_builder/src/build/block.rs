@@ -139,7 +139,7 @@ fn build_func_body(state: &mut BuildState, func: &Fn, body: &[AstToken]) -> Lang
     if matches!(ir_func.ret_ty, Type::Void) {
         if let Some(last_block) = ir_func.last_mut() {
             match last_block.get_end_instruction() {
-                None => last_block.set_end_instruction(Some(EndInstr::Return(None))),
+                None => last_block.set_end_instruction(EndInstr::Return(None)),
                 Some(EndInstr::Return(None)) => (),
                 Some(end_instr) => {
                     return Err(LangError::new(
@@ -188,7 +188,7 @@ fn build_anon(state: &mut BuildState, body: &[AstToken]) -> LangResult<()> {
         state.merge_blocks.insert(anon_block_id, merge_block_name);
 
         let cur_block = state.cur_basic_block_mut()?;
-        cur_block.set_end_instruction(Some(EndInstr::Branch(merge_block_name)));
+        cur_block.set_end_instruction(EndInstr::Branch(merge_block_name));
 
         state.set_cur_basic_block(Some(merge_block_name));
     } else {
@@ -323,11 +323,11 @@ fn build_if_case(
 
         let expr_val = build_expr(case_expr);
 
-        let end_instr = Some(EndInstr::BranchIf(
+        let end_instr = EndInstr::BranchIf(
             expr_val,
             case_block.name.clone(),
             next_branch_block.name.clone(),
-        ));
+        );
         state.cur_basic_block_mut()?.set_end_instruction(end_instr);
     }
 
@@ -344,7 +344,7 @@ fn build_if_case(
     if !cur_basic_block.has_end_instruction() {
         let merge_block = state.get_merge_block(block_id)?;
         let end_instr = EndInstr::Branch(merge_block.name.clone());
-        cur_basic_block.set_end_instruction(Some(end_instr));
+        cur_basic_block.set_end_instruction(end_instr);
     }
 
     Ok(())
@@ -442,7 +442,7 @@ fn build_match(
             .map_err(|e| into_err(e))?;
 
         if let Some(default_block) = cur_func.get_mut(&default_block_name) {
-            default_block.set_end_instruction(Some(EndInstr::Unreachable));
+            default_block.set_end_instruction(EndInstr::Unreachable);
         } else {
             unreachable!()
         }
@@ -466,7 +466,7 @@ fn build_match(
     for block_name in blocks_without_branch {
         if let Some(block_without_branch) = state.cur_func_mut()?.get_mut(&block_name) {
             let end_instr = EndInstr::Branch(merge_block_name.clone());
-            block_without_branch.set_end_instruction(Some(end_instr));
+            block_without_branch.set_end_instruction(end_instr);
         } else {
             unreachable!()
         }
@@ -477,7 +477,7 @@ fn build_match(
 
     if let Some(start_block) = state.cur_func_mut()?.get_mut(&start_block_name) {
         let end_instr = EndInstr::BranchSwitch(match_val, default_block_name, cases);
-        start_block.set_end_instruction(Some(end_instr));
+        start_block.set_end_instruction(end_instr);
     } else {
         unreachable!()
     }
@@ -592,7 +592,7 @@ fn build_while(
 
     if let Some(cur_block) = state.cur_func_mut()?.get_mut(&cur_block_name) {
         let end_instr = EndInstr::Branch(branch_block_name.clone());
-        cur_block.set_end_instruction(Some(end_instr))
+        cur_block.set_end_instruction(end_instr)
     } else {
         unreachable!()
     }
@@ -601,14 +601,11 @@ fn build_while(
     state.set_cur_basic_block(Some(branch_block_name.clone()));
     if let Some(expr) = expr_opt {
         let expr_val = build_expr(expr);
-        let end_instr = Some(EndInstr::BranchIf(
-            expr_val,
-            body_block_name.clone(),
-            merge_block_name.clone(),
-        ));
+        let end_instr =
+            EndInstr::BranchIf(expr_val, body_block_name.clone(), merge_block_name.clone());
         state.cur_basic_block_mut()?.set_end_instruction(end_instr);
     } else {
-        let end_instr = Some(EndInstr::Branch(body_block_name.clone()));
+        let end_instr = EndInstr::Branch(body_block_name.clone());
         state.cur_basic_block_mut()?.set_end_instruction(end_instr);
     }
 
@@ -623,7 +620,7 @@ fn build_while(
     // If the block does NOT contain a terminator instruction inside it (return,
     // yield etc.), add a unconditional branch back up to the "while.branch" block.
     if !state.cur_basic_block()?.has_end_instruction() {
-        let end_instr = Some(EndInstr::Branch(branch_block_name.clone()));
+        let end_instr = EndInstr::Branch(branch_block_name.clone());
         state.cur_basic_block_mut()?.set_end_instruction(end_instr);
     }
 
