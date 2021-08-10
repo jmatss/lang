@@ -118,65 +118,78 @@ fn solve_unsolvable(
     // all SolveCond's have been tried and the type system isn't solvable.
     let solve_conds = [SolveCond::new().excl_gen_inst(), SolveCond::new()];
 
+    let mut fully_solved = false;
+
     for solve_cond in solve_conds.iter() {
-        let mut solved_this_iteration = HashSet::new();
-        let start_len = unsolvables.len();
+        // For every "solve condition", loop over the types multiple times if
+        // needed until no progression was made in a iteration. At that point,
+        // break this inner `loop` and continue with the next `solve_cond`.
+        loop {
+            let mut solved_this_iteration = HashSet::new();
+            let start_len = unsolvables.len();
 
-        debug!(
-            "start unsolvable -- start len: {}, solve_cond: {:?}",
-            start_len, solve_cond
-        );
+            debug!(
+                "start unsolvable -- start len: {}, solve_cond: {:?}",
+                start_len, solve_cond
+            );
 
-        for (type_id, child_type_ids) in unsolvables.iter() {
-            debug!("solve unsolvable -- type_id: {}", type_id);
+            for (type_id, child_type_ids) in unsolvables.iter() {
+                debug!("solve unsolvable -- type_id: {}", type_id);
 
-            solve(&ctx.ty_env, ctx.ast_ctx, *type_id)?;
-            let inf_type_id = inferred_type(&ctx.ty_env.lock().unwrap(), *type_id)?;
+                solve(&ctx.ty_env, ctx.ast_ctx, *type_id)?;
+                let inf_type_id = inferred_type(&ctx.ty_env.lock().unwrap(), *type_id)?;
 
-            let check_inf = true;
-            let is_solved_res = is_solved(
-                &ctx.ty_env.lock().unwrap(),
-                inf_type_id,
-                check_inf,
-                *solve_cond,
-            )?;
-            if is_solved_res {
-                let mut all_children_solved = true;
-                for child_type_id in child_type_ids {
-                    let child_is_solved = is_solved(
-                        &ctx.ty_env.lock().unwrap(),
-                        *child_type_id,
-                        check_inf,
-                        *solve_cond,
-                    )?;
+                let check_inf = true;
+                let is_solved_res = is_solved(
+                    &ctx.ty_env.lock().unwrap(),
+                    inf_type_id,
+                    check_inf,
+                    *solve_cond,
+                )?;
+                if is_solved_res {
+                    let mut all_children_solved = true;
+                    for child_type_id in child_type_ids {
+                        let child_is_solved = is_solved(
+                            &ctx.ty_env.lock().unwrap(),
+                            *child_type_id,
+                            check_inf,
+                            *solve_cond,
+                        )?;
 
-                    if !child_is_solved {
-                        all_children_solved = false;
-                        break;
+                        if !child_is_solved {
+                            all_children_solved = false;
+                            break;
+                        }
+                    }
+
+                    debug!(
+                        "solve unsolvable -- type_id: {}, all_children_solved: {}",
+                        type_id, all_children_solved
+                    );
+
+                    if all_children_solved {
+                        solved_this_iteration.insert(*type_id);
                     }
                 }
+            }
 
-                debug!(
-                    "solve unsolvable -- type_id: {}, all_children_solved: {}",
-                    type_id, all_children_solved
-                );
+            for solved_type_id in &solved_this_iteration {
+                unsolvables.remove(solved_type_id);
+            }
 
-                if all_children_solved {
-                    solved_this_iteration.insert(*type_id);
-                }
+            if unsolvables.is_empty() {
+                // No unsolved types left, all of them have been solved, SUCCESS!
+                fully_solved = true;
+                break;
+            } else if solved_this_iteration.is_empty() {
+                // No types was solved this iteration meaning that no more progress
+                // can be made at this `solve_cond`. Break and start with the
+                // next `solve_cond`.
+                break;
             }
         }
 
-        // Remove the types that was solved in this iteration.
-        if !solved_this_iteration.is_empty() {
-            for solved_type_id in solved_this_iteration {
-                unsolvables.remove(&solved_type_id);
-            }
-        }
-
-        // No unsolved types left, all of them have been solved, success!
-        // Do a early, no need to iterate through all `solve_conds`.
-        if unsolvables.is_empty() {
+        if fully_solved {
             break;
         }
     }
