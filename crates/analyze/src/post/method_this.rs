@@ -46,7 +46,10 @@ impl MethodThisAnalyzer {
         };
 
         let adt_type_id = fn_call.method_adt.unwrap();
-        let adt_path = get_ident(&ctx.ty_env.lock().unwrap(), adt_type_id)?.unwrap();
+        let mut adt_path = get_ident(&ctx.ty_env.lock().unwrap(), adt_type_id)?.unwrap();
+        if let Some(gens) = &fn_call.generics {
+            adt_path = adt_path.with_gens(gens.clone());
+        }
 
         let method =
             ctx.ast_ctx

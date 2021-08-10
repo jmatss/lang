@@ -82,14 +82,25 @@ impl DeclFnAnalyzer {
         adt_path: &LangPath,
         func: &mut Arc<RwLock<Fn>>,
     ) {
-        let inner_ty = if ctx.ast_ctx.is_trait(&ctx.ty_env.lock().unwrap(), adt_path) {
-            InnerTy::Trait(adt_path.clone())
+        let mut adt_path_without_gens = adt_path.clone();
+        if let Some(last_part) = adt_path_without_gens.last_mut() {
+            last_part.1 = None;
+        }
+
+        let inner_ty = if ctx
+            .ast_ctx
+            .is_trait(&ctx.ty_env.lock().unwrap(), &adt_path_without_gens)
+        {
+            InnerTy::Trait(adt_path_without_gens.clone())
         } else {
-            match ctx.ast_ctx.get_adt(&ctx.ty_env.lock().unwrap(), adt_path) {
+            match ctx
+                .ast_ctx
+                .get_adt(&ctx.ty_env.lock().unwrap(), &adt_path_without_gens)
+            {
                 Ok(adt) => match adt.as_ref().read().unwrap().kind {
-                    AdtKind::Struct => InnerTy::Struct(adt_path.clone()),
-                    AdtKind::Union => InnerTy::Union(adt_path.clone()),
-                    AdtKind::Enum => InnerTy::Enum(adt_path.clone()),
+                    AdtKind::Struct => InnerTy::Struct(adt_path_without_gens.clone()),
+                    AdtKind::Union => InnerTy::Union(adt_path_without_gens.clone()),
+                    AdtKind::Enum => InnerTy::Enum(adt_path_without_gens.clone()),
                     AdtKind::Unknown => unreachable!("AdtKind::Unknown"),
                 },
                 Err(err) => {
@@ -141,7 +152,7 @@ impl DeclFnAnalyzer {
                 let err = ctx.ast_ctx.err(format!(
                     "Non static function did not contain \"this\" or \"this ptr\" reference. \
                     ADT name: {}, func: {:#?}.",
-                    to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path),
+                    to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path_without_gens),
                     func
                 ));
                 self.errors.push(err);
@@ -166,10 +177,11 @@ impl DeclFnAnalyzer {
         }
 
         // Insert this method into `methods` in the analyze context.
-        if let Err(err) =
-            ctx.ast_ctx
-                .insert_method(&ctx.ty_env.lock().unwrap(), adt_path, Arc::clone(func))
-        {
+        if let Err(err) = ctx.ast_ctx.insert_method(
+            &ctx.ty_env.lock().unwrap(),
+            &adt_path_without_gens,
+            Arc::clone(func),
+        ) {
             self.errors.push(err);
             return;
         }
