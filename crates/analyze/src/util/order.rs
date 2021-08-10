@@ -334,11 +334,7 @@ impl ReferenceCollector {
         };
 
         Ok(if self.full_paths {
-            let generics = if let Some(generics) = &adt.as_ref().borrow().read().unwrap().generics {
-                Some(generics.clone())
-            } else {
-                None
-            };
+            let generics = adt.read().unwrap().generics.as_ref().cloned();
             module.clone_push(&adt_name, generics.as_ref(), adt_file_pos)
         } else {
             module.clone_push(&adt_name, None, adt_file_pos)

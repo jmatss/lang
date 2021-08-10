@@ -650,11 +650,7 @@ impl AdtInit {
     /// Returns the "full name" which is the name containing possible generics
     /// as well.
     pub fn full_name(&mut self, ty_env: &TyEnv) -> LangResult<String> {
-        let adt_init_generics = if let Some(generics) = self.generics(&ty_env) {
-            Some(generics)
-        } else {
-            None
-        };
+        let adt_init_generics = self.generics(&ty_env);
 
         if let Some(adt_type_id) = &self.ret_type {
             let adt_ty = ty_env.ty(*adt_type_id)?;

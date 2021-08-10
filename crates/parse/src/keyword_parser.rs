@@ -951,7 +951,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // values according to their index position in the enum.
         for (idx, member) in members.iter_mut().enumerate() {
             let mut ty_env_guard = self.iter.ty_env.lock().unwrap();
-            let member_file_pos = member.file_pos.clone().unwrap();
+            let member_file_pos = member.file_pos.unwrap();
 
             let enum_type_info = (name.clone(), file_pos.to_owned());
             let member_type_info = (member.name.clone(), member_file_pos);

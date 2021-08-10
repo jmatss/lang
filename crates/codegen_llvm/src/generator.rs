@@ -510,7 +510,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                         ));
 
                         if let Some(struct_type) = struct_type_opt {
-                            struct_type.clone().into()
+                            struct_type.into()
                         } else {
                             return Err(self.err(
                                 format!(
@@ -534,7 +534,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                         ));
 
                         if let Some(struct_type) = struct_type_opt {
-                            struct_type.clone().into()
+                            struct_type.into()
                         } else {
                             return Err(self.err(
                                 format!(

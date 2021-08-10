@@ -417,13 +417,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             args.push(basic_value);
         }
 
-        let is_const = CodeGen::is_const(
-            &args
-                .clone()
-                .iter()
-                .map(|x| x.clone().into())
-                .collect::<Vec<_>>(),
-        );
+        let is_const =
+            CodeGen::is_const(&args.clone().iter().map(|x| (*x).into()).collect::<Vec<_>>());
 
         if is_const {
             Ok(struct_type.const_named_struct(&args).into())

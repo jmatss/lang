@@ -1459,19 +1459,14 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         );
 
         let type_id = union_
-            .as_ref()
-            .borrow()
             .read()
             .unwrap()
             .members
             .get(idx as usize)
             .unwrap()
-            .as_ref()
-            .borrow()
             .read()
             .unwrap()
             .ty
-            .clone()
             .unwrap();
         let file_pos = get_file_pos(&self.analyze_ctx.ty_env.lock().unwrap(), type_id).cloned();
         let member_ty = self.compile_type(type_id, file_pos)?;

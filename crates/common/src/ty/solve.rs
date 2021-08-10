@@ -571,11 +571,9 @@ fn solve_unknown_adt_member(
                 &member_name,
                 file_pos,
             )?
-            .as_ref()
             .read()
             .unwrap()
             .ty
-            .clone()
             .unwrap()
     };
 
