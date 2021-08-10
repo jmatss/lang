@@ -234,7 +234,8 @@ pub fn get_generics(ty_env: &TyEnv, id: TypeId) -> LangResult<Vec<TypeId>> {
 }
 
 /// Gets a set of all unsolvable types that is contained in the given type `self`.
-/// This exludes Generic's, GenericInstance's and Any's.
+/// Which types are counted as unsolvable depends on the given `solve_cond`.
+/// `Any` types are always excluded.
 pub fn get_unsolvable(
     ty_env: &TyEnv,
     type_id: TypeId,
@@ -244,7 +245,7 @@ pub fn get_unsolvable(
 
     match ty_env.ty(type_id)? {
         Ty::CompoundType(inner_ty, gens, _) => {
-            if !inner_ty.is_solved(SolveCond::new()) {
+            if !inner_ty.is_solved(solve_cond) {
                 unsolvable.insert(type_id);
             }
             for gen_type_id in gens.iter_types() {
@@ -280,7 +281,18 @@ pub fn get_unsolvable(
             }
         }
 
-        Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => (),
+        Ty::Generic(..) => {
+            if !solve_cond.can_solve_gen() {
+                unsolvable.insert(type_id);
+            }
+        }
+        Ty::GenericInstance(..) => {
+            if !solve_cond.can_solve_gen_inst() {
+                unsolvable.insert(type_id);
+            }
+        }
+
+        Ty::Any(..) => (),
     }
 
     Ok(unsolvable)
