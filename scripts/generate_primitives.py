@@ -1,13 +1,13 @@
 import os
 
 CURRENT_FILE_DIR = os.path.dirname(__file__)
-PRIMITIVES_PATH = os.path.join(CURRENT_FILE_DIR, '..', 'std', 'types', 'primitives.ren')
+PRIMITIVES_PATH = os.path.join(CURRENT_FILE_DIR, '..', 'std', 'primitives.ren')
 
 def heading(file):
     output = '''/*
     Auto generated with `generate_primitives.py`, do not edit manually.
 */
-mod std::types
+mod std
 
 '''
     file.write(output)

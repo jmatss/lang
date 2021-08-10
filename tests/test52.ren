@@ -1,4 +1,4 @@
-use std::types::String
+use std::String
 
 ext fn printf(format: {u8}, ...) -> i32
 
@@ -10,7 +10,7 @@ fn main() -> i32
 
 
     var i_i8: i8 = 123
-    var s_i8_or_error = std::types::I8::to_string(i_i8)
+    var s_i8_or_error = std::I8::to_string(i_i8)
     std::assert(s_i8_or_error.&.is_success())
     var s_i8 = s_i8_or_error.&.get_success()
     printf("\ns_i8 -- \"%s\", len: %d, cap: %d", s_i8.to_c_string().&.get_success(), s_i8.len(), s_i8.cap())
@@ -19,7 +19,7 @@ fn main() -> i32
 
 
     var i_u8: u8 = 123
-    var s_u8_or_error = std::types::U8::to_string(i_u8)
+    var s_u8_or_error = std::U8::to_string(i_u8)
     std::assert(s_u8_or_error.&.is_success())
     var s_u8 = s_u8_or_error.&.get_success()
     printf("\ns_u8 -- \"%s\", len: %d, cap: %d", s_u8.to_c_string().&.get_success(), s_u8.len(), s_u8.cap())

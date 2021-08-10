@@ -44,28 +44,28 @@ impl DeclFnAnalyzer {
         // block id for the parent.
         let parent_id = ctx.ast_ctx.get_parent_id(fn_id)?;
 
-        let full_path = {
+        let path_without_gens = {
             let module = ctx.ast_ctx.get_module(fn_id)?.unwrap_or_default();
             let func = func.as_ref().read().unwrap();
 
-            module.clone_push(&func.name, func.generics.as_ref(), Some(func.file_pos))
+            module.clone_push(&func.name, None, Some(func.file_pos))
         };
 
         // TODO: Add file positions to error message.
         if ctx
             .ast_ctx
-            .get_fn(&ctx.ty_env.lock().unwrap(), &full_path)
+            .get_fn(&ctx.ty_env.lock().unwrap(), &path_without_gens)
             .is_ok()
         {
             let err = ctx.ast_ctx.err(format!(
                 "Two declarations of function \"{}\" founds. Full path: {}",
                 &func.as_ref().read().unwrap().name,
-                to_string_path(&ctx.ty_env.lock().unwrap(), &full_path),
+                to_string_path(&ctx.ty_env.lock().unwrap(), &path_without_gens),
             ));
             return Err(err);
         }
 
-        let key = (full_path, parent_id);
+        let key = (path_without_gens, parent_id);
         ctx.ast_ctx.fns.insert(
             &ctx.ty_env.lock().unwrap(),
             DerefType::Shallow,

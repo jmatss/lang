@@ -1,4 +1,4 @@
-mod std::types
+mod std
 
 pub union Result<T, E>
 {

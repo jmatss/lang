@@ -1,7 +1,7 @@
 /*
     Auto generated with `generate_primitives.py`, do not edit manually.
 */
-mod std::types
+mod std
 
 /// Converts a `digit` to ascii.
 /// The given `digit` is expected to be a single digit (0-9).

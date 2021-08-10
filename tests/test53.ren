@@ -1,5 +1,5 @@
-use std::types::String
-use std::types::StringView
+use std::String
+use std::StringView
 
 ext fn printf(format: {u8}, ...) -> i32
 

@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Mutex};
 
 use common::{
     error::LangResult,
+    path::{LangPath, LangPathPart},
     token::{block::BuiltIn, expr::Var},
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, ty_env::TyEnv, type_info::TypeInfo},
 };
@@ -31,13 +32,20 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         Generics::empty(),
         TypeInfo::BuiltIn,
     ))?;
-    let string_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::String,
+    let void_type_id = ty_env_guard.id(&Ty::CompoundType(
+        InnerTy::Void,
         Generics::empty(),
         TypeInfo::BuiltIn,
     ))?;
-    let void_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::Void,
+    let string_path = LangPath::new(
+        vec![
+            LangPathPart("std".into(), None),
+            LangPathPart("String".into(), None),
+        ],
+        None,
+    );
+    let string_type_id = ty_env_guard.id(&Ty::CompoundType(
+        InnerTy::Struct(string_path),
         Generics::empty(),
         TypeInfo::BuiltIn,
     ))?;
@@ -189,9 +197,9 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         BuiltIn::new(name, parameters, generics, any_type_id, false),
     );
 
-    // TODO: Want this to return `std::types::String`, but at the same time
-    //       we don't want to force the user to have to include the string.ren file
-    //       just to compile the code even if `@format()` isn't used.
+    // TODO: Is it possible to make this StringView in some scenarios? Ex.
+    //       if the arguments are constants and the whole string result can be
+    //       calculated at compile time?
     let name = "format";
     let parameters = vec![Var::new(
         "format".into(),
@@ -205,7 +213,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let generics = None;
     built_ins.insert(
         name,
-        BuiltIn::new(name, parameters, generics, any_type_id, true),
+        BuiltIn::new(name, parameters, generics, string_type_id, true),
     );
 
     let name = "argc";
@@ -229,7 +237,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let generics = None;
     built_ins.insert(
         name,
-        BuiltIn::new(name, parameters, generics, string_type_id, false),
+        BuiltIn::new(name, parameters, generics, u8_ptr_type_id, false),
     );
 
     let name = "line";

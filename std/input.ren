@@ -1,7 +1,7 @@
 mod std
 
-use std::types::Result
-use std::types::String
+use std::Result
+use std::String
 
 ext fn _read(fd: i32, buf: {u8}, len: u32) -> i32
 

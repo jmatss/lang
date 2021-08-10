@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, RwLock, RwLockWriteGuard},
 };
 
+use backtrace::Backtrace;
 use log::Level;
 
 use crate::{
@@ -237,10 +238,19 @@ impl AstCtx {
         {
             Ok(id)
         } else if id == BlockCtx::DEFAULT_BLOCK_ID {
+            warn!("TODO: Remove backtrace");
+            /*
             let mut err_msg = format!(
                 "Unable to find decl for \"{}\" ({:#?}).",
                 to_string_path(ty_env, path),
                 path
+            );
+            */
+            let mut err_msg = format!(
+                "Unable to find decl for \"{}\" ({:#?}). Backtrace: {:#?}",
+                to_string_path(ty_env, path),
+                path,
+                Backtrace::new()
             );
             if log_enabled!(Level::Debug) {
                 err_msg.push_str(&format!("\nmap: {:#?}", map))

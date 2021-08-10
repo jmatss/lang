@@ -580,14 +580,13 @@ impl Visitor for TypeInferencer {
                 }
             }
         } else {
-            let partial_path = fn_call.module.clone_push(
-                &fn_call.name,
-                fn_call.generics.as_ref(),
-                fn_call.file_pos,
-            );
+            let partial_path_without_gens =
+                fn_call
+                    .module
+                    .clone_push(&fn_call.name, None, fn_call.file_pos);
             let full_path = match ctx.ast_ctx.calculate_fn_full_path(
                 &ctx.ty_env.lock().unwrap(),
-                &partial_path,
+                &partial_path_without_gens,
                 ctx.block_id,
             ) {
                 Ok(full_path) => full_path,
@@ -666,6 +665,38 @@ impl Visitor for TypeInferencer {
 
                     self.insert_constraint(ctx, arg_type_id, param_type_id);
                 }
+            }
+
+            let fn_gens = func
+                .read()
+                .unwrap()
+                .generics
+                .clone()
+                .unwrap_or_else(Generics::empty)
+                .iter_types()
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let fn_call_gens = fn_call
+                .generics
+                .clone()
+                .unwrap_or_else(Generics::empty)
+                .iter_types()
+                .cloned()
+                .collect::<Vec<_>>();
+
+            if fn_call_gens.len() == fn_gens.len() {
+                for (fn_call_gen, fn_gen) in fn_call_gens.iter().zip(fn_gens.iter()) {
+                    self.insert_constraint(ctx, *fn_call_gen, *fn_gen);
+                }
+            } else {
+                let err = ctx.ast_ctx.err(format!(
+                    "Wrong amount of generics for fn call.\n\
+                    Func call: {:#?}\nfn_gens: {:#?}",
+                    fn_call, fn_gens
+                ));
+                self.errors.push(err);
+                return;
             }
 
             let func = func.as_ref().borrow().read().unwrap();

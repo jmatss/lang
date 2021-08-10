@@ -1,4 +1,4 @@
-mod std::types
+mod std
 
 pub union Either<L, R>
 {
@@ -10,12 +10,12 @@ impl Either
 {
     fn left(val: L = @null<L>()) -> Either<L, R>
     {
-        return Optional<L> { left = val}
+        return Either { left = val}
     }
 
     fn right(val: R = @null<R>()) -> Either<L, R>
     {
-        return Optional<R> { right = val}
+        return Either { right = val}
     }
 
     fn {this} is_left() -> bool

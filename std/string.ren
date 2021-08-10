@@ -1,9 +1,10 @@
-mod std::types
+mod std
 
-use std::mem::Allocator
-use std::types::Disposable
-use std::types::Optional
-use std::types::Result
+use std::Allocator
+use std::AsView
+use std::Disposable
+use std::Optional
+use std::Result
 
 ext fn strlen(str: {u8}) -> u32
 ext fn strncmp(str1: {u8}, str2: {u8}, len: u32) -> i32
@@ -123,11 +124,6 @@ impl String
         return this.append_lit(ascii.&, 0, 1)
     }
 
-    pub fn this as_view() -> StringView
-    {
-        return StringView::new(this.ptr, 0, this.len())
-    }
-
     /// Converts this `String` into a null-terminated C string.
     ///
     /// This function creates a new heap allocation with size `this.len` + 1
@@ -178,6 +174,14 @@ impl String
         }
 
         return new_ptr_or_empty
+    }
+}
+
+impl AsView for String
+{
+    pub fn {this} as_view() -> StringView
+    {
+        return StringView::new(this.*.ptr, 0, this.*.len())
     }
 }
 

@@ -1,21 +1,73 @@
 mod compiler;
 
-use analyze::analyze;
+use std::{collections::HashMap, path::Path, time::Instant};
+
 use clap::{App, Arg};
+use inkwell::context::Context;
+use log::{log_enabled, Level};
+
+use analyze::analyze;
 use codegen_llvm::generator;
 use common::{
     error::{LangError, LangErrorKind, LangResult},
     file::{FileId, FileInfo},
     ty::ty_env::TY_ENV,
 };
-use inkwell::context::Context;
 use lex::lexer;
-use log::{log_enabled, Level};
 use parse::parser::ParseTokenIter;
-use std::{collections::HashMap, path::Path, time::Instant};
 
 #[macro_use]
 extern crate log;
+
+// TODO: How to chose which `std` files to include? Ex. `String` that are currently
+//       included into the compiler depends on libc functions, so it is not good
+//       to have it as an requirement. Need to find a better way to pick which
+//       types/functions to include in the compiler.
+//       The paths to the files to include are also hardcoded in the code, this
+//       needs to be changed.
+// TODO: Currently the content of the `std` files needs to be mutable. This is
+//       needed because something that is parsed as an "shift right" (>>) might
+//       actually be two individual "greater than" signs inside a type.
+//       This means that we have to copy the contents of the embedded `std` files
+//       from static memory to mutable memory which isn't optimal. See if possible
+//       in the future to not require the content to be mutable in `TokenIter`.
+
+/// Macro hack to count amount of items in a given macro "repetition".
+macro_rules! count {
+    ($_t:tt $sub:expr) => {
+        $sub
+    };
+}
+
+/// Macro to include the specified std files into the compiled program.
+macro_rules! std_files {
+    ($($filename:literal,)*) => {
+        struct StdFile(&'static str, &'static [u8]);
+        const STD_FILES_LEN: usize = <[()]>::len(&[$(count!(($filename) ())),*]);
+        const STD_FILES : [StdFile; STD_FILES_LEN] = [
+            $(
+                StdFile(
+                    $filename,
+                    include_bytes!(concat!("..\\..\\..\\std\\", $filename)),
+                )
+            ),*
+        ];
+    };
+}
+
+// TODO: Add "print.ren" as default?
+std_files!(
+    "as_view.ren",
+    "assert.ren",
+    "disposable.ren",
+    "either.ren",
+    "mem.ren",
+    "optional.ren",
+    "primitives.ren",
+    "result.ren",
+    "string.ren",
+    "string_view.ren",
+);
 
 fn main() -> LangResult<()> {
     env_logger::init();
@@ -77,9 +129,26 @@ fn main() -> LangResult<()> {
     let mut file_nr: FileId = 0;
     let mut file_info: HashMap<FileId, FileInfo> = HashMap::default();
 
-    // Loop through files and lex+parse them. All files will be incldued in the
-    // same LLVM module.
+    // All parsed files will be included in the same LLVM module.
     let mut parser = ParseTokenIter::new(&TY_ENV);
+
+    // Loop through and lex/parse the specified `std` files.
+    for std_file in &STD_FILES {
+        let filename = std_file.0.into();
+        let static_content = std_file.1;
+        // TODO: Fix ugly mut hack, see comment at top of this file.
+        let mut mut_content = static_content.to_vec();
+
+        file_nr += 1;
+        let file = FileInfo {
+            directory: Path::new("").into(),
+            filename,
+        };
+
+        lex_and_parse(&mut parser, file_nr, file, Some(&mut mut_content));
+    }
+
+    // Loop through and lex/parse the "regular" input files.
     for input_file in &opts.input_files {
         let path = std::path::Path::new(input_file);
         let filename = path
@@ -113,37 +182,7 @@ fn main() -> LangResult<()> {
 
         file_info.insert(file_nr, file.clone());
 
-        let lex_timer = Instant::now();
-        let mut lex_tokens = match lexer::lex(file_nr, &file) {
-            Ok(lex_tokens) => lex_tokens,
-            Err(errs) => {
-                for e in errs {
-                    eprintln!("[ERROR] {}", e);
-                }
-                std::process::exit(1);
-            }
-        };
-        println!(
-            "Lexing {} complete ({:?}).",
-            &file.filename,
-            lex_timer.elapsed()
-        );
-
-        let parse_timer = Instant::now();
-        match parser.parse(&mut lex_tokens) {
-            Ok(_) => (),
-            Err(errs) => {
-                for e in errs {
-                    eprintln!("[ERROR] {}", e);
-                }
-                std::process::exit(1);
-            }
-        }
-        println!(
-            "Parsing {} complete ({:?}).",
-            &file.filename,
-            parse_timer.elapsed()
-        );
+        lex_and_parse(&mut parser, file_nr, file, None);
     }
 
     let mut ast_root = parser.take_root_block();
@@ -210,6 +249,48 @@ fn main() -> LangResult<()> {
     println!("Compiled to: {}", opts.output_file);
 
     Ok(())
+}
+
+fn lex_and_parse(
+    parser: &mut ParseTokenIter,
+    file_nr: FileId,
+    file: FileInfo,
+    content: Option<&mut [u8]>,
+) {
+    let lex_timer = Instant::now();
+    let lex_tokens_result = if let Some(content) = content {
+        lexer::lex_with_content(file_nr, content)
+    } else {
+        lexer::lex(file_nr, &file)
+    };
+
+    let mut lex_tokens = match lex_tokens_result {
+        Ok(lex_tokens) => lex_tokens,
+        Err(errs) => {
+            for e in errs {
+                eprintln!("[ERROR] {}", e);
+            }
+            std::process::exit(1);
+        }
+    };
+    println!(
+        "Lexing {} complete ({:?}).",
+        &file.filename,
+        lex_timer.elapsed()
+    );
+
+    let parse_timer = Instant::now();
+    if let Err(errs) = parser.parse(&mut lex_tokens) {
+        for e in errs {
+            eprintln!("[ERROR] {}", e);
+        }
+        std::process::exit(1);
+    }
+    println!(
+        "Parsing {} complete ({:?}).",
+        &file.filename,
+        parse_timer.elapsed()
+    );
 }
 
 struct Options {
@@ -301,11 +382,7 @@ fn parse_opts() -> Options {
         inputs.for_each(|f| input_files.push(f.into()));
     }
 
-    let input_files_list = if let Some(input) = matches.value_of("input") {
-        Some(input.into())
-    } else {
-        None
-    };
+    let input_files_list = matches.value_of("input").map(|input| input.into());
 
     Options {
         input_files,

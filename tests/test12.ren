@@ -1,5 +1,5 @@
 ext fn printf(format: {u8}, ...) -> i32
-ext fn malloc(size: i32) -> {u8}
+ext fn malloc(size: u32) -> {u8}
 
 fn double(n: {i32})
 {

@@ -28,7 +28,17 @@ pub fn lex(file_nr: FileId, file_info: &FileInfo) -> Result<Vec<LexToken>, Vec<L
             )]);
         }
     };
-    let mut iter = LexTokenIter::new(&mut content, file_nr);
+
+    lex_with_content(file_nr, &mut content)
+}
+
+/// Lexes the characters in the source code to LexToken's and returns a vector
+/// containing all lex tokens.
+pub fn lex_with_content(
+    file_nr: FileId,
+    content: &mut [u8],
+) -> Result<Vec<LexToken>, Vec<LangError>> {
+    let mut iter = LexTokenIter::new(content, file_nr);
 
     let mut lex_tokens = Vec::new();
     let mut errors = Vec::new();

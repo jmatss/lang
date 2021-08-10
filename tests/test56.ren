@@ -1,4 +1,4 @@
-use std::types::String
+use std::String
 
 struct TestStruct
 {
@@ -11,11 +11,12 @@ fn main() -> i32
     var arr1 = @array(init_val, 2)
     var arr2: [u64: 2] = @array(init_val, 2)
     
-    var out1: String = @format(
+    var out1 = @format(
         "arr1: [{}, {}]\narr2: [{}, {}]",
         arr1.[0], arr1.[1], arr2.[0], arr2.[1]
     )
-    std::print(out1.as_view())
+    // TODO:
+    //std::print_new(out1)
     out1.&.deinit()
 
     var i = 0
@@ -30,8 +31,8 @@ fn main() -> i32
     var init_val_ts = TestStruct { x_val }
     var arr3 = @array(init_val_ts, 2)
 
-    var out2: String = @format("arr3.x: [{}, {}]", arr3.[0].x, arr3.[1].x)
-    std::print(out2.as_view())
+    var out2 = @format("arr3.x: [{}, {}]", arr3.[0].x, arr3.[1].x)
+    //std::print_new(out2)
     out2.&.deinit()
 
     i = 0

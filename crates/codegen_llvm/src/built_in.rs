@@ -380,15 +380,15 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         // TODO: Get path from somewehre, probably as arg to compiler.
         let mut builder = LangPathBuilder::new();
-        builder.add_path("std").add_path("types");
-        let types_module = builder.build();
+        builder.add_path("std");
+        let std_module = builder.build();
 
         let ty_container =
-            TypeContainer::new(&mut self.analyze_ctx.ty_env.lock().unwrap(), &types_module)?;
+            TypeContainer::new(&mut self.analyze_ctx.ty_env.lock().unwrap(), &std_module)?;
 
         let mut string_init_call = FnCall::new(
             "init_size".into(),
-            types_module.clone(),
+            std_module.clone(),
             vec![Argument::new(
                 None,
                 None,
@@ -414,7 +414,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         let mut string_get_success_call = FnCall::new(
             "get_success".into(),
-            types_module.clone(),
+            std_module.clone(),
             vec![Argument::new(
                 Some("this".into()),
                 None,
@@ -473,7 +473,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         for format_part in format_parts {
             let expr = match format_part {
                 FormatPart::String(str_lit) => {
-                    self.str_lit_to_string_view(str_lit, &ty_container, &types_module)
+                    self.str_lit_to_string_view(str_lit, &ty_container, &std_module)
                 }
                 FormatPart::Arg(expr) => {
                     let type_id = expr.get_expr_type()?;
@@ -483,7 +483,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                             &var_name,
                             arg_idx,
                             &ty_container,
-                            &types_module,
+                            &std_module,
                         )?;
                         arg_idx += 1;
                         expr
@@ -493,7 +493,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             };
 
-            self.append_view_to_string(string_var_ptr.clone(), expr, &ty_container, &types_module)?;
+            self.append_view_to_string(string_var_ptr.clone(), expr, &ty_container, &std_module)?;
         }
 
         self.compile_expr(&mut string_var_expr, ExprTy::RValue)
@@ -690,7 +690,7 @@ struct TypeContainer {
 }
 
 impl TypeContainer {
-    pub fn new(ty_env: &mut TyEnv, types_module: &LangPath) -> LangResult<TypeContainer> {
+    pub fn new(ty_env: &mut TyEnv, std_module: &LangPath) -> LangResult<TypeContainer> {
         let u8_type_id = ty_env.id(&Ty::CompoundType(
             InnerTy::U8,
             Generics::empty(),
@@ -704,7 +704,7 @@ impl TypeContainer {
             TypeInfo::BuiltIn,
         ))?;
 
-        let string_path = types_module.clone_push("String", None, None);
+        let string_path = std_module.clone_push("String", None, None);
         let string_type_id = ty_env.id(&Ty::CompoundType(
             InnerTy::Struct(string_path),
             Generics::empty(),
@@ -712,14 +712,14 @@ impl TypeContainer {
         ))?;
         let string_ptr_type_id = ty_env.id(&Ty::Pointer(string_type_id, TypeInfo::BuiltIn))?;
 
-        let string_view_path = types_module.clone_push("StringView", None, None);
+        let string_view_path = std_module.clone_push("StringView", None, None);
         let string_view_type_id = ty_env.id(&Ty::CompoundType(
             InnerTy::Struct(string_view_path),
             Generics::empty(),
             TypeInfo::BuiltIn,
         ))?;
 
-        let result_path = types_module.clone_push("Result", None, None);
+        let result_path = std_module.clone_push("Result", None, None);
         let mut gens = Generics::new();
         gens.insert("T".into(), string_type_id);
         gens.insert("E".into(), u8_ptr_type_id);
@@ -729,7 +729,7 @@ impl TypeContainer {
             TypeInfo::BuiltIn,
         ))?;
 
-        let result_path = types_module.clone_push("Result", None, None);
+        let result_path = std_module.clone_push("Result", None, None);
         let mut gens = Generics::new();
         gens.insert("T".into(), u32_type_id);
         gens.insert("E".into(), u8_ptr_type_id);

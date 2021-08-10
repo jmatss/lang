@@ -1,8 +1,6 @@
-mod std::types
+mod std
 
-use std::mem::Allocator
-use std::types::Optional
-use std::types::Result
+use std::AsView
 
 ext fn strlen(str: {u8}) -> u32
 
@@ -47,5 +45,13 @@ impl StringView
     pub fn this len() -> u32
     {
         return this.len
+    }
+}
+
+impl AsView for StringView
+{
+    pub fn {this} as_view() -> StringView
+    {
+        return this.*
     }
 }

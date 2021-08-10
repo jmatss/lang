@@ -1,14 +1,12 @@
-mod std::mem
+mod std
 
-use std::types::Optional
-use std::types::Result
+use std::Optional
+use std::Result
 
 ext fn malloc(size: u32) -> {u8}
 ext fn free(ptr: {u8})
 ext fn realloc(ptr: {u8}, size: u32) -> {u8}
-ext fn printf(format: {u8}, ...) -> i32
 ext fn memcpy(dest: {u8}, src: {u8}, size: u32) -> {u8}
-ext fn memcmp(str1: {u8}, str2: {u8}, size: u32) -> i32
 
 /// A basic heap allocator that can be used to work with heap allocated data.
 pub struct Allocator;
