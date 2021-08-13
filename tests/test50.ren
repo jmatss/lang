@@ -2,8 +2,7 @@ use std::String
 
 ext fn printf(format: {u8}, ...) -> i32
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var str1_or_error = String::init_size(1)
     std::assert(str1_or_error.&.is_success())
 

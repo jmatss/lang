@@ -1,13 +1,11 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-struct TestStruct
-{
-    i: i32,
-    msg: i32,
+struct TestStruct {
+    var i: i32
+    var msg: i32
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var integer = 123
     var ptr = integer.&
 

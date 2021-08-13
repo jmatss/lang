@@ -1,59 +1,42 @@
 mod std
 
-pub union Optional<T>
-{
-    value: T,
-    empty: T,
-}
+pub union Optional<T> {
+    var value: T
+    var empty: T
 
-impl Optional
-{
-    fn value(val: T = @null<T>()) -> Optional<T>
-    {
+    fn value(val: T = @null<T>()) -> Optional<T> {
         return Optional { value = val}
     }
 
-    fn empty() -> Optional<T>
-    {
+    fn empty() -> Optional<T> {
         return Optional { empty = @null<T>() }
     }
 
-    fn {this} has_value() -> bool
-    {
-        if _ is this.*.value
-        {
+    fn {this} has_value() -> bool {
+        if _ is this.*.value {
             return true
-        }
-        else
-        {
+        } else {
             return false
         }
     }
 
-    fn {this} is_empty() -> bool
-    {
+    fn {this} is_empty() -> bool {
         return not this.has_value()
     }
 
-    fn {this} get() -> T
-    {
+    fn {this} get() -> T {
         return this.*.value
     }
 
-    fn {this} get_or(default: T) -> T
-    {
-        if val is this.*.value
-        {
+    fn {this} get_or(default: T) -> T {
+        if val is this.*.value {
             return val
-        }
-        else
-        {
+        } else {
             return default
         }
     }
 
-    fn {this} set(val: T)
-    {
+    fn {this} set(val: T) {
         this.*.value = val
     }
 }

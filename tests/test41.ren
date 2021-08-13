@@ -6,30 +6,24 @@
 //    traits, one can write the functions inside the regular struct impl block.
 //    Fix this.
 
-trait TestTrait
-{
-    fn this trait_func(i: i8) -> u64;
+trait TestTrait {
+    fn this trait_func(i: i8) -> u64
 }
 
-struct TestStruct<T>
-where T impls TestTrait
-{
-    inner: T,
+struct TestStruct<T> where T: TestTrait {
+    var inner: T
 }
 
 struct InnerStructWithTrait;
-impl TestTrait for InnerStructWithTrait
-{
-    fn this trait_func(i: i8) -> u64
-    {
+impl InnerStructWithTrait: TestTrait {
+    fn this trait_func(i: i8) -> u64 {
         return 123
     }
 
     // TODO: Create error for methods in trait impl
     //       that doesn't exist in the trait.
     /*
-    fn abc() -> i32
-    {
+    fn abc() -> i32 {
         return 1
     }
     */
@@ -37,8 +31,7 @@ impl TestTrait for InnerStructWithTrait
 
 struct InnerStructWithoutTrait;
 
-fn main() -> i32
-{
+fn main() -> i32 {
     // Should produce a error since u64 doesn't implement TestTrait
     //var ts = TestStruct<u64> { 34 }
     
@@ -53,9 +46,9 @@ fn main() -> i32
 
 struct UnimplementedStruct<K, V>
 where
-    K impls TestTrait
-    V impls TestTrait
+    K: TestTrait
+    V: TestTrait
 {
-    key: K,
-    val: V,
+    var key: K
+    var val: V
 }

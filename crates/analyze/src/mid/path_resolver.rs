@@ -192,7 +192,7 @@ impl Visitor for PathResolver {
 
     fn visit_impl(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
         if let Block {
-            header: BlockHeader::Implement(path, trait_path_opt),
+            header: BlockHeader::Implement(adt_path, trait_path),
             ..
         } = block
         {
@@ -200,55 +200,43 @@ impl Visitor for PathResolver {
 
             if let Ok(full_path) =
                 ctx.ast_ctx
-                    .calculate_adt_full_path(&ty_env_guard, path, ctx.block_id)
+                    .calculate_adt_full_path(&ty_env_guard, adt_path, ctx.block_id)
             {
-                *path = full_path
-            } else if let Ok(full_path) =
-                ctx.ast_ctx
-                    .calculate_trait_full_path(&ty_env_guard, path, ctx.block_id)
-            {
-                *path = full_path
+                *adt_path = full_path;
             } else {
                 let mut err = ctx.ast_ctx.err_adt(
                     &ty_env_guard,
                     format!(
-                        "Unable to find full path for type defined in impl block: {}",
-                        to_string_path(&ty_env_guard, &path)
+                        "Unable to find full path for ADT defined in impl block: {}",
+                        to_string_path(&ty_env_guard, &adt_path)
                     ),
-                    path,
+                    adt_path,
                 );
-                err = ctx.ast_ctx.err_trait(&ty_env_guard, err.msg, path);
+                err = ctx.ast_ctx.err_adt(&ty_env_guard, err.msg, adt_path);
 
                 if !self.errors.contains(&err) {
                     self.errors.push(err);
                 }
             }
 
-            if let Some(trait_path) = trait_path_opt {
-                if let Ok(full_path) =
-                    ctx.ast_ctx
-                        .calculate_adt_full_path(&ty_env_guard, trait_path, ctx.block_id)
-                {
-                    *trait_path = full_path
-                } else if let Ok(full_path) =
-                    ctx.ast_ctx
-                        .calculate_trait_full_path(&ty_env_guard, trait_path, ctx.block_id)
-                {
-                    *trait_path = full_path
-                } else {
-                    let mut err = ctx.ast_ctx.err_trait(
-                        &ty_env_guard,
-                        format!(
-                            "Unable to find full path for trait defined in impl block: {}",
-                            to_string_path(&ty_env_guard, &trait_path)
-                        ),
-                        trait_path,
-                    );
-                    err = ctx.ast_ctx.err_trait(&ty_env_guard, err.msg, trait_path);
+            if let Ok(full_path) =
+                ctx.ast_ctx
+                    .calculate_trait_full_path(&ty_env_guard, trait_path, ctx.block_id)
+            {
+                *trait_path = full_path
+            } else {
+                let mut err = ctx.ast_ctx.err_trait(
+                    &ty_env_guard,
+                    format!(
+                        "Unable to find full path for trait defined in impl block: {}",
+                        to_string_path(&ty_env_guard, &trait_path)
+                    ),
+                    trait_path,
+                );
+                err = ctx.ast_ctx.err_trait(&ty_env_guard, err.msg, trait_path);
 
-                    if !self.errors.contains(&err) {
-                        self.errors.push(err);
-                    }
+                if !self.errors.contains(&err) {
+                    self.errors.push(err);
                 }
             }
         }

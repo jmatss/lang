@@ -66,7 +66,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                         )?;
                     }
                     ExternalDecl::Struct(struct_) => {
-                        self.compile_struct(&struct_.as_ref().borrow().read().unwrap())?;
+                        self.compile_struct_decl(&struct_.as_ref().borrow().read().unwrap())?;
                     }
                 }
                 Ok(())

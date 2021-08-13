@@ -266,6 +266,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         }
 
         // TODO: Implement check for `is_fn_ptr_call`s arg/param count as well.
+        let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
 
         let fn_ptr = if fn_call.is_fn_ptr_call {
             let var_name = &fn_call.name;
@@ -297,9 +298,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     ));
                 }
             }
-        } else if let Some(fn_value) = self
-            .module
-            .get_function(&fn_call.full_name(&self.analyze_ctx.ty_env.lock().unwrap())?)
+        } else if let Some(fn_value) = self.module.get_function(&fn_call.full_name(&ty_env_guard)?)
         {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
@@ -308,7 +307,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Wrong amount of args given when calling func \"{}\". Expected: {}, got: {}",
-                        &fn_call.full_name(&self.analyze_ctx.ty_env.lock().unwrap())?,
+                        &fn_call.full_name(&ty_env_guard)?,
                         fn_value.count_params(),
                         fn_call.arguments.len()
                     ),
@@ -318,11 +317,26 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
             Either::Left(fn_value)
         } else {
+            let mut fns = Vec::default();
+            if let Some(first_fn_val) = self.module.get_first_function() {
+                let fn_name = first_fn_val.get_name().to_str().unwrap();
+                fns.push(format!(" * {}", fn_name.to_string()));
+
+                let mut prev_fn_val = first_fn_val;
+                while let Some(fn_val) = prev_fn_val.get_next_function() {
+                    let fn_name = fn_val.get_name().to_str().unwrap();
+                    fns.push(format!(" * {}", fn_name.to_string()));
+                    prev_fn_val = fn_val;
+                }
+            }
+
+            println!("FNS -- {:#?}", fns);
+
             return Err(self.err(
                 format!(
                     "Unable to find function with name \"{}\" to call (full name: {:#?}).",
                     &fn_call.name,
-                    &fn_call.full_name(&self.analyze_ctx.ty_env.lock().unwrap())
+                    &fn_call.full_name(&ty_env_guard)
                 ),
                 fn_call.file_pos,
             ));

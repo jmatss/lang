@@ -1,12 +1,8 @@
-fn main() -> i32
-{
+fn main() -> i32 {
     var i = 0
-    while i < 10
-    {
-        if i % 5 == 0
-        {
-            if i == 0
-            {
+    while i < 10 {
+        if i % 5 == 0 {
+            if i == 0 {
                 i += 1
                 continue
             }

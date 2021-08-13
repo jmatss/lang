@@ -3,8 +3,7 @@ use std::StringView
 
 ext fn printf(format: {u8}, ...) -> i32
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var expected_str_or_error = String::init("123")
     std::assert(expected_str_or_error.&.is_success())
     var expected_str = expected_str_or_error.&.get_success()

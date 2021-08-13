@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, RwLock, RwLockWriteGuard},
 };
 
-use backtrace::Backtrace;
+use itertools::Itertools;
 use log::Level;
 
 use crate::{
@@ -238,19 +238,10 @@ impl AstCtx {
         {
             Ok(id)
         } else if id == BlockCtx::DEFAULT_BLOCK_ID {
-            warn!("TODO: Remove backtrace");
-            /*
             let mut err_msg = format!(
                 "Unable to find decl for \"{}\" ({:#?}).",
                 to_string_path(ty_env, path),
                 path
-            );
-            */
-            let mut err_msg = format!(
-                "Unable to find decl for \"{}\" ({:#?}). Backtrace: {:#?}",
-                to_string_path(ty_env, path),
-                path,
-                Backtrace::new()
             );
             if log_enabled!(Level::Debug) {
                 err_msg.push_str(&format!("\nmap: {:#?}", map))
@@ -502,7 +493,7 @@ impl AstCtx {
                 "Unable to find method named \"{}\" in ADT \"{}\".\nExisting methods: {:#?}.",
                 &method_name,
                 to_string_path(ty_env, adt_name),
-                &adt.methods.keys(),
+                &adt.methods.keys().sorted(),
             )))
         }
     }
@@ -598,7 +589,6 @@ impl AstCtx {
     ) -> LangResult<u64> {
         if let Some(idx) = self
             .get_adt(ty_env, adt_name)?
-            .as_ref()
             .read()
             .unwrap()
             .member_index(member_name)

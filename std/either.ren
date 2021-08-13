@@ -1,47 +1,34 @@
 mod std
 
-pub union Either<L, R>
-{
-    left: L,
-    right: R,
-}
+pub union Either<L, R> {
+    var left: L
+    var right: R
 
-impl Either
-{
-    fn left(val: L = @null<L>()) -> Either<L, R>
-    {
+    fn left(val: L = @null<L>()) -> Either<L, R> {
         return Either { left = val}
     }
 
-    fn right(val: R = @null<R>()) -> Either<L, R>
-    {
+    fn right(val: R = @null<R>()) -> Either<L, R> {
         return Either { right = val}
     }
 
-    fn {this} is_left() -> bool
-    {
-        if _ is this.*.left
-        {
+    fn {this} is_left() -> bool {
+        if _ is this.*.left {
             return true
-        }
-        else
-        {
+        } else {
             return false
         }
     }
 
-    fn {this} is_right() -> bool
-    {
+    fn {this} is_right() -> bool {
         return not this.is_left()
     }
 
-    fn {this} get_left() -> L
-    {
+    fn {this} get_left() -> L {
         return this.*.left
     }
 
-    fn {this} get_right() -> R
-    {
+    fn {this} get_right() -> R {
         return this.*.right
     }
 }

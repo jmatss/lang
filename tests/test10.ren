@@ -2,27 +2,21 @@ use std::String
 
 ext fn malloc(size: u32) -> {u8}
 
-struct TestStruct
-{
-    i: i32,
-    msg: {u8},
+struct TestStruct {
+    var i: i32
+    var msg: {u8}
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var test_struct = TestStruct { 0 , malloc(6) }
 
-    if test_struct.i == 0 and false
-    {
+    if test_struct.i == 0 and false {
         test_struct.msg = "TRUE"
-    }
-    else
-    {
+    } else {
         test_struct.msg = "FALSE"
     }
 
-    while test_struct.i < 3
-    {
+    while test_struct.i < 3 {
         test_struct.i += 1
     }
 

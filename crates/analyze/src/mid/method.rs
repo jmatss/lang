@@ -24,10 +24,10 @@ use crate::util::generics::combine_generics;
 /// function pointers rather than functions. A bool flag will be set in those calls.
 pub struct MethodAnalyzer {
     /// Contains the name for the ADT of the latest traversed impl block.
-    impl_adt_path: Option<LangPath>,
+    adt_path: Option<LangPath>,
 
     /// Contains the generics for the ADT of the latest traversed impl block.
-    impl_generics: Option<Generics>,
+    adt_gens: Option<Generics>,
 
     /// Contains the generics for the fn of the latest traversed fn block.
     fn_generics: Option<Generics>,
@@ -41,8 +41,8 @@ const THIS_VAR_NAME: &str = "this";
 impl MethodAnalyzer {
     pub fn new() -> Self {
         Self {
-            impl_adt_path: None,
-            impl_generics: None,
+            adt_path: None,
+            adt_gens: None,
             fn_generics: None,
             errors: Vec::default(),
         }
@@ -80,36 +80,47 @@ impl Visitor for MethodAnalyzer {
         }
     }
 
-    fn visit_impl(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
-        if let Block {
-            header: BlockHeader::Implement(adt_name, ..),
-            id,
-            ..
-        } = block
-        {
-            let module = match ctx.ast_ctx.get_module(*id) {
-                Ok(Some(module)) => module,
-                Ok(None) => LangPath::default(),
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+    fn visit_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        let Block { header, id, .. } = block;
 
-            let last_part = adt_name.last().unwrap();
-            let path = module.clone_push(&last_part.0, None, adt_name.file_pos);
+        let (path_without_gens, adt_gens) = match header {
+            BlockHeader::Implement(adt_path, ..) => {
+                let module = match ctx.ast_ctx.get_module(*id) {
+                    Ok(Some(module)) => module,
+                    Ok(None) => LangPath::default(),
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
-            let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock().unwrap(), &path) {
-                Ok(adt) => adt,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+                let last_part = adt_path.last().unwrap();
+                let path = module.clone_push(&last_part.0, None, adt_path.file_pos);
 
-            self.impl_adt_path = Some(path);
-            self.impl_generics = adt.as_ref().read().unwrap().generics.clone();
-        }
+                let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock().unwrap(), &path) {
+                    Ok(adt) => adt,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                let adt = adt.read().unwrap();
+                (path, adt.generics.clone())
+            }
+
+            BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
+                let adt = adt.read().unwrap();
+                let path = adt.module.clone_push(&adt.name, None, Some(adt.file_pos));
+
+                (path, adt.generics.clone())
+            }
+
+            _ => return,
+        };
+
+        self.adt_path = Some(path_without_gens);
+        self.adt_gens = adt_gens;
     }
 
     fn visit_fn(&mut self, block: &mut Block, _ctx: &mut TraverseCtx) {
@@ -123,8 +134,8 @@ impl Visitor for MethodAnalyzer {
             // This isn't a method, reset the variable for any impl block
             // because we have left the impl block.
             if func.as_ref().read().unwrap().method_adt.is_none() {
-                self.impl_adt_path = None;
-                self.impl_generics = None;
+                self.adt_path = None;
+                self.adt_gens = None;
             }
         }
     }
@@ -189,7 +200,7 @@ impl Visitor for MethodAnalyzer {
             let first_part = fn_call.module.first().unwrap();
             let possible_gen_or_this = &first_part.0;
 
-            if let Some(adt_path) = &self.impl_adt_path {
+            if let Some(adt_path) = &self.adt_path {
                 if possible_gen_or_this == "this" {
                     let this_gens = if let Some(this_gens) = first_part.1.clone() {
                         this_gens
@@ -252,7 +263,7 @@ impl Visitor for MethodAnalyzer {
                 }
             }
 
-            if let Some(impl_gens) = &self.impl_generics {
+            if let Some(impl_gens) = &self.adt_gens {
                 if impl_gens.contains(possible_gen_or_this) {
                     let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
                     let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::Generic(

@@ -3,11 +3,12 @@ use std::sync::{Arc, RwLock};
 use log::debug;
 
 use common::{
-    ctx::ast_ctx::AstCtx,
+    ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx},
     error::{LangError, LangResult},
     file::FilePosition,
     hash::DerefType,
     hash_map::TyEnvHashMap,
+    hash_set::TyEnvHashSet,
     path::LangPath,
     token::{
         ast::AstToken,
@@ -18,7 +19,7 @@ use common::{
         replace::{replace_gen_impls, replace_self},
         solve::set_generic_names,
         substitution_sets::sub_sets_debug_print,
-        to_string::to_string_type_id,
+        to_string::{to_string_path, to_string_type_id},
         ty::Ty,
         ty_env::TyEnv,
         type_id::TypeId,
@@ -27,6 +28,11 @@ use common::{
 };
 
 use super::generic_replace::GenericsReplacer;
+
+// TODO: Must clean-up and simplify this logic. Can for example probably merge
+//       a lot of shared logic between creating ADT and impl blocks.
+//       Must also simplify all the removal/adding/replacing logic, very hard to
+//       follow what is going on.
 
 /// Remove any ADTs that contain generics. Add new ADTs that contain replaced
 /// generics (static dispatch). The old blocks are set to "Empty".
@@ -54,21 +60,25 @@ impl GenericAdtCreator {
 
     /// Creates new instance of the ADT with path `old_path`. This new instances
     /// will have the generics replaced with some implementation.
+    /// The methods stored inside the ADT body will also be cloned and have
+    /// their generics implemented.
     ///
-    /// The given `old_path` is the path to the ADT WITHOUT any generics. The
-    /// `new_path` will represent the new ADTs which will contain generics.
+    /// The given `adt_path_without_gens` is the path to the ADT without any
+    /// generics. The `new_path` will represent the new ADTs which will contain
+    /// generics.
     ///
     /// Returns the amount of new ADT blocks. Since this function will most
     /// likely be called from a loop iterating through the AstTokens, the returned
     /// value can be used to skip over the newly created ADTs.
     ///
     /// When the new ADTs have been created, the old one will be removed.
-    /// It will removed even though no new ADTs are created.
+    /// It will removed even if no new ADTs are created.
     fn create_adt_instance(
         &mut self,
         ctx: &mut TraverseCtx,
-        old_path: &LangPath,
-        body: &mut Vec<AstToken>,
+        adt_path_without_gens: &LangPath,
+        default_body: &mut Vec<AstToken>,
+        adt_body: &mut Vec<AstToken>,
         file_pos: &FilePosition,
         old_idx: usize,
         old_id: BlockId,
@@ -76,15 +86,22 @@ impl GenericAdtCreator {
     ) -> LangResult<Option<usize>> {
         let generic_adt_tys_res = self
             .generic_adts
-            .get(&ctx.ty_env.lock().unwrap(), DerefType::None, old_path)?
+            .get(
+                &ctx.ty_env.lock().unwrap(),
+                DerefType::None,
+                adt_path_without_gens,
+            )?
             .cloned();
+
         if let Some(generic_adt_tys) = generic_adt_tys_res {
             let adt = {
-                let adt = ctx.ast_ctx.get_adt(&ctx.ty_env.lock().unwrap(), old_path)?;
+                let adt = ctx
+                    .ast_ctx
+                    .get_adt(&ctx.ty_env.lock().unwrap(), adt_path_without_gens)?;
                 Arc::clone(&adt)
             };
 
-            for gen_adt_type_id in &generic_adt_tys {
+            for (new_idx, gen_adt_type_id) in generic_adt_tys.iter().enumerate() {
                 set_generic_names(
                     &mut ctx.ty_env.lock().unwrap(),
                     &ctx.ast_ctx,
@@ -98,8 +115,8 @@ impl GenericAdtCreator {
 
                 // The methods are RCs inside the "Adt" struct which means that
                 // they are still tied to the "old" ADT. Empty the methods
-                // map, it will be filled in later with a completly new implement
-                // block that will be tied to this new ADT.
+                // map, it will be filled in later with the same methods that
+                // then have had their generics replaced/implemented.
                 new_adt.methods.clear();
 
                 let gen_adt_ty =
@@ -129,9 +146,10 @@ impl GenericAdtCreator {
                 }
 
                 // Create the new path containing generics.
-                let mut new_path = old_path.clone();
+                let mut new_path = adt_path_without_gens.clone();
                 let last_part = new_path.pop().unwrap();
-                new_path = new_path.clone_push(&last_part.0, Some(&gens), old_path.file_pos);
+                new_path =
+                    new_path.clone_push(&last_part.0, Some(&gens), adt_path_without_gens.file_pos);
 
                 // TODO: Can this be done with a visitor/traverser? The current
                 //       default traverser takes a AstToken, so would need to create
@@ -152,7 +170,7 @@ impl GenericAdtCreator {
                         match replace_self(
                             &mut ctx.ty_env.lock().unwrap(),
                             *type_id,
-                            &old_path,
+                            &adt_path_without_gens,
                             *gen_adt_type_id,
                         ) {
                             Ok(Some(new_type_id)) => *type_id = new_type_id,
@@ -164,7 +182,7 @@ impl GenericAdtCreator {
                     *member = Arc::new(RwLock::new(new_member));
                 }
 
-                new_adt.generics = Some(gens);
+                new_adt.generics = Some(gens.clone());
 
                 // Insert the new ADT variants that have replaced the generic
                 // parameters with an actual real type. These new ADTs will be
@@ -195,16 +213,45 @@ impl GenericAdtCreator {
                         panic!("Bad adt kind: {:?}", adt.as_ref().read().unwrap().kind)
                     }
                 };
-                let adt_body = Vec::with_capacity(0);
+
+                let mut generics_replacer = GenericsReplacer::new_adt(
+                    Arc::clone(&new_adt_rc),
+                    &gens,
+                    adt_path_without_gens,
+                    *gen_adt_type_id,
+                );
+
+                // For every method of the ADT, replace any generic types with
+                // the type of the generics instances. Also replace any reference
+                // to the old name with the new full name (containing generics).
+                //
+                // This will be done for parameters, return types and bodies.
+                // New instances will be created for all shared references (see
+                // `set_deep_copy(true)` in `AstTraverser`).
+                let mut new_adt_body = adt_body.clone();
+                for method in &mut new_adt_body {
+                    if let AstToken::Block(Block {
+                        header: BlockHeader::Fn(..),
+                        ..
+                    }) = method
+                    {
+                        if let Err(mut errs) =
+                            traverse_with_deep_copy(ctx, &mut generics_replacer, method, new_idx)
+                        {
+                            self.errors.append(&mut errs);
+                            continue;
+                        }
+                    }
+                }
 
                 // Slower to shift all the ast tokens to the right, but ensures that
                 // the tokens are inserted next to the old ADT and doesn't ex. get
                 // added after the EOF token.
-                body.insert(
+                default_body.insert(
                     old_idx + 1,
                     AstToken::Block(Block {
                         header,
-                        body: adt_body,
+                        body: new_adt_body,
                         id: old_id,
                         file_pos: file_pos.to_owned(),
                     }),
@@ -215,8 +262,8 @@ impl GenericAdtCreator {
             self.remove_adt_instance(
                 &ctx.ty_env.lock().unwrap(),
                 &mut ctx.ast_ctx,
-                old_path,
-                body,
+                adt_path_without_gens,
+                default_body,
                 old_idx,
                 parent_id,
             )?;
@@ -252,14 +299,18 @@ impl GenericAdtCreator {
     fn create_impl_instance(
         &mut self,
         ctx: &mut TraverseCtx,
-        body: &mut Vec<AstToken>,
+        default_body: &mut Vec<AstToken>,
         old_idx: usize,
-        old_path: &LangPath,
-        old_impl_token: &mut AstToken,
+        adt_path_without_gens: &LangPath,
+        old_impl_token: &AstToken,
     ) -> LangResult<Option<usize>> {
         let generic_adt_tys_res = self
             .generic_adts
-            .get(&ctx.ty_env.lock().unwrap(), DerefType::None, old_path)?
+            .get(
+                &ctx.ty_env.lock().unwrap(),
+                DerefType::None,
+                adt_path_without_gens,
+            )?
             .cloned();
 
         if let Some(generic_adt_tys) = generic_adt_tys_res {
@@ -305,7 +356,7 @@ impl GenericAdtCreator {
                     ..
                 }) = &mut new_impl_token
                 {
-                    let new_path = old_path.with_gens(gens.clone());
+                    let new_path = adt_path_without_gens.with_gens(gens.clone());
                     *new_impl_path = new_path.clone();
                     (new_impl_body, new_path)
                 } else {
@@ -323,11 +374,11 @@ impl GenericAdtCreator {
                 let mut generics_replacer = GenericsReplacer::new_adt(
                     Arc::clone(&new_adt),
                     &gens,
-                    old_path,
+                    adt_path_without_gens,
                     *gen_adt_type_id,
                 );
 
-                // For every method of the ADT, replace any generic types with
+                // For every method of the impl, replace any generic types with
                 // the type of the generics instances. Also replace any reference
                 // to the old name with the new full name (containing generics).
                 //
@@ -356,11 +407,11 @@ impl GenericAdtCreator {
                 // Slower to shift all the ast tokens to the right, but ensure
                 // that the tokens are inserted next to the old "implement" and
                 // doesn't ex. get added after the EOF token.
-                body.insert(old_idx + new_idx + 1, new_impl_token);
+                default_body.insert(old_idx + new_idx + 1, new_impl_token);
             }
 
             // Remove the old, now unused, implement block.
-            self.remove_impl_instance(body, old_idx);
+            self.remove_impl_instance(default_body, old_idx);
 
             Ok(Some(generic_adt_tys.len()))
         } else {
@@ -418,180 +469,177 @@ impl Visitor for GenericAdtCreator {
     //       to find another better way to do this. Will probably have to
     //       implement some helper functions to modify the AST, remove/add etc.
     /// Create new ADTs for generic implementations.
-    fn visit_default_block(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
-        if let Block {
+    fn visit_default_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        let default_body = if let Block {
             header: BlockHeader::Default,
-            id: parent_id,
-            body,
+            body: default_body,
             ..
-        } = &mut block
+        } = block
         {
-            let mut i = 0;
+            default_body
+        } else {
+            unreachable!();
+        };
 
-            // Iterate through all the ADTs in the AST.
-            while i < body.len() {
-                let body_token = body.get(i).cloned().expect("Known to be in bounds.");
+        // This set will store paths of ADTs that have been removed. These are
+        // ADTs with generics that aren't used anywhere in the code.
+        // They will be stored in a set since we also need to remove their
+        // corresponding impl blocks. And since the impl blocks are traversed
+        // afterwards, this set will be used to see which impls to remove.
+        let mut unused_adts = TyEnvHashSet::default();
 
-                // Modify and create the new ADTs. The old ADT will also be removed.
-                if let AstToken::Block(Block {
-                    header,
-                    file_pos,
-                    id: old_id,
-                    ..
-                }) = &body_token
-                {
-                    match header {
-                        BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
-                            let full_path = {
-                                let module = match ctx.ast_ctx.get_module(*old_id) {
-                                    Ok(Some(module)) => module,
-                                    Ok(None) => LangPath::default(),
-                                    Err(err) => {
-                                        self.errors.push(err);
-                                        return;
-                                    }
-                                };
+        let mut i = 0;
 
-                                let adt = adt.as_ref().read().unwrap();
-                                module.clone_push(&adt.name, None, Some(adt.file_pos))
-                            };
+        // Iterate through all ADTs in the AST. Create new ADTs for ADTs with
+        // generics, where the generics have their "real" types implemented.
+        while i < default_body.len() {
+            let mut body_token = default_body.get(i).cloned().unwrap();
 
-                            let contains_key = match self.generic_adts.contains_key(
-                                &ctx.ty_env.lock().unwrap(),
-                                DerefType::None,
-                                &full_path,
-                            ) {
-                                Ok(contains_key) => contains_key,
-                                Err(err) => {
-                                    self.errors.push(err);
-                                    return;
-                                }
-                            };
-
-                            if contains_key {
-                                let create_adt_instance_res = match self.create_adt_instance(
-                                    ctx, &full_path, body, file_pos, i, *old_id, *parent_id,
-                                ) {
-                                    Ok(create_adt_instance_res) => create_adt_instance_res,
-                                    Err(err) => {
-                                        self.errors.push(err);
-                                        return;
-                                    }
-                                };
-
-                                if let Some(skip) = create_adt_instance_res {
-                                    // Skip the newly created ADT blocks (if any).
-                                    i += skip;
-                                }
-                            } else if adt
-                                .as_ref()
-                                .read()
-                                .unwrap()
-                                .generics
-                                .as_ref()
-                                .map(|gens| !gens.is_empty())
-                                .unwrap_or(false)
-                            {
-                                // If the ADT contains generics but isn't in `self.generic_adts`,
-                                // it means that the ADT isn't used anywhere and contains generics.
-                                // Need to remove it.
-                                if let Err(err) = self.remove_adt_instance(
-                                    &ctx.ty_env.lock().unwrap(),
-                                    &mut ctx.ast_ctx,
-                                    &full_path,
-                                    body,
-                                    i,
-                                    *parent_id,
-                                ) {
-                                    self.errors.push(err);
-                                    return;
-                                }
-                            }
-                        }
-
-                        _ => (),
+            if let AstToken::Block(Block {
+                header,
+                body: child_body,
+                id: child_id,
+                file_pos: child_file_pos,
+                ..
+            }) = &mut body_token
+            {
+                let adt_path_without_gens = match header {
+                    BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
+                        let adt = adt.read().unwrap();
+                        adt.module.clone_push(&adt.name, None, Some(adt.file_pos))
                     }
-                }
+                    _ => {
+                        i += 1;
+                        continue;
+                    }
+                };
 
-                i += 1;
-            }
+                let amount_of_adts_created = match self.create_adt_instance(
+                    ctx,
+                    &adt_path_without_gens,
+                    default_body,
+                    child_body,
+                    &child_file_pos,
+                    i,
+                    *child_id,
+                    BlockCtx::DEFAULT_BLOCK_ID,
+                ) {
+                    Ok(Some(amount)) => amount,
+                    Ok(None) => 0,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
-            i = 0;
+                i += amount_of_adts_created;
 
-            // Iterate through all the implement blocks in the AST.
-            while i < body.len() {
-                let mut body_token = body.get(i).cloned().expect("Known to be in bounds.");
-
-                // Modify and create new implement block for the ADTs that contains
-                // generics. These new impl blocks will contain the actual generic
-                // implementations/instances. The old impl blocks containing the
-                // generic placeholders will be removed.
-                if let AstToken::Block(Block {
-                    header: BlockHeader::Implement(adt_path, _),
-                    id: old_id,
-                    ..
-                }) = &body_token
-                {
-                    let full_path = {
-                        let module = match ctx.ast_ctx.get_module(*old_id) {
-                            Ok(Some(module)) => module,
-                            Ok(None) => LangPath::default(),
-                            Err(err) => {
-                                self.errors.push(err);
-                                return;
-                            }
-                        };
-
-                        let last_part = adt_path.last().unwrap();
-                        module.clone_push(&last_part.0, None, adt_path.file_pos)
-                    };
-
-                    let contains_key = match self.generic_adts.contains_key(
-                        &ctx.ty_env.lock().unwrap(),
-                        DerefType::None,
-                        &full_path,
-                    ) {
-                        Ok(contains_key) => contains_key,
+                // If true: No new ADT blocks were created. If the ADT has generics,
+                // but no new ADT blocks were created, it means that the current
+                // ADT isn't used anywhere in the code.
+                // In this case the ADT must be removed since its generics are
+                // never inferred/implemented to any type.
+                if amount_of_adts_created == 0 {
+                    let ty_env_guard = ctx.ty_env.lock().unwrap();
+                    let adt = match ctx.ast_ctx.get_adt(&ty_env_guard, &adt_path_without_gens) {
+                        Ok(adt) => adt,
                         Err(err) => {
                             self.errors.push(err);
                             return;
                         }
                     };
 
-                    if contains_key {
-                        let create_method_instance_res = match self.create_impl_instance(
-                            ctx,
-                            body,
-                            i,
-                            &full_path,
-                            &mut body_token,
-                        ) {
-                            Ok(create_method_instance_res) => create_method_instance_res,
-                            Err(err) => {
-                                self.errors.push(err);
-                                return;
-                            }
-                        };
+                    let has_gens = adt
+                        .read()
+                        .unwrap()
+                        .generics
+                        .as_ref()
+                        .map(|gens| !gens.is_empty())
+                        .unwrap_or(false);
 
-                        if let Some(skip) = create_method_instance_res {
-                            // Skip the newly created impl blocks (if any).
-                            i += skip;
+                    if has_gens {
+                        if let Err(err) = self.remove_adt_instance(
+                            &ty_env_guard,
+                            &mut ctx.ast_ctx,
+                            &adt_path_without_gens,
+                            default_body,
+                            i,
+                            BlockCtx::DEFAULT_BLOCK_ID,
+                        ) {
+                            self.errors.push(err);
+                            return;
                         }
-                    } else {
-                        // If this is a impl block for a ADT that has been
-                        // removed, remove the impl block as well.
-                        if ctx
-                            .ast_ctx
-                            .get_adt(&ctx.ty_env.lock().unwrap(), &full_path)
-                            .is_err()
-                        {
-                            self.remove_impl_instance(body, i);
+
+                        if let Err(err) = unused_adts.insert(
+                            &ty_env_guard,
+                            DerefType::None,
+                            adt_path_without_gens,
+                        ) {
+                            self.errors.push(err);
+                            return;
                         }
                     }
                 }
-
-                i += 1;
             }
+
+            i += 1;
+        }
+
+        i = 0;
+
+        // TODO: Possible to merge the two loops in some way (ADT+impl)?
+        //       Currently the ADT need to be created first since the impl block
+        //       logic uses the created ADTs to look-up replace paths etc.
+        //       correctly.
+        // Iterate through all impl blocks in the AST. This logic is very similar
+        // to the loop above where we iterate through all ADTs and create new
+        // copies of them. But instead we iterate through the impl blocks and
+        // creates copies of them with the generics implemented.
+        while i < default_body.len() {
+            let body_token = default_body.get(i).cloned().unwrap();
+
+            if let AstToken::Block(Block {
+                header: BlockHeader::Implement(adt_path, ..),
+                ..
+            }) = &body_token
+            {
+                let adt_path_without_gens = adt_path.without_gens();
+
+                // If the impl is stored in `unused_adts`, it is a impl block for
+                // a ADT containing generics that never was used in the code.
+                // The ADT have already been removed, remove the impl block as well.
+                match unused_adts.contains(
+                    &ctx.ty_env.lock().unwrap(),
+                    DerefType::None,
+                    &adt_path_without_gens,
+                ) {
+                    Ok(true) => self.remove_impl_instance(default_body, i),
+                    Ok(false) => (),
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                let amount_of_impls_created = match self.create_impl_instance(
+                    ctx,
+                    default_body,
+                    i,
+                    &adt_path_without_gens,
+                    &body_token,
+                ) {
+                    Ok(Some(amount)) => amount,
+                    Ok(None) => 0,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                i += amount_of_impls_created;
+            }
+
+            i += 1;
         }
     }
 }

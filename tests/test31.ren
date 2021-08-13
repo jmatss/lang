@@ -1,18 +1,12 @@
-struct TestStruct<T>
-{
-    inner: T,
-}
+struct TestStruct<T> {
+    var inner: T
 
-impl TestStruct
-{
-    fn {this} test_func() -> i32
-    {
+    fn {this} test_func() -> i32 {
         return 123
     }
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var i: u64 = 1
     var f: f32 = 123.
 

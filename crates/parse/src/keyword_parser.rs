@@ -6,11 +6,10 @@ use std::{
 use common::{
     error::LangResult,
     file::FilePosition,
-    path::LangPath,
     token::{
         ast::AstToken,
-        block::{Adt, Block, BlockHeader, Fn, Trait},
-        expr::Expr,
+        block::{AdtBuilder, Block, BlockHeader, Fn, Trait},
+        expr::{Expr, Var},
         lit::Lit,
         stmt::{ExternalDecl, Modifier, Stmt},
     },
@@ -88,7 +87,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 Some(kw_file_pos),
             )),
 
-            Kw::Implements | Kw::Where | Kw::Else | Kw::FunctionPointer => Err(self.iter.err(
+            Kw::Where | Kw::Else | Kw::FunctionPointer => Err(self.iter.err(
                 format!(
                     "Unexpected keyword when parsing keyword start: {:#?}",
                     keyword
@@ -556,17 +555,15 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
                     file_pos.set_end(&next_lex_token.unwrap().file_pos)?;
 
-                    let has_definition = false;
-                    ExternalDecl::Struct(Arc::new(RwLock::new(Adt::new_struct(
-                        ident,
-                        LangPath::empty(),
-                        modifiers,
-                        Vec::with_capacity(0),
-                        file_pos,
-                        has_definition,
-                        None,
-                        None,
-                    ))))
+                    let mut builder = AdtBuilder::new_struct();
+                    builder
+                        .name(ident)
+                        .modifiers(modifiers)
+                        .file_pos(file_pos)
+                        .has_definition(false);
+
+                    let ext_struct = builder.build()?;
+                    ExternalDecl::Struct(Arc::new(RwLock::new(ext_struct)))
                 }
 
                 _ => {
@@ -831,75 +828,55 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         ))
     }
 
-    /// Parses a struct header.
-    ///   "struct <ident> [ < <generic>, ... > ] [where ...] [{ [<ident>: <type>] [[,] ...] }]"
+    /// Parses a struct.
+    ///   "struct <ident> [ < <generic>, ... > ] [where ...] [{ ... }]"
     /// The "struct" keyword has already been consumed when this function is called.
     fn parse_struct(
         &mut self,
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
-        let mut module = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
+        let mut builder = AdtBuilder::new_struct();
 
-        let last_part = module.pop().unwrap();
-        let name = last_part.0;
-        let generics = last_part.1;
+        self.parse_adt_header(&mut builder, &mut file_pos)?;
+        let body = self.parse_adt_body(&mut builder, &mut file_pos)?;
 
-        let impls = self.parse_where(generics.as_ref())?;
-        if impls.is_some() {
-            if let Ok(next_file_pos) = self.iter.peek_file_pos() {
-                file_pos.set_end(&next_file_pos)?;
-            }
-        }
-
-        // Parse the members of the struct. If the next token isn't a
-        // "CurlyBracketBegin" symbol, assume this is a struct with no members.
-        let (members, is_var_arg) = if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
-            self.iter.peek_skip_space_line().map(|t| t.kind)
-        {
-            let start_symbol = Sym::CurlyBracketBegin;
-            let end_symbol = Sym::CurlyBracketEnd;
-            let (members, is_var_arg, par_file_pos) =
-                self.iter
-                    .parse_par_list(start_symbol, end_symbol, generics.as_ref())?;
-
-            file_pos.set_end(&par_file_pos)?;
-
-            (members, is_var_arg)
-        } else {
-            (Vec::default(), false)
-        };
-
-        let members = members
-            .iter()
-            .map(|m| Arc::new(RwLock::new(m.clone())))
-            .collect::<Vec<_>>();
-
-        if is_var_arg {
-            return Err(self.iter.err(
-                format!(
-                    "Found invalid var_arg symbol in struct with name: {}",
-                    &name
-                ),
-                Some(file_pos),
-            ));
-        }
-
-        let has_definition = true;
-        let struct_ = Adt::new_struct(
-            name,
-            module,
-            modifiers,
-            members,
-            file_pos,
-            has_definition,
-            generics,
-            impls,
-        );
+        builder
+            .modifiers(modifiers)
+            .has_definition(true)
+            .file_pos(file_pos);
+        let struct_ = builder.build()?;
 
         Ok(AstToken::Block(Block {
             header: BlockHeader::Struct(Arc::new(RwLock::new(struct_))),
-            body: Vec::with_capacity(0),
+            body,
+            id: self.iter.reserve_block_id(),
+            file_pos,
+        }))
+    }
+
+    /// Parses a union.
+    ///   "union <ident> [ < <generic>, ... > ] [where ...] [{ ... }]"
+    /// The "union" keyword has already been consumed when this function is called.
+    fn parse_union(
+        &mut self,
+        modifiers: Vec<Modifier>,
+        mut file_pos: FilePosition,
+    ) -> LangResult<AstToken> {
+        let mut builder = AdtBuilder::new_union();
+
+        self.parse_adt_header(&mut builder, &mut file_pos)?;
+        let body = self.parse_adt_body(&mut builder, &mut file_pos)?;
+
+        builder
+            .modifiers(modifiers)
+            .has_definition(true)
+            .file_pos(file_pos);
+        let union = builder.build()?;
+
+        Ok(AstToken::Block(Block {
+            header: BlockHeader::Union(Arc::new(RwLock::new(union))),
+            body,
             id: self.iter.reserve_block_id(),
             file_pos,
         }))
@@ -907,8 +884,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
     // TODO: Should it possible to set values to the individual enum variants?
     //       Should there be possible to set the integer type of the enum?
-    /// Parses a enum header.
-    ///   "enum <ident> { <ident> [[,] ...] }"
+    /// Parses a enum block.
+    ///   "enum <ident> { [<MEMBER_NAME>] ... }"
     /// The "enum" keyword has already been consumed when this function is called.
     fn parse_enum(
         &mut self,
@@ -917,28 +894,81 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     ) -> LangResult<AstToken> {
         let full_path = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
 
-        let mut module = full_path.clone();
-
-        let last_part = module.pop().unwrap();
-        let name = last_part.0;
-
-        // Parse the members of the enum.
-        let start_symbol = Sym::CurlyBracketBegin;
-        let end_symbol = Sym::CurlyBracketEnd;
-        let (mut members, is_var_arg, par_file_pos) =
-            self.iter.parse_par_list(start_symbol, end_symbol, None)?;
-
-        file_pos.set_end(&par_file_pos)?;
-
-        if is_var_arg {
+        let next_token = self.iter.next_skip_space_line();
+        let next_kind = next_token.as_ref().map(|t| t.kind.clone());
+        if !matches!(next_kind, Some(LexTokenKind::Sym(Sym::CurlyBracketBegin))) {
             return Err(self.iter.err(
-                format!("Found invalid var_arg symbol in enum with name: {}", &name),
-                Some(file_pos),
+                format!(
+                    "Expected CurlyBracketBegin at start of enum body, but found: {:#?}",
+                    next_token
+                ),
+                next_token.map(|t| t.file_pos),
             ));
         }
 
+        let mut module = full_path.clone();
+        let last_part = module.pop().unwrap();
+        let name = last_part.0;
+
+        let mut members = Vec::default();
+
+        // Only expects idents in the enum body, nothing else is expected atm.
+        loop {
+            let peek_token = self.iter.peek_skip_space_line();
+            let peek_kind = peek_token.map(|t| t.kind);
+            if let Some(LexTokenKind::Sym(Sym::CurlyBracketEnd)) = peek_kind {
+                let curly_bracket_end = self.iter.next_skip_space_line();
+                file_pos.set_end(&curly_bracket_end.unwrap().file_pos)?;
+                break;
+            }
+
+            let next_token = self.iter.next_skip_space_line();
+            let next_kind = next_token.as_ref().map(|t| t.kind.clone());
+            if let Some(LexTokenKind::Ident(member_name)) = next_kind {
+                let member_file_pos = next_token.unwrap().file_pos.to_owned();
+                let is_const = true;
+
+                let member = Var::new(
+                    member_name,
+                    None,
+                    None,
+                    None,
+                    Some(member_file_pos),
+                    None,
+                    is_const,
+                );
+                members.push(member);
+            } else {
+                return Err(self.iter.err(
+                    format!(
+                        "Unexpected token in enum body block, was: {:#?}.",
+                        next_token
+                    ),
+                    next_token.map(|t| t.file_pos),
+                ));
+            };
+        }
+
+        // TODO: How should the type of the enum be decided? Should it be possible
+        //       to specify as a generic on the enum declaration? But in that case
+        //       it would take a generic impl instead of a generic decl as structs.
+        //       Is this ok?
+        let enum_type_id = self.iter.ty_env.lock().unwrap().id(&Ty::CompoundType(
+            InnerTy::Enum(full_path.clone()),
+            Generics::empty(),
+            TypeInfo::Enum(file_pos.to_owned()),
+        ))?;
+
+        let mut builder = AdtBuilder::new_enum();
+        builder
+            .module(module)
+            .name(name.clone())
+            .modifiers(modifiers)
+            .file_pos(file_pos)
+            .has_definition(true)
+            .enum_ty(enum_type_id);
+
         const RADIX: u32 = 10;
-        let mut members_arc = Vec::default();
 
         // TODO: This should probably be done somewhere else in a better way.
         //       In the future all enums might not be i32 and might not have the
@@ -974,103 +1004,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 None,
             )));
 
-            members_arc.push(Arc::new(RwLock::new(member.clone())));
+            builder.insert_member(&Arc::new(RwLock::new(member.clone())));
         }
 
-        // TODO: How should the type of the enum be decided? Should it be possible
-        //       to specify as a generic on the enum declaration? But in that case
-        //       it would take a generic impl instead of a generic decl as structs.
-        //       Is this ok?
-        let enum_type_id = self.iter.ty_env.lock().unwrap().id(&Ty::CompoundType(
-            InnerTy::Enum(full_path),
-            Generics::empty(),
-            TypeInfo::Enum(file_pos.to_owned()),
-        ))?;
-
-        let has_definition = true;
-        let enum_ = Adt::new_enum(
-            name,
-            module,
-            modifiers,
-            members_arc,
-            file_pos,
-            has_definition,
-            Some(enum_type_id),
-        );
+        let enum_ = builder.build()?;
 
         Ok(AstToken::Block(Block {
             header: BlockHeader::Enum(Arc::new(RwLock::new(enum_))),
-            body: Vec::with_capacity(0),
-            id: self.iter.reserve_block_id(),
-            file_pos,
-        }))
-    }
-
-    /// Parses a union header.
-    ///   "union <ident> [ < <generic>, ... > ] [where ...] [{ [<ident>: <type>] [[,] ...] }]"
-    /// The "union" keyword has already been consumed when this function is called.
-    fn parse_union(
-        &mut self,
-        modifiers: Vec<Modifier>,
-        mut file_pos: FilePosition,
-    ) -> LangResult<AstToken> {
-        let mut module = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
-
-        let last_part = module.pop().unwrap();
-        let name = last_part.0;
-        let generics = last_part.1;
-
-        let impls = self.parse_where(generics.as_ref())?;
-        if impls.is_some() {
-            if let Ok(next_file_pos) = self.iter.peek_file_pos() {
-                file_pos.set_end(&next_file_pos)?;
-            }
-        }
-
-        // Parse the members of the union. If the next token isn't a
-        // "CurlyBracketBegin" symbol, assume this is a enum with no members.
-        let (members, is_var_arg) = if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
-            self.iter.peek_skip_space_line().map(|t| t.kind)
-        {
-            let start_symbol = Sym::CurlyBracketBegin;
-            let end_symbol = Sym::CurlyBracketEnd;
-            let (members, is_var_arg, par_file_pos) =
-                self.iter
-                    .parse_par_list(start_symbol, end_symbol, generics.as_ref())?;
-
-            file_pos.set_end(&par_file_pos)?;
-
-            (members, is_var_arg)
-        } else {
-            (Vec::default(), false)
-        };
-
-        let members = members
-            .iter()
-            .map(|m| Arc::new(RwLock::new(m.clone())))
-            .collect::<Vec<_>>();
-
-        if is_var_arg {
-            return Err(self.iter.err(
-                format!("Found invalid var_arg symbol in union with name: {}", &name),
-                Some(file_pos),
-            ));
-        }
-
-        let has_definition = true;
-        let union = Adt::new_union(
-            name,
-            module,
-            modifiers,
-            members,
-            file_pos,
-            has_definition,
-            generics,
-            impls,
-        );
-
-        Ok(AstToken::Block(Block {
-            header: BlockHeader::Union(Arc::new(RwLock::new(union))),
             body: Vec::with_capacity(0),
             id: self.iter.reserve_block_id(),
             file_pos,
@@ -1159,58 +1099,147 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }))
     }
 
-    // TODO: Generics
-    /// Parses a implement header. This can either be a impl for the methods of
-    /// a structure or it can also be a impl of a trait for a structure.
-    ///   "implement <ident> [for <ident>] { [<func> ...] }"
-    /// The "implement" keyword has already been consumed when this function is called.
-    fn parse_impl(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
-        let first_path = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
+    /// Parses a ADT header (module, name, generics and where-impls).
+    ///   " <ident> [ < <generic>, ... > ] [where ...]"
+    /// The ADT type identifier (struct/union) will already have been consumed
+    /// when this function is called.
+    fn parse_adt_header(
+        &mut self,
+        builder: &mut AdtBuilder,
+        file_pos: &mut FilePosition,
+    ) -> LangResult<()> {
+        let mut module = self.iter.parse_path(file_pos, GenericsKind::Decl)?;
 
-        // If the next token is a "for" keyword, this is a impl for a trait
-        // and the previosly parsed `ident` is the name of the trait. If not,
-        // the previous `ident` is the name of a structure.
-        let (adt_path, trait_path) = if let Some(LexTokenKind::Kw(Kw::For)) =
-            self.iter.peek_skip_space_line().as_ref().map(|t| &t.kind)
-        {
+        let last_part = module.pop().unwrap();
+        let name = last_part.0;
+        let generics = last_part.1;
+
+        let impls = self.parse_where(generics.as_ref())?;
+        if impls.is_some() {
+            if let Ok(next_file_pos) = self.iter.peek_file_pos() {
+                file_pos.set_end(&next_file_pos)?;
+            }
+        }
+
+        builder
+            .module(module)
+            .name(name)
+            .generics(generics)
+            .impls(impls);
+
+        Ok(())
+    }
+
+    /// Parses a ADT body i.e. the variables and methods belonging to the
+    /// specific ADT.
+    ///   "{ [<VARIABLE> | <FUNC>] ... }"
+    /// The returned vector is the methods parsed in the body (this will become
+    /// the body tokens of the ADT).
+    fn parse_adt_body(
+        &mut self,
+        builder: &mut AdtBuilder,
+        file_pos: &mut FilePosition,
+    ) -> LangResult<Vec<AstToken>> {
+        let next_token = self.iter.peek_skip_space_line();
+        let next_kind = next_token.map(|t| t.kind);
+        if matches!(next_kind, Some(LexTokenKind::Sym(Sym::CurlyBracketBegin))) {
             self.iter.next_skip_space_line();
-            let adt_path = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
-
-            (adt_path, Some(first_path))
         } else {
-            (first_path, None)
-        };
+            // Early return if this is an empty ADT body.
+            return Ok(Vec::with_capacity(0));
+        }
+
+        let mut method_tokens = Vec::default();
+
+        loop {
+            let next_token = self.iter.peek_skip_space_line();
+            let next_kind = next_token.as_ref().map(|t| t.kind.clone());
+
+            // If true: Matches the ending CurlyBracketEnd and breaks out of the
+            // loop, the body of this ADT have been parsed fully.
+            if matches!(next_kind, Some(LexTokenKind::Sym(Sym::CurlyBracketEnd))) {
+                self.iter.next_skip_space_line();
+                break;
+            }
+
+            let token = match self.iter.next_token() {
+                Ok(token) => token,
+                Err(err) => {
+                    return Err(self.iter.err(
+                        "Unable to parse token in ADT body block".into(),
+                        err.file_pos,
+                    ))
+                }
+            };
+            file_pos.set_end(token.file_pos().unwrap())?;
+
+            match &token {
+                // Parsing ADT methods.
+                AstToken::Block(Block {
+                    header: BlockHeader::Fn(..),
+                    ..
+                }) => {
+                    // OBS! The methods aren't inserted into the ADT "look-up"
+                    //      at this point, only the tokens are parsed and
+                    //      returned from this function. The methods are inserted
+                    //      into the ADT "look-up" in during the "decl" analyzing
+                    //      stage.
+                    method_tokens.push(token);
+                }
+
+                // Parsing ADT member variables.
+                AstToken::Stmt(Stmt::VariableDecl(var, ..)) => {
+                    builder.insert_member(var);
+                }
+
+                token if token.is_skippable() => (),
+
+                _ => {
+                    return Err(self.iter.err(
+                        format!("Unexpected token in ADT body block, was: {:#?}.", token),
+                        token.file_pos().cloned(),
+                    ));
+                }
+            }
+        }
+
+        Ok(method_tokens)
+    }
+
+    // TODO: Generics
+    /// Parses a implement block. A "impl" block implements a specific trait
+    /// for a specific ADT.
+    ///   "impl <ADT_NAME>: <TRAIT_NAME> { [<FUNC> ...] }"
+    /// The "impl" keyword has already been consumed when this function is called.
+    fn parse_impl(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
+        let adt_path = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
+
+        let next_token = self.iter.next_skip_space_line();
+        let next_kind = next_token.clone().map(|t| t.kind);
+        if !matches!(next_kind, Some(LexTokenKind::Sym(Sym::Colon))) {
+            return Err(self.iter.err(
+                format!(
+                    "Expected Colon after impl ADT ident, got: {:#?}.",
+                    next_token
+                ),
+                Some(file_pos.to_owned()),
+            ));
+        }
+
+        // TODO: How should the `file_pos` be updated before the parsing of the
+        //       `trait_path`? Which FilePosition should be used?
+        let trait_path = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
 
         let header = BlockHeader::Implement(adt_path, trait_path);
         let impl_token = self.iter.next_block(header)?;
 
-        // Iterate through the tokens in the body and make sure that all tokens
-        // are functions.
-        if let AstToken::Block(Block {
+        let impl_body = if let AstToken::Block(Block {
             header: BlockHeader::Implement(..),
-            body,
-            file_pos,
+            body: impl_body,
             ..
         }) = &impl_token
         {
-            for ast_token in body {
-                if let AstToken::Block(Block {
-                    header: BlockHeader::Fn(_),
-                    ..
-                }) = ast_token
-                {
-                    // Do nothing, the token is of correct type.
-                } else if ast_token.is_skippable() {
-                } else {
-                    return Err(self.iter.err(
-                        format!(
-                            "Non function parsed in \"implement\" block: {:#?}.",
-                            ast_token
-                        ),
-                        Some(file_pos.to_owned()),
-                    ));
-                }
-            }
+            impl_body
         } else {
             return Err(self.iter.err(
                 format!(
@@ -1219,6 +1248,27 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 ),
                 Some(file_pos),
             ));
+        };
+
+        // Iterate through the tokens inside the impl body block and make sure
+        // that all tokens are functions.
+        for ast_token in impl_body {
+            if let AstToken::Block(Block {
+                header: BlockHeader::Fn(..),
+                ..
+            }) = ast_token
+            {
+                // Do nothing, the token is of correct type.
+            } else if ast_token.is_skippable() {
+            } else {
+                return Err(self.iter.err(
+                    format!(
+                        "Non function parsed in \"implement\" block: {:#?}.",
+                        ast_token
+                    ),
+                    Some(file_pos.to_owned()),
+                ));
+            }
         }
 
         Ok(impl_token)
@@ -1226,7 +1276,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
     /// Parses a where clause. Every "implements" statement are parsed to the
     /// end of the line.
-    ///   "where [<ident> implements <trait> [,<trait>]...]"
+    ///   "where [<ident> : <trait> [,<trait>]...]"
     /// The "where" keyword has NOT been parsed at this point. If the next token
     /// isn't the "where" keyword, no where clause exists so a None should
     /// be returned.
@@ -1247,7 +1297,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let mut implements = HashMap::new();
 
         loop {
-            // Start by parsing the identifier.
+            // Start by parsing the generic identifier (ex. "T").
             let lex_token = self.iter.next_skip_space_line();
             let ident = if let Some(LexTokenKind::Ident(ident)) =
                 lex_token.as_ref().map(|token| &token.kind)
@@ -1263,15 +1313,15 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 ));
             };
 
-            // Consume and make sure that the next token is a "implements" keyword .
+            // Consume and make sure that the next token is a "colon" symbol .
             let lex_token = self.iter.next_skip_space_line();
             if !matches!(
                 lex_token.as_ref().map(|t| &t.kind),
-                Some(LexTokenKind::Kw(Kw::Implements))
+                Some(LexTokenKind::Sym(Sym::Colon))
             ) {
                 return Err(self.iter.err(
                     format!(
-                        "Expected \"implements\" when parsing \"where\" clause, got: {:#?}",
+                        "Expected \"Colon\" when parsing \"where\" clause, got: {:#?}",
                         lex_token
                     ),
                     lex_token.map(|t| t.file_pos),
@@ -1285,10 +1335,13 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
                 // TODO: Should trailing commas be allowed?
                 // If the next token is a comma, continue parsing types. If it
-                // is a line break symbol, stop parsing the types. Else, unexpected
+                // is a line break symbol or CurlyBracketBegin (indicating the
+                // start of the body), stop parsing the types. Else, unexpected
                 // symbol; return error.
                 if let Some(next_token) = self.iter.next_skip_space() {
-                    if next_token.is_break_symbol() {
+                    if next_token.is_break_symbol()
+                        || matches!(next_token.kind, LexTokenKind::Sym(Sym::CurlyBracketBegin))
+                    {
                         self.iter.rewind_skip_space()?;
                         break;
                     } else if let LexTokenKind::Sym(Sym::Comma) = next_token.kind {
@@ -1296,7 +1349,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                     } else {
                         return Err(self.iter.err(
                             format!(
-                                "Expected \"implements\" when parsing \"where\" clause, got: {:#?}",
+                                "Bad token when parsing \"where\" clause, got: {:#?}",
                                 lex_token
                             ),
                             Some(next_token.file_pos),
@@ -1315,11 +1368,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
                 self.iter.peek_skip_space_line().as_ref().map(|t| &t.kind)
             {
-                break;
-            } else if let Some(LexTokenKind::Sym(Sym::SemiColon)) =
-                self.iter.peek_skip_space().as_ref().map(|t| &t.kind)
-            {
-                self.iter.next_skip_space();
                 break;
             }
         }

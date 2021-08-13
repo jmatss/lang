@@ -2,30 +2,21 @@ use std::types::Optional
 
 ext fn printf(format: {u8}, ...) -> i32
 
-struct TypeStruct
-{
-    len: u64,
-}
+struct TypeStruct {
+    var len: u64
 
-impl TypeStruct
-{
-    fn this len() -> u64
-    {
+    fn this len() -> u64 {
         return this.len
     }
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var x = Optional::value(TypeStruct { 123 })
 
     var y
-    if val is x.value
-    {
+    if val is x.value {
         y = Optional::value(val.len())
-    }
-    else
-    {
+    } else {
         y = Optional::empty()
     }
 

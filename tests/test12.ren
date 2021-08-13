@@ -1,25 +1,21 @@
 ext fn printf(format: {u8}, ...) -> i32
 ext fn malloc(size: u32) -> {u8}
 
-fn double(n: {i32})
-{
+fn double(n: {i32}) {
    n.* *= 2
 }
 
-struct TestStruct
-{
-    a: i32,
-    b: f64,
+struct TestStruct {
+    var a: i32
+    var b: f64
 }
 
-struct TestArrayStruct
-{
-    a: i32,
-    b: {[i32: 2]},
+struct TestArrayStruct {
+    var a: i32
+    var b: {[i32: 2]}
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var x1 = [[1.1, 2.2], [3.3, 4.4]]
 
     var f64_var: f64 = 3.3
@@ -37,8 +33,7 @@ fn main() -> i32
 
     var x2 = [1, 2, 3]
     var i = 0
-    while i < 3
-    {
+    while i < 3 {
         double(x2.[i].&)
         i += 1
     }

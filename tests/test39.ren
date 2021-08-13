@@ -1,13 +1,11 @@
 use std::mem::Allocator
 
-struct TestStruct
-{
-    inner_a: i8,
-    inner_b: u8,
+struct TestStruct {
+    var inner_a: i8
+    var inner_b: u8
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var i_u64: u64 = 123
     var a_or_error = Allocator::init<u64>(i_u64)
     var a = a_or_error.&.get_success()

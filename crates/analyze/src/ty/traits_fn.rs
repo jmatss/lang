@@ -1,12 +1,11 @@
 use std::{
-    borrow::Borrow,
     collections::{hash_map::Entry, HashMap, HashSet},
     iter::FromIterator,
+    sync::Arc,
 };
 
 use common::{
     error::{LangError, LangResult},
-    path::LangPathPart,
     token::{
         block::{Adt, Block, BlockHeader},
         expr::FnCall,
@@ -122,45 +121,43 @@ impl Visitor for TraitsFnAnalyzer {
         }
     }
 
-    fn visit_impl(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
-        if let Block {
-            header: BlockHeader::Implement(impl_path, ..),
-            ..
-        } = block
-        {
-            let full_impl_path = match ctx.ast_ctx.get_module(ctx.block_id) {
-                Ok(Some(mut full_impl_path)) => {
-                    let impl_ident = impl_path.last().unwrap().0.clone();
-                    full_impl_path.push(LangPathPart(impl_ident, None));
-                    full_impl_path
-                }
-                Ok(None) => {
-                    let mut full_impl_path = impl_path.clone();
-                    let last_part = full_impl_path.pop().unwrap();
-                    full_impl_path.push(LangPathPart(last_part.0, None));
-                    full_impl_path
-                }
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+    fn visit_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        let Block { header, .. } = block;
 
-            let adt = match ctx
-                .ast_ctx
-                .get_adt(&ctx.ty_env.lock().unwrap(), &full_impl_path)
-            {
-                Ok(adt) => adt,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
-            let adt = adt.as_ref().borrow().read().unwrap();
+        let adt = match header {
+            BlockHeader::Implement(impl_path, ..) => {
+                let path_without_gens = match ctx.ast_ctx.get_module(ctx.block_id) {
+                    Ok(Some(module)) => {
+                        let impl_name = impl_path.last().unwrap().0.clone();
+                        module.clone_push(&impl_name, None, None)
+                    }
+                    Ok(None) => impl_path.without_gens(),
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
-            if let Err(err) = self.store_generic_trait_method_names(&ctx, &adt) {
-                self.errors.push(err);
+                match ctx
+                    .ast_ctx
+                    .get_adt(&ctx.ty_env.lock().unwrap(), &path_without_gens)
+                {
+                    Ok(adt) => adt,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                }
             }
+
+            BlockHeader::Struct(adt) | BlockHeader::Union(adt) => Arc::clone(adt),
+
+            _ => return,
+        };
+
+        let adt = adt.read().unwrap();
+        if let Err(err) = self.store_generic_trait_method_names(&ctx, &adt) {
+            self.errors.push(err);
         }
     }
 

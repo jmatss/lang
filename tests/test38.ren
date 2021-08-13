@@ -1,7 +1,6 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-fn main() -> i32
-{
+fn main() -> i32 {
     test_normal()
     test_default()
     test_enum()
@@ -9,13 +8,11 @@ fn main() -> i32
     return 0
 }
 
-fn test_normal()
-{
+fn test_normal() {
     var correct
     var value = 1
 
-    match value
-    {
+    match value {
         1 {
             correct = true
             printf("1")
@@ -30,13 +27,11 @@ fn test_normal()
     std::assert(correct)
 }
 
-fn test_default()
-{
+fn test_default() {
     var correct
     var value = 99
 
-    match value
-    {
+    match value {
         1 {
             correct = false
             printf("\n1")
@@ -51,19 +46,16 @@ fn test_default()
     std::assert(correct)
 }
 
-enum TestEnum
-{
-    FIRST,
-    SECOND,
+enum TestEnum {
+    FIRST
+    SECOND
 }
 
-fn test_enum()
-{
+fn test_enum() {
     var correct
     var value = TestEnum::SECOND
 
-    match value
-    {
+    match value {
         TestEnum::FIRST {
             correct = false
             printf("\nFIRST")

@@ -1,23 +1,16 @@
-struct TestStruct<T>
-{
-    inner: T,
-}
+struct TestStruct<T> {
+    var inner: T
 
-impl TestStruct
-{
-    fn this instance_method(value: T) -> T
-    {
+    fn this instance_method(value: T) -> T {
         return this.inner
     }
 
-    fn static_method(value: T) -> T
-    {
+    fn static_method(value: T) -> T {
         return value
     }
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var i: i64 = 123
     var f: f64 = 456.
 

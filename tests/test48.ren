@@ -1,48 +1,37 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-struct TestStruct;
-impl TestStruct
-{
-    fn static_func() -> i8
-    {
+struct TestStruct {
+    fn static_func() -> i8 {
         return 12
     }
 
-    fn func1() -> i8
-    {
+    fn func1() -> i8 {
         return this::static_func()
     }
 
-    fn this func2()  -> i8
-    {
+    fn this func2()  -> i8 {
         return this::static_func()
     }
 
-    fn {this} func3()  -> i8
-    {
+    fn {this} func3()  -> i8 {
         return this::static_func()
     }
 
     /*
     TODO: Should this be implemented?
-    fn func4() -> this
-    {
+    fn func4() -> this {
         // ADT constructor.
         this {}
     }
     */
 }
 
-struct TestStructWithGen<Ts>;
-impl TestStructWithGen
-{
-    fn static_func(val: Ts) -> Ts
-    {
+struct TestStructWithGen<Ts> {
+    fn static_func(val: Ts) -> Ts {
         return val
     }
 
-    fn func<Tf>(val: Tf) -> Tf
-    {
+    fn func<Tf>(val: Tf) -> Tf {
         return this<Tf>::static_func(val)
     }
 }

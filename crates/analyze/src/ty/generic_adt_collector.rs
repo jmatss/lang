@@ -160,74 +160,62 @@ impl<'a> GenericAdtCollector<'a> {
         ast_tokens: &mut [AstToken],
     ) -> LangResult<()> {
         for ast_token in ast_tokens {
-            // Need to do this ugly hack to make the borrow checker happy.
-            // We wan't to borrow the `adt_path` and use it in the logic below,
-            // but at the same time borrow the `ast_token` which contains the
-            // `adt_path`.
-            let impl_opt = match ast_token {
-                AstToken::Block(Block {
-                    header: BlockHeader::Implement(adt_path, _),
-                    ..
-                }) => {
-                    if ctx
-                        .ast_ctx
-                        .get_adt(&ctx.ty_env.lock().unwrap(), adt_path)
-                        .is_ok()
-                    {
-                        Some(adt_path.clone())
-                    } else {
-                        None
-                    }
-                }
+            let header = if let AstToken::Block(Block { header, .. }) = ast_token {
+                header
+            } else {
+                continue;
+            };
 
+            let adt_path_without_gens = match header {
+                BlockHeader::Implement(adt_path, ..) => adt_path.without_gens(),
+                BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
+                    let adt = adt.read().unwrap();
+                    adt.module.clone_push(&adt.name, None, Some(adt.file_pos))
+                }
                 _ => continue,
             };
 
-            if let Some(adt_path) = impl_opt {
-                let adt_path_without_gens = adt_path.without_gens();
+            let mut collector = GenericNestedCollector::new();
+            if let Err(mut errs) = traverse(ctx, &mut collector, ast_token) {
+                self.errors.append(&mut errs);
+            }
 
-                let mut collector = GenericNestedCollector::new();
-                if let Err(mut errs) = traverse(ctx, &mut collector, ast_token) {
-                    self.errors.append(&mut errs);
-                }
+            let ty_env_guard = ctx.ty_env.lock().unwrap();
 
-                let ty_env_guard = ctx.ty_env.lock().unwrap();
+            for (method_name, type_ids) in collector.nested_generic_adts.iter() {
+                for type_id in type_ids {
+                    let deref_type = DerefType::None;
+                    let contains_key = self.nested_generic_adts.contains_key(
+                        &ty_env_guard,
+                        deref_type,
+                        &adt_path_without_gens,
+                    )?;
 
-                for (method_name, type_ids) in collector.nested_generic_adts.iter() {
-                    for type_id in type_ids {
-                        let deref_type = DerefType::None;
-                        let contains_key = self.nested_generic_adts.contains_key(
-                            &ty_env_guard,
-                            deref_type,
-                            &adt_path_without_gens,
-                        )?;
+                    if contains_key {
+                        let inner_map = self
+                            .nested_generic_adts
+                            .get_mut(&ty_env_guard, deref_type, &adt_path_without_gens)?
+                            .unwrap();
 
-                        if contains_key {
-                            let inner_map = self
-                                .nested_generic_adts
-                                .get_mut(&ty_env_guard, deref_type, &adt_path_without_gens)?
-                                .unwrap();
-
-                            match inner_map.entry(method_name.clone()) {
-                                Entry::Occupied(mut o_inner) => {
-                                    if !o_inner.get().contains(type_id) {
-                                        o_inner.get_mut().push(*type_id);
-                                    }
-                                }
-                                Entry::Vacant(v_inner) => {
-                                    v_inner.insert(vec![*type_id]);
+                        match inner_map.entry(method_name.clone()) {
+                            Entry::Occupied(mut o_inner) => {
+                                if !o_inner.get().contains(type_id) {
+                                    o_inner.get_mut().push(*type_id);
                                 }
                             }
-                        } else {
-                            let mut m = HashMap::default();
-                            m.insert(method_name.clone(), vec![*type_id]);
-                            self.nested_generic_adts.insert(
-                                &ty_env_guard,
-                                deref_type,
-                                adt_path_without_gens.clone(),
-                                m,
-                            )?;
+                            Entry::Vacant(v_inner) => {
+                                v_inner.insert(vec![*type_id]);
+                            }
                         }
+                    } else {
+                        let mut m = HashMap::default();
+                        m.insert(method_name.clone(), vec![*type_id]);
+                        self.nested_generic_adts.insert(
+                            &ty_env_guard,
+                            deref_type,
+                            adt_path_without_gens.clone(),
+                            m,
+                        )?;
                     }
                 }
             }

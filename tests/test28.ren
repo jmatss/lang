@@ -1,18 +1,15 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-struct TestStruct<T>
-{
-    inner: T,
-    two: [T: 2],
+struct TestStruct<T> {
+    var inner: T
+    var two: [T: 2]
 }
 
-struct OuterTestStruct<U>
-{
-    inner_test_struct: U,
+struct OuterTestStruct<U> {
+    var inner_test_struct: U
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var x: u64 = 123
     var y = [x, x]  // var y: [u64: 2] = [1, 2]
     var test_struct = TestStruct { x, y }

@@ -4,7 +4,7 @@ use common::{
     ctx::block_ctx::BlockCtx,
     error::{LangError, LangResult},
     hash::DerefType,
-    path::{LangPath, LangPathPart},
+    path::LangPath,
     token::expr::Var,
     token::{
         ast::AstToken,
@@ -14,7 +14,10 @@ use common::{
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
-        generics::Generics, inner_ty::InnerTy, to_string::to_string_path, ty::Ty,
+        generics::Generics,
+        inner_ty::InnerTy,
+        to_string::{to_string_path, to_string_type_id},
+        ty::Ty,
         type_info::TypeInfo,
     },
     BlockId,
@@ -76,17 +79,14 @@ impl DeclFnAnalyzer {
         Ok(())
     }
 
+    /// If this is a non-static method, insert `this` as the first parameter
+    /// to the given function.
     fn analyze_method_header(
         &mut self,
         ctx: &mut TraverseCtx,
-        adt_path: &LangPath,
+        adt_path_without_gens: &LangPath,
         func: &mut Arc<RwLock<Fn>>,
     ) {
-        let mut adt_path_without_gens = adt_path.clone();
-        if let Some(last_part) = adt_path_without_gens.last_mut() {
-            last_part.1 = None;
-        }
-
         let inner_ty = if ctx
             .ast_ctx
             .is_trait(&ctx.ty_env.lock().unwrap(), &adt_path_without_gens)
@@ -175,16 +175,6 @@ impl DeclFnAnalyzer {
                 func.parameters = Some(vec![var]);
             }
         }
-
-        // Insert this method into `methods` in the analyze context.
-        if let Err(err) = ctx.ast_ctx.insert_method(
-            &ctx.ty_env.lock().unwrap(),
-            &adt_path_without_gens,
-            Arc::clone(func),
-        ) {
-            self.errors.push(err);
-            return;
-        }
     }
 }
 
@@ -201,34 +191,33 @@ impl Visitor for DeclFnAnalyzer {
         ctx.ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
     }
 
-    /// Marks the functions in this implement block with the name of the implement
-    /// block. This lets one differentiate between functions and methods by checking
-    /// the `method_struct` field in "Function"s.
-    fn visit_impl(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
-        // TODO: This won't work for all cases. The `impl_path` doesn't consider
-        //       the module path or "use"s.
-
-        let (impl_path, body) = if let Block {
-            header: BlockHeader::Implement(impl_path, _),
-            body,
-            ..
-        } = &mut block
-        {
-            (impl_path, body)
-        } else {
-            return;
-        };
-
-        let mut partial_path = impl_path.clone();
-        let last_part = partial_path.pop().unwrap();
-        partial_path.push(LangPathPart(last_part.0, None));
-
+    /// Marks the methods in ADT/impl blocks with the name of the ADTs. This
+    /// lets one differentiate between functions and methods by checking the
+    /// `method_adt` field in the functions.
+    fn visit_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        let Block { header, body, .. } = block;
         let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
+        let path_without_gens = match header {
+            BlockHeader::Implement(adt_path, ..) => adt_path.without_gens(),
+
+            BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
+                let adt = adt.read().unwrap();
+                adt.module.clone_push(&adt.name, None, None)
+            }
+
+            BlockHeader::Trait(trait_) => {
+                let trait_ = trait_.read().unwrap();
+                trait_.module.clone_push(&trait_.name, None, None)
+            }
+
+            _ => return,
+        };
 
         let inner_ty = {
             if let Ok(full_path) =
                 ctx.ast_ctx
-                    .calculate_adt_full_path(&ty_env_guard, impl_path, ctx.block_id)
+                    .calculate_adt_full_path(&ty_env_guard, &path_without_gens, ctx.block_id)
             {
                 if ctx.ast_ctx.is_struct(&ty_env_guard, &full_path) {
                     InnerTy::Struct(full_path)
@@ -239,47 +228,48 @@ impl Visitor for DeclFnAnalyzer {
                 } else {
                     unreachable!("full_path: {:#?}", full_path);
                 }
-            } else if let Ok(full_path) =
-                ctx.ast_ctx
-                    .calculate_trait_full_path(&ty_env_guard, impl_path, ctx.block_id)
-            {
+            } else if let Ok(full_path) = ctx.ast_ctx.calculate_trait_full_path(
+                &ty_env_guard,
+                &path_without_gens,
+                ctx.block_id,
+            ) {
                 InnerTy::Trait(full_path)
             } else {
                 let err = ctx.ast_ctx.err_adt(
                     &ty_env_guard,
                     format!(
-                        "Unable to find ADT with path: {}",
-                        to_string_path(&ty_env_guard, &partial_path)
+                        "Unable to find ADT or trait with path: {}",
+                        to_string_path(&ty_env_guard, &path_without_gens)
                     ),
-                    &partial_path,
+                    &path_without_gens,
                 );
                 self.errors.push(err);
                 return;
             }
         };
 
-        let impl_type_id =
+        let adt_type_id =
             match ty_env_guard.id(&Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None)) {
-                Ok(impl_type_id) => impl_type_id,
+                Ok(adt_type_id) => adt_type_id,
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
             };
 
-        for mut body_token in body {
+        for body_token in body {
             if body_token.is_skippable() {
                 // skip
             } else if let AstToken::Block(Block {
-                header: BlockHeader::Fn(func),
+                header: BlockHeader::Fn(method),
                 ..
-            }) = &mut body_token
+            }) = body_token
             {
-                func.as_ref().write().unwrap().method_adt = Some(impl_type_id);
+                method.write().unwrap().method_adt = Some(adt_type_id);
             } else {
                 let err = ctx.ast_ctx.err(format!(
-                    "AST token in impl block with name \"{}\" not a function: {:?}",
-                    to_string_path(&ty_env_guard, impl_path),
+                    "AST token in ADT block with type \"{:?}\" not a method: {:?}",
+                    to_string_type_id(&ty_env_guard, adt_type_id),
                     body_token
                 ));
                 self.errors.push(err);
@@ -287,6 +277,9 @@ impl Visitor for DeclFnAnalyzer {
         }
     }
 
+    /// The `visit_block` is traversed before this function is called which
+    /// means that all `method_adt`s will be set for the funtions.
+    ///
     fn visit_fn(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
         if let Block {
             header: BlockHeader::Fn(func),
@@ -309,11 +302,21 @@ impl Visitor for DeclFnAnalyzer {
             if let Some(adt_ty) = adt_ty {
                 if let Ty::CompoundType(inner_ty, ..) = adt_ty {
                     match inner_ty {
-                        InnerTy::Struct(path)
-                        | InnerTy::Enum(path)
-                        | InnerTy::Union(path)
-                        | InnerTy::Trait(path) => {
-                            self.analyze_method_header(ctx, &path, func);
+                        InnerTy::Struct(adt_path)
+                        | InnerTy::Enum(adt_path)
+                        | InnerTy::Union(adt_path)
+                        | InnerTy::Trait(adt_path) => {
+                            let adt_path_without_gens = adt_path.without_gens();
+                            self.analyze_method_header(ctx, &adt_path_without_gens, func);
+
+                            // Insert this method into the ADT.
+                            if let Err(err) = ctx.ast_ctx.insert_method(
+                                &ctx.ty_env.lock().unwrap(),
+                                &adt_path_without_gens,
+                                Arc::clone(func),
+                            ) {
+                                self.errors.push(err);
+                            }
                         }
 
                         _ => unreachable!(

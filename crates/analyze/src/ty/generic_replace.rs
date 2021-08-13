@@ -30,6 +30,13 @@ use common::{
 /// This can be used for replacing generics declared in ADTs and generics
 /// declared in functions. If they are declared in functions, the ADT related
 /// fields will be set to None.
+///
+/// OBS! When using this `GenericsReplacer`, one should use the `Traverser` with
+///      `deep_copy` set to true. This will make new copies of all things wrapped
+///      in Arc's (fns, vars etc.).
+///      This `GenericsReplacer` will then replace the generics with the given
+///      implementations and then insert references to the new methods into the
+///      specified ADT (both in look-ups and AST tree).
 pub struct GenericsReplacer<'a> {
     /// A set containing the name+blockID for the "old" variables that now have
     /// been modified and given a `copy_nr`. This set will be used to figure out
@@ -156,7 +163,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
                 }
             };
 
-            let new_adt_name = {
+            let new_adt_path = {
                 let new_adt = new_adt.as_ref().read().unwrap();
                 module.clone_push(
                     &new_adt.name,
@@ -187,7 +194,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
                 // look-up table.
                 if let Err(err) = ctx.ast_ctx.insert_method(
                     &ctx.ty_env.lock().unwrap(),
-                    &new_adt_name,
+                    &new_adt_path,
                     Arc::clone(&func),
                 ) {
                     self.errors.push(err);
@@ -208,7 +215,6 @@ impl<'a> Visitor for GenericsReplacer<'a> {
                     var.copy_nr = ctx.copy_nr;
                 }
             }
-
             Err(err) => self.errors.push(err),
         }
     }

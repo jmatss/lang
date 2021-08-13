@@ -10,6 +10,7 @@ use super::{
 };
 
 use crate::{
+    error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
     path::LangPath,
     ty::{generics::Generics, ty_env::TyEnv},
@@ -38,11 +39,10 @@ pub enum BlockHeader {
     Trait(Arc<RwLock<Trait>>),
 
     /// The first LangPath is the path of the ADT that this impl block implements
-    /// and the second optional LangPath is the path of the trait if this impl
-    /// block implements a trait.
-    /// If this is just a impl for the struct, the optional will be None.
+    /// and the second LangPath is the path of the trait that this impl block
+    /// implements for the given ADT.
     /// The body of this block will contain the functions.
-    Implement(LangPath, Option<LangPath>),
+    Implement(LangPath, LangPath),
 
     /// A anonymous block "{ ... }" that can be used to limit the scope.
     Anonymous,
@@ -146,80 +146,6 @@ pub enum AdtKind {
 }
 
 impl Adt {
-    pub fn new_struct(
-        name: String,
-        module: LangPath,
-        modifiers: Vec<Modifier>,
-        members: Vec<Arc<RwLock<Var>>>,
-        file_pos: FilePosition,
-        has_definition: bool,
-        generics: Option<Generics>,
-        implements: Option<HashMap<String, Vec<TypeId>>>,
-    ) -> Self {
-        Self {
-            name,
-            module,
-            modifiers,
-            members,
-            file_pos,
-            has_definition,
-            kind: AdtKind::Struct,
-            methods: HashMap::default(),
-            generics,
-            implements,
-            enum_ty: None,
-        }
-    }
-
-    pub fn new_union(
-        name: String,
-        module: LangPath,
-        modifiers: Vec<Modifier>,
-        members: Vec<Arc<RwLock<Var>>>,
-        file_pos: FilePosition,
-        has_definition: bool,
-        generics: Option<Generics>,
-        implements: Option<HashMap<String, Vec<TypeId>>>,
-    ) -> Self {
-        Self {
-            name,
-            module,
-            modifiers,
-            members,
-            file_pos,
-            has_definition,
-            kind: AdtKind::Union,
-            methods: HashMap::default(),
-            generics,
-            implements,
-            enum_ty: None,
-        }
-    }
-
-    pub fn new_enum(
-        name: String,
-        module: LangPath,
-        modifiers: Vec<Modifier>,
-        members: Vec<Arc<RwLock<Var>>>,
-        file_pos: FilePosition,
-        has_definition: bool,
-        enum_ty: Option<TypeId>,
-    ) -> Self {
-        Self {
-            name,
-            module,
-            modifiers,
-            members,
-            file_pos,
-            has_definition,
-            kind: AdtKind::Enum,
-            methods: HashMap::default(),
-            generics: None,
-            implements: None,
-            enum_ty,
-        }
-    }
-
     /// Returns the index of the member with name `member_name` of this ADT.
     pub fn member_index(&self, member_name: &str) -> Option<usize> {
         for (idx, member) in self.members.iter().enumerate() {
@@ -228,6 +154,143 @@ impl Adt {
             }
         }
         None
+    }
+}
+
+#[derive(Debug)]
+pub struct AdtBuilder {
+    kind: AdtKind,
+    name: Option<String>,
+    module: Option<LangPath>,
+    modifiers: Option<Vec<Modifier>>,
+    file_pos: Option<FilePosition>,
+    has_definition: Option<bool>,
+
+    /// The key is the name of the method.
+    methods: HashMap<String, Arc<RwLock<Fn>>>,
+    members: Vec<Arc<RwLock<Var>>>,
+
+    /* Values set for Struct and Union */
+    generics: Option<Generics>,
+    implements: Option<HashMap<String, Vec<TypeId>>>,
+
+    /* Values set for Enum */
+    enum_ty: Option<TypeId>,
+}
+
+impl AdtBuilder {
+    pub fn new(kind: AdtKind) -> Self {
+        Self {
+            kind,
+            name: None,
+            module: None,
+            modifiers: None,
+            file_pos: None,
+            has_definition: None,
+
+            generics: None,
+            implements: None,
+            enum_ty: None,
+
+            methods: HashMap::default(),
+            members: Vec::default(),
+        }
+    }
+    pub fn new_struct() -> Self {
+        Self::new(AdtKind::Struct)
+    }
+
+    pub fn new_union() -> Self {
+        Self::new(AdtKind::Union)
+    }
+
+    pub fn new_enum() -> Self {
+        Self::new(AdtKind::Enum)
+    }
+
+    pub fn build(self) -> LangResult<Adt> {
+        let name = self.name.ok_or_else(|| {
+            LangError::new(
+                "name not set in AdtBuilder.".into(),
+                LangErrorKind::ParseError,
+                None,
+            )
+        })?;
+        let module = self.module.unwrap_or_else(LangPath::empty);
+        let modifiers = self.modifiers.unwrap_or_else(|| Vec::with_capacity(0));
+        let file_pos = self.file_pos.ok_or_else(|| {
+            LangError::new(
+                "file_pos not set in AdtBuilder.".into(),
+                LangErrorKind::ParseError,
+                None,
+            )
+        })?;
+        let has_definition = self.has_definition.unwrap_or(false);
+
+        Ok(Adt {
+            name,
+            module,
+            modifiers,
+            file_pos,
+            has_definition,
+            methods: self.methods,
+            members: self.members,
+            kind: self.kind,
+            generics: self.generics,
+            implements: self.implements,
+            enum_ty: None,
+        })
+    }
+
+    pub fn name(&mut self, name: String) -> &mut Self {
+        self.name = Some(name);
+        self
+    }
+
+    pub fn module(&mut self, module: LangPath) -> &mut Self {
+        self.module = Some(module);
+        self
+    }
+
+    pub fn modifiers(&mut self, modifiers: Vec<Modifier>) -> &mut Self {
+        self.modifiers = Some(modifiers);
+        self
+    }
+
+    pub fn file_pos(&mut self, file_pos: FilePosition) -> &mut Self {
+        self.file_pos = Some(file_pos);
+        self
+    }
+
+    pub fn has_definition(&mut self, has_definition: bool) -> &mut Self {
+        self.has_definition = Some(has_definition);
+        self
+    }
+
+    pub fn generics(&mut self, generics: Option<Generics>) -> &mut Self {
+        self.generics = generics;
+        self
+    }
+
+    pub fn impls(&mut self, impls: Option<HashMap<String, Vec<TypeId>>>) -> &mut Self {
+        self.implements = impls;
+        self
+    }
+
+    pub fn enum_ty(&mut self, enum_ty: TypeId) -> &mut Self {
+        self.enum_ty = Some(enum_ty);
+        self
+    }
+
+    pub fn insert_method(&mut self, method: &Arc<RwLock<Fn>>) -> &mut Self {
+        let method_name = method.read().unwrap().name.clone();
+        self.methods.insert(method_name, Arc::clone(method));
+        self
+    }
+
+    pub fn insert_member(&mut self, member: &Arc<RwLock<Var>>) -> &mut Self {
+        self.members.push(Arc::clone(member));
+        self
     }
 }
 

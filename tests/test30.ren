@@ -1,23 +1,19 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-struct TestStruct<T>
-{
-    inner: T,
+struct TestStruct<T> {
+    var inner: T
 }
 
-struct TestStructTwo<K, V>
-{
-    key: K,
-    value: {V},
+struct TestStructTwo<K, V> {
+    var key: K
+    var value: {V}
 }
 
-struct UnImplemented<U>
-{
-    unimplemented: U,
+struct UnImplemented<U> {
+    var unimplemented: U
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var i: u64 = 1
     var f: f32 = 123.
 

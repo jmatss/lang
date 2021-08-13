@@ -1,12 +1,10 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-struct TestStruct
-{
-    x: i64,
+struct TestStruct {
+    var x: i64
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var x = 3
     x.++
     printf("x inc: %d", x)

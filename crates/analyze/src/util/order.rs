@@ -420,32 +420,30 @@ impl Visitor for ReferenceCollector {
         }
     }
 
-    fn visit_impl(&mut self, block: &mut Block, _ctx: &mut TraverseCtx) {
-        if let Block {
-            header: BlockHeader::Implement(impl_path, ..),
-            ..
-        } = block
-        {
-            self.cur_adt_path = Some(impl_path.clone());
-        }
-    }
-
+    /// Store the current "ADT path" so that one can see in which ADT one is in
+    /// when traversing the blocks.
     fn visit_block(&mut self, block: &mut Block, _ctx: &mut TraverseCtx) {
-        if let Block {
-            header: BlockHeader::Fn(func),
-            ..
-        } = block
-        {
-            // Need to do this in `visit_block` instead of `visit_fn` since the types
-            // in the function declaration/prototype is traversed before the
-            // `visit_fn` is.
-            //
+        let Block { header, .. } = block;
+
+        let cur_adt_path = match header {
+            BlockHeader::Implement(impl_path, ..) => Some(impl_path.clone()),
+
+            BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
+                let adt = adt.read().unwrap();
+                Some(
+                    adt.module
+                        .clone_push(&adt.name, adt.generics.as_ref(), Some(adt.file_pos)),
+                )
+            }
+
             // This is a function, not a method. It is not located inside a impl
             // block, so reset the ADT name since it doesn't belong to the ADT.
-            if func.as_ref().borrow().read().unwrap().method_adt.is_none() {
-                self.cur_adt_path = None;
-            }
-        }
+            BlockHeader::Fn(func) if func.read().unwrap().method_adt.is_none() => None,
+
+            _ => return,
+        };
+
+        self.cur_adt_path = cur_adt_path;
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {

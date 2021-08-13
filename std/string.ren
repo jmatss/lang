@@ -10,67 +10,51 @@ ext fn strlen(str: {u8}) -> u32
 ext fn strncmp(str1: {u8}, str2: {u8}, len: u32) -> i32
 
 /// Represents a mutable, heap-allocated, string of text.
-pub struct String
-{
-    ptr: {u8},
-    len: u32,
-    cap: u32,
-}
+pub struct String {
+    var ptr: {u8}
+    var len: u32
+    var cap: u32
 
-impl String
-{
     /// Creates a new String from a given string literal.
     ///
     /// If no `start_idx` argument is given, it will be set to the default value 0.
     /// If no `len` arguments is given, or it is set to 0, this function will assume that
     /// the given `str_lit` is null-terminated and calculate the length with `strlen()`.
-    pub fn init(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<String, {u8}>
-    {
-        if start_idx != 0
-        {
+    pub fn init(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<String, {u8}> {
+        if start_idx != 0 {
             str_lit = @ptr_add(str_lit, start_idx)
         }
 
-        if len == 0
-        {
+        if len == 0 {
             len = strlen(str_lit)
         }
 
         var ptr_or_error = Allocator::clone<u8>(str_lit, len)
-        if ptr is ptr_or_error.success
-        {
+        if ptr is ptr_or_error.success {
             var str = String { ptr, len, len }
             return Result::success(str)
-        }
-        else
-        {
+        } else {
             var err = ptr_or_error.&.get_error()
             return Result::error(err)
         }
     }
 
-    pub fn init_size(size: u32) -> Result<String, {u8}>
-    {
+    pub fn init_size(size: u32) -> Result<String, {u8}> {
         var ptr_or_error = Allocator::init_size<u8>(size)
-        if ptr is ptr_or_error.success
-        {
+        if ptr is ptr_or_error.success {
             var str = String { ptr, 0, size }
             return Result::success(str)
-        }
-        else
-        {
+        } else {
             var err = ptr_or_error.&.get_error()
             return Result::error(err)
         }
     }
 
-    pub fn this len() -> u32
-    {
+    pub fn this len() -> u32 {
         return this.len
     }
 
-    pub fn this cap() -> u32
-    {
+    pub fn this cap() -> u32 {
         return this.cap
     }
 
@@ -84,23 +68,18 @@ impl String
     /// If no `start_idx` argument is given, it will be set to the default value 0.
     /// If no `len` arguments is given, this function will assume that the given
     /// `str_lit` is null-terminated and calculate the length with `strlen()`.
-    pub fn {this} append_lit(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<i32, {u8}>
-    {
-        if start_idx != 0
-        {
+    pub fn {this} append_lit(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<i32, {u8}> {
+        if start_idx != 0 {
             str_lit = @ptr_add(str_lit, start_idx)
         }
 
-        if len == 0
-        {
+        if len == 0 {
             len = strlen(str_lit)
         }
 
-        if len > this.*.cap() - this.*.len()
-        {
+        if len > this.*.cap() - this.*.len() {
             var resize_or_empty = this.resize(len)
-            if resize_or_empty.&.is_empty()
-            {
+            if resize_or_empty.&.is_empty() {
                 return Result::error("Unable to resize String")
             }
         }
@@ -113,14 +92,12 @@ impl String
     }
 
     /// Appends the contents of a StringView to this String.
-    pub fn {this} append_view(str_view: StringView) -> Result<i32, {u8}>
-    {
+    pub fn {this} append_view(str_view: StringView) -> Result<i32, {u8}> {
         return this.append_lit(str_view.ptr, 0, str_view.len())
     }
 
     /// Appends the given ascii character to this String.
-    pub fn {this} append_ascii(ascii: u8) -> Result<i32, {u8}>
-    {
+    pub fn {this} append_ascii(ascii: u8) -> Result<i32, {u8}> {
         return this.append_lit(ascii.&, 0, 1)
     }
 
@@ -128,12 +105,10 @@ impl String
     ///
     /// This function creates a new heap allocation with size `this.len` + 1
     /// which needs to be free'd by the caller.
-    pub fn this to_c_string() -> Result<{u8}, {u8}>
-    {
+    pub fn this to_c_string() -> Result<{u8}, {u8}> {
         var len = this.len()
         var ptr_or_error = Allocator::init_size<u8>(len + 1)
-        if err is ptr_or_error.error
-        {
+        if err is ptr_or_error.error {
             return Result::error(err)
         }
 
@@ -146,29 +121,22 @@ impl String
         return Result::success(c_str_ptr)
     }
 
-    pub fn {this} eq(other: {String}) -> bool
-    {   
-        if this.*.len() == other.*.len()
-        {
+    pub fn {this} eq(other: {String}) -> bool {   
+        if this.*.len() == other.*.len() {
             return strncmp(this.*.ptr, other.*.ptr, this.*.len()) == 0
-        }
-        else
-        {
+        } else {
             return false
         }
     }
 
-    fn {this} resize(min_req_resize: u32) -> Optional<{u8}>
-    {
+    fn {this} resize(min_req_resize: u32) -> Optional<{u8}> {
         var new_cap = this.*.cap() * 2
-        while new_cap - this.*.len() < min_req_resize
-        {
+        while new_cap - this.*.len() < min_req_resize {
             new_cap *= 2
         }
 
         var new_ptr_or_empty = Allocator::reinit<u8>(this.*.ptr, new_cap)
-        if new_ptr is new_ptr_or_empty.value
-        {
+        if new_ptr is new_ptr_or_empty.value {
             this.*.ptr = new_ptr
             this.*.cap = new_cap
         }
@@ -177,20 +145,15 @@ impl String
     }
 }
 
-impl AsView for String
-{
-    pub fn {this} as_view() -> StringView
-    {
+impl String: AsView {
+    pub fn {this} as_view() -> StringView {
         return StringView::new(this.*.ptr, 0, this.*.len())
     }
 }
 
-impl Disposable for String
-{
-    pub fn {this} deinit()
-    {
-        if not @is_null(this.*.ptr)
-        {
+impl String: Disposable {
+    pub fn {this} deinit() {
+        if not @is_null(this.*.ptr) {
             Allocator::deinit<u8>(this.*.ptr)
         }
     }

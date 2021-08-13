@@ -1,29 +1,21 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-fn double(n: {i32}) -> bool
-{
+fn double(n: {i32}) -> bool {
     n.* *= 2
-
     return true
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var num = 3
 
     if true and 1 == 1 or double(num.&) {
     }
     
-    if false and double(num.&)
-    {
+    if false and double(num.&) {
         printf("TRUE\n")
-    }
-    else true or double(num.&)
-    {
+    } else true or double(num.&) {
         printf("MIDDLE\n")
-    }
-    else
-    {
+    } else {
         printf("FALSE\n")
     }
 

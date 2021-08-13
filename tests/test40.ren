@@ -1,11 +1,9 @@
-struct TestStruct<T>
-{
-    inner: T,
+struct TestStruct<T> {
+    var inner: T
 }
 
 // Issue #3
-fn main() -> i32
-{
+fn main() -> i32 {
     var ts = TestStruct { 34 }
     var i: i8 = 12
 

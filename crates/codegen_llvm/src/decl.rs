@@ -39,13 +39,13 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
             match adt.kind {
                 AdtKind::Struct => {
-                    self.compile_struct(&adt)?;
+                    self.compile_struct_decl(&adt)?;
                 }
                 AdtKind::Enum => {
-                    self.compile_enum(&adt)?;
+                    self.compile_enum_decl(&adt)?;
                 }
                 AdtKind::Union => {
-                    self.compile_union(&adt)?;
+                    self.compile_union_decl(&adt)?;
                 }
                 AdtKind::Unknown => unreachable!("Tried to compile AdtKind::Unknown"),
             }

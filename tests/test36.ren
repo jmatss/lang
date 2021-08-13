@@ -1,33 +1,38 @@
-enum TestEnum
-{
-    FIRST,
-    SECOND,
-    THIRD,
+enum TestEnum {
+    FIRST
+    SECOND
+    THIRD
 }
 
-impl TestEnum
-{
-    fn new(n: i32) -> TestEnum
-    {
-        if n == 1
-        {
+// TODO: Reallow specifying methods for enums.
+/*
+impl TestEnum {
+    fn new(n: i32) -> TestEnum {
+        if n == 1 {
             return TestEnum::FIRST
-        }
-        else n == 2
-        {
+        } else n == 2 {
             return TestEnum::SECOND
-        }
-        else // n == 3
-        {
+        } else { // n == 3
             return TestEnum::THIRD
         }
     }
 }
+*/
 
-fn main() -> i32
-{
+fn new(n: i32) -> TestEnum {
+    if n == 1 {
+        return TestEnum::FIRST
+    } else n == 2 {
+        return TestEnum::SECOND
+    } else { // n == 3
+        return TestEnum::THIRD
+    }
+}
+
+fn main() -> i32 {
     var e1: TestEnum = TestEnum::SECOND
-    var e2 = TestEnum::new(3)
+    //var e2 = TestEnum::new(3)
+    var e2 = new(3)
 
     return 0
 }

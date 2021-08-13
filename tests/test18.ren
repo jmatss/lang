@@ -1,24 +1,18 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-struct TestStruct
-{
-    a: i32,
-    b: {f32},
-    c: i32,
-}
+struct TestStruct {
+    var a: i32
+    var b: {f32}
+    var c: i32
 
-impl TestStruct
-{
-    fn {this} add(input: i32) -> i32
-    {
+    fn {this} add(input: i32) -> i32 {
         this.*.a = 20
         this.*.b.* = 2.0
         return this.*.a + this.*.c + input
     }
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var b = 1.0
     var test_struct = TestStruct { 10, b.&, 2 }
 

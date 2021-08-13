@@ -1,35 +1,24 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-struct InnerStruct
-{
-    x: f32,
-    y: f64,
-}
+struct InnerStruct {
+    var x: f32
+    var y: f64
 
-impl InnerStruct
-{
-    fn this sum() -> f64
-    {
+    fn this sum() -> f64 {
         return this.x as f64 + this.y
     }
 }
 
-struct OuterStruct
-{
-    a: i32,
-    b: i64,
-}
+struct OuterStruct {
+    var a: i32
+    var b: i64
 
-impl OuterStruct
-{
-    fn new() -> InnerStruct
-    {
+    fn new() -> InnerStruct {
         return InnerStruct { 1.0, 2.0 }
     }
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var inner_y1 = InnerStruct { 3.0, 4.0 }.y
     var inner_y2 = OuterStruct::new().y
     printf("inner_y1: %f, inner_y2: %f", inner_y1, inner_y2)

@@ -5,29 +5,23 @@ use std::types::Disposable
 use std::types::Optional
 use std::types::Result
 
-pub struct ArrayList<T>
-{
-    ptr: {T},
-    len: u32,
-    cap: u32,
-}
+pub struct ArrayList<T> {
+    var ptr: {T}
+    var len: u32
+    var cap: u32
 
-impl ArrayList
-{
     /// Allocates a new ArrayList with a initial capacity of `cap` items.
     ///
     /// If `cap` is set to 0, the current implementation will set the capacity
     /// to 1 so that something can be allocated. This should be changed in the
     /// future so that a ArrayList of size 0 can be lazy initialized and only
     /// make a heap allocation if it is ever used.
-    pub fn init(cap: u32 = 0) -> Result<ArrayList<T>, {u8}>
-    {
+    pub fn init(cap: u32 = 0) -> Result<ArrayList<T>, {u8}> {
         if cap == 0 { cap = 1 }
 
         var size = cap * @size<T>()
         var ptr_or_error = Allocator::init_size<u8>(size)
-        if err is ptr_or_error.error
-        {
+        if err is ptr_or_error.error {
             return Result::error(err)
         }
 
@@ -37,13 +31,10 @@ impl ArrayList
         return Result::success(list)
     }
 
-    pub fn {this} push(item: T) -> Result<u32, {u8}>
-    {
-        if this.*.len() >= this.*.cap()
-        {
+    pub fn {this} push(item: T) -> Result<u32, {u8}> {
+        if this.*.len() >= this.*.cap() {
             var resize_or_error = this.resize(1)
-            if err is resize_or_error.error
-            {
+            if err is resize_or_error.error {
                 return Result::error(err)
             }
         }
@@ -55,10 +46,8 @@ impl ArrayList
         return Result::success(0)
     }
 
-    pub fn {this} pop() -> Optional<T>
-    {
-        if this.*.len() == 0
-        {
+    pub fn {this} pop() -> Optional<T> {
+        if this.*.len() == 0 {
             return Optional::empty()
         }
 
@@ -71,10 +60,8 @@ impl ArrayList
 
     }
 
-    pub fn {this} get(idx: u32) -> Optional<T>
-    {
-        if idx >= this.*.len()
-        {
+    pub fn {this} get(idx: u32) -> Optional<T> {
+        if idx >= this.*.len() {
             return Optional::empty()
         }
 
@@ -84,10 +71,8 @@ impl ArrayList
         return Optional::value(item)
     }
 
-    pub fn {this} set(idx: u32, item: T) -> Result<T, {u8}>
-    {
-        if idx >= this.*.len()
-        {
+    pub fn {this} set(idx: u32, item: T) -> Result<T, {u8}> {
+        if idx >= this.*.len() {
             var err = "Tried to set value at idx greater than ArrayList length."
             return Result::error(err)
         }
@@ -99,45 +84,35 @@ impl ArrayList
         return Result::success(old_item)
     }
 
-    pub fn this len() -> u32
-    {
+    pub fn this len() -> u32 {
         return this.len
     }
 
-    pub fn this cap() -> u32
-    {
+    pub fn this cap() -> u32 {
         return this.cap
     }
 
-    fn {this} resize(min_resize: u32) -> Result<{u8}, {u8}>
-    {
+    fn {this} resize(min_resize: u32) -> Result<{u8}, {u8}> {
         var new_cap = this.*.cap() * 2
-        while new_cap - this.*.len() < min_resize
-        {
+        while new_cap - this.*.len() < min_resize {
             new_cap *= 2
         }
 
         var new_ptr_or_empty = Allocator::reinit<u8>(this.*.ptr, new_cap)
-        if new_ptr is new_ptr_or_empty.value
-        {
+        if new_ptr is new_ptr_or_empty.value {
             this.*.ptr = new_ptr
             this.*.cap = new_cap
             return Result::success(new_ptr)
-        }
-        else
-        {
+        } else {
             var err = "Unable to reallocate size for ArrayList."
             return Result::error(err)
         }
     }
 }
 
-impl Disposable for ArrayList
-{
-    pub fn {this} deinit()
-    {
-        if not @is_null(this.*.ptr)
-        {
+impl ArrayList: Disposable {
+    pub fn {this} deinit() {
+        if not @is_null(this.*.ptr) {
             Allocator::deinit<u8>(this.*.ptr as {u8})
             this.*.ptr = @null<{u8}>()
         }

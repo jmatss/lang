@@ -1,14 +1,10 @@
-trait TestTrait
-{
+trait TestTrait {
     fn static_method()
     fn this instance_method()
 }
 
-struct TestStruct<T> where T impls TestTrait;
-impl TestStruct
-{
-    fn abc(value: T)
-    {
+struct TestStruct<T> where T: TestTrait {
+    fn abc(value: T) {
         // Should fail to compile since `T` only implements `TestTrait` which
         // means that `value`/`T` only have "access" to `TestTrait`s functions.
         //T::unknown_static_method()
@@ -19,7 +15,6 @@ impl TestStruct
     }
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     return 0
 }

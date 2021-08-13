@@ -1,14 +1,10 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var f = 1.0 as f64
-    if f > 2.0
-    {
+    if f > 2.0 {
         printf("unreachable!")
-    }
-    else
-    {
+    } else {
         printf("Result: %f", f)
     }
     return 0

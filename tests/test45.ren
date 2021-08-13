@@ -1,64 +1,49 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-union TestUnion
-{
-    var_a: f64,
-    another: i16,
+union TestUnion {
+    var var_a: f64
+    var another: i16
 }
 
-union TestGenericUnion<T>
-{
-    a: i16,
-    b: T,
+union TestGenericUnion<T> {
+    var a: i16
+    var b: T
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var correct
 
     var abc = TestUnion { var_a = 123.456 }
     var def = TestUnion { another = 789 }
 
-    if val is abc.var_a
-    {
+    if val is abc.var_a {
         correct = true
         printf("%f", val)
-    }
-    else
-    {
+    } else {
         correct = false
     }
     std::assert(correct)
 
-    if val is abc.another
-    {
+    if val is abc.another {
         correct = false
-    }
-    else
-    {
+    } else {
         correct = true
         printf("\nabc.another not a match")
     }
     std::assert(correct)
 
-    if val is def.var_a
-    {
+    if val is def.var_a {
         correct = false
-    }
-    else
-    {
+    } else {
         correct = true
         printf("\ndef.var_a not a match")
     }
     std::assert(correct)
 
-    if val is def.another
-    {
+    if val is def.another {
         correct = true
         printf("\n%d", val as i32)
-    }
-    else
-    {
+    } else {
         correct = false
     }
     std::assert(correct)

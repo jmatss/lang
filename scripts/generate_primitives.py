@@ -5,8 +5,8 @@ PRIMITIVES_PATH = os.path.join(CURRENT_FILE_DIR, '..', 'std', 'primitives.ren')
 
 def heading(file):
     output = '''/*
-    Auto generated with `generate_primitives.py`, do not edit manually.
-*/
+ * Auto generated with `generate_primitives.py`, do not edit manually.
+ */
 mod std
 
 '''
@@ -15,10 +15,8 @@ mod std
 def digit_to_ascii(file):
     output = '''/// Converts a `digit` to ascii.
 /// The given `digit` is expected to be a single digit (0-9).
-fn digit_to_ascii(digit: u8) -> u8
-{
-    if digit >= 10
-    {
+fn digit_to_ascii(digit: u8) -> u8 {
+    if digit >= 10 {
         @unreachable()
     }
     return digit + 48 // 48 == '0'
@@ -29,24 +27,17 @@ fn digit_to_ascii(digit: u8) -> u8
 
 def abs_fn(is_signed, name_lower, name_unsigned=None):
     if is_signed:
-        return '''    pub fn abs(number: {0}) -> {1}
-    {{
-        if number >= 0
-        {{
+        return '''    pub fn abs(number: {0}) -> {1} {{
+        if number >= 0 {{
             return number as {1}
-        }}
-        else number == this::min()
-        {{
+        }} else number == this::min() {{
             return ((number + 1) * (-1)) as {1} + 1
-        }}
-        else
-        {{
+        }} else {{
             return (number * (-1)) as {1}
         }}
     }}'''.format(name_lower, name_unsigned)
     else:
-        return '''    pub fn abs(number: {0}) -> {0}
-    {{
+        return '''    pub fn abs(number: {0}) -> {0} {{
         return number
     }}'''.format(name_lower)
 
@@ -58,61 +49,49 @@ def prim_struct(file, name, str_byte_size, min, max, name_unsigned=None):
         name_unsigned = name_lower
     abs_output = abs_fn(name_lower != name_unsigned, name_lower, name_unsigned)
 
-    output = '''pub struct {0};
-impl {0}
-{{
-    pub fn to_string(number: {1}) -> Result<String, {{u8}}>
-    {{
+    output = '''pub struct {0} {{
+    pub fn to_string(number: {1}) -> Result<String, {{u8}}> {{
         var is_negative = number < 0
         var number_abs = this::abs(number)
 
         var buf: [u8: {2}]
         var buf_idx = 0
 
-        while true
-        {{
+        while true {{
             var digit = number_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
             number_abs /= 10
-            if number_abs == 0
-            {{
+            if number_abs == 0 {{
                 break
             }}
         }}
 
         var str_len
-        if is_negative
-        {{
+        if is_negative {{
             str_len = buf_idx + 1
-        }}
-        else
-        {{
+        }} else {{
             str_len = buf_idx
         }}
 
         var str_or_error = String::init_size(str_len)
-        if err is str_or_error.error
-        {{
+        if err is str_or_error.error {{
             return Result::error(err)
         }}
         var str = str_or_error.&.get_success()
 
-        if is_negative
-        {{
+        if is_negative {{
             str.&.append_ascii(45) // 45 == '-'
         }}
 
         var idx = buf_idx - 1
-        while true
-        {{
+        while true {{
             var ascii = buf.[idx]
             str.&.append_ascii(ascii)
 
-            if idx == 0
-            {{
+            if idx == 0 {{
                 break
             }}
 
@@ -122,44 +101,38 @@ impl {0}
         return Result::success(str)
     }}
 
-    pub fn to_string_view(number: {1}, data: {{[u8: {2}]}}) -> StringView
-    {{
+    pub fn to_string_view(number: {1}, data: {{[u8: {2}]}}) -> StringView {{
         var is_negative = number < 0
         var number_abs = this::abs(number)
 
         var buf: [u8: {2}]
         var buf_idx = 0
 
-        while true
-        {{
+        while true {{
             var digit = number_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
             number_abs /= 10
-            if number_abs == 0
-            {{
+            if number_abs == 0 {{
                 break
             }}
         }}
 
         var data_idx = 0
-        if is_negative
-        {{
+        if is_negative {{
             data.*.[data_idx] = 45 // 45 == '-'
             data_idx.++
         }}
 
         buf_idx.--
-        while true
-        {{
+        while true {{
             var ascii = buf.[buf_idx]
             data.*.[data_idx] = ascii
             data_idx.++
 
-            if buf_idx == 0
-            {{
+            if buf_idx == 0 {{
                 break
             }}
 
@@ -169,13 +142,11 @@ impl {0}
         return StringView::new(data as {{u8}}, 0, data_idx)
     }}
 
-    pub fn min() -> {1}
-    {{
+    pub fn min() -> {1} {{
         return {3}
     }}
 
-    pub fn max() -> {1}
-    {{
+    pub fn max() -> {1} {{
         return {4}
     }}
     

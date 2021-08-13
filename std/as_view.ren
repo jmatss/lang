@@ -1,7 +1,6 @@
 mod std
 
 /// A trait used for types that can be converted to a `StringView`.
-trait AsView
-{
+trait AsView {
     fn {this} as_view();
 }

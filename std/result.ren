@@ -1,64 +1,46 @@
 mod std
 
-pub union Result<T, E>
-{
-    success: T,
-    error: E,
-}
+pub union Result<T, E> {
+    var success: T
+    var error: E
 
-impl Result
-{
-    fn success(val: T = @null<T>()) -> Result<T, E>
-    {
+    fn success(val: T = @null<T>()) -> Result<T, E> {
         return Result { success = val }
     }
 
-    fn error(err: E = @null<E>()) -> Result<T, E>
-    {
+    fn error(err: E = @null<E>()) -> Result<T, E> {
         return Result { error = err }
     }
 
-    fn {this} is_success() -> bool
-    {
-        if _ is this.*.success
-        {
+    fn {this} is_success() -> bool {
+        if _ is this.*.success {
             return true
-        }
-        else
-        {
+        } else {
             return false
         }
     }
 
-    fn {this} is_error() -> bool
-    {
+    fn {this} is_error() -> bool {
         return not this.is_success()
     }
 
-    fn {this} get_success() -> T
-    {
+    fn {this} get_success() -> T {
         return this.*.success
     }
 
-    fn {this} get_success_or(default: T) -> T
-    {
-        if val is this.*.success
-        {
+    fn {this} get_success_or(default: T) -> T {
+        if val is this.*.success {
             return val
-        }
-        else
-        {
+        } else {
             return default
         }
     }
 
-    fn {this} get_error() -> E
-    {
+    fn {this} get_error() -> E {
         return this.*.error
     }
 
-    fn {this} set(val: T)
-    {
+    fn {this} set(val: T) {
         this.*.success = val
     }
 }

@@ -4,36 +4,30 @@ use std::types::Disposable
 
 ext fn printf(format: {u8}, ...) -> i32
 
-enum ErrorKind
-{
-    FIRST,
-    SECOND,
+enum ErrorKind {
+    FIRST
+    SECOND
 }
 
-struct Error
-{
-    kind: ErrorKind,
-    msg: {u8},
+struct Error {
+    var kind: ErrorKind
+    var msg: {u8}
     
     /// Keeps track of the state of `msg`.
     /// If `msg` needs to be deallocated, this will be set to `true`.
-    msg_needs_deinit: bool,
+    var msg_needs_deinit: bool
 }
 
-impl Disposable for Error
-{
-    fn {this} deinit()
-    {
-        if this.*.msg_needs_deinit
-        {
+impl Error: Disposable {
+    fn {this} deinit() {
+        if this.*.msg_needs_deinit {
             Allocator::deinit<u8>(this.*.msg)
             this.*.msg_needs_deinit = false
         }
     }
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var kind
     var msg
     var msg_or_error

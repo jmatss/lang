@@ -1,23 +1,17 @@
 ext fn printf(format: {u8}, ...) -> i32
 ext fn strcmp(s1: {u8}, s2: {u8}) -> i32
 
-struct TestStruct<T>
-{
-    a: i64,
-    b: T,
-}
+struct TestStruct<T> {
+    var a: i64
+    var b: T
 
-impl TestStruct
-{
-    fn this generic_size() -> u32
-    {
+    fn this generic_size() -> u32 {
         return @size<T>()
     }
 }
 
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var ts = TestStruct<f64> { 123, 456. }
     var size_inner = ts.generic_size()
 
@@ -56,7 +50,7 @@ fn main() -> i32
     std::assert(column_nr == 21 + 33)
 
     printf("\nline_nr: %d", line_nr)
-    std::assert(line_nr == 52)
+    std::assert(line_nr == 46)
 
     printf("\nfilename: %s", filename)
     std::assert(strcmp(filename, "test35.ren") == 0)
@@ -86,8 +80,7 @@ fn main() -> i32
     std::assert(strcmp(@name(var_name), "var_name") == 0)
 
 
-    if false
-    {
+    if false {
         @unreachable()
     }
 

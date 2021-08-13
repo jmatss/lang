@@ -1,32 +1,24 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-struct TestStruct
-{
-    x: i32,
-}
+struct TestStruct {
+    var x: i32
 
-impl TestStruct
-{
-    fn {this} inc() -> u64
-    {
+    fn {this} inc() -> u64 {
         this.*.x += 1
         return this.*.x as u64
     }
 
-    fn this inc_by_val() -> u64
-    {
+    fn this inc_by_val() -> u64 {
         this.x += 1
         return this.x as u64
     }
 
-    fn static_inc(arg: i32) -> u64
-    {
+    fn static_inc(arg: i32) -> u64 {
         return (arg + 1) as u64
     }
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var test_struct = TestStruct { 5 }
 
     var by_ref = test_struct.&.inc()

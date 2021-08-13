@@ -9,14 +9,10 @@ ext fn strlen(str: {u8}) -> u32
 /// `StringView` does not own the string that it points to, so one have to
 /// make sure to not have any dangling `StringView`s when the underlying
 /// string memory is freed.
-pub struct StringView
-{
-    ptr: {u8},
-    len: u32,
-}
+pub struct StringView {
+    var ptr: {u8}
+    var len: u32
 
-impl StringView
-{
     /// Creates a `StringView` from a string literal.
     /// The view will span the length of `len` bytes starting at the offset
     /// `start_idx` from the given literal pointer `str_lit`.
@@ -27,31 +23,25 @@ impl StringView
     ///
     /// OBS! This function does NOT check the validity of the given index and length,
     ///      it is up to the caller to make sure that they are correct.
-    pub fn new(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> StringView
-    {
-        if start_idx != 0
-        {
+    pub fn new(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> StringView {
+        if start_idx != 0 {
             str_lit = @ptr_add(str_lit, start_idx)
         }
 
-        if len == 0
-        {
+        if len == 0 {
             len = strlen(str_lit)
         }
 
         return StringView { str_lit, len }
     }
 
-    pub fn this len() -> u32
-    {
+    pub fn this len() -> u32 {
         return this.len
     }
 }
 
-impl AsView for StringView
-{
-    pub fn {this} as_view() -> StringView
-    {
+impl StringView: AsView {
+    pub fn {this} as_view() -> StringView {
         return this.*
     }
 }

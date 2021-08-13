@@ -1,24 +1,20 @@
 ext fn printf(format: {u8}, ...) -> i32
 
-struct NestedStruct
-{
-    z: f64,
-    b: {u32},
+struct NestedStruct {
+    var z: f64
+    var b: {u32}
 }
 
-struct TestStruct
-{
-    x: u32,
-    y: {NestedStruct},
+struct TestStruct {
+    var x: u32
+    var y: {NestedStruct}
 }
 
-fn double(n: {u32})
-{
+fn double(n: {u32}) {
     n.* *= 2
 }
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var i = 3
     var s = NestedStruct { 123.321, i.& }
     var k = TestStruct { 456, s.& }

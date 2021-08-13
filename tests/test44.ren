@@ -1,9 +1,5 @@
-struct TestStruct;
-impl TestStruct
-{
-    fn method<T, V>(value: T, other: V)
-    {
-    }
+struct TestStruct {
+    fn method<T, V>(value: T, other: V) {}
 }
 
 fn main() -> i32

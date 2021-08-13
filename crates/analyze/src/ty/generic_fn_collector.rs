@@ -193,102 +193,88 @@ impl<'a> GenericFnCollector<'a> {
         ast_tokens: &mut Vec<AstToken>,
     ) -> LangResult<()> {
         for ast_token in ast_tokens {
-            // Need to do this ugly hack to make the borrow checker happy.
-            // We want to borrow the `adt_path` and use it in the logic below,
-            // but at the same time borrow the `ast_token` which contains the
-            // `adt_path`.
-            let impl_opt = match ast_token {
-                AstToken::Block(Block {
-                    header: BlockHeader::Implement(adt_path, _),
-                    ..
-                }) => {
-                    if ctx
-                        .ast_ctx
-                        .get_adt(&ctx.ty_env.lock().unwrap(), adt_path)
-                        .is_ok()
-                    {
-                        Some(adt_path.clone())
-                    } else {
-                        None
-                    }
-                }
+            let header = if let AstToken::Block(Block { header, .. }) = ast_token {
+                header
+            } else {
+                continue;
+            };
 
+            let adt_path_without_gens = match header {
+                BlockHeader::Implement(adt_path, ..) => adt_path.without_gens(),
+                BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
+                    let adt = adt.read().unwrap();
+                    adt.module.clone_push(&adt.name, None, Some(adt.file_pos))
+                }
                 _ => continue,
             };
 
-            if let Some(adt_path) = impl_opt {
-                let mut collector = GenericNestedCollector::new();
-                if let Err(mut errs) = traverse(ctx, &mut collector, ast_token) {
-                    self.errors.append(&mut errs);
-                    continue;
-                }
+            let mut collector = GenericNestedCollector::new();
+            if let Err(mut errs) = traverse(ctx, &mut collector, ast_token) {
+                self.errors.append(&mut errs);
+                continue;
+            }
 
-                for (nested_info, gens_vec) in collector
-                    .nested_generic_methods
-                    .keys()
-                    .zip(collector.nested_generic_methods.values())
-                {
-                    for gens in gens_vec {
-                        let ty_env_guard = ctx.ty_env.lock().unwrap();
-                        let contains_key = self.nested_generic_methods.contains_key(
-                            &ty_env_guard,
-                            DerefType::None,
-                            &adt_path.without_gens(),
-                        )?;
+            for (nested_info, gens_vec) in collector
+                .nested_generic_methods
+                .keys()
+                .zip(collector.nested_generic_methods.values())
+            {
+                for gens in gens_vec {
+                    let ty_env_guard = ctx.ty_env.lock().unwrap();
+                    let contains_key = self.nested_generic_methods.contains_key(
+                        &ty_env_guard,
+                        DerefType::None,
+                        &adt_path_without_gens,
+                    )?;
 
-                        // Insert the new generic types into `self.generic_methods`. These
-                        // generics will then be used when creating copies of the method.
-                        if contains_key {
-                            let map_inner = self
-                                .nested_generic_methods
-                                .get_mut(&ty_env_guard, DerefType::None, &adt_path.without_gens())?
+                    // Insert the new generic types into `self.generic_methods`. These
+                    // generics will then be used when creating copies of the method.
+                    if contains_key {
+                        let map_inner = self
+                            .nested_generic_methods
+                            .get_mut(&ty_env_guard, DerefType::None, &adt_path_without_gens)?
+                            .unwrap();
+
+                        let contains_key_inner =
+                            map_inner.contains_key(&ty_env_guard, DerefType::Deep, nested_info)?;
+
+                        if contains_key_inner {
+                            let vec_inner = map_inner
+                                .get_mut(&ty_env_guard, DerefType::Deep, nested_info)?
                                 .unwrap();
 
-                            let contains_key_inner = map_inner.contains_key(
-                                &ty_env_guard,
-                                DerefType::Deep,
-                                nested_info,
-                            )?;
-
-                            if contains_key_inner {
-                                let vec_inner = map_inner
-                                    .get_mut(&ty_env_guard, DerefType::Deep, nested_info)?
-                                    .unwrap();
-
-                                let mut contains_gens = false;
-                                for gen_inner in vec_inner.iter() {
-                                    if generics_eq(&ty_env_guard, gen_inner, gens, DerefType::Deep)?
-                                    {
-                                        contains_gens = true;
-                                    }
+                            let mut contains_gens = false;
+                            for gen_inner in vec_inner.iter() {
+                                if generics_eq(&ty_env_guard, gen_inner, gens, DerefType::Deep)? {
+                                    contains_gens = true;
                                 }
+                            }
 
-                                if !contains_gens {
-                                    vec_inner.push(gens.clone());
-                                }
-                            } else {
-                                map_inner.insert(
-                                    &ty_env_guard,
-                                    DerefType::None,
-                                    nested_info.clone(),
-                                    vec![gens.clone()],
-                                )?;
+                            if !contains_gens {
+                                vec_inner.push(gens.clone());
                             }
                         } else {
-                            let mut map_outer = TyEnvHashMap::default();
-                            map_outer.insert(
+                            map_inner.insert(
                                 &ty_env_guard,
                                 DerefType::None,
                                 nested_info.clone(),
                                 vec![gens.clone()],
                             )?;
-                            self.nested_generic_methods.insert(
-                                &ty_env_guard,
-                                DerefType::None,
-                                adt_path.without_gens(),
-                                map_outer,
-                            )?;
                         }
+                    } else {
+                        let mut map_outer = TyEnvHashMap::default();
+                        map_outer.insert(
+                            &ty_env_guard,
+                            DerefType::None,
+                            nested_info.clone(),
+                            vec![gens.clone()],
+                        )?;
+                        self.nested_generic_methods.insert(
+                            &ty_env_guard,
+                            DerefType::None,
+                            adt_path_without_gens.clone(),
+                            map_outer,
+                        )?;
                     }
                 }
             }

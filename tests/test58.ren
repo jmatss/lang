@@ -1,16 +1,11 @@
-fn test_fn(x: u8) -> u8
-{
+fn test_fn(x: u8) -> u8 {
     return x
 }
 
-fn main() -> i32
-{
-    var res1: f32 = if false
-    {
+fn main() -> i32 {
+    var res1: f32 = if false {
         yield 1.0
-    }
-    else
-    {
+    } else {
         yield 0.0
     }
     // std::assert(res1 == 0.0)

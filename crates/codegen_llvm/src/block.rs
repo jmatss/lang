@@ -209,7 +209,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     &mut block.body,
                 )?;
             }
-            BlockHeader::Implement(..) => {
+            BlockHeader::Implement(..) | BlockHeader::Struct(..) | BlockHeader::Union(..) => {
                 for mut ast_token in &mut block.body {
                     if let AstToken::Block(Block {
                         header: BlockHeader::Fn(func),
@@ -249,11 +249,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 ));
             }
 
-            BlockHeader::Struct(_)
-            | BlockHeader::Enum(_)
-            | BlockHeader::Union(_)
-            | BlockHeader::Trait(_) => {
+            BlockHeader::Enum(_) | BlockHeader::Trait(_) => {
                 // All ADTs and traits already compiled at this stage.
+                // Only the methods inside structs and unions are compiled
+                // at this stage.
             }
 
             //BlockHeader::For(var, expr) => self.compile_for(var, expr),
@@ -916,8 +915,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn compile_struct(&mut self, struct_: &Adt) -> LangResult<()> {
-        debug!("Compiling struct -- {:#?}", struct_);
+    pub(super) fn compile_struct_decl(&mut self, struct_: &Adt) -> LangResult<()> {
+        debug!("Compiling struct decl -- {:#?}", struct_);
 
         let full_path = struct_.module.clone_push(
             &struct_.name,
@@ -963,8 +962,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn compile_enum(&mut self, enum_: &Adt) -> LangResult<()> {
-        debug!("Compiling enum -- {:#?}", enum_);
+    pub(super) fn compile_enum_decl(&mut self, enum_: &Adt) -> LangResult<()> {
+        debug!("Compiling enum decl -- {:#?}", enum_);
 
         let full_path =
             enum_
@@ -1018,8 +1017,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     /// The union will be represented with a "struct" contain a i8 `tag` member
     /// indicating which variant it is followed by an array of i8s with the size
     /// of the largest member.
-    pub(super) fn compile_union(&mut self, union: &Adt) -> LangResult<()> {
-        debug!("Compiling union -- {:#?}", union);
+    pub(super) fn compile_union_decl(&mut self, union: &Adt) -> LangResult<()> {
+        debug!("Compiling union decl -- {:#?}", union);
 
         let full_path =
             union

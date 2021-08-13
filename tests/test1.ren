@@ -1,16 +1,10 @@
-fn main() -> i32
-{
+fn main() -> i32 {
     var x = 0
-    if x == 3
-    {
+    if x == 3 {
         return 1
-    }
-    else not x == 0
-    {
+    } else not x == 0 {
         return 2
-    }
-    else
-    {
+    } else {
         return 0
     }
 }

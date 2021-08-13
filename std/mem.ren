@@ -9,28 +9,20 @@ ext fn realloc(ptr: {u8}, size: u32) -> {u8}
 ext fn memcpy(dest: {u8}, src: {u8}, size: u32) -> {u8}
 
 /// A basic heap allocator that can be used to work with heap allocated data.
-pub struct Allocator;
-impl Allocator
-{
-    pub fn init<T>(value: T = @null<T>()) -> Result<{T}, {u8}>
-    {
+pub struct Allocator {
+    pub fn init<T>(value: T = @null<T>()) -> Result<{T}, {u8}> {
         var ptr_or_error = this::init_size<T>(@size<T>())
-        if ptr is ptr_or_error.success
-        {
+        if ptr is ptr_or_error.success {
             ptr.* = value
         }
         return ptr_or_error
     }
 
-    pub fn init_size<T>(size: u32) -> Result<{T}, {u8}>
-    {
+    pub fn init_size<T>(size: u32) -> Result<{T}, {u8}> {
         var ptr = malloc(size) as {T}
-        if not @is_null(ptr)
-        {
+        if not @is_null(ptr) {
             return Result::success(ptr)
-        }
-        else
-        {
+        } else {
             return Result::error("Unable to allocate memory")
         }
     }
@@ -38,21 +30,16 @@ impl Allocator
     /// Re-allocates the heap memory with a new size `size`.
     /// After a successful re-allocation, the new pointer will returned in the Optional value.
     /// If the allocation failed, the function will return an empty Optional.
-    pub fn reinit<T>(ptr: {T}, size: u32) -> Optional<{T}>
-    {
+    pub fn reinit<T>(ptr: {T}, size: u32) -> Optional<{T}> {
         var new_ptr = realloc(ptr as {u8}, size) as {T}
-        if not @is_null(new_ptr)
-        {
+        if not @is_null(new_ptr) {
             return Optional::value(new_ptr)
-        }
-        else
-        {
+        } else {
             return Optional::empty()
         }
     }
 
-    pub fn deinit<T>(ptr: {T})
-    {
+    pub fn deinit<T>(ptr: {T}) {
         free(ptr as {u8})
     }
     
@@ -60,11 +47,9 @@ impl Allocator
     /// and returns a pointer to the new allocation.
     /// If `size` isn't set, it will default to the size of `T`.
     /// Implemented using libc `memcpy`.
-    fn clone<T>(src: {T}, size: u32 = @size<T>() as u32) -> Result<{T}, {u8}>
-    {
+    fn clone<T>(src: {T}, size: u32 = @size<T>() as u32) -> Result<{T}, {u8}> {
         var ptr_or_error = this::init_size<T>(size)
-        if dst is ptr_or_error.success
-        {
+        if dst is ptr_or_error.success {
             memcpy(dst as {u8}, src as {u8}, size)
         }
         return ptr_or_error
@@ -73,8 +58,7 @@ impl Allocator
     /// Copies `size` bytes from `src` to `dst`.
     /// If `size` isn't set, it will default to the size of `T`.
     /// Implemented using libc `memcpy`.
-    pub fn copy<T>(dst: {T}, src: {T}, size: u32 = @size<T>() as u32)
-    {
+    pub fn copy<T>(dst: {T}, src: {T}, size: u32 = @size<T>() as u32) {
         memcpy(dst as {u8}, src as {u8}, size)
     }
 }

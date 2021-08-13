@@ -1,6 +1,5 @@
 use common::{
     error::LangError,
-    path::LangPathPart,
     token::{
         ast::AstToken,
         block::{Block, BlockHeader},
@@ -81,92 +80,86 @@ impl Visitor for GenericsAnalyzer {
     /// "Rewrites" generics parsed as "UnknownIdent"s to "Generic"s by matching
     /// the identifiers with known names for the generics defined on the structure.
     /// This will be done for both the method headers and everything in their bodies.
-    fn visit_impl(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
-        if let Block {
-            header: BlockHeader::Implement(impl_path, ..),
-            body,
-            ..
-        } = block
-        {
-            let full_impl_path = match ctx.ast_ctx.get_module(ctx.block_id) {
-                Ok(Some(mut full_impl_path)) => {
-                    let impl_ident = impl_path.last().unwrap().0.clone();
-                    full_impl_path.push(LangPathPart(impl_ident, None));
-                    full_impl_path
-                }
-                Ok(None) => {
-                    let mut full_impl_path = impl_path.clone();
-                    let last_part = full_impl_path.pop().unwrap();
-                    full_impl_path.push(LangPathPart(last_part.0, None));
-                    full_impl_path
-                }
-                Err(err) => {
+    fn visit_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        let Block { header, body, .. } = block;
+
+        let adt_generics = match header {
+            BlockHeader::Implement(impl_path, ..) => {
+                let path_without_gens = match ctx.ast_ctx.get_module(ctx.block_id) {
+                    Ok(Some(module)) => {
+                        let impl_name = impl_path.last().unwrap().0.clone();
+                        module.clone_push(&impl_name, None, None)
+                    }
+                    Ok(None) => impl_path.without_gens(),
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                if let Ok(adt) = ctx
+                    .ast_ctx
+                    .get_adt(&ctx.ty_env.lock().unwrap(), &path_without_gens)
+                {
+                    adt.read().unwrap().generics.clone().unwrap_or_default()
+                } else if ctx
+                    .ast_ctx
+                    .get_trait(&ctx.ty_env.lock().unwrap(), &path_without_gens)
+                    .is_ok()
+                {
+                    Generics::empty()
+                } else {
+                    let err = ctx.ast_ctx.err(format!(
+                        "Unable to find ADT/Trait for impl block with name \"{}\".",
+                        to_string_path(&ctx.ty_env.lock().unwrap(), &path_without_gens),
+                    ));
                     self.errors.push(err);
                     return;
                 }
-            };
+            }
 
-            // TODO: Implement generics for iterfaces and enums (?).
+            BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
+                adt.read().unwrap().generics.clone().unwrap_or_default()
+            }
 
-            let adt_generics = if let Ok(adt) = ctx
-                .ast_ctx
-                .get_adt(&ctx.ty_env.lock().unwrap(), &full_impl_path)
+            BlockHeader::Trait(_) => Generics::empty(),
+
+            _ => return,
+        };
+
+        // Iterate through the body of one method at a time and replace all
+        // "UnknownIdent"s representing generics to "Generic"s.
+        for method in body {
+            let func_generics = if let AstToken::Block(Block {
+                header: BlockHeader::Fn(func),
+                ..
+            }) = method
             {
-                adt.as_ref()
-                    .read()
-                    .unwrap()
-                    .generics
-                    .clone()
-                    .unwrap_or_default()
-            } else if ctx
-                .ast_ctx
-                .get_trait(&ctx.ty_env.lock().unwrap(), &full_impl_path)
-                .is_ok()
-            {
-                Generics::empty()
+                func.as_ref().read().unwrap().generics.clone()
             } else {
-                let err = ctx.ast_ctx.err(format!(
-                    "Unable to find ADT/Trait for impl block with name \"{}\".",
-                    to_string_path(&ctx.ty_env.lock().unwrap(), &full_impl_path),
-                ));
-                self.errors.push(err);
-                return;
+                panic!("Not method in impl or ADT block: {:#?}", method);
             };
 
-            // Iterate through the body of one method at a time and replace all
-            // "UnknownIdent"s representing generics to "Generic"s.
-            for method in body {
-                let func_generics = if let AstToken::Block(Block {
-                    header: BlockHeader::Fn(func),
-                    ..
-                }) = method
-                {
-                    func.as_ref().read().unwrap().generics.clone()
-                } else {
-                    panic!("Not method in impl block: {:#?}", method);
-                };
+            // No generics declared on either ADT/Trait or function, early skip.
+            if adt_generics.is_empty() && func_generics.is_none() {
+                continue;
+            }
 
-                // No generics declared on either ADT/Trait or function, early skip.
-                if adt_generics.is_empty() && func_generics.is_none() {
-                    continue;
+            // Replaces any generics declared on the function.
+            if let Some(func_generics) = func_generics {
+                let mut func_replacer = FuncGenericsReplacer::new(&func_generics);
+                if let Err(mut errs) = traverse(ctx, &mut func_replacer, method) {
+                    self.errors.append(&mut errs);
+                    return;
                 }
+            }
 
-                // Replaces any generics declared on the function.
-                if let Some(func_generics) = func_generics {
-                    let mut func_replacer = FuncGenericsReplacer::new(&func_generics);
-                    if let Err(mut errs) = traverse(ctx, &mut func_replacer, method) {
-                        self.errors.append(&mut errs);
-                        return;
-                    }
-                }
-
-                // Replaces any generics declared on the ADT/Trait.
-                if !adt_generics.is_empty() {
-                    let mut adt_replacer = FuncGenericsReplacer::new(&adt_generics);
-                    if let Err(mut errs) = traverse(ctx, &mut adt_replacer, method) {
-                        self.errors.append(&mut errs);
-                        return;
-                    }
+            // Replaces any generics declared on the ADT/Trait.
+            if !adt_generics.is_empty() {
+                let mut adt_replacer = FuncGenericsReplacer::new(&adt_generics);
+                if let Err(mut errs) = traverse(ctx, &mut adt_replacer, method) {
+                    self.errors.append(&mut errs);
+                    return;
                 }
             }
         }

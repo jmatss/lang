@@ -1,5 +1,4 @@
-fn main() -> i32
-{
+fn main() -> i32 {
     const a: i32 = 5
     const b: i32 = 123
     const x = a + b
@@ -7,8 +6,7 @@ fn main() -> i32
     var correct
 
     // Can only match/switch on constant values.
-    match x
-    {
+    match x {
         128 {
             correct = true
         }
@@ -19,8 +17,7 @@ fn main() -> i32
     std::assert(correct)
 
 
-    match 3 - 2
-    {
+    match 3 - 2 {
         123 {
             correct = false
         }

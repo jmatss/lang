@@ -4,7 +4,6 @@ mod std
 ///
 /// This can be ex. structs that have allocated memory that needs to be freed or
 /// sockets that needs to be flushed and closed.
-trait Disposable
-{
+trait Disposable {
     fn {this} deinit();
 }

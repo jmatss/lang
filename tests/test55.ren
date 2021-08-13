@@ -6,8 +6,7 @@ var global_var: i8
 var global_var_init = 1 as i8
 var global_var_init_u8: u8 = 2
 
-fn main() -> i32
-{
+fn main() -> i32 {
     var str = @format(
         "global_var: {}, global_var_init: {}, global_var_init_u8: {}",
         global_var, global_var_init, global_var_init_u8

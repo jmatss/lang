@@ -64,7 +64,6 @@ pub enum Kw {
 
     Trait,
     Implement,
-    Implements,
 
     Where,
     //Macro,
@@ -238,7 +237,6 @@ impl LexToken {
 
             "trait" => LexTokenKind::Kw(Kw::Trait),
             "impl" => LexTokenKind::Kw(Kw::Implement),
-            "impls" => LexTokenKind::Kw(Kw::Implements),
 
             "where" => LexTokenKind::Kw(Kw::Where),
             "defer" => LexTokenKind::Kw(Kw::Defer),
