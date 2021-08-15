@@ -1,7 +1,7 @@
 use either::Either;
 use inkwell::{
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
-    values::{AggregateValue, AnyValueEnum, FloatValue, IntValue, PointerValue},
+    values::{AnyValueEnum, FloatValue, IntValue, PointerValue},
     AddressSpace,
 };
 use log::debug;
@@ -193,6 +193,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // Use a random name. This name will never be used, but just need to
         // make sure that there aren't multiple globals with the same name.
         let name = format!("str.lit.{}", rand::random::<u32>());
+        let i8_type = self.context.i8_type();
 
         let len = if null_terminated {
             lit.len() + 1
@@ -200,25 +201,26 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             lit.len()
         };
 
-        let i8_type = self.context.i8_type();
-        let i8_ptr_type = i8_type.ptr_type(AddressSpace::Generic);
-        let arr_type = i8_type.array_type(len as u32);
+        let mut bytes = Vec::with_capacity(len);
+        for byte in lit.as_bytes() {
+            bytes.push(i8_type.const_int(*byte as u64, false));
+        }
+
+        if null_terminated {
+            bytes.push(i8_type.const_zero());
+        }
+
+        let arr_val = i8_type.const_array(&bytes);
+        let arr_type = arr_val.get_type();
 
         let global_val = self
             .module
             .add_global(arr_type, Some(AddressSpace::Const), &name);
-        global_val.set_constant(true);
-
-        let arr_val = arr_type.const_zero();
-        for (i, byte) in lit.as_bytes().iter().enumerate() {
-            let val = i8_type.const_int(*byte as u64, false);
-            arr_val.const_insert_value(val, &mut [i as u32]);
-        }
         global_val.set_initializer(&arr_val);
 
         global_val
             .as_pointer_value()
-            .const_address_space_cast(i8_ptr_type)
+            .const_address_space_cast(i8_type.ptr_type(AddressSpace::Generic))
     }
 
     // TODO: Better conversion of the integer literal.
