@@ -227,10 +227,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                             let ptr = any_value.into_pointer_value();
                             Ok(self.builder.build_load(ptr, "deref.rval").into())
                         } else {
-                            Err(self.err(
-                                format!("Tried to deref non pointer in rvalue {:?}", any_value),
-                                file_pos,
-                            ))
+                            // TODO: Is it OK to allow this case and don't report
+                            //       it as an error?
+                            Ok(any_value)
                         }
                     }
                 }

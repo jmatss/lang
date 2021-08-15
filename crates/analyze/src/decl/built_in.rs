@@ -37,15 +37,15 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         Generics::empty(),
         TypeInfo::BuiltIn,
     ))?;
-    let string_path = LangPath::new(
-        vec![
-            LangPathPart("std".into(), None),
-            LangPathPart("String".into(), None),
-        ],
-        None,
-    );
+    let string_path = ["std".into(), "String".into()].into();
     let string_type_id = ty_env_guard.id(&Ty::CompoundType(
         InnerTy::Struct(string_path),
+        Generics::empty(),
+        TypeInfo::BuiltIn,
+    ))?;
+    let string_view_path = ["std".into(), "StringView".into()].into();
+    let string_view_type_id = ty_env_guard.id(&Ty::CompoundType(
+        InnerTy::Struct(string_view_path),
         Generics::empty(),
         TypeInfo::BuiltIn,
     ))?;
@@ -89,7 +89,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let generics = None;
     built_ins.insert(
         name,
-        BuiltIn::new(name, parameters, generics, u8_ptr_type_id, false),
+        BuiltIn::new(name, parameters, generics, string_view_type_id, false),
     );
 
     let name = "null";
@@ -237,7 +237,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let generics = None;
     built_ins.insert(
         name,
-        BuiltIn::new(name, parameters, generics, u8_ptr_type_id, false),
+        BuiltIn::new(name, parameters, generics, string_view_type_id, false),
     );
 
     let name = "line";

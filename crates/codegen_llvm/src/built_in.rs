@@ -355,7 +355,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         &mut self,
         built_in_call: &mut BuiltInCall,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let file_pos = built_in_call.file_pos;
+        let file_pos = Some(built_in_call.file_pos);
 
         let format_parts = if let Some(format_parts) = &built_in_call.format_parts {
             format_parts
@@ -383,7 +383,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                         &mut self.analyze_ctx.ty_env.lock().unwrap(),
                         file_pos,
                     )?),
-                    Some(file_pos),
+                    file_pos,
                 ),
             )],
             None,
@@ -402,7 +402,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let mut un_op_address = UnOp::new(
             UnOperator::Address,
             Box::new(Expr::FnCall(string_init_call)),
-            Some(file_pos),
+            file_pos,
         );
         un_op_address.ret_type = Some(type_id_string_ptr(
             &mut self.analyze_ctx.ty_env.lock().unwrap(),
@@ -456,7 +456,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             AssignOperator::Assignment,
             Expr::Var(string_var.as_ref().borrow().read().unwrap().clone()),
             Expr::FnCall(string_get_success_call),
-            Some(file_pos),
+            file_pos,
         );
 
         // Need to insert the variable declaration into the look-up tables so that
@@ -466,13 +466,14 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             .ast_ctx
             .variables
             .insert(var_key, string_var);
+
         self.compile_stmt(&mut string_var_decl)?;
         self.compile_stmt(&mut string_var_assign)?;
 
         let mut string_var_address = UnOp::new(
             UnOperator::Address,
             Box::new(string_var_expr.clone()),
-            Some(file_pos),
+            file_pos,
         );
         string_var_address.ret_type = Some(type_id_string_ptr(
             &mut self.analyze_ctx.ty_env.lock().unwrap(),
@@ -489,7 +490,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
                 FormatPart::Arg(expr) => {
                     let type_id = expr.get_expr_type()?;
-                    if is_primitive(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)? {
+                    let is_primitive =
+                        is_primitive(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
+                    if is_primitive {
                         let expr =
                             self.primitive_to_string_view(expr, &var_name, arg_idx, &std_module)?;
                         arg_idx += 1;
@@ -499,7 +502,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     }
                 }
             };
-
             self.append_view_to_string(string_var_ptr.clone(), expr, &std_module)?;
         }
 
@@ -512,7 +514,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         string_view_expr: Expr,
         types_module: &LangPath,
     ) -> LangResult<()> {
-        let file_pos = string_view_expr.file_pos().cloned().unwrap();
+        let file_pos = string_view_expr.file_pos().cloned();
 
         let mut string_append_view_call = FnCall::new(
             "append_view".into(),
@@ -522,7 +524,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 Argument::new(None, None, string_view_expr),
             ],
             None,
-            Some(file_pos),
+            file_pos,
         );
         string_append_view_call.is_method = true;
         string_append_view_call.method_adt = Some(type_id_string(
@@ -542,7 +544,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         &mut self,
         str_lit: &str,
         types_module: &LangPath,
-        file_pos: FilePosition,
+        file_pos: Option<FilePosition>,
     ) -> LangResult<Expr> {
         Ok(Expr::Lit(
             Lit::String(str_lit.into(), StringType::Regular),
@@ -550,7 +552,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 &mut self.analyze_ctx.ty_env.lock().unwrap(),
                 file_pos,
             )?),
-            Some(file_pos),
+            file_pos,
         ))
         /*
         let mut string_view_init = FnCall::new(
@@ -603,59 +605,50 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         arg_idx: usize,
         types_module: &LangPath,
     ) -> LangResult<Expr> {
-        let file_pos = primitive_expr.file_pos().cloned().unwrap();
+        let file_pos = primitive_expr.file_pos().cloned();
         let type_id = primitive_expr.get_expr_type()?;
+
+        let mut ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
 
         // TODO: What buffer size should floats have? What is their max char size?
         // `buf_size` is the max amount of bytes that a given primitive type
         // value can occupy in string form.
-        let (primitive_name, buf_size) =
-            match get_inner(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)? {
-                InnerTy::I8 => ("I8", 4),
-                InnerTy::U8 => ("U8", 3),
-                InnerTy::I16 => ("I16", 6),
-                InnerTy::U16 => ("U16", 5),
-                InnerTy::I32 => ("I32", 11),
-                InnerTy::U32 => ("U32", 10),
-                InnerTy::F32 => ("F32", 0),
-                InnerTy::I64 => ("I64", 20),
-                InnerTy::U64 => ("U64", 19),
-                InnerTy::F64 => ("F64", 0),
-                InnerTy::I128 => ("I128", 40),
-                InnerTy::U128 => ("U128", 39),
-                _ => panic!("bad format variadic arg type: {:#?}", primitive_expr),
-            };
+        let (primitive_name, buf_size) = match get_inner(&ty_env_guard, type_id)? {
+            InnerTy::I8 => ("I8", 4),
+            InnerTy::U8 => ("U8", 3),
+            InnerTy::I16 => ("I16", 6),
+            InnerTy::U16 => ("U16", 5),
+            InnerTy::I32 => ("I32", 11),
+            InnerTy::U32 => ("U32", 10),
+            InnerTy::F32 => ("F32", 0),
+            InnerTy::I64 => ("I64", 20),
+            InnerTy::U64 => ("U64", 19),
+            InnerTy::F64 => ("F64", 0),
+            InnerTy::I128 => ("I128", 40),
+            InnerTy::U128 => ("U128", 39),
+            _ => panic!("bad format variadic arg type: {:#?}", primitive_expr),
+        };
 
         let primitive_path = types_module.clone_push(primitive_name, None, None);
-        let primitive_type_id = self
-            .analyze_ctx
-            .ty_env
-            .lock()
-            .unwrap()
-            .id(&Ty::CompoundType(
-                InnerTy::Struct(primitive_path),
-                Generics::empty(),
-                TypeInfo::Default(file_pos),
-            ))?;
+        let primitive_type_id = ty_env_guard.id(&Ty::CompoundType(
+            InnerTy::Struct(primitive_path),
+            Generics::empty(),
+            TypeInfo::DefaultOpt(file_pos),
+        ))?;
 
-        let arr_type_id = self.analyze_ctx.ty_env.lock().unwrap().id(&Ty::Array(
-            type_id_u8(&mut self.analyze_ctx.ty_env.lock().unwrap(), file_pos)?,
+        let u8_type_id = type_id_u8(&mut ty_env_guard, file_pos)?;
+        let u32_type_id = type_id_u32(&mut ty_env_guard, file_pos)?;
+        let arr_type_id = ty_env_guard.id(&Ty::Array(
+            u8_type_id,
             Some(Box::new(Expr::Lit(
                 Lit::Integer(buf_size.to_string(), 10),
-                Some(type_id_u32(
-                    &mut self.analyze_ctx.ty_env.lock().unwrap(),
-                    file_pos,
-                )?),
+                Some(u32_type_id),
                 None,
             ))),
-            TypeInfo::Default(file_pos),
+            TypeInfo::DefaultOpt(file_pos),
         ))?;
-        let arr_ptr_type_id = self
-            .analyze_ctx
-            .ty_env
-            .lock()
-            .unwrap()
-            .id(&Ty::Pointer(arr_type_id, TypeInfo::Default(file_pos)))?;
+        let arr_ptr_type_id =
+            ty_env_guard.id(&Ty::Pointer(arr_type_id, TypeInfo::DefaultOpt(file_pos)))?;
 
         let buf_var_name = format!("{}_idx_{}", var_name, arg_idx);
         let buf_var = Arc::new(RwLock::new(Var::new(
@@ -674,6 +667,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             .ast_ctx
             .variables
             .insert(buf_var_key, Arc::clone(&buf_var));
+
+        std::mem::drop(ty_env_guard);
 
         self.compile_stmt(&mut buf_var_decl)?;
 
@@ -705,48 +700,55 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     }
 }
 
-/// Below are some helper functions to creates types easiliy.
-
-pub fn type_id_u8(ty_env: &mut TyEnv, file_pos: FilePosition) -> LangResult<TypeId> {
+pub fn type_id_u8(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangResult<TypeId> {
     ty_env.id(&Ty::CompoundType(
         InnerTy::U8,
         Generics::empty(),
-        TypeInfo::Default(file_pos),
+        TypeInfo::DefaultOpt(file_pos),
     ))
 }
 
-pub fn type_id_u32(ty_env: &mut TyEnv, file_pos: FilePosition) -> LangResult<TypeId> {
+pub fn type_id_u32(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangResult<TypeId> {
     ty_env.id(&Ty::CompoundType(
         InnerTy::U32,
         Generics::empty(),
-        TypeInfo::Default(file_pos),
+        TypeInfo::DefaultOpt(file_pos),
     ))
 }
 
-pub fn type_id_string(ty_env: &mut TyEnv, file_pos: FilePosition) -> LangResult<TypeId> {
+pub fn type_id_string(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangResult<TypeId> {
     let string_path = ["std".into(), "String".into()].into();
     ty_env.id(&Ty::CompoundType(
         InnerTy::Struct(string_path),
         Generics::empty(),
-        TypeInfo::Default(file_pos),
+        TypeInfo::DefaultOpt(file_pos),
     ))
 }
 
-pub fn type_id_string_ptr(ty_env: &mut TyEnv, file_pos: FilePosition) -> LangResult<TypeId> {
+pub fn type_id_string_ptr(
+    ty_env: &mut TyEnv,
+    file_pos: Option<FilePosition>,
+) -> LangResult<TypeId> {
     let string_type_id = type_id_string(ty_env, file_pos)?;
-    ty_env.id(&Ty::Pointer(string_type_id, TypeInfo::Default(file_pos)))
+    ty_env.id(&Ty::Pointer(string_type_id, TypeInfo::DefaultOpt(file_pos)))
 }
 
-pub fn type_id_string_view(ty_env: &mut TyEnv, file_pos: FilePosition) -> LangResult<TypeId> {
+pub fn type_id_string_view(
+    ty_env: &mut TyEnv,
+    file_pos: Option<FilePosition>,
+) -> LangResult<TypeId> {
     let view_path = ["std".into(), "StringView".into()].into();
     ty_env.id(&Ty::CompoundType(
         InnerTy::Struct(view_path),
         Generics::empty(),
-        TypeInfo::Default(file_pos),
+        TypeInfo::DefaultOpt(file_pos),
     ))
 }
 
-pub fn type_id_result_string(ty_env: &mut TyEnv, file_pos: FilePosition) -> LangResult<TypeId> {
+pub fn type_id_result_string(
+    ty_env: &mut TyEnv,
+    file_pos: Option<FilePosition>,
+) -> LangResult<TypeId> {
     let result_path = ["std".into(), "Result".into()].into();
     let mut gens = Generics::new();
     gens.insert("T".into(), type_id_string(ty_env, file_pos)?);
@@ -754,11 +756,14 @@ pub fn type_id_result_string(ty_env: &mut TyEnv, file_pos: FilePosition) -> Lang
     ty_env.id(&Ty::CompoundType(
         InnerTy::Struct(result_path),
         gens,
-        TypeInfo::Default(file_pos),
+        TypeInfo::DefaultOpt(file_pos),
     ))
 }
 
-pub fn type_id_result_u32(ty_env: &mut TyEnv, file_pos: FilePosition) -> LangResult<TypeId> {
+pub fn type_id_result_u32(
+    ty_env: &mut TyEnv,
+    file_pos: Option<FilePosition>,
+) -> LangResult<TypeId> {
     let result_path = ["std".into(), "Result".into()].into();
     let mut gens = Generics::new();
     gens.insert("T".into(), type_id_u32(ty_env, file_pos)?);
@@ -766,6 +771,6 @@ pub fn type_id_result_u32(ty_env: &mut TyEnv, file_pos: FilePosition) -> LangRes
     ty_env.id(&Ty::CompoundType(
         InnerTy::Struct(result_path),
         gens,
-        TypeInfo::Default(file_pos),
+        TypeInfo::DefaultOpt(file_pos),
     ))
 }
