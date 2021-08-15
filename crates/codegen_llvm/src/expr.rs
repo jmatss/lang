@@ -1,7 +1,7 @@
 use either::Either;
 use inkwell::{
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
-    values::{AnyValueEnum, FloatValue, IntValue},
+    values::{AggregateValue, AnyValueEnum, FloatValue, IntValue, PointerValue},
     AddressSpace,
 };
 use log::debug;
@@ -12,7 +12,7 @@ use common::{
     token::{
         block::AdtKind,
         expr::{AdtInit, ArrayInit, Expr, FnCall},
-        lit::Lit,
+        lit::{Lit, StringType},
     },
     ty::{get::get_inner, inner_ty::InnerTy, to_string::to_string_path, type_id::TypeId},
 };
@@ -101,33 +101,16 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         file_pos: Option<FilePosition>,
     ) -> LangResult<AnyValueEnum<'ctx>> {
         match lit {
-            Lit::String(str_lit) => {
-                // Returns a pointer to the newly created string literal.
-                // The string literal will be an array of u8(/i8(?)) with a
-                // null terminator.
-                // TODO: Probably best to let string literals be a pointer to
-                //       an array so one can get the size. But for now it is
-                //       casted to a pointer to u8 to be compatible with C code.
-                // See: https://github.com/TheDan64/inkwell/issues/32
-                let lit_ptr = unsafe {
-                    self.builder
-                        .build_global_string(str_lit, "str.lit")
-                        .as_pointer_value()
-                };
-                let address_space = AddressSpace::Generic;
-                let i8_ptr_type = self.context.i8_type().ptr_type(address_space);
-                Ok(lit_ptr.const_cast(i8_ptr_type).into())
+            Lit::String(str_lit, string_type) => {
+                self.compile_lit_string(str_lit, string_type, file_pos)
             }
 
             Lit::Char(char_lit) => {
                 if char_lit.chars().count() == 1 {
-                    if let Some(ch) = char_lit.chars().next() {
-                        Ok(AnyValueEnum::IntValue(
-                            self.context.i32_type().const_int(ch as u64, false),
-                        ))
-                    } else {
-                        Err(self.err("Unable to get char literal.".into(), file_pos))
-                    }
+                    let ch = char_lit.chars().next().unwrap();
+                    Ok(AnyValueEnum::IntValue(
+                        self.context.i32_type().const_int(ch as u64, false),
+                    ))
                 } else {
                     Err(self.err("Char literal isn't a single character.".into(), file_pos))
                 }
@@ -153,6 +136,89 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 file_pos,
             )?)),
         }
+    }
+
+    fn compile_lit_string(
+        &mut self,
+        str_lit: &str,
+        string_type: &StringType,
+        file_pos: Option<FilePosition>,
+    ) -> LangResult<AnyValueEnum<'ctx>> {
+        // Early return if this is a null-terminated C string. No need to fetch
+        // structs and calculate len.
+        if matches!(string_type, StringType::C) {
+            return Ok(self.compile_lit_string_global(str_lit, true).into());
+        }
+
+        let ptr_arg = self.compile_lit_string_global(str_lit, false);
+        let len_arg = self
+            .context
+            .i32_type()
+            .const_int(str_lit.len() as u64, false);
+
+        let struct_path = match string_type {
+            StringType::Regular => ["std".into(), "StringView".into()].into(),
+            StringType::F | StringType::S => ["std".into(), "String".into()].into(),
+            StringType::C => unreachable!(),
+        };
+        let struct_name = to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &struct_path);
+
+        let struct_type = if let Some(struct_type) = self.module.get_struct_type(&struct_name) {
+            struct_type
+        } else {
+            return Err(self.err(
+                format!(
+                    "Unable to get struct \"{}\" when compiling lit string.",
+                    struct_name
+                ),
+                file_pos,
+            ));
+        };
+
+        Ok(struct_type
+            .const_named_struct(&[ptr_arg.into(), len_arg.into()])
+            .into())
+    }
+
+    /// Compiles the given string literal into an u8 array and adds its as
+    /// a new LLVM global. The function returns a pointer to this global.
+    ///
+    /// If `null_terminated` is set to true, the size of the array will be
+    /// `lit.len() + 1` and the last item in the array will be set to zero.
+    fn compile_lit_string_global(
+        &mut self,
+        lit: &str,
+        null_terminated: bool,
+    ) -> PointerValue<'ctx> {
+        // Use a random name. This name will never be used, but just need to
+        // make sure that there aren't multiple globals with the same name.
+        let name = format!("str.lit.{}", rand::random::<u32>());
+
+        let len = if null_terminated {
+            lit.len() + 1
+        } else {
+            lit.len()
+        };
+
+        let i8_type = self.context.i8_type();
+        let i8_ptr_type = i8_type.ptr_type(AddressSpace::Generic);
+        let arr_type = i8_type.array_type(len as u32);
+
+        let global_val = self
+            .module
+            .add_global(arr_type, Some(AddressSpace::Const), &name);
+        global_val.set_constant(true);
+
+        let arr_val = arr_type.const_zero();
+        for (i, byte) in lit.as_bytes().iter().enumerate() {
+            let val = i8_type.const_int(*byte as u64, false);
+            arr_val.const_insert_value(val, &mut [i as u32]);
+        }
+        global_val.set_initializer(&arr_val);
+
+        global_val
+            .as_pointer_value()
+            .const_address_space_cast(i8_ptr_type)
     }
 
     // TODO: Better conversion of the integer literal.

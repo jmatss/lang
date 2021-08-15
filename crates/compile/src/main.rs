@@ -64,6 +64,7 @@ std_files!(
     "mem.ren",
     "optional.ren",
     "primitives.ren",
+    "print.ren",
     "result.ren",
     "string.ren",
     "string_view.ren",

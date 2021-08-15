@@ -239,7 +239,7 @@ impl TypeSolver {
             ctx.ty_env.lock().unwrap().forwards(),
             all_types_string
         );
-        sub_sets_debug_print(ctx.ty_env)
+        sub_sets_debug_print(&ctx.ty_env.lock().unwrap());
     }
 }
 

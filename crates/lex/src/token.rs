@@ -94,7 +94,6 @@ pub enum Sym {
     Dot,
     TripleDot,
     Comma,
-    UnderScore,
     QuestionMark,
     ExclamationMark,
     Equals,
@@ -119,6 +118,9 @@ pub enum Sym {
     ArrayIndexBegin, // .[
     Increment,       // .++
     Decrement,       // .--
+    DoubleQuoteC,    // c"
+    DoubleQuoteS,    // s"
+    DoubleQuoteF,    // f"
 
     DoubleEquals,
     NotEquals,
@@ -294,7 +296,6 @@ impl LexToken {
             '{' => LexToken::ret_single_lookup(Sym::CurlyBracketBegin),
             '}' => LexToken::ret_single_lookup(Sym::CurlyBracketEnd),
             ',' => LexToken::ret_single_lookup(Sym::Comma),
-            '_' => LexToken::ret_single_lookup(Sym::UnderScore),
             '?' => LexToken::ret_single_lookup(Sym::QuestionMark),
             '\"' => LexToken::ret_single_lookup(Sym::DoubleQuote),
             '\'' => LexToken::ret_single_lookup(Sym::SingleQuote),
@@ -412,6 +413,10 @@ impl LexToken {
                     ("/=", Sym::AssignDiv),
                 ],
             ),
+
+            'c' => LexToken::match_symbol(&real_string, vec![("c\"", Sym::DoubleQuoteC)]),
+            's' => LexToken::match_symbol(&real_string, vec![("s\"", Sym::DoubleQuoteS)]),
+            'f' => LexToken::match_symbol(&real_string, vec![("f\"", Sym::DoubleQuoteF)]),
 
             _ => None,
         }

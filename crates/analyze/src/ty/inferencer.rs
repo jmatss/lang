@@ -10,11 +10,12 @@ use log::debug;
 use common::{
     error::LangError,
     file::FilePosition,
+    path::LangPath,
     token::{
         ast::AstToken,
         block::{AdtKind, Block, BlockHeader, Fn},
         expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, Var},
-        lit::Lit,
+        lit::{Lit, StringType},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
         stmt::Modifier,
         stmt::Stmt,
@@ -114,7 +115,7 @@ impl Visitor for TypeInferencer {
             ctx.ty_env.lock().unwrap().forwards(),
             all_types_string
         );
-        sub_sets_debug_print(&ctx.ty_env);
+        sub_sets_debug_print(&ctx.ty_env.lock().unwrap());
     }
 
     /// Assigns a "Unknown" type for every expression that doesn't have a type
@@ -122,6 +123,8 @@ impl Visitor for TypeInferencer {
     /// stage and should be converted/subtituted into a "real" type before this
     /// analyzing step is done.
     fn visit_lit(&mut self, expr: &mut Expr, ctx: &mut TraverseCtx) {
+        let file_pos = expr.file_pos().cloned();
+
         let (lit, type_id_opt, type_info) = if let Expr::Lit(lit, type_id_opt, file_pos) = expr {
             let type_info = TypeInfo::Lit(file_pos.to_owned());
             (lit, type_id_opt, type_info)
@@ -134,30 +137,44 @@ impl Visitor for TypeInferencer {
         }
 
         let inner_ty = match lit {
-            Lit::String(_) => {
-                let u8_ty = Ty::CompoundType(InnerTy::U8, Generics::empty(), type_info.clone());
-                let u8_type_id = match ctx.ty_env.lock().unwrap().id(&u8_ty) {
-                    Ok(type_id) => type_id,
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
-                };
+            Lit::String(_, string_type) => match string_type {
+                StringType::Regular => InnerTy::Struct(LangPath::new(
+                    vec!["std".into(), "StringView".into()],
+                    file_pos,
+                )),
 
-                let ptr_ty = Ty::Pointer(u8_type_id, type_info);
-                let ptr_type_id = match ctx.ty_env.lock().unwrap().id(&ptr_ty) {
-                    Ok(type_id) => type_id,
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
-                    }
-                };
+                StringType::S | StringType::F => {
+                    InnerTy::Struct(LangPath::new(vec!["std".into(), "String".into()], file_pos))
+                }
 
-                // TODO: Have a custom struct "String" instead of "*u8"?
-                *type_id_opt = Some(ptr_type_id);
+                // A C string requires special logic since it should be a pointer,
+                // it should be a compound type like all the other variants
+                // handled in this function. Because of this, there is a early
+                // return in this case.
+                StringType::C => {
+                    let u8_ty = Ty::CompoundType(InnerTy::U8, Generics::empty(), type_info.clone());
+                    let u8_type_id = match ctx.ty_env.lock().unwrap().id(&u8_ty) {
+                        Ok(type_id) => type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
 
-                return;
-            }
+                    let ptr_ty = Ty::Pointer(u8_type_id, type_info);
+                    let ptr_type_id = match ctx.ty_env.lock().unwrap().id(&ptr_ty) {
+                        Ok(type_id) => type_id,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    };
+
+                    *type_id_opt = Some(ptr_type_id);
+
+                    return;
+                }
+            },
 
             Lit::Char(_) => InnerTy::Character,
             Lit::Bool(_) => InnerTy::Boolean,

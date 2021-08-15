@@ -122,6 +122,12 @@ impl From<Vec<LangPathPart>> for LangPath {
     }
 }
 
+impl<const N: usize> From<[LangPathPart; N]> for LangPath {
+    fn from(parts: [LangPathPart; N]) -> Self {
+        LangPath::new(parts.to_vec(), None)
+    }
+}
+
 impl TyEnvHash for LangPath {
     fn hash_with_state<H: std::hash::Hasher>(
         &self,
@@ -163,6 +169,12 @@ impl LangPathPart {
     }
 }
 
+impl From<&str> for LangPathPart {
+    fn from(name: &str) -> Self {
+        LangPathPart(name.into(), None)
+    }
+}
+
 impl TyEnvHash for LangPathPart {
     fn hash_with_state<H: std::hash::Hasher>(
         &self,
@@ -173,7 +185,7 @@ impl TyEnvHash for LangPathPart {
         self.0.hash(state);
         // A empty list of generics and no generics at all is considered equals.
         if let Some(gens) = self.1.as_ref() {
-            if !gens.is_empty() {
+            if !gens.is_empty_types() {
                 gens.hash_with_state(ty_env, deref_type, state)?;
             }
         }

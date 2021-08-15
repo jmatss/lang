@@ -1,9 +1,10 @@
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry, HashMap, HashSet},
-    fmt::Debug,
     sync::Mutex,
 };
+
+use log::Level;
 
 use crate::{
     error::{LangError, LangErrorKind, LangResult},
@@ -292,64 +293,64 @@ fn compatible_with_start(
     }
 }
 
-pub fn sub_sets_debug_print(ty_env: &Mutex<TyEnv>) {
-    let ty_env_guard = ty_env.lock().unwrap();
+pub fn sub_sets_debug_print(ty_env: &TyEnv) {
+    if log_enabled!(Level::Debug) {
+        let mut root_to_children: HashMap<NodeId, HashSet<NodeId>> = HashMap::new();
 
-    let mut root_to_children: HashMap<NodeId, HashSet<NodeId>> = HashMap::new();
+        for id in ty_env.sub_sets.id_to_node.keys() {
+            let root_id = ty_env.sub_sets.find_root(*id).unwrap();
 
-    for id in ty_env_guard.sub_sets.id_to_node.keys() {
-        let root_id = ty_env_guard.sub_sets.find_root(*id).unwrap();
-
-        if *id == root_id {
-            continue;
-        }
-
-        match root_to_children.entry(root_id) {
-            Entry::Occupied(mut o) => {
-                o.get_mut().insert(*id);
+            if *id == root_id {
+                continue;
             }
-            Entry::Vacant(v) => {
-                let mut s = HashSet::default();
-                s.insert(*id);
-                v.insert(s);
+
+            match root_to_children.entry(root_id) {
+                Entry::Occupied(mut o) => {
+                    o.get_mut().insert(*id);
+                }
+                Entry::Vacant(v) => {
+                    let mut s = HashSet::default();
+                    s.insert(*id);
+                    v.insert(s);
+                }
             }
         }
-    }
 
-    let mut s = String::new();
+        let mut s = String::new();
 
-    s.push_str("sets:\n");
-    for (root_id, children_ids) in root_to_children {
-        s.push_str("============\n");
-        s.push_str(&format!("+ root: {}\nchildren:\n", root_id));
-        for child_id in children_ids.iter() {
-            s.push_str(&format!(" {}\n", child_id));
-        }
+        s.push_str("sets:\n");
+        for (root_id, children_ids) in root_to_children {
+            s.push_str("============\n");
+            s.push_str(&format!("+ root: {}\nchildren:\n", root_id));
+            for child_id in children_ids.iter() {
+                s.push_str(&format!(" {}\n", child_id));
+            }
 
-        let root_node = ty_env_guard.sub_sets.id_to_node.get(&root_id).unwrap();
-        let root_parent = root_node.parent_id;
-        let root_type_id = &root_node.type_id;
-        s.push_str(&format!(
-            "\nroot node_id: {}, parent: {}, type_id: {}, ty: {:#?}\n",
-            root_id,
-            root_parent,
-            root_type_id,
-            ty_env_guard.ty(*root_type_id)
-        ));
-
-        for child_id in children_ids.iter() {
-            let child_node = ty_env_guard.sub_sets.id_to_node.get(child_id).unwrap();
-            let child_parent = child_node.parent_id;
-            let child_type_id = &child_node.type_id;
+            let root_node = ty_env.sub_sets.id_to_node.get(&root_id).unwrap();
+            let root_parent = root_node.parent_id;
+            let root_type_id = &root_node.type_id;
             s.push_str(&format!(
-                "- node_id: {}, parent: {}, type_id: {}, ty: {:#?}\n",
-                child_id,
-                child_parent,
-                child_type_id,
-                ty_env_guard.ty(*child_type_id)
+                "\nroot node_id: {}, parent: {}, type_id: {}, ty: {:#?}\n",
+                root_id,
+                root_parent,
+                root_type_id,
+                ty_env.ty(*root_type_id)
             ));
-        }
-    }
 
-    debug!("{}", s);
+            for child_id in children_ids.iter() {
+                let child_node = ty_env.sub_sets.id_to_node.get(child_id).unwrap();
+                let child_parent = child_node.parent_id;
+                let child_type_id = &child_node.type_id;
+                s.push_str(&format!(
+                    "- node_id: {}, parent: {}, type_id: {}, ty: {:#?}\n",
+                    child_id,
+                    child_parent,
+                    child_type_id,
+                    ty_env.ty(*child_type_id)
+                ));
+            }
+        }
+
+        debug!("{}", s);
+    }
 }

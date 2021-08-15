@@ -9,6 +9,9 @@ def heading(file):
  */
 mod std
 
+use std::Result
+use std::StringView
+
 '''
     file.write(output)
     
@@ -50,7 +53,7 @@ def prim_struct(file, name, str_byte_size, min, max, name_unsigned=None):
     abs_output = abs_fn(name_lower != name_unsigned, name_lower, name_unsigned)
 
     output = '''pub struct {0} {{
-    pub fn to_string(number: {1}) -> Result<String, {{u8}}> {{
+    pub fn to_string(number: {1}) -> Result<String, StringView> {{
         var is_negative = number < 0
         var number_abs = this::abs(number)
 

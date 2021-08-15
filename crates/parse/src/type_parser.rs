@@ -524,31 +524,16 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             if let LexTokenKind::Sym(Sym::SquareBracketEnd) = lex_token.kind {
                 None
             } else if let LexTokenKind::Sym(Sym::Colon) = lex_token.kind {
-                if let Some(next_token) = self.iter.peek_skip_space() {
-                    // If the symbol is a underscore, the size of the array
-                    // should be infered (currently the parse output doesn't
-                    // differ between this and just not having a size at all (?)).
-                    if let LexTokenKind::Sym(Sym::UnderScore) = next_token.kind {
-                        // TODO: Need to parse tokens.
-                        panic!("TODO: Underscore in array dimension.");
-                    } else {
-                        let stop_conds = [Sym::SquareBracketEnd];
-                        let expr = self.iter.parse_expr(&stop_conds)?;
+                let stop_conds = [Sym::SquareBracketEnd];
+                let expr = self.iter.parse_expr(&stop_conds)?;
 
-                        if let Some(expr_file_pos) = expr.file_pos() {
-                            file_pos.set_end(expr_file_pos)?;
-                        } else {
-                            unreachable!();
-                        }
-
-                        Some(Box::new(expr))
-                    }
+                if let Some(expr_file_pos) = expr.file_pos() {
+                    file_pos.set_end(expr_file_pos)?;
                 } else {
-                    return Err(self.iter.err(
-                        "Received None when looking at symbol after colon in array type.".into(),
-                        Some(lex_token.file_pos),
-                    ));
+                    unreachable!();
                 }
+
+                Some(Box::new(expr))
             } else {
                 // TODO: Where to fetch file_pos from?
                 return Err(self.iter.err(

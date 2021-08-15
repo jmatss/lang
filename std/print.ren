@@ -7,57 +7,37 @@ use std::StringView
 ext fn _write(fd: i32, data: {u8}, len: u32) -> i32
 ext fn fflush(fd: i32) -> i32
 
-pub fn print_fd<V>(
-    view: V,
+pub fn print_fd(
+    view: StringView,
     fd: i32,
     line_break: bool = true,
-    flush: bool = false,
-) -> Result<u32, {u8}>
-where V impls AsView
-{
-    var str_view = view.&.as_view()
-    if _write(fd, str_view.ptr, str_view.len()) == -1
-    {
+    flush: bool = false
+) -> Result<u32, StringView> {
+    if _write(fd, view.ptr, view.len()) == -1 {
         return Result::error("Error when writing to fd")
     }
     
-    if line_break
-    {
+    if line_break {
         // TODO: Make static variable containing value instead.
         var ascii = 10  // \n
-        if _write(fd, ascii.&, 1) == -1
-        {
+        if _write(fd, ascii.&, 1) == -1 {
             return Result::error("Error when writing line break to fd")
         }
     }
     
-    if flush and fflush(fd) == -1
-    {
+    if flush and fflush(fd) == -1 {
         return Result::error("Error when flushing to fd")
     }
 
     return Result::success(0)
 }
 
-pub fn print(lit: {u8}, line_break: bool = true, flush: bool = false) -> Result<u32, {u8}>
-{
-    return print_new<StringView>(StringView::new(lit), line_break, flush)
-}
-
-// TODO: This should become the "default" print.
-//       In the future, a regular string literal "abc123" will be
-//       represented as a StringView. So then this function will
-//       be used instead of the old `print` taking a u8 pointer.
-pub fn print_new<V>(view: V, line_break: bool = true, flush: bool = false) -> Result<u32, {u8}>
-where V impls AsView
-{
+pub fn print(view: StringView, line_break: bool = true, flush: bool = false) -> Result<u32, StringView> {
     var stdout_fd = 1
-    return print_fd<V>(view, stdout_fd, line_break, flush)
+    return print_fd(view, stdout_fd, line_break, flush)
 }
 
-pub fn eprint<V>(view: V, line_break: bool = true, flush: bool = false) -> Result<u32, {u8}>
-where V impls AsView
-{
+pub fn eprint(view: StringView, line_break: bool = true, flush: bool = false) -> Result<u32, StringView> {
     var stderr_fd = 2
-    return print_fd<V>(view, stderr_fd, line_break, flush)
+    return print_fd(view, stderr_fd, line_break, flush)
 }

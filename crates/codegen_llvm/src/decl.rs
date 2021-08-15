@@ -22,8 +22,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     /// This function shall be ran before the function/method prototypes
     /// are compiled since they might contains references to types.
     pub(super) fn compile_type_decl(&mut self, ast_token: &mut AstToken) -> LangResult<()> {
-        self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
-
         // TODO: Currently only returns the first error, should return all.
         let include_impls = false;
         let full_paths = true;
@@ -59,8 +57,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     /// have do declare prototypes manual in the source before the use of the
     /// function/method.
     pub(super) fn compile_fn_decl(&mut self, mut ast_token: &mut AstToken) -> LangResult<()> {
-        self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
-
         if let AstToken::Block(Block {
             header,
             body,

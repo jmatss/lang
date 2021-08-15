@@ -5,7 +5,7 @@ use std::{
 };
 
 use either::Either;
-use log::debug;
+use log::{debug, warn};
 
 use common::{
     ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx},
@@ -215,18 +215,28 @@ fn contains_rec(
     references: &TyEnvHashMap<LangPath, TyEnvHashSet<LangPath>>,
     seen_idents: &mut TyEnvHashSet<LangPath>,
 ) -> LangResult<bool> {
+    let deref_type = DerefType::Deep;
+
+    // Prevent checking the same type multiple times to prevent infinite
+    // recursion. If we see this for the second time, should be ok to return
+    // a false.
+    if seen_idents.contains(ty_env, deref_type, ref_ident)? {
+        return Ok(false);
+    } else {
+        seen_idents.insert(ty_env, deref_type, ref_ident.clone())?;
+    }
+
     let ref_references =
-        if let Some(ref_references) = references.get(ty_env, DerefType::Deep, ref_ident)? {
+        if let Some(ref_references) = references.get(ty_env, deref_type, ref_ident)? {
             ref_references
         } else {
             return Ok(false);
         };
 
-    if ref_references.contains(ty_env, DerefType::Deep, cur_ident)? {
+    if ref_references.contains(ty_env, deref_type, cur_ident)? {
         return Ok(true);
     } else {
         for nested_ident in ref_references.values() {
-            seen_idents.insert(ty_env, DerefType::Deep, nested_ident.clone())?;
             if contains_rec(ty_env, cur_ident, nested_ident, references, seen_idents)? {
                 return Ok(true);
             }
@@ -253,6 +263,15 @@ fn contains_strings_rec(
     references: &HashMap<String, HashSet<String>>,
     seen_idents: &mut HashSet<String>,
 ) -> bool {
+    // Prevent checking the same string multiple times to prevent infinite
+    // recursion. If we see this for the second time, should be ok to return
+    // a false.
+    if seen_idents.contains(ref_ident) {
+        return false;
+    } else {
+        seen_idents.insert(ref_ident.to_string());
+    }
+
     let ref_references = if let Some(ref_references) = references.get(ref_ident) {
         ref_references
     } else {
@@ -263,7 +282,6 @@ fn contains_strings_rec(
         return true;
     } else {
         for nested_ident in ref_references {
-            seen_idents.insert(nested_ident.clone());
             if contains_strings_rec(cur_ident, nested_ident, references, seen_idents) {
                 return true;
             }

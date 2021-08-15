@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, sync::Mutex};
+use std::{collections::HashMap, hash::Hash};
 
 use crate::{
     error::LangResult,
@@ -6,10 +6,7 @@ use crate::{
     TypeId,
 };
 
-use super::{
-    contains::{contains_generic_shallow, contains_unknown_any_shallow},
-    ty_env::TyEnv,
-};
+use super::ty_env::TyEnv;
 
 /// Used to indicate what kind this "Generics" is.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -140,22 +137,6 @@ impl Generics {
 
     pub fn iter_types_mut(&mut self) -> std::slice::IterMut<TypeId> {
         self.types.iter_mut()
-    }
-
-    pub fn is_solved(&self, ty_env: &Mutex<TyEnv>) -> LangResult<bool> {
-        let mut solved = true;
-
-        for type_id in &self.types {
-            let ty_env_guard = ty_env.lock().unwrap();
-            if contains_unknown_any_shallow(&ty_env_guard, *type_id)?
-                || contains_generic_shallow(&ty_env_guard, *type_id)?
-            {
-                solved = false;
-                break;
-            }
-        }
-
-        Ok(solved)
     }
 }
 

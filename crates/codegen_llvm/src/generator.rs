@@ -48,9 +48,6 @@ pub(super) struct CodeGen<'a, 'b, 'ctx> {
     /// The ID of the current block that is being compiled.
     pub cur_block_id: BlockId,
 
-    /// The file position of the current token.
-    pub cur_file_pos: FilePosition,
-
     /// Contains the current basic block that instructions are inserted into.
     pub cur_basic_block: Option<BasicBlock<'ctx>>,
 
@@ -154,8 +151,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
             analyze_ctx,
 
-            cur_file_pos: FilePosition::default(),
-
             cur_block_id: 0,
             cur_basic_block: None,
             cur_func: None,
@@ -170,8 +165,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     }
 
     pub(super) fn compile(&mut self, mut ast_token: &mut AstToken) -> LangResult<()> {
-        self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
-
         match &mut ast_token {
             AstToken::Block(block) => {
                 self.compile_block(block)?;

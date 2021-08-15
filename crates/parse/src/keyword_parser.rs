@@ -1166,7 +1166,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 Ok(token) => token,
                 Err(err) => {
                     return Err(self.iter.err(
-                        "Unable to parse token in ADT body block".into(),
+                        format!(
+                            "Unable to parse token in ADT body block. Nested err: {}",
+                            &err.msg
+                        ),
                         err.file_pos,
                     ))
                 }

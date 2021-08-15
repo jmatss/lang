@@ -20,7 +20,7 @@ pub struct String {
     /// If no `start_idx` argument is given, it will be set to the default value 0.
     /// If no `len` arguments is given, or it is set to 0, this function will assume that
     /// the given `str_lit` is null-terminated and calculate the length with `strlen()`.
-    pub fn init(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<String, {u8}> {
+    pub fn init(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<String, StringView> {
         if start_idx != 0 {
             str_lit = @ptr_add(str_lit, start_idx)
         }
@@ -39,7 +39,7 @@ pub struct String {
         }
     }
 
-    pub fn init_size(size: u32) -> Result<String, {u8}> {
+    pub fn init_size(size: u32) -> Result<String, StringView> {
         var ptr_or_error = Allocator::init_size<u8>(size)
         if ptr is ptr_or_error.success {
             var str = String { ptr, 0, size }
@@ -68,7 +68,7 @@ pub struct String {
     /// If no `start_idx` argument is given, it will be set to the default value 0.
     /// If no `len` arguments is given, this function will assume that the given
     /// `str_lit` is null-terminated and calculate the length with `strlen()`.
-    pub fn {this} append_lit(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<i32, {u8}> {
+    pub fn {this} append_lit(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<i32, StringView> {
         if start_idx != 0 {
             str_lit = @ptr_add(str_lit, start_idx)
         }
@@ -92,12 +92,12 @@ pub struct String {
     }
 
     /// Appends the contents of a StringView to this String.
-    pub fn {this} append_view(str_view: StringView) -> Result<i32, {u8}> {
+    pub fn {this} append_view(str_view: StringView) -> Result<i32, StringView> {
         return this.append_lit(str_view.ptr, 0, str_view.len())
     }
 
     /// Appends the given ascii character to this String.
-    pub fn {this} append_ascii(ascii: u8) -> Result<i32, {u8}> {
+    pub fn {this} append_ascii(ascii: u8) -> Result<i32, StringView> {
         return this.append_lit(ascii.&, 0, 1)
     }
 
@@ -105,7 +105,7 @@ pub struct String {
     ///
     /// This function creates a new heap allocation with size `this.len` + 1
     /// which needs to be free'd by the caller.
-    pub fn this to_c_string() -> Result<{u8}, {u8}> {
+    pub fn this to_c_string() -> Result<{u8}, StringView> {
         var len = this.len()
         var ptr_or_error = Allocator::init_size<u8>(len + 1)
         if err is ptr_or_error.error {

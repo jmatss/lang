@@ -127,6 +127,7 @@ dependencies = [
  "either",
  "inkwell",
  "log",
+ "rand",
 ]
 
 [[package]]

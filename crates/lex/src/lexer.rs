@@ -3,7 +3,10 @@ use log::debug;
 use common::{
     error::{LangError, LangErrorKind, LangResult},
     file::{FileId, FileInfo, FilePosition},
-    token::{ast::CommentType, lit::Lit},
+    token::{
+        ast::CommentType,
+        lit::{Lit, StringType},
+    },
 };
 
 use crate::{
@@ -117,6 +120,28 @@ impl<'a> LexTokenIter<'a> {
                 self.get_whitespaces()
             } else if LexTokenIter::is_valid_number(c1, RADIX) {
                 self.get_number()
+            } else if let Some((symbol_kind, n)) = LexToken::get_if_symbol_three_chars(c1, c2, c3) {
+                // Add special cases for string- and char literals, they start
+                // and end with some quote variant. Also handle comments here
+                // since they also start with symbols (// and /*).
+                match symbol_kind {
+                    LexTokenKind::Sym(Sym::CommentSingleLine) => self.get_comment_single(n),
+                    LexTokenKind::Sym(Sym::CommentMultiLineBegin) => self.get_comment_multi(n),
+                    LexTokenKind::Sym(Sym::SingleQuote) => self.get_lit_char()?,
+                    LexTokenKind::Sym(
+                        symbol
+                        @
+                        (Sym::DoubleQuote
+                        | Sym::DoubleQuoteC
+                        | Sym::DoubleQuoteS
+                        | Sym::DoubleQuoteF),
+                    ) => self.get_lit_string(symbol)?,
+                    _ => {
+                        self.iter.skip(n);
+                        self.inc_column_and_offset(n as u64);
+                        symbol_kind
+                    }
+                }
             } else if LexTokenIter::is_valid_identifier_start(c1) {
                 let ident: String = self.get_ident()?;
 
@@ -132,21 +157,6 @@ impl<'a> LexTokenIter<'a> {
                     bool_kind
                 } else {
                     LexTokenKind::Ident(ident)
-                }
-            } else if let Some((symbol_kind, n)) = LexToken::get_if_symbol_three_chars(c1, c2, c3) {
-                // Add special cases for string- and char literals, they start
-                // and end with " or '. Also handle comments here since they
-                // also start with symbols (// and /*).
-                match symbol_kind {
-                    LexTokenKind::Sym(Sym::CommentSingleLine) => self.get_comment_single(n),
-                    LexTokenKind::Sym(Sym::CommentMultiLineBegin) => self.get_comment_multi(n),
-                    LexTokenKind::Sym(Sym::DoubleQuote) => self.get_lit_string()?,
-                    LexTokenKind::Sym(Sym::SingleQuote) => self.get_lit_char()?,
-                    _ => {
-                        self.iter.skip(n);
-                        self.inc_column_and_offset(n as u64);
-                        symbol_kind
-                    }
                 }
             } else {
                 let msg = format!(
@@ -341,13 +351,15 @@ impl<'a> LexTokenIter<'a> {
     // TODO: Formatting string. Example "num x: {x}"  (== format!("num x: {}", x))
     /// Returns the string or char literal at the current position of the iterator.
     /// Will also escape any "escapable" characters in the process.
-    fn get_lit(&mut self, literal_symbol: Sym) -> LangResult<String> {
+    /// The given `start_sym_len` is the length of the start symbol that should
+    /// be skipped before parsing the actual literal (ex. ", c", ' etc.).
+    fn get_lit(&mut self, lit_symbol: Sym, start_sym_len: usize) -> LangResult<String> {
         let mut chars = Vec::new();
 
-        // Remove the start "symbol" (single or double-quote).
-        self.iter.skip(1);
-        let mut column_count = 1;
-        let mut column_count_bytes = 1;
+        // Remove the start "symbol" (single-quote or some double-quote variant).
+        self.iter.skip(start_sym_len);
+        let mut column_count = start_sym_len as u64;
+        let mut column_count_bytes = start_sym_len as u64;
 
         // Iterate through all char tokens in the string literal and add them to
         // the `chars` vector until the end of the literal.
@@ -414,7 +426,7 @@ impl<'a> LexTokenIter<'a> {
 
                 _ => {
                     if let Some((LexTokenKind::Sym(s), _)) = LexToken::get_if_symbol_char(ch) {
-                        if s == literal_symbol {
+                        if s == lit_symbol {
                             break;
                         }
                     }
@@ -522,9 +534,17 @@ impl<'a> LexTokenIter<'a> {
     }
 
     /// Returns the string literal at the current position of the iterator.
-    fn get_lit_string(&mut self) -> LangResult<LexTokenKind> {
+    fn get_lit_string(&mut self, start_sym_lit: Sym) -> LangResult<LexTokenKind> {
+        let (string_type, start_sym_len) = match start_sym_lit {
+            Sym::DoubleQuote => (StringType::Regular, 1),
+            Sym::DoubleQuoteC => (StringType::C, 2),
+            Sym::DoubleQuoteS => (StringType::S, 2),
+            Sym::DoubleQuoteF => (StringType::F, 2),
+            _ => unreachable!("Bad start_sym_lit: {:#?}", start_sym_lit),
+        };
         Ok(LexTokenKind::Lit(Lit::String(
-            self.get_lit(Sym::DoubleQuote)?,
+            self.get_lit(Sym::DoubleQuote, start_sym_len)?,
+            string_type,
         )))
     }
 
@@ -532,7 +552,7 @@ impl<'a> LexTokenIter<'a> {
     fn get_lit_char(&mut self) -> LangResult<LexTokenKind> {
         // Since this is a char literal, need to make sure that the given
         // literal has the character length "1".
-        let char_lit = self.get_lit(Sym::SingleQuote)?;
+        let char_lit = self.get_lit(Sym::SingleQuote, 1)?;
         if char_lit.chars().count() == 1 {
             Ok(LexTokenKind::Lit(Lit::Char(char_lit)))
         } else {
@@ -792,7 +812,7 @@ mod tests {
         let mut input = "\"abc 123 åäö\"".to_owned();
         let expected = "abc 123 åäö";
         let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
-            .get_lit(Sym::DoubleQuote)
+            .get_lit(Sym::DoubleQuote, 1)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
@@ -800,7 +820,7 @@ mod tests {
         let mut input = "\'\\\\\'".to_owned();
         let expected = "\\";
         let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
-            .get_lit(Sym::SingleQuote)
+            .get_lit(Sym::SingleQuote, 1)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
@@ -808,7 +828,7 @@ mod tests {
         let mut input = "\'\\x41\'".to_owned();
         let expected = "A";
         let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
-            .get_lit(Sym::SingleQuote)
+            .get_lit(Sym::SingleQuote, 1)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
@@ -816,7 +836,7 @@ mod tests {
         let mut input = "\'\\u{980}\'".to_owned();
         let expected = "ঀ";
         let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
-            .get_lit(Sym::SingleQuote)
+            .get_lit(Sym::SingleQuote, 1)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
@@ -824,7 +844,7 @@ mod tests {
         let mut input = "\'\\n\'".to_owned();
         let expected = "\n";
         let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
-            .get_lit(Sym::SingleQuote)
+            .get_lit(Sym::SingleQuote, 1)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
@@ -832,7 +852,7 @@ mod tests {
         let mut input = "\'\\r\'".to_owned();
         let expected = "\r";
         let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
-            .get_lit(Sym::SingleQuote)
+            .get_lit(Sym::SingleQuote, 1)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
@@ -840,7 +860,7 @@ mod tests {
         let mut input = "\'\\t\'".to_owned();
         let expected = "\t";
         let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
-            .get_lit(Sym::SingleQuote)
+            .get_lit(Sym::SingleQuote, 1)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
@@ -848,7 +868,7 @@ mod tests {
         let mut input = "\'\\0\'".to_owned();
         let expected = "\0";
         let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
-            .get_lit(Sym::SingleQuote)
+            .get_lit(Sym::SingleQuote, 1)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
@@ -856,7 +876,7 @@ mod tests {
         let mut input = "\'\\\'\'".to_owned();
         let expected = "\'";
         let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
-            .get_lit(Sym::SingleQuote)
+            .get_lit(Sym::SingleQuote, 1)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
 
@@ -864,7 +884,7 @@ mod tests {
         let mut input = "\'\\\"\'".to_owned();
         let expected = "\"";
         let actual = LexTokenIter::new(unsafe { input.as_bytes_mut() }, 1)
-            .get_lit(Sym::SingleQuote)
+            .get_lit(Sym::SingleQuote, 1)
             .expect("Unable to parse literal.");
         assert_eq!(expected, actual);
     }

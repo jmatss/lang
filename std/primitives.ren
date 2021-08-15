@@ -3,6 +3,9 @@
  */
 mod std
 
+use std::Result
+use std::StringView
+
 /// Converts a `digit` to ascii.
 /// The given `digit` is expected to be a single digit (0-9).
 fn digit_to_ascii(digit: u8) -> u8 {
@@ -13,7 +16,7 @@ fn digit_to_ascii(digit: u8) -> u8 {
 }
 
 pub struct U8 {
-    pub fn to_string(number: u8) -> Result<String, {u8}> {
+    pub fn to_string(number: u8) -> Result<String, StringView> {
         var is_negative = number < 0
         var number_abs = this::abs(number)
 
@@ -119,7 +122,7 @@ pub struct U8 {
 }
 
 pub struct I8 {
-    pub fn to_string(number: i8) -> Result<String, {u8}> {
+    pub fn to_string(number: i8) -> Result<String, StringView> {
         var is_negative = number < 0
         var number_abs = this::abs(number)
 
@@ -231,7 +234,7 @@ pub struct I8 {
 }
 
 pub struct U16 {
-    pub fn to_string(number: u16) -> Result<String, {u8}> {
+    pub fn to_string(number: u16) -> Result<String, StringView> {
         var is_negative = number < 0
         var number_abs = this::abs(number)
 
@@ -337,7 +340,7 @@ pub struct U16 {
 }
 
 pub struct I16 {
-    pub fn to_string(number: i16) -> Result<String, {u8}> {
+    pub fn to_string(number: i16) -> Result<String, StringView> {
         var is_negative = number < 0
         var number_abs = this::abs(number)
 
@@ -449,7 +452,7 @@ pub struct I16 {
 }
 
 pub struct U32 {
-    pub fn to_string(number: u32) -> Result<String, {u8}> {
+    pub fn to_string(number: u32) -> Result<String, StringView> {
         var is_negative = number < 0
         var number_abs = this::abs(number)
 
@@ -555,7 +558,7 @@ pub struct U32 {
 }
 
 pub struct I32 {
-    pub fn to_string(number: i32) -> Result<String, {u8}> {
+    pub fn to_string(number: i32) -> Result<String, StringView> {
         var is_negative = number < 0
         var number_abs = this::abs(number)
 
@@ -667,7 +670,7 @@ pub struct I32 {
 }
 
 pub struct U64 {
-    pub fn to_string(number: u64) -> Result<String, {u8}> {
+    pub fn to_string(number: u64) -> Result<String, StringView> {
         var is_negative = number < 0
         var number_abs = this::abs(number)
 
@@ -773,7 +776,7 @@ pub struct U64 {
 }
 
 pub struct I64 {
-    pub fn to_string(number: i64) -> Result<String, {u8}> {
+    pub fn to_string(number: i64) -> Result<String, StringView> {
         var is_negative = number < 0
         var number_abs = this::abs(number)
 

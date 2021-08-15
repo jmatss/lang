@@ -1,5 +1,6 @@
 mod std::container
 
+use std::StringView
 use std::mem::Allocator
 use std::types::Disposable
 use std::types::Optional
@@ -16,7 +17,7 @@ pub struct ArrayList<T> {
     /// to 1 so that something can be allocated. This should be changed in the
     /// future so that a ArrayList of size 0 can be lazy initialized and only
     /// make a heap allocation if it is ever used.
-    pub fn init(cap: u32 = 0) -> Result<ArrayList<T>, {u8}> {
+    pub fn init(cap: u32 = 0) -> Result<ArrayList<T>, StringView> {
         if cap == 0 { cap = 1 }
 
         var size = cap * @size<T>()
@@ -31,7 +32,7 @@ pub struct ArrayList<T> {
         return Result::success(list)
     }
 
-    pub fn {this} push(item: T) -> Result<u32, {u8}> {
+    pub fn {this} push(item: T) -> Result<u32, StringView> {
         if this.*.len() >= this.*.cap() {
             var resize_or_error = this.resize(1)
             if err is resize_or_error.error {
@@ -71,7 +72,7 @@ pub struct ArrayList<T> {
         return Optional::value(item)
     }
 
-    pub fn {this} set(idx: u32, item: T) -> Result<T, {u8}> {
+    pub fn {this} set(idx: u32, item: T) -> Result<T, StringView> {
         if idx >= this.*.len() {
             var err = "Tried to set value at idx greater than ArrayList length."
             return Result::error(err)
@@ -92,7 +93,7 @@ pub struct ArrayList<T> {
         return this.cap
     }
 
-    fn {this} resize(min_resize: u32) -> Result<{u8}, {u8}> {
+    fn {this} resize(min_resize: u32) -> Result<{u8}, StringView> {
         var new_cap = this.*.cap() * 2
         while new_cap - this.*.len() < min_resize {
             new_cap *= 2

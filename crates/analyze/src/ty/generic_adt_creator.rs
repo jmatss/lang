@@ -19,7 +19,7 @@ use common::{
         replace::{replace_gen_impls, replace_self},
         solve::set_generic_names,
         substitution_sets::sub_sets_debug_print,
-        to_string::{to_string_path, to_string_type_id},
+        to_string::to_string_type_id,
         ty::Ty,
         ty_env::TyEnv,
         type_id::TypeId,
@@ -461,7 +461,7 @@ impl Visitor for GenericAdtCreator {
             all_types_string
         );
 
-        sub_sets_debug_print(&ctx.ty_env);
+        sub_sets_debug_print(&ctx.ty_env.lock().unwrap());
     }
 
     // TODO: Currently the assumption is that all ADTs are stored in the

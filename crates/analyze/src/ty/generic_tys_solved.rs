@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use common::{
     error::{LangError, LangErrorKind, LangResult},
-    token::block::{Block, BlockHeader},
+    token::block::Block,
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
         get::get_file_pos, substitution_sets::sub_sets_debug_print, ty::Ty, ty_env::TyEnv,
@@ -126,7 +126,7 @@ impl Visitor for GenericTysSolvedChecker {
     }
 
     fn visit_default_block(&mut self, _block: &mut Block, ctx: &mut TraverseCtx) {
-        sub_sets_debug_print(&ctx.ty_env);
+        sub_sets_debug_print(&ctx.ty_env.lock().unwrap());
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {

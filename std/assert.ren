@@ -1,14 +1,17 @@
 mod std
 
+use std::AsView
+use std::StringView
+
 ext fn printf(format: {u8}, ...) -> i32
 ext fn exit(exit_code: i32)
 ext fn strlen(str: {u8}) -> u32
 
-fn assert(expr: bool, msg: {u8} = "") {
+fn assert<V>(expr: bool, msg: StringView = @null<StringView>()) {
     if not expr {
-        printf("\nASSERT FAILED\n")
-        if strlen(msg) > 0 {
-            printf("%s\n", msg)
+        std::print("\nASSERT FAILED")
+        if not @is_null(msg.ptr) {
+            std::print(msg)
         }
         exit(1)
     }

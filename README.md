@@ -561,7 +561,7 @@ Gets the name of the given variable `var` as a null terminated C string.
 Creates a null/empty value of the specified type `T`.
 
 ### `@is_null(expr: T)`
-Checks if the given argument `expr` is null/0.
+Checks if the given argument `expr` is null/0. The type `T` must be a pointer type.
 
 ### `@ptr_add(ptr: {T}, amount: u32)`
 Adds the value of the second parameter `amount` times the size of the type `T` to the pointer `ptr`.
