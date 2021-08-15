@@ -42,19 +42,19 @@ fn main() -> i32
     var ts = TestStruct {}
 
     var res1 = TestStruct::func1()
-    printf("res1: %d", res1 as i32);
+    printf(c"res1: %d", res1 as i32);
     std::assert(expected == res1)
 
     var res2 = ts.func2()
-    printf("\nres2: %d", res2 as i32);
+    printf(c"\nres2: %d", res2 as i32);
     std::assert(expected == res2)
 
     var res3 = ts.&.func3()
-    printf("\nres3: %d", res3 as i32);
+    printf(c"\nres3: %d", res3 as i32);
     std::assert(expected == res3)
 
     var res4 = TestStructWithGen<f32>::func<i8>(12)
-    printf("\nres4: %d", res4 as i32);
+    printf(c"\nres4: %d", res4 as i32);
     std::assert(expected == res4)
 
     return 0

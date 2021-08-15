@@ -20,7 +20,7 @@ fn main() -> i32 {
         y = Optional::empty()
     }
 
-    printf("y.get(): %d", y.&.get() as i32)
+    printf(c"y.get(): %d", y.&.get() as i32)
     std::assert(y.value == 123)
 
     return 0

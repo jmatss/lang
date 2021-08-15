@@ -15,12 +15,12 @@ fn test_normal() {
     match value {
         1 {
             correct = true
-            printf("1")
+            printf(c"1")
         }
 
         default {
             correct = false
-            printf("default")
+            printf(c"default")
         }
     }
 
@@ -34,12 +34,12 @@ fn test_default() {
     match value {
         1 {
             correct = false
-            printf("\n1")
+            printf(c"\n1")
         }
 
         default {
             correct = true
-            printf("\ndefault")
+            printf(c"\ndefault")
         }
     }
 
@@ -58,12 +58,12 @@ fn test_enum() {
     match value {
         TestEnum::FIRST {
             correct = false
-            printf("\nFIRST")
+            printf(c"\nFIRST")
         }
 
         TestEnum::SECOND {
             correct = true
-            printf("\nSECOND")
+            printf(c"\nSECOND")
         }
     }
 

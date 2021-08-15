@@ -4,33 +4,35 @@ ext fn printf(format: {u8}, ...) -> i32
 
 fn main() -> i32 {
     var str1_or_error = String::init_size(1)
+    printf(c"test2")
     std::assert(str1_or_error.&.is_success())
 
     var str1 = str1_or_error.&.get_success()
     var str1_len = str1.len()
     var str1_cap = str1.cap()
-    printf("str1 -- len: %d, cap: %d", str1_len, str1_cap)
+    printf(c"str1 -- len: %d, cap: %d", str1_len, str1_cap)
     str1.&.deinit()
     std::assert(str1_len == 0 and str1_cap == 1)
 
 
-    var str2_or_error = String::init("firstsecond")
+    var str2_or_error = String::init(c"firstsecond")
     std::assert(str2_or_error.&.is_success())
-    var str3_or_error = String::init("notIncluded_first", 12, 5)
+    var str3_or_error = String::init(c"notIncluded_first", 12, 5)
     std::assert(str3_or_error.&.is_success())
 
     var str2 = str2_or_error.&.get_success()
     var str2_c = str2.to_c_string().&.get_success()
     var str3 = str3_or_error.&.get_success()
     var str3_c = str3.to_c_string().&.get_success()
-    printf("\nstr2 -- \"%s\", len: %d, cap: %d", str2_c, str2.len(), str2.cap())
-    printf("\nstr3 -- \"%s\", len: %d, cap: %d", str3_c, str3.len(), str3.cap())
-    str3.&.append_lit("second")
+    printf(c"\nstr2 -- \"%s\", len: %d, cap: %d", str2_c, str2.len(), str2.cap())
+    printf(c"\nstr3 -- \"%s\", len: %d, cap: %d", str3_c, str3.len(), str3.cap())
+    str3.&.append_lit(c"second")
     var str3_c_after = str3.to_c_string().&.get_success()
-    printf("\nstr3 after append -- \"%s\", len: %d, cap: %d", str3_c_after, str3.len(), str3.cap())
+    printf(c"\nstr3 after append -- \"%s\", len: %d, cap: %d", str3_c_after, str3.len(), str3.cap())
     std::assert(str2.&.eq(str3.&))
     str2.&.deinit()
     str3.&.deinit()
+
 
     return 0
 }

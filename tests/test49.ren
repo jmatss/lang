@@ -3,20 +3,20 @@ ext fn printf(format: {u8}, ...) -> i32
 fn main() -> i32 {
     var argc = @argc()
     var argv = @argv()
-    printf("argc: %d, argv: %s", argc, argv.*)
+    printf(c"argc: %d, argv: %s", argc, argv.*)
     std::assert(argc == 1)
 
 
     // This test assumes that the pointer size is 8 bytes.
     var x: i64 = 3
-    printf("\nold_address: 0x%p", x.&)
+    printf(c"\nold_address: 0x%p", x.&)
 
     var new_ptr_add = @ptr_add(x.&, 2)
-    printf("\nnew_ptr_add: 0x%p", new_ptr_add)
+    printf(c"\nnew_ptr_add: 0x%p", new_ptr_add)
     std::assert(new_ptr_add as i64 - x.& as i64 == 16)
 
     var new_ptr_sub = @ptr_sub(x.&, 2)
-    printf("\nnew_ptr_sub: 0x%p", new_ptr_sub)
+    printf(c"\nnew_ptr_sub: 0x%p", new_ptr_sub)
     std::assert(x.& as i64 - new_ptr_sub as i64 == 16)
 
     return 0

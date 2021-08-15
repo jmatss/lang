@@ -7,24 +7,24 @@ struct TestStruct {
 fn main() -> i32 {
     var x = 3
     x.++
-    printf("x inc: %d", x)
+    printf(c"x inc: %d", x)
     std::assert(x == 4)
 
     x.--
-    printf("\nx dec: %d", x)
+    printf(c"\nx dec: %d", x)
     std::assert(x == 3)
     
     var test_struct = TestStruct { 3 }
     test_struct.x.++
-    printf("\ntest_struct.x inc: %lld", test_struct.x)
+    printf(c"\ntest_struct.x inc: %lld", test_struct.x)
     std::assert(test_struct.x == 4)
 
     test_struct.x.--
-    printf("\ntest_struct.x dec: %lld", test_struct.x)
+    printf(c"\ntest_struct.x dec: %lld", test_struct.x)
     std::assert(test_struct.x == 3)
     
     var eval = test_struct.x.++ - 2
-    printf("\neval: %lld", eval)
+    printf(c"\neval: %lld", eval)
     std::assert(eval == 2)
 
     return 0

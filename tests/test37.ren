@@ -8,9 +8,9 @@ fn main() -> i32 {
     var ptr_1_2 = int_1.&
     var ptr_2   = int_2.&
 
-    printf("ptr_1_1: %p", ptr_1_1)
-    printf("\nptr_1_2: %p", ptr_1_2)
-    printf("\nptr_2: %p", ptr_2)
+    printf(c"ptr_1_1: %p", ptr_1_1)
+    printf(c"\nptr_1_2: %p", ptr_1_2)
+    printf(c"\nptr_2: %p", ptr_2)
 
     std::assert(ptr_1_1 == ptr_1_2)
     std::assert(ptr_1_1 != ptr_2)

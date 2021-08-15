@@ -2,7 +2,7 @@ ext fn printf(format: {u8}, ...) -> i32
 
 fn main() -> i32 {
     var k = 0
-    defer printf("\nHELLO - k: %d", k)
+    defer printf(c"\nHELLO - k: %d", k)
     if true {
         k += 1
     }
@@ -11,7 +11,7 @@ fn main() -> i32 {
     var abc = true
     while i < 3 {
         // Should be executed at the end of every iteration.
-        defer printf("\ni: %d", i)
+        defer printf(c"\ni: %d", i)
         i += 1
         if abc  {
             continue
@@ -24,7 +24,7 @@ fn main() -> i32 {
     var early_return = false
 
     {
-        defer printf("\na, x: %d", x)
+        defer printf(c"\na, x: %d", x)
         x += 1
 
         if early_return {
@@ -33,11 +33,11 @@ fn main() -> i32 {
             x += 2
         }
 
-        defer printf("\nb, x: %d", x)
+        defer printf(c"\nb, x: %d", x)
         x += 3
     }
 
-    printf("\nEND")
+    printf(c"\nEND")
 
     return 0
 }

@@ -3,9 +3,9 @@ ext fn printf(format: {u8}, ...) -> i32
 fn main() -> i32 {
     var f = 1.0 as f64
     if f > 2.0 {
-        printf("unreachable!")
+        printf(c"unreachable!")
     } else {
-        printf("Result: %f", f)
+        printf(c"Result: %f", f)
     }
     return 0
 }

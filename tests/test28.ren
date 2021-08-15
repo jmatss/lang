@@ -18,7 +18,7 @@ fn main() -> i32 {
     test_struct.two.[1] = 2
 
     printf(
-        "test_struct.two.[0]: %lld, test_struct.two.[1]: %lld, test_struct.inner: %lld",
+        c"test_struct.two.[0]: %lld, test_struct.two.[1]: %lld, test_struct.inner: %lld",
         test_struct.two.[0], test_struct.two.[1], test_struct.inner
     )
     std::assert(test_struct.two.[0] == 1 and test_struct.two.[1] == 2 and test_struct.inner == 123)
@@ -30,14 +30,14 @@ fn main() -> i32 {
     outer_test_struct.inner_test_struct.two.[1] = 4
 
     printf(
-        "\nouter_test_struct.inner_test_struct.two.[0]: %lld, outer_test_struct.inner_test_struct.two.[1]: %lld",
+        c"\nouter_test_struct.inner_test_struct.two.[0]: %lld, outer_test_struct.inner_test_struct.two.[1]: %lld",
         outer_test_struct.inner_test_struct.two.[0], outer_test_struct.inner_test_struct.two.[1]
     )
     std::assert(outer_test_struct.inner_test_struct.two.[0] == 3 and outer_test_struct.inner_test_struct.two.[1] == 4)
 
     // Modifying the outer struct shouldn't modify the old inner `test_struct` since it is passed by value.
     printf(
-        "\ntest_struct.two.[0]: %lld, test_struct.two.[1]: %lld",
+        c"\ntest_struct.two.[0]: %lld, test_struct.two.[1]: %lld",
         test_struct.two.[0], test_struct.two.[1]
     )
     std::assert(test_struct.two.[0] == 1 and test_struct.two.[1] == 2)

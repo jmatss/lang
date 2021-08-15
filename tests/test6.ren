@@ -17,7 +17,7 @@ fn fac(n: i32) -> i32 {
 
 fn main() -> i32 {   
     var n: i32 = 7
-    printf("n: %d, result: %d", n, fac(n))
+    printf(c"n: %d, result: %d", n, fac(n))
 
     var buf: {u8} = malloc(20)
 

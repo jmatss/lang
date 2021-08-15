@@ -18,7 +18,7 @@ fn main() -> i32 {
 
     if val is abc.var_a {
         correct = true
-        printf("%f", val)
+        printf(c"%f", val)
     } else {
         correct = false
     }
@@ -28,7 +28,7 @@ fn main() -> i32 {
         correct = false
     } else {
         correct = true
-        printf("\nabc.another not a match")
+        printf(c"\nabc.another not a match")
     }
     std::assert(correct)
 
@@ -36,13 +36,13 @@ fn main() -> i32 {
         correct = false
     } else {
         correct = true
-        printf("\ndef.var_a not a match")
+        printf(c"\ndef.var_a not a match")
     }
     std::assert(correct)
 
     if val is def.another {
         correct = true
-        printf("\n%d", val as i32)
+        printf(c"\n%d", val as i32)
     } else {
         correct = false
     }

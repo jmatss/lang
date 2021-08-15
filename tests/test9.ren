@@ -21,7 +21,7 @@ fn main() -> i32 {
     double(k.y.*.b)
     k.y.*.b.* += 2
     std::assert(i == 8)
-    printf("Output: %d", i)
+    printf(c"Output: %d", i)
 
     return 0
 }

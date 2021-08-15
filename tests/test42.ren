@@ -34,18 +34,18 @@ fn main() -> i32 {
     var needs_deinit
 
     kind = ErrorKind::FIRST
-    msg = "A stack allocated error message."
+    msg = c"A stack allocated error message."
     needs_deinit = false
     var stack_err = Error { kind, msg, needs_deinit }
 
     kind = ErrorKind::SECOND
-    msg_or_error = Allocator::clone<u8>("A heap allocated error message.", 32)
+    msg_or_error = Allocator::clone<u8>(c"A heap allocated error message.", 32)
     msg = msg_or_error.&.get_success()
     needs_deinit = true
     var heap_err = Error { kind, msg, needs_deinit }
 
-    printf("Stack: %s", stack_err.msg)
-    printf("\nHeap: %s", heap_err.msg)
+    printf(c"Stack: %s", stack_err.msg)
+    printf(c"\nHeap: %s", heap_err.msg)
     
     heap_err.&.deinit()
 

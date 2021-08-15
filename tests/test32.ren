@@ -26,17 +26,17 @@ fn main() -> i32 {
     var expected_f32 = 123.
     var expected_f64 = 456.
 
-    printf("expected_i32: %d, test_struct_i32.inner: %d\n", expected_i32, test_struct_i32.inner)
+    printf(c"expected_i32: %d, test_struct_i32.inner: %d\n", expected_i32, test_struct_i32.inner)
     std::assert(expected_i32 == test_struct_i32.inner)
-    printf("expected_u64: %llu, test_struct_u64.inner: %llu\n", expected_u64, test_struct_u64.inner)
+    printf(c"expected_u64: %llu, test_struct_u64.inner: %llu\n", expected_u64, test_struct_u64.inner)
     std::assert(expected_u64 == test_struct_u64.inner)
-    printf("expected_i16: %d, test_struct_i16.inner: %d\n", expected_i16 as i32, test_struct_i16.inner as i32)
+    printf(c"expected_i16: %d, test_struct_i16.inner: %d\n", expected_i16 as i32, test_struct_i16.inner as i32)
     std::assert(expected_i16 == test_struct_i16.inner)
-    printf("expected_i8: %d, test_struct_i8.inner: %d\n", expected_i8 as i32, test_struct_i8.inner as i32)
+    printf(c"expected_i8: %d, test_struct_i8.inner: %d\n", expected_i8 as i32, test_struct_i8.inner as i32)
     std::assert(expected_i8 == test_struct_i8.inner)
-    printf("expected_f32: %f, test_struct_f32.inner: %f\n", expected_f32 as f64, test_struct_f32.inner as f64)
+    printf(c"expected_f32: %f, test_struct_f32.inner: %f\n", expected_f32 as f64, test_struct_f32.inner as f64)
     std::assert(expected_f32 == test_struct_f32.inner)
-    printf("expected_f64: %f, test_struct_f64.inner: %f", expected_f64, test_struct_f64.inner)
+    printf(c"expected_f64: %f, test_struct_f64.inner: %f", expected_f64, test_struct_f64.inner)
     std::assert(expected_f64 == test_struct_f64.inner)
 
     return 0

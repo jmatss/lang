@@ -10,7 +10,7 @@ fn main() -> i32 {
     var ptr = integer.&
 
     var ret = ptr.* + ptr.*
-    printf("ret: %d", ret)
+    printf(c"ret: %d", ret)
     //std::assert(ret == 246)
 
     return 0

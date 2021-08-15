@@ -1,7 +1,7 @@
 use std::StringView
 
 fn main() -> i32 {
-    var view = StringView::new("test output")
+    var view = StringView::new(c"test output")
     //var res
 
 // TODO:

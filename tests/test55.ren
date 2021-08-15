@@ -12,7 +12,7 @@ fn main() -> i32 {
         global_var, global_var_init, global_var_init_u8
     )
     defer str.&.deinit()
-    printf("%s", str.to_c_string().&.get_success())
+    printf(c"%s", str.to_c_string().&.get_success())
 
     std::assert(global_var == 0)
     std::assert(global_var_init == 1)

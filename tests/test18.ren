@@ -18,8 +18,8 @@ fn main() -> i32 {
 
     var actual_result = test_struct.&.add(8)
 
-    printf("\ntest_struct.a: %d, test_struct.b.*: %f, test_struct.c: %d", test_struct.a, test_struct.b.* as f64, test_struct.c)
-    printf("\nactual_result: %d", actual_result)
+    printf(c"\ntest_struct.a: %d, test_struct.b.*: %f, test_struct.c: %d", test_struct.a, test_struct.b.* as f64, test_struct.c)
+    printf(c"\nactual_result: %d", actual_result)
     std::assert(b == 2.0)
     std::assert(test_struct.a == 20 and test_struct.b.* == 2.0 and test_struct.c == 2)
     std::assert(actual_result == 30)

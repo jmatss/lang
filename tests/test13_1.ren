@@ -4,7 +4,7 @@ fn main() -> i32 {
     var i = 3
 
     second_file::double(i.&)
-    printf("i: %d", i)
+    printf(c"i: %d", i)
 
     return 0
 }

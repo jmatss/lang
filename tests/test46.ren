@@ -36,11 +36,11 @@ fn main() -> i32
     test_fn2(fnptr test_fn2_impl)
 
     var result3 = test_fn3(fnptr test_fn3_impl)
-    printf("result3: %d", result3 as i32)
+    printf(c"result3: %d", result3 as i32)
     std::assert(result3 == 3)
 
     var result4 = test_fn4(fnptr test_fn4_impl)
-    printf("\nresult4: %f", result4 as f64)
+    printf(c"\nresult4: %f", result4 as f64)
     std::assert(result4 == 4.4)
 
     return 0
