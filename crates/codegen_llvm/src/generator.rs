@@ -16,7 +16,6 @@ use common::{
     ctx::analyze_ctx::AnalyzeCtx,
     error::{LangError, LangErrorKind::CodeGenError, LangResult},
     file::FilePosition,
-    path::LangPathPart,
     token::{
         ast::AstToken,
         expr::{Expr, Var},
@@ -491,12 +490,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             }
 
-            Ty::CompoundType(inner_ty, generics, ..) => {
+            Ty::CompoundType(inner_ty, ..) => {
                 match inner_ty {
-                    InnerTy::Struct(mut full_path) | InnerTy::Union(mut full_path) => {
-                        let last_part = full_path.pop().unwrap();
-                        full_path.push(LangPathPart(last_part.0, Some(generics)));
-
+                    InnerTy::Struct(full_path) | InnerTy::Union(full_path) => {
                         let struct_type_opt = self.module.get_struct_type(&to_string_path(
                             &self.analyze_ctx.ty_env.lock().unwrap(),
                             &full_path,
@@ -517,10 +513,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                             ));
                         }
                     }
-                    InnerTy::Enum(mut full_path) => {
-                        let last_part = full_path.pop().unwrap();
-                        full_path.push(LangPathPart(last_part.0, Some(generics)));
-
+                    InnerTy::Enum(full_path) => {
                         let struct_type_opt = self.module.get_struct_type(&to_string_path(
                             &self.analyze_ctx.ty_env.lock().unwrap(),
                             &full_path,

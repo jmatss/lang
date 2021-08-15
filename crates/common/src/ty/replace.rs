@@ -19,9 +19,11 @@ use super::{generics::Generics, inner_ty::InnerTy, ty_env::TyEnv};
 /// inside a "CompoundType" into "Generic"s.
 pub fn replace_gens(ty_env: &mut TyEnv, id: TypeId, generics: &Generics) -> LangResult<()> {
     match ty_env.ty(id)?.clone() {
-        Ty::CompoundType(InnerTy::UnknownIdent(path, ..), gens, type_info) => {
-            for gen_type_id in gens.iter_types() {
-                replace_gens(ty_env, *gen_type_id, generics)?;
+        Ty::CompoundType(InnerTy::UnknownIdent(path, ..), type_info) => {
+            if let Some(gens) = path.gens() {
+                for gen_type_id in gens.iter_types() {
+                    replace_gens(ty_env, *gen_type_id, generics)?;
+                }
             }
 
             if path.count() == 1 {
@@ -130,33 +132,18 @@ pub fn replace_gen_impls(
 
         // Need to update generics both in the type `gens_clone` and the
         // generics declared inside a potential LangPath of the InnerTy.
-        Ty::CompoundType(inner_ty, gens_clone, ..) => {
+        Ty::CompoundType(inner_ty, ..) => {
             let mut was_updated = false;
-
-            for gen_type_id in gens_clone.iter_types_mut() {
-                if let Some(new_gen_type_id) =
-                    replace_gen_impls(ty_env, ast_ctx, *gen_type_id, generics_impl)?
-                {
-                    *gen_type_id = new_gen_type_id;
-                    was_updated = true;
-                }
-            }
-
-            if let Some(path) = inner_ty.get_ident_mut() {
-                if let Some(inner_gens_clune) =
-                    path.last_mut().map(|part| part.1.as_mut()).flatten()
-                {
-                    for gen_type_id in inner_gens_clune.iter_types_mut() {
-                        if let Some(new_gen_type_id) =
-                            replace_gen_impls(ty_env, ast_ctx, *gen_type_id, generics_impl)?
-                        {
-                            *gen_type_id = new_gen_type_id;
-                            was_updated = true;
-                        }
+            if let Some(gens) = inner_ty.gens_mut() {
+                for gen_type_id in gens.iter_types_mut() {
+                    if let Some(new_gen_type_id) =
+                        replace_gen_impls(ty_env, ast_ctx, *gen_type_id, generics_impl)?
+                    {
+                        *gen_type_id = new_gen_type_id;
+                        was_updated = true;
                     }
                 }
             }
-
             was_updated
         }
 
@@ -394,14 +381,16 @@ pub fn replace_gens_with_gen_instances(
             true
         }
 
-        Ty::CompoundType(_, gens_clone, ..) => {
+        Ty::CompoundType(inner_ty, ..) => {
             let mut was_updated = false;
-            for gen_type_id in gens_clone.iter_types_mut() {
-                if let Some(new_gen_type_id) =
-                    replace_gens_with_gen_instances(ty_env, *gen_type_id, unique_id)?
-                {
-                    *gen_type_id = new_gen_type_id;
-                    was_updated = true;
+            if let Some(gens) = inner_ty.gens_mut() {
+                for gen_type_id in gens.iter_types_mut() {
+                    if let Some(new_gen_type_id) =
+                        replace_gens_with_gen_instances(ty_env, *gen_type_id, unique_id)?
+                    {
+                        *gen_type_id = new_gen_type_id;
+                        was_updated = true;
+                    }
                 }
             }
             was_updated
@@ -513,12 +502,14 @@ pub fn replace_unique_ids(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<Opt
             true
         }
 
-        Ty::CompoundType(_, gens_clone, ..) => {
+        Ty::CompoundType(inner_ty, ..) => {
             let mut was_updated = false;
-            for gen_type_id in gens_clone.iter_types_mut() {
-                if let Some(new_gen_type_id) = replace_unique_ids(ty_env, *gen_type_id)? {
-                    *gen_type_id = new_gen_type_id;
-                    was_updated = true;
+            if let Some(gens) = inner_ty.gens_mut() {
+                for gen_type_id in gens.iter_types_mut() {
+                    if let Some(new_gen_type_id) = replace_unique_ids(ty_env, *gen_type_id)? {
+                        *gen_type_id = new_gen_type_id;
+                        was_updated = true;
+                    }
                 }
             }
             was_updated
@@ -604,13 +595,15 @@ pub fn convert_default(ty_env: &Mutex<TyEnv>, type_id: TypeId) -> LangResult<()>
 
     let ty_clone = ty_env.lock().unwrap().ty_clone(inf_type_id)?;
     match ty_clone {
-        Ty::CompoundType(inner_ty, generics, ..) => {
+        Ty::CompoundType(inner_ty, ..) => {
             if inner_ty.is_unknown_int() || inner_ty.is_unknown_float() {
                 replace_default(&mut ty_env.lock().unwrap(), inf_type_id)?;
             }
 
-            for gen_type_id in generics.iter_types() {
-                convert_default(ty_env, *gen_type_id)?;
+            if let Some(gens) = inner_ty.gens() {
+                for gen_type_id in gens.iter_types() {
+                    convert_default(ty_env, *gen_type_id)?;
+                }
             }
         }
 

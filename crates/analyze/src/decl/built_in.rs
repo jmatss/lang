@@ -2,9 +2,8 @@ use std::{collections::HashMap, sync::Mutex};
 
 use common::{
     error::LangResult,
-    path::{LangPath, LangPathPart},
     token::{block::BuiltIn, expr::Var},
-    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, ty_env::TyEnv, type_info::TypeInfo},
+    ty::{inner_ty::InnerTy, ty::Ty, ty_env::TyEnv, type_info::TypeInfo},
 };
 
 /// Stores information about all built-in functions into a hashmap.
@@ -15,38 +14,18 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let unique_id = ty_env_guard.new_unique_id();
     let any_type_id = ty_env_guard.id(&Ty::Any(unique_id, TypeInfo::BuiltIn))?;
     let any_ptr_type_id = ty_env_guard.id(&Ty::Pointer(any_type_id, TypeInfo::BuiltIn))?;
-    let u32_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::U32,
-        Generics::empty(),
-        TypeInfo::BuiltIn,
-    ))?;
-    let u8_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::U8,
-        Generics::empty(),
-        TypeInfo::BuiltIn,
-    ))?;
+    let u32_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::U32, TypeInfo::BuiltIn))?;
+    let u8_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::U8, TypeInfo::BuiltIn))?;
     let u8_ptr_type_id = ty_env_guard.id(&Ty::Pointer(u8_type_id, TypeInfo::BuiltIn))?;
     let u8_ptr_ptr_type_id = ty_env_guard.id(&Ty::Pointer(u8_ptr_type_id, TypeInfo::BuiltIn))?;
-    let bool_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::Boolean,
-        Generics::empty(),
-        TypeInfo::BuiltIn,
-    ))?;
-    let void_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::Void,
-        Generics::empty(),
-        TypeInfo::BuiltIn,
-    ))?;
-    let string_path = ["std".into(), "String".into()].into();
+    let bool_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::Boolean, TypeInfo::BuiltIn))?;
+    let void_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::Void, TypeInfo::BuiltIn))?;
     let string_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::Struct(string_path),
-        Generics::empty(),
+        InnerTy::Struct(["std".into(), "String".into()].into()),
         TypeInfo::BuiltIn,
     ))?;
-    let string_view_path = ["std".into(), "StringView".into()].into();
     let string_view_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::Struct(string_view_path),
-        Generics::empty(),
+        InnerTy::Struct(["std".into(), "StringView".into()].into()),
         TypeInfo::BuiltIn,
     ))?;
 

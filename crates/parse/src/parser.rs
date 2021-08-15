@@ -758,13 +758,7 @@ impl<'a> ParseTokenIter<'a> {
                     file_pos.set_end(&gens_file_pos)?;
                 }
 
-                let generics = if let Some(gens) = gens {
-                    gens
-                } else {
-                    Generics::empty()
-                };
-
-                path_builder.add_path_gen(&ident, &generics);
+                path_builder.add_path_with_gen(&ident, gens.as_ref());
             } else {
                 path_builder.add_path(&ident);
             }
@@ -777,11 +771,6 @@ impl<'a> ParseTokenIter<'a> {
                 if let LexTokenKind::Sym(Sym::DoubleColon) = lex_token.kind {
                     self.next_skip_space();
                     continue;
-                /*
-                } else if lex_token.is_break_symbol() {
-                    self.next_skip_space();
-                    break;
-                */
                 } else {
                     break;
                 }

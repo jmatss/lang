@@ -15,10 +15,12 @@ pub fn contains_generic_with_name(
             gen_names.contains(gen_name)
         }
 
-        Ty::CompoundType(_, gens, ..) => {
-            for type_id in gens.iter_types() {
-                if contains_generic_with_name(ty_env, *type_id, gen_names)? {
-                    return Ok(true);
+        Ty::CompoundType(inner_ty, ..) => {
+            if let Some(gens) = inner_ty.gens() {
+                for type_id in gens.iter_types() {
+                    if contains_generic_with_name(ty_env, *type_id, gen_names)? {
+                        return Ok(true);
+                    }
                 }
             }
             false
@@ -105,12 +107,14 @@ pub fn contains_ty_shallow(
     }
 
     Ok(match parent_ty {
-        Ty::CompoundType(_, gens, _) => {
+        Ty::CompoundType(inner_ty, ..) => {
             let mut contains = false;
-            for type_id in gens.iter_types() {
-                if contains_ty_shallow(ty_env, *type_id, child_ty)? {
-                    contains = true;
-                    break;
+            if let Some(gens) = inner_ty.gens() {
+                for type_id in gens.iter_types() {
+                    if contains_ty_shallow(ty_env, *type_id, child_ty)? {
+                        contains = true;
+                        break;
+                    }
                 }
             }
             contains

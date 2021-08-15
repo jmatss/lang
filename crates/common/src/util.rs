@@ -1,5 +1,5 @@
 use crate::{
-    path::{LangPath, LangPathPart},
+    path::LangPath,
     ty::{
         generics::Generics,
         to_string::{to_string_generics, to_string_path},
@@ -12,22 +12,17 @@ use crate::{
 pub fn to_method_name(
     ty_env: &TyEnv,
     adt_path: &LangPath,
-    adt_generics: Option<&Generics>,
     method_name: &str,
     method_generics: Option<&Generics>,
 ) -> String {
-    let mut adt_path_clone = adt_path.clone();
-    let last_part = adt_path_clone.pop().unwrap();
-    adt_path_clone.push(LangPathPart(last_part.0, adt_generics.cloned()));
-    let adt_generic_name = to_string_path(ty_env, &adt_path_clone);
-
-    let method_generic_name = if let Some(method_generics) = method_generics {
+    let adt_name_with_gens = to_string_path(ty_env, &adt_path);
+    let method_name_with_gens = if let Some(method_generics) = method_generics {
         to_generic_name(ty_env, &method_name, method_generics)
     } else {
         method_name.into()
     };
 
-    format!("{}.{}", adt_generic_name, method_generic_name)
+    format!("{}.{}", adt_name_with_gens, method_name_with_gens)
 }
 
 /// Adds the `copy_nr` information to the end of a variable name. This will come

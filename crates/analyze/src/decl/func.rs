@@ -14,7 +14,6 @@ use common::{
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
-        generics::Generics,
         inner_ty::InnerTy,
         to_string::{to_string_path, to_string_type_id},
         ty::Ty,
@@ -117,13 +116,12 @@ impl DeclFnAnalyzer {
             static THIS_VAR_NAME: &str = "this";
             let mut func = func.as_ref().write().unwrap();
 
-            let generics = Generics::new();
-
-            let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
-                inner_ty,
-                generics,
-                TypeInfo::None,
-            )) {
+            let type_id = match ctx
+                .ty_env
+                .lock()
+                .unwrap()
+                .id(&Ty::CompoundType(inner_ty, TypeInfo::None))
+            {
                 Ok(type_id) => type_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -248,14 +246,13 @@ impl Visitor for DeclFnAnalyzer {
             }
         };
 
-        let adt_type_id =
-            match ty_env_guard.id(&Ty::CompoundType(inner_ty, Generics::new(), TypeInfo::None)) {
-                Ok(adt_type_id) => adt_type_id,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+        let adt_type_id = match ty_env_guard.id(&Ty::CompoundType(inner_ty, TypeInfo::None)) {
+            Ok(adt_type_id) => adt_type_id,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
 
         for body_token in body {
             if body_token.is_skippable() {

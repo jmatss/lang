@@ -10,15 +10,14 @@ use crate::{
     UniqueId,
 };
 
-use super::{
-    generics::Generics, inner_ty::InnerTy, ty_env::TyEnv, type_id::TypeId, type_info::TypeInfo,
-};
+use super::{inner_ty::InnerTy, ty_env::TyEnv, type_id::TypeId, type_info::TypeInfo};
 
 #[derive(Debug, Clone)]
 pub enum Ty {
     /// A base type that can contain generic types. The first boxed type is
-    /// the actual type and the vector of types are the generic types.
-    CompoundType(InnerTy, Generics, TypeInfo),
+    /// the actual type. If this type contains generics, it will be stored inside
+    /// the ADT path of the `InnerTy`.
+    CompoundType(InnerTy, TypeInfo),
 
     /// A pointer to a type.
     Pointer(TypeId, TypeInfo),
@@ -108,10 +107,9 @@ impl TyEnvHash for Ty {
         state: &mut H,
     ) -> LangResult<()> {
         match self {
-            Ty::CompoundType(inner_ty, gens, _) => {
+            Ty::CompoundType(inner_ty, ..) => {
                 0.hash(state);
                 inner_ty.hash_with_state(ty_env, deref_type, state)?;
-                gens.hash_with_state(ty_env, deref_type, state)?;
             }
             Ty::Pointer(type_id, _) => {
                 1.hash(state);

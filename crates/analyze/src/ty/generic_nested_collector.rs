@@ -81,11 +81,13 @@ impl GenericNestedCollector {
         }
 
         match ty_env.ty(type_id)?.clone() {
-            Ty::CompoundType(inner_ty, generics, _) => {
+            Ty::CompoundType(inner_ty, ..) => {
                 let mut contains_generic = false;
-                for gen_type_id in generics.iter_types() {
-                    if contains_generic_shallow(ty_env, *gen_type_id)? {
-                        contains_generic = true;
+                if let Some(gens) = inner_ty.gens() {
+                    for gen_type_id in gens.iter_types() {
+                        if contains_generic_shallow(ty_env, *gen_type_id)? {
+                            contains_generic = true;
+                        }
                     }
                 }
 

@@ -69,9 +69,11 @@ impl GenericTysSolvedChecker {
                 }
             }
 
-            Ty::CompoundType(_, gen_tys, _) => {
-                for gen_type_id in gen_tys.iter_types() {
-                    self.assert_generics_solved(ty_env, *gen_type_id)?;
+            Ty::CompoundType(inner_ty, ..) => {
+                if let Some(gens) = inner_ty.gens() {
+                    for gen_type_id in gens.iter_types() {
+                        self.assert_generics_solved(ty_env, *gen_type_id)?;
+                    }
                 }
             }
 

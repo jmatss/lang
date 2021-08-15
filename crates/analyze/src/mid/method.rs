@@ -146,9 +146,10 @@ impl Visitor for MethodAnalyzer {
         // to see if the module/path of the function call represents a ADT.
         // If that is the case, this is a static function call on that ADT.
         if fn_call.module.count() > 0 {
+            let potential_adt_path = &fn_call.module;
             let full_path_opt = if let Ok(adt) = ctx.ast_ctx.get_adt_partial(
                 &ctx.ty_env.lock().unwrap(),
-                &fn_call.module.without_gens(),
+                &potential_adt_path.without_gens(),
                 ctx.block_id,
             ) {
                 let adt = adt.as_ref().read().unwrap();
@@ -162,19 +163,8 @@ impl Visitor for MethodAnalyzer {
             };
 
             if let Some(full_path) = full_path_opt {
-                let gens = if let Some(gens) = full_path
-                    .last()
-                    .map(|part| part.generics().as_ref())
-                    .flatten()
-                {
-                    gens.clone()
-                } else {
-                    Generics::empty()
-                };
-
                 let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
                     InnerTy::UnknownIdent(full_path, ctx.block_id),
-                    gens,
                     TypeInfo::Default(ctx.file_pos.to_owned()),
                 )) {
                     Ok(type_id) => type_id,
@@ -202,19 +192,15 @@ impl Visitor for MethodAnalyzer {
 
             if let Some(adt_path) = &self.adt_path {
                 if possible_gen_or_this == "this" {
-                    let this_gens = if let Some(this_gens) = first_part.1.clone() {
-                        this_gens
-                    } else {
-                        Generics::empty()
-                    };
-
+                    let this_gens = first_part.generics().as_ref();
                     let fn_call_path = fn_call.module.clone_push(
                         &fn_call.name,
                         fn_call.generics.as_ref(),
                         fn_call.file_pos,
                     );
+
                     let new_gens =
-                        match combine_generics(ctx, Some(adt_path), &this_gens, &fn_call_path) {
+                        match combine_generics(ctx, Some(adt_path), this_gens, &fn_call_path) {
                             Ok(new_gens) => new_gens,
                             Err(err) => {
                                 self.errors.push(err);
@@ -222,9 +208,9 @@ impl Visitor for MethodAnalyzer {
                             }
                         };
 
+                    let adt_path_with_gens = adt_path.with_gens_opt(new_gens);
                     let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
-                        InnerTy::UnknownIdent(adt_path.to_owned(), ctx.block_id),
-                        new_gens,
+                        InnerTy::UnknownIdent(adt_path_with_gens, ctx.block_id),
                         TypeInfo::None,
                     )) {
                         Ok(type_id) => type_id,

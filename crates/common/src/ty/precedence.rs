@@ -102,7 +102,7 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (Ty::Any(..), _) => Ok(Ordering::Greater),
         (_, Ty::Any(..)) => Ok(Ordering::Less),
 
-        (Ty::CompoundType(inner_a, _, info_a), Ty::CompoundType(inner_b, _, info_b))
+        (Ty::CompoundType(inner_a, info_a), Ty::CompoundType(inner_b, info_b))
             if inner_a.is_unknown() && inner_b.is_unknown() =>
         {
             prec_inner_ty(inner_a, info_a.file_pos(), inner_b, info_b.file_pos())
@@ -182,7 +182,7 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (Ty::UnknownMethodGeneric(..), _) => Ok(Ordering::Greater),
         (_, Ty::UnknownMethodGeneric(..)) => Ok(Ordering::Less),
 
-        (Ty::CompoundType(inner_a, _, info_a), Ty::CompoundType(inner_b, _, info_b))
+        (Ty::CompoundType(inner_a, info_a), Ty::CompoundType(inner_b, info_b))
             if inner_a.is_unknown_ident() && inner_b.is_unknown_ident() =>
         {
             prec_inner_ty(inner_a, info_a.file_pos(), inner_b, info_b.file_pos())
@@ -240,7 +240,7 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
 
             assert!(
                 param_type_ids_a.len() == param_type_ids_b.len(),
-                "gen len diff. param_type_ids_a: {:#?}, param_type_ids_b: {:#?}",
+                "param len diff. param_type_ids_a: {:#?}, param_type_ids_b: {:#?}",
                 param_type_ids_a,
                 param_type_ids_b
             );
@@ -258,18 +258,28 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (Ty::Fn(..), _) => Ok(Ordering::Greater),
         (_, Ty::Fn(..)) => Ok(Ordering::Less),
 
-        (Ty::CompoundType(inner_a, gens_a, info_a), Ty::CompoundType(inner_b, gens_b, info_b)) => {
+        (Ty::CompoundType(inner_a, info_a), Ty::CompoundType(inner_b, info_b)) => {
             let ord = prec_inner_ty(inner_a, info_a.file_pos(), inner_b, info_b.file_pos())?;
             if ord != Ordering::Equal {
                 return Ok(ord);
             }
 
+            let gens_a = inner_a.gens();
+            let gens_b = inner_b.gens();
+
+            if gens_a.is_none() && gens_b.is_none() {
+                return Ok(Ordering::Equal);
+            }
+
             assert!(
-                gens_a.len() == gens_b.len(),
-                "gen len diff. gens_a: {:#?}, gens_b: {:#?}",
+                gens_a.is_some() == gens_b.is_some(),
+                "gens diff Some/None. gens_a: {:#?}, gens_b: {:#?}",
                 gens_a,
                 gens_b
             );
+
+            let gens_a = gens_a.unwrap();
+            let gens_b = gens_b.unwrap();
 
             for (gen_a_type_id, gen_b_type_id) in gens_a.iter_types().zip(gens_b.iter_types()) {
                 let ord = prec_allow_eq(ty_env, *gen_a_type_id, *gen_b_type_id)?;

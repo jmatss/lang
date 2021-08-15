@@ -75,9 +75,11 @@ impl PathResolver {
         //       Is this a correct assumption?
         let ty = ctx.ty_env.lock().unwrap().ty_clone(type_id)?;
         match ty {
-            Ty::CompoundType(_, gens, ..) => {
-                for gen_type_id in gens.iter_types() {
-                    self.resolve_ty_path(ctx, *gen_type_id, block_id)?;
+            Ty::CompoundType(inner_ty, ..) => {
+                if let Some(gens) = inner_ty.gens() {
+                    for gen_type_id in gens.iter_types() {
+                        self.resolve_ty_path(ctx, *gen_type_id, block_id)?;
+                    }
                 }
                 self.replace_inner_path(ctx, type_id, block_id)?;
             }

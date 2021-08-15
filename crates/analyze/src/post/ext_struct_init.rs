@@ -31,7 +31,7 @@ impl Visitor for ExtStructInit {
     }
 
     fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &mut TraverseCtx) {
-        let adt_type_id = adt_init.ret_type.unwrap();
+        let adt_type_id = adt_init.adt_type_id.unwrap();
         let adt_path = match get_ident(&ctx.ty_env.lock().unwrap(), adt_type_id) {
             Ok(adt_path_opt) => adt_path_opt.unwrap(),
             Err(err) => {

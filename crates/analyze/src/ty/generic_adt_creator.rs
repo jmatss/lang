@@ -16,11 +16,11 @@ use common::{
     },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse_with_deep_copy, visitor::Visitor},
     ty::{
+        get::get_gens,
         replace::{replace_gen_impls, replace_self},
         solve::set_generic_names,
         substitution_sets::sub_sets_debug_print,
         to_string::to_string_type_id,
-        ty::Ty,
         ty_env::TyEnv,
         type_id::TypeId,
     },
@@ -119,22 +119,15 @@ impl GenericAdtCreator {
                 // then have had their generics replaced/implemented.
                 new_adt.methods.clear();
 
-                let gen_adt_ty =
-                    if let Ok(gen_adt_ty) = ctx.ty_env.lock().unwrap().ty(*gen_adt_type_id) {
-                        gen_adt_ty.clone()
+                let mut gens =
+                    if let Some(gens) = get_gens(&ctx.ty_env.lock().unwrap(), *gen_adt_type_id)? {
+                        gens.clone()
                     } else {
-                        panic!("{:?}", gen_adt_type_id);
+                        return Err(ctx.ast_ctx.err(format!(
+                            "Expected type with id {} to contain generics.",
+                            gen_adt_type_id
+                        )));
                     };
-
-                let mut gens = if let Ty::CompoundType(_, gens, ..) = &gen_adt_ty {
-                    gens.clone()
-                } else {
-                    let err = ctx.ast_ctx.err(format!(
-                        "Generic instance type not compound: {:#?}",
-                        gen_adt_type_id
-                    ));
-                    return Err(err);
-                };
 
                 // Before creating the new ADT, make sure that the generics are
                 // fully inferred.
@@ -145,11 +138,7 @@ impl GenericAdtCreator {
                     }
                 }
 
-                // Create the new path containing generics.
-                let mut new_path = adt_path_without_gens.clone();
-                let last_part = new_path.pop().unwrap();
-                new_path =
-                    new_path.clone_push(&last_part.0, Some(&gens), adt_path_without_gens.file_pos);
+                let new_path = adt_path_without_gens.with_gens(gens.clone());
 
                 // TODO: Can this be done with a visitor/traverser? The current
                 //       default traverser takes a AstToken, so would need to create
@@ -321,22 +310,15 @@ impl GenericAdtCreator {
                     *gen_adt_type_id,
                 )?;
 
-                let gen_adt_ty =
-                    if let Ok(gen_adt_ty) = ctx.ty_env.lock().unwrap().ty(*gen_adt_type_id) {
-                        gen_adt_ty.clone()
+                let mut gens =
+                    if let Some(gens) = get_gens(&ctx.ty_env.lock().unwrap(), *gen_adt_type_id)? {
+                        gens.clone()
                     } else {
-                        panic!("{:?}", gen_adt_type_id);
+                        return Err(ctx.ast_ctx.err(format!(
+                            "Expected type with id {} to contain generics.",
+                            gen_adt_type_id
+                        )));
                     };
-
-                let mut gens = if let Ty::CompoundType(_, gens, ..) = &gen_adt_ty {
-                    gens.clone()
-                } else {
-                    let err = ctx.ast_ctx.err(format!(
-                        "Generic instance type not compound: {:#?}",
-                        gen_adt_type_id
-                    ));
-                    return Err(err);
-                };
 
                 // Before creating the new impl, make sure that the generics are
                 // fully inferred.

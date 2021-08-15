@@ -79,22 +79,22 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                         Ok((type_id, file_pos))
                     } else {
                         // This is a ident that represents a name of a type/ADT.
-                        let generics = match self.parse_type_generics(GenericsKind::Impl)? {
-                            (generics, Some(file_pos_last)) => {
+                        let gens_opt = match self.parse_type_generics(GenericsKind::Impl)? {
+                            (gens, Some(file_pos_last)) => {
                                 file_pos.set_end(&file_pos_last)?;
-                                generics
+                                gens
                             }
-                            (generics, None) => generics,
+                            (gens, None) => gens,
                         };
-                        let generics = generics.unwrap();
 
                         // Wrap the current ident into a "Generic" if it exists in
                         // the `self.generics` map. Otherwise return it as a
                         // "UnknownIdent" wrapped in a "CompoundType".
                         if let Some(true) = self.generics.map(|g| g.contains(ident)) {
-                            if !generics.is_empty() {
-                                panic!("TODO: Generic decl in type has generics itself.");
-                            }
+                            assert!(
+                                gens_opt.is_none(),
+                                "Generic decl in type has generics itself."
+                            );
 
                             let unique_id = self.iter.ty_env.lock().unwrap().new_unique_id();
                             let type_info = TypeInfo::Generic(file_pos);
@@ -110,17 +110,24 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                             // TODO: Remove need for this.
                             let tmp_ty_env = TyEnv::default();
 
-                            let inner_ty = InnerTy::ident_to_type(
+                            let mut inner_ty = InnerTy::ident_to_type(
                                 &to_string_path(&tmp_ty_env, &path_builder.build()),
                                 self.iter.current_block_id(),
                             );
 
+                            // Set the gens of the inner_ty after it has been
+                            // created since currently no clean way to do the
+                            // parsing of the inner_ty and gens at the same time.
+                            if let Some(ident) = inner_ty.get_ident_mut() {
+                                *ident = ident.with_gens_opt(gens_opt);
+                            }
+
                             Ok((
-                                self.iter.ty_env.lock().unwrap().id(&Ty::CompoundType(
-                                    inner_ty,
-                                    generics,
-                                    TypeInfo::Default(file_pos),
-                                ))?,
+                                self.iter
+                                    .ty_env
+                                    .lock()
+                                    .unwrap()
+                                    .id(&Ty::CompoundType(inner_ty, TypeInfo::Default(file_pos)))?,
                                 file_pos,
                             ))
                         }
@@ -152,7 +159,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     // The generics will be used when using the function to make
                     // a call inside the body. It will be appended to the name of
                     // the function call as usual.
-                    let generics = match self.parse_type_generics(GenericsKind::Impl)? {
+                    let gens = match self.parse_type_generics(GenericsKind::Impl)? {
                         (generics, Some(file_pos_last)) => {
                             file_pos.set_end(&file_pos_last)?;
                             generics
@@ -162,7 +169,11 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                             generics
                         }
                     };
-                    let gens = generics.unwrap().iter_types().cloned().collect::<Vec<_>>();
+                    let gen_type_ids = if let Some(gens) = &gens {
+                        gens.iter_types().cloned().collect()
+                    } else {
+                        Vec::with_capacity(0)
+                    };
 
                     let start_symbol = Sym::ParenthesisBegin;
                     let end_symbol = Sym::ParenthesisEnd;
@@ -197,7 +208,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
 
                     Ok((
                         self.iter.ty_env.lock().unwrap().id(&Ty::Fn(
-                            gens,
+                            gen_type_ids,
                             params,
                             ret_type_id,
                             TypeInfo::Default(file_pos),
@@ -267,11 +278,11 @@ impl<'a, 'b> TypeParser<'a, 'b> {
         let pos = self.iter.pos();
 
         // If the next token isn't a "PointyBracketBegin" there are no generic
-        // list, just return a empty generics.
+        // list, just return a None generics.
         if let Some(lex_token) = self.iter.next_skip_space() {
             if !matches!(lex_token.kind, LexTokenKind::Sym(Sym::PointyBracketBegin)) {
                 self.iter.rewind_to_pos(pos);
-                return Ok((Some(generics), None));
+                return Ok((None, None));
             }
         }
 

@@ -7,7 +7,7 @@ use crate::{
     BlockId, UniqueId,
 };
 
-use super::{ty::SolveCond, ty_env::TyEnv};
+use super::{generics::Generics, ty::SolveCond, ty_env::TyEnv};
 
 #[derive(Debug, Clone)]
 pub enum InnerTy {
@@ -92,6 +92,22 @@ impl InnerTy {
             | InnerTy::Trait(ident)
             | InnerTy::UnknownIdent(ident, ..) => Some(ident),
             _ => None,
+        }
+    }
+
+    pub fn gens(&self) -> Option<&Generics> {
+        if let Some(ident) = self.get_ident_ref() {
+            ident.last().map(|part| part.1.as_ref()).flatten()
+        } else {
+            None
+        }
+    }
+
+    pub fn gens_mut(&mut self) -> Option<&mut Generics> {
+        if let Some(ident) = self.get_ident_mut() {
+            ident.last_mut().map(|part| part.1.as_mut()).flatten()
+        } else {
+            None
         }
     }
 

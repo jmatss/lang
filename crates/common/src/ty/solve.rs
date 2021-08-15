@@ -5,7 +5,7 @@ use either::Either;
 use crate::{
     ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx},
     error::LangResult,
-    path::{LangPath, LangPathPart},
+    path::LangPath,
     token::block::Fn,
     ty::{
         generics::Generics,
@@ -24,8 +24,9 @@ use super::{ty::Ty, ty_env::TyEnv};
 
 /// A enum representing the status/progress of solving a ADT type.
 enum AdtSolveStatus {
-    /// The given ADT type was solved. Return the path and generics of the solved ADT.
-    Solved(LangPath, Generics),
+    /// The given ADT type was solved. Return the path (possibly containing
+    /// generics) of the solved ADT.
+    Solved(LangPath),
 
     /// Some progress was made, but the ADT wasn't solved. Return the progressed
     /// TypeId (not the original).
@@ -128,8 +129,16 @@ fn insert_constraint_inner(
     };
 
     match (ty, inf_ty) {
-        (Ty::CompoundType(_, ty_a_gens, ..), Ty::CompoundType(_, ty_b_gens, ..)) => {
-            for (ty_a_gen, ty_b_gen) in ty_a_gens.iter_types().zip(ty_b_gens.iter_types()) {
+        (Ty::CompoundType(inner_a, ..), Ty::CompoundType(inner_b, ..)) => {
+            if inner_a.gens().is_none() && inner_b.gens().is_none() {
+                return Ok(());
+            }
+
+            let empty_gens = Generics::empty();
+            let gens_a = inner_a.gens().unwrap_or(&empty_gens);
+            let gens_b = inner_b.gens().unwrap_or(&empty_gens);
+
+            for (ty_a_gen, ty_b_gen) in gens_a.iter_types().zip(gens_b.iter_types()) {
                 insert_constraint_inner(ty_env, *ty_a_gen, *ty_b_gen)?;
                 insert_constraint(ty_env, *ty_a_gen, *ty_b_gen)?;
             }
@@ -355,22 +364,24 @@ fn solve_compound(
 
     let mut was_updated = false;
 
-    let (inner_ty, generics) = if let Ty::CompoundType(inner_ty, generics, ..) = &mut ty_clone {
-        (inner_ty, generics)
+    let inner_ty = if let Ty::CompoundType(inner_ty, ..) = &mut ty_clone {
+        inner_ty
     } else {
         unreachable!();
     };
 
     let mut new_nested_seen_type_ids: HashSet<TypeId> = HashSet::new();
-    for gen_type_id in generics.iter_types_mut() {
-        let mut seen_type_ids_snapshot = seen_type_ids.clone();
-        solve_priv(ty_env, ast_ctx, *gen_type_id, &mut seen_type_ids_snapshot)?;
-        new_nested_seen_type_ids.extend(seen_type_ids_snapshot.difference(seen_type_ids));
+    if let Some(gens) = inner_ty.gens_mut() {
+        for gen_type_id in gens.iter_types_mut() {
+            let mut seen_type_ids_snapshot = seen_type_ids.clone();
+            solve_priv(ty_env, ast_ctx, *gen_type_id, &mut seen_type_ids_snapshot)?;
+            new_nested_seen_type_ids.extend(seen_type_ids_snapshot.difference(seen_type_ids));
 
-        let inf_gen_type_id = inferred_type(&ty_env.lock().unwrap(), *gen_type_id)?;
-        if *gen_type_id != inf_gen_type_id {
-            *gen_type_id = inf_gen_type_id;
-            was_updated = true;
+            let inf_gen_type_id = inferred_type(&ty_env.lock().unwrap(), *gen_type_id)?;
+            if *gen_type_id != inf_gen_type_id {
+                *gen_type_id = inf_gen_type_id;
+                was_updated = true;
+            }
         }
     }
     seen_type_ids.extend(new_nested_seen_type_ids);
@@ -378,13 +389,14 @@ fn solve_compound(
     // Solve the inner structure type.
     if let InnerTy::UnknownIdent(path, block_id) = inner_ty {
         let ty_env_guard = ty_env.lock().unwrap();
+        let gens = path.gens();
 
         let full_path_opt = if let Ok(full_path) =
             ast_ctx.calculate_adt_full_path(&ty_env_guard, &path.without_gens(), *block_id)
         {
             Some(full_path)
         } else if let Ok(full_path) =
-            ast_ctx.calculate_trait_full_path(&ty_env_guard, &path, *block_id)
+            ast_ctx.calculate_trait_full_path(&ty_env_guard, &path.without_gens(), *block_id)
         {
             Some(full_path)
         } else {
@@ -392,10 +404,7 @@ fn solve_compound(
         };
 
         if let Some(full_path) = full_path_opt {
-            // Add the already (possible) existing generics to the full path.
-            let mut full_path_with_gens = full_path.clone();
-            let last_part = full_path_with_gens.pop().unwrap();
-            full_path_with_gens.push(LangPathPart(last_part.0, Some(generics.clone())));
+            let full_path_with_gens = full_path.with_gens_opt(gens.cloned());
 
             let new_inner_type_id = if ast_ctx.is_struct(&ty_env_guard, &full_path) {
                 Some(InnerTy::Struct(full_path_with_gens))
@@ -548,8 +557,8 @@ fn solve_unknown_adt_member(
             unreachable!()
         };
 
-    let (adt_path, adt_gens) = match solve_adt_type(ty_env, ast_ctx, *adt_type_id, seen_type_ids)? {
-        AdtSolveStatus::Solved(adt_path, adt_gens) => (adt_path, adt_gens),
+    let adt_path = match solve_adt_type(ty_env, ast_ctx, *adt_type_id, seen_type_ids)? {
+        AdtSolveStatus::Solved(adt_path) => adt_path,
         AdtSolveStatus::GenericInstance(gen_adt_type_id) => {
             *adt_type_id = gen_adt_type_id;
             let new_type_id = ty_env.lock().unwrap().id(&ty_clone)?;
@@ -579,8 +588,10 @@ fn solve_unknown_adt_member(
 
     // TODO: Is this needed? Does this do anything atm?
     // Replace potential generics with impls from the solved ADT type.
-    if let Some(new_new_type_id) = replace_gen_impls(ty_env, ast_ctx, new_type_id, &adt_gens)? {
-        new_type_id = new_new_type_id;
+    if let Some(adt_gens) = adt_path.gens() {
+        if let Some(new_new_type_id) = replace_gen_impls(ty_env, ast_ctx, new_type_id, adt_gens)? {
+            new_type_id = new_new_type_id;
+        }
     }
 
     // Start from max of u64 to prevent clashing with "normal" unique IDs.
@@ -625,8 +636,8 @@ fn solve_unknown_adt_method(
         unreachable!()
     };
 
-    let (adt_path, adt_gens) = match solve_adt_type(ty_env, ast_ctx, *adt_type_id, seen_type_ids)? {
-        AdtSolveStatus::Solved(adt_path, adt_gens) => (adt_path, adt_gens),
+    let adt_path = match solve_adt_type(ty_env, ast_ctx, *adt_type_id, seen_type_ids)? {
+        AdtSolveStatus::Solved(adt_path) => adt_path,
         AdtSolveStatus::GenericInstance(gen_adt_type_id) => {
             *adt_type_id = gen_adt_type_id;
             let new_type_id = ty_env.lock().unwrap().id(&ty_clone)?;
@@ -658,8 +669,8 @@ fn solve_unknown_adt_method(
     };
 
     debug!(
-        "solve_unknown_adt_method -- fn_call_gens: {:#?}, adt_gens: {:#?}",
-        fn_call_gens, adt_gens
+        "solve_unknown_adt_method -- fn_call_gens: {:#?}, adt_path: {:#?}",
+        fn_call_gens, adt_path
     );
 
     let inf_new_type_id = if let Some(mut new_type_id) = method.ret_type {
@@ -668,8 +679,12 @@ fn solve_unknown_adt_method(
         {
             new_type_id = new_new_type_id;
         }
-        if let Some(new_new_type_id) = replace_gen_impls(ty_env, ast_ctx, new_type_id, &adt_gens)? {
-            new_type_id = new_new_type_id;
+        if let Some(adt_gens) = adt_path.gens() {
+            if let Some(new_new_type_id) =
+                replace_gen_impls(ty_env, ast_ctx, new_type_id, adt_gens)?
+            {
+                new_type_id = new_new_type_id;
+            }
         }
 
         // Start from max of u64 to prevent clashing with "normal" unique IDs.
@@ -685,11 +700,10 @@ fn solve_unknown_adt_method(
         inferred_type(&ty_env.lock().unwrap(), new_type_id)?
     } else {
         // The return type of the method is None == Void.
-        ty_env.lock().unwrap().id(&Ty::CompoundType(
-            InnerTy::Void,
-            Generics::empty(),
-            TypeInfo::None,
-        ))?
+        ty_env
+            .lock()
+            .unwrap()
+            .id(&Ty::CompoundType(InnerTy::Void, TypeInfo::None))?
     };
 
     debug!(
@@ -736,8 +750,8 @@ fn solve_unknown_method_argument(
             unreachable!()
         };
 
-    let (adt_path, adt_gens) = match solve_adt_type(ty_env, ast_ctx, *adt_type_id, seen_type_ids)? {
-        AdtSolveStatus::Solved(adt_path, adt_gens) => (adt_path, adt_gens),
+    let adt_path = match solve_adt_type(ty_env, ast_ctx, *adt_type_id, seen_type_ids)? {
+        AdtSolveStatus::Solved(adt_path) => adt_path,
         AdtSolveStatus::GenericInstance(gen_adt_type_id) => {
             *adt_type_id = gen_adt_type_id;
             let new_type_id = ty_env.lock().unwrap().id(&ty_clone)?;
@@ -793,8 +807,10 @@ fn solve_unknown_method_argument(
     if let Some(new_new_type_id) = replace_gen_impls(ty_env, ast_ctx, new_type_id, &fn_call_gens)? {
         new_type_id = new_new_type_id;
     }
-    if let Some(new_new_type_id) = replace_gen_impls(ty_env, ast_ctx, new_type_id, &adt_gens)? {
-        new_type_id = new_new_type_id;
+    if let Some(adt_gens) = adt_path.gens() {
+        if let Some(new_new_type_id) = replace_gen_impls(ty_env, ast_ctx, new_type_id, adt_gens)? {
+            new_type_id = new_new_type_id;
+        }
     }
 
     // Start from max of u64 to prevent clashing with "normal" unique IDs.
@@ -835,8 +851,8 @@ fn solve_unknown_method_generic(
             unreachable!()
         };
 
-    let (adt_path, adt_gens) = match solve_adt_type(ty_env, ast_ctx, *adt_type_id, seen_type_ids)? {
-        AdtSolveStatus::Solved(adt_path, adt_gens) => (adt_path, adt_gens),
+    let adt_path = match solve_adt_type(ty_env, ast_ctx, *adt_type_id, seen_type_ids)? {
+        AdtSolveStatus::Solved(adt_path) => adt_path,
         AdtSolveStatus::GenericInstance(gen_adt_type_id) => {
             *adt_type_id = gen_adt_type_id;
             let new_type_id = ty_env.lock().unwrap().id(&ty_clone)?;
@@ -880,8 +896,10 @@ fn solve_unknown_method_generic(
             .unwrap()
             .id(&Ty::GenericInstance(gen_name, unique_id, type_info.clone()))?;
 
-    if let Some(new_new_type_id) = replace_gen_impls(ty_env, ast_ctx, new_type_id, &adt_gens)? {
-        new_type_id = new_new_type_id;
+    if let Some(adt_gens) = adt_path.gens() {
+        if let Some(new_new_type_id) = replace_gen_impls(ty_env, ast_ctx, new_type_id, adt_gens)? {
+            new_type_id = new_new_type_id;
+        }
     }
 
     let new_method_gens_res =
@@ -979,8 +997,8 @@ fn solve_adt_type(
         }
 
         let inf_adt_ty = ty_env.lock().unwrap().ty_clone(inf_adt_type_id)?;
-        let (inner_ty, adt_gens) = match inf_adt_ty {
-            Ty::CompoundType(inner_ty, gens, ..) => (inner_ty, gens),
+        let inner_ty = match inf_adt_ty {
+            Ty::CompoundType(inner_ty, ..) => inner_ty,
 
             // TODO: Fix this edge case. This might be a pointer to ADT to
             //       represent a "{this}" function. Remove the need for this
@@ -1005,8 +1023,8 @@ fn solve_adt_type(
                 }
 
                 let inf_ty_i = ty_env.lock().unwrap().ty_clone(inf_type_id_i)?;
-                if let Ty::CompoundType(inner_ty, gens, ..) = inf_ty_i {
-                    (inner_ty, gens)
+                if let Ty::CompoundType(inner_ty, ..) = inf_ty_i {
+                    inner_ty
                 } else {
                     unreachable!(
                         "ADT type not pointer to compound, inf_adt_type_id: {}",
@@ -1019,7 +1037,7 @@ fn solve_adt_type(
         };
 
         if let Some(adt_path) = inner_ty.get_ident() {
-            Ok(AdtSolveStatus::Solved(adt_path, adt_gens))
+            Ok(AdtSolveStatus::Solved(adt_path))
         } else {
             Err(ast_ctx.err(format!(
                 "ADT CompoundType isn't generic or identifier, is: {:?}\nADT type ID: {}",
@@ -1072,39 +1090,45 @@ pub fn new_method_generics(
 pub fn set_generic_names(ty_env: &mut TyEnv, ast_ctx: &AstCtx, type_id: TypeId) -> LangResult<()> {
     let ty_clone = ty_env.ty_clone(type_id)?;
 
-    let (inner_ty, generics) = match ty_clone {
-        Ty::CompoundType(inner_ty, generics, ..) => (inner_ty, generics),
-
+    let inner_ty = match ty_clone {
+        Ty::CompoundType(inner_ty, ..) => inner_ty,
         Ty::Pointer(type_id_i, ..) | Ty::Array(type_id_i, ..) => {
             return set_generic_names(ty_env, ast_ctx, type_id_i);
         }
-
         _ => return Ok(()),
     };
 
-    if !generics.is_empty() && generics.len_names() == 0 && inner_ty.get_ident_ref().is_some() {
-        let path = inner_ty.get_ident().unwrap().without_gens();
-        let full_path =
-            ast_ctx.calculate_adt_full_path(ty_env, &path, BlockCtx::DEFAULT_BLOCK_ID)?;
+    match inner_ty.gens() {
+        Some(gens) if !gens.is_empty_types() && gens.is_empty_names() => (),
+        _ => return Ok(()),
+    }
 
-        let adt = match ast_ctx.get_adt(ty_env, &full_path.without_gens()) {
-            Ok(adt) => adt,
-            Err(err) => return Err(err),
+    // From this point on, we know that the given type have generic types set
+    // but those generics doesn't have their names set. Get names from the ADT
+    // in the AST and set those in the current generics.
+
+    let path_without_gens = inner_ty.get_ident().unwrap().without_gens();
+    let full_path_without_gens = ast_ctx
+        .calculate_adt_full_path(ty_env, &path_without_gens, BlockCtx::DEFAULT_BLOCK_ID)?
+        .without_gens();
+
+    let adt = match ast_ctx.get_adt(ty_env, &full_path_without_gens) {
+        Ok(adt) => adt,
+        Err(err) => return Err(err),
+    };
+    let adt = adt.as_ref().read().unwrap();
+
+    if let Some(adt_gens) = adt.generics.clone() {
+        let ty_mut = ty_env.ty_mut(type_id)?;
+
+        let gens = match ty_mut {
+            Ty::CompoundType(inner_ty, ..) => inner_ty.gens_mut().unwrap(),
+            _ => unreachable!(),
         };
-        let adt = adt.as_ref().read().unwrap();
 
-        if let Some(adt_gens) = adt.generics.clone() {
-            let ty_mut = ty_env.ty_mut(type_id)?;
-
-            let generics = match ty_mut {
-                Ty::CompoundType(_, generics, ..) => generics,
-                _ => unreachable!("type_id: {:?}, generics: {:#?}", type_id, generics),
-            };
-
-            for (idx, gen_name) in adt_gens.iter_names().enumerate() {
-                generics.insert_lookup(gen_name.clone(), idx);
-                generics.insert_name(gen_name.clone());
-            }
+        for (idx, gen_name) in adt_gens.iter_names().enumerate() {
+            gens.insert_lookup(gen_name.clone(), idx);
+            gens.insert_name(gen_name.clone());
         }
     }
 

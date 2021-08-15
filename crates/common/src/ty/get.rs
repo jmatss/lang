@@ -6,12 +6,12 @@ use crate::{
     hash::DerefType,
     hash_set::TyEnvHashSet,
     path::LangPath,
-    path::LangPathPart,
     token::expr::Expr,
     TypeId,
 };
 
 use super::{
+    generics::Generics,
     inner_ty::InnerTy,
     ty::{SolveCond, Ty},
     ty_env::TyEnv,
@@ -70,6 +70,15 @@ pub fn get_ident(ty_env: &TyEnv, id: TypeId) -> LangResult<Option<LangPath>> {
     }
 }
 
+/// Returns the generics if this type represents an ADT with generics.
+/// If this type isn't an ADT with generics, None is returned.
+pub fn get_gens(ty_env: &TyEnv, id: TypeId) -> LangResult<Option<&Generics>> {
+    match ty_env.ty(id)? {
+        Ty::CompoundType(inner_ty, ..) => Ok(inner_ty.gens()),
+        _ => Ok(None),
+    }
+}
+
 pub fn get_type_info(ty_env: &TyEnv, id: TypeId) -> Option<&TypeInfo> {
     Some(ty_env.ty(id).ok()?.type_info())
 }
@@ -109,11 +118,13 @@ pub fn get_exprs_mut<'a, 'b>(ty_env: &'a mut TyEnv, id: TypeId) -> LangResult<Ve
             }
         }
 
-        Ty::CompoundType(_, gens, _) => {
-            for gen_type_id in gens.iter_types() {
-                let inner_exprs = get_exprs_mut(ty_env, *gen_type_id)?;
-                for inner_expr in inner_exprs {
-                    exprs.push(unsafe { (inner_expr as *mut Expr).as_mut().unwrap() });
+        Ty::CompoundType(inner_ty, ..) => {
+            if let Some(gens) = inner_ty.gens() {
+                for gen_type_id in gens.iter_types() {
+                    let inner_exprs = get_exprs_mut(ty_env, *gen_type_id)?;
+                    for inner_expr in inner_exprs {
+                        exprs.push(unsafe { (inner_expr as *mut Expr).as_mut().unwrap() });
+                    }
                 }
             }
         }
@@ -187,10 +198,12 @@ pub fn get_generics(ty_env: &TyEnv, id: TypeId) -> LangResult<Vec<TypeId>> {
             generics.push(id);
         }
 
-        Ty::CompoundType(_, gens, _) => {
-            for gen_type_id in gens.iter_types() {
-                let mut inner_generics = get_generics(ty_env, *gen_type_id)?;
-                generics.append(&mut inner_generics);
+        Ty::CompoundType(inner_ty, ..) => {
+            if let Some(gens) = inner_ty.gens() {
+                for gen_type_id in gens.iter_types() {
+                    let mut inner_generics = get_generics(ty_env, *gen_type_id)?;
+                    generics.append(&mut inner_generics);
+                }
             }
         }
 
@@ -244,12 +257,14 @@ pub fn get_unsolvable(
     let mut unsolvable = HashSet::default();
 
     match ty_env.ty(type_id)? {
-        Ty::CompoundType(inner_ty, gens, _) => {
+        Ty::CompoundType(inner_ty, ..) => {
             if !inner_ty.is_solved(solve_cond) {
                 unsolvable.insert(type_id);
             }
-            for gen_type_id in gens.iter_types() {
-                unsolvable.extend(get_unsolvable(ty_env, *gen_type_id, solve_cond)?);
+            if let Some(gens) = inner_ty.gens() {
+                for gen_type_id in gens.iter_types() {
+                    unsolvable.extend(get_unsolvable(ty_env, *gen_type_id, solve_cond)?);
+                }
             }
         }
 
@@ -318,17 +333,13 @@ pub fn get_adt_and_trait_paths(
     };
 
     match ty_env.ty(id)? {
-        Ty::CompoundType(inner_ty, gens, _) => {
-            for gen_type_id in gens.iter_types() {
-                let inner_paths = get_adt_and_trait_paths(ty_env, *gen_type_id, full_paths)?;
-                paths.extend(ty_env, deref_type, &inner_paths)?;
+        Ty::CompoundType(inner_ty, ..) => {
+            if let Some(gens) = inner_ty.gens() {
+                for gen_type_id in gens.iter_types() {
+                    let inner_paths = get_adt_and_trait_paths(ty_env, *gen_type_id, full_paths)?;
+                    paths.extend(ty_env, deref_type, &inner_paths)?;
+                }
             }
-
-            let generics_opt = if gens.len_types() > 0 {
-                Some(gens.clone())
-            } else {
-                None
-            };
 
             match inner_ty {
                 InnerTy::Struct(path)
@@ -336,14 +347,11 @@ pub fn get_adt_and_trait_paths(
                 | InnerTy::Union(path)
                 | InnerTy::Trait(path)
                 | InnerTy::UnknownIdent(path, ..) => {
-                    let mut path_clone = path.clone();
-                    let last_part = path_clone.pop().unwrap();
-                    if full_paths {
-                        path_clone.push(LangPathPart(last_part.0, generics_opt));
+                    let path_clone = if full_paths {
+                        path.clone()
                     } else {
-                        path_clone.push(LangPathPart(last_part.0, None));
-                    }
-
+                        path.without_gens()
+                    };
                     paths.insert(ty_env, deref_type, path_clone)?;
                 }
                 _ => (),
@@ -411,9 +419,11 @@ pub fn get_nested_type_ids(
     }
 
     match ty_env.ty(type_id)? {
-        Ty::CompoundType(_, gens, ..) => {
-            for gen_type_id in gens.iter_types() {
-                get_nested_type_ids(ty_env, all_nested_type_ids, *gen_type_id, incl_inf)?;
+        Ty::CompoundType(inner_ty, ..) => {
+            if let Some(gens) = inner_ty.gens() {
+                for gen_type_id in gens.iter_types() {
+                    get_nested_type_ids(ty_env, all_nested_type_ids, *gen_type_id, incl_inf)?;
+                }
             }
         }
 

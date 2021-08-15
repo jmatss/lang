@@ -1,13 +1,13 @@
 use std::collections::HashSet;
 
 use common::{
-    error::{LangError, LangResult},
-    path::{LangPath, LangPathPart},
-    token::block::TraitCompareError,
+    error::{LangError, LangErrorKind},
+    path::LangPath,
+    token::block::{Fn, TraitCompareError},
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
-        generics::Generics, get::get_ident, inner_ty::InnerTy, solve::inferred_type,
-        to_string::to_string_path, ty::Ty, type_id::TypeId,
+        get::get_ident, inner_ty::InnerTy, solve::inferred_type, to_string::to_string_path, ty::Ty,
+        ty_env::TyEnv, type_id::TypeId,
     },
     BlockId,
 };
@@ -31,6 +31,110 @@ impl TraitsGenericAnalyzer {
         }
     }
 
+    /// Makes a check to ensure that the specified `trait_method` is correctly
+    /// implement by `impl_method`.
+    fn verify_method(
+        ty_env: &TyEnv,
+        impl_method: &Fn,
+        trait_method: &Fn,
+        adt_path: &LangPath,
+        trait_path: &LangPath,
+    ) -> Result<(), Vec<LangError>> {
+        if let Err(cmp_errors) = impl_method.trait_cmp(trait_method) {
+            let mut errs = Vec::with_capacity(cmp_errors.len());
+            let err_msg_start = format!(
+                "Struct \"{}\"s impl of trait \"{}\"s method \"{}\" is incorrect.\n",
+                to_string_path(ty_env, &adt_path),
+                to_string_path(ty_env, &trait_path),
+                trait_method.name,
+            );
+            let err_msg_end = format!(
+                "\nstruct_method: {:#?}\ntrait_method: {:#?}",
+                impl_method, trait_method
+            );
+
+            for cmp_err in cmp_errors {
+                let err_msg = match cmp_err {
+                    TraitCompareError::ParamLenDiff(s_len, t_len, contains_this) => {
+                        let (s_len, t_len) = if contains_this {
+                            (s_len, t_len + 1)
+                        } else {
+                            (s_len, t_len)
+                        };
+                        format!(
+                            "Parameter list length differs. Struct len: {}, trait len: {}",
+                            s_len, t_len,
+                        )
+                    }
+                    TraitCompareError::ParamTypeDiff(t_idx, contains_this) => {
+                        let s_idx = if contains_this { t_idx + 1 } else { t_idx };
+                        format!(
+                            "Parameter types at idx {} differs. Struct param type: {:#?}, trait param type: {:#?}",
+                            s_idx,
+                            impl_method.parameters.as_ref().unwrap().get(s_idx).unwrap().as_ref().read().unwrap().ty,
+                            trait_method.parameters.as_ref().unwrap().get(t_idx).unwrap().as_ref().read().unwrap().ty,
+                        )
+                    }
+                    TraitCompareError::ReturnTypeDiff => {
+                        format!(
+                            "Return types differ. Struct return type: {:#?}, trait return type: {:#?}",
+                            impl_method.ret_type,
+                            trait_method.ret_type,
+                        )
+                    }
+                    TraitCompareError::GenericsLenDiff(s_len, t_len) => {
+                        format!(
+                            "Generic list length differs. Struct len: {}, trait len: {}",
+                            s_len, t_len,
+                        )
+                    }
+                    TraitCompareError::GenericsNameDiff(idx) => {
+                        format!(
+                            "Generic at idx {} differs. Struct generic name: {:#?}, trait generic name: {:#?}",
+                            idx,
+                            impl_method.generics.as_ref().unwrap().get_name(idx).unwrap(),
+                            trait_method.generics.as_ref().unwrap().get_name(idx).unwrap(),
+                        )
+                    }
+                    TraitCompareError::ImplsLenDiff(s_len, t_len) => {
+                        format!(
+                            "Implements list length differs. Struct len: {}, trait len: {}",
+                            s_len, t_len,
+                        )
+                    }
+                    TraitCompareError::ImplsNameDiff(Some(s_name), None) => {
+                        format!(
+                            "Found impls for generic with name \"{}\" in struct, not found trait.",
+                            s_name,
+                        )
+                    }
+                    TraitCompareError::ImplsNameDiff(None, Some(t_name)) => {
+                        format!(
+                            "Found impls for generic with name \"{}\" in trait, not found struct.",
+                            t_name,
+                        )
+                    }
+                    TraitCompareError::ImplsNameDiff(..) => {
+                        unreachable!()
+                    }
+                    TraitCompareError::ImplsTypeDiff(gen_name) => {
+                        format!("Impls list diff for generic with name \"{}\".", gen_name,)
+                    }
+                };
+
+                errs.push(LangError::new(
+                    format!("{}{}{}", err_msg_start, err_msg, err_msg_end),
+                    LangErrorKind::AnalyzeError,
+                    None,
+                ));
+            }
+
+            Err(errs)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Given a ADT with the path `adt_path`, makes sure that the "instance"s of
     /// its generics implements the traits that are required on the generic
     /// declarations in a "where" clause.
@@ -49,20 +153,25 @@ impl TraitsGenericAnalyzer {
         &mut self,
         ctx: &TraverseCtx,
         adt_path: &LangPath,
-        generics: &Generics,
-    ) -> LangResult<()> {
-        let mut adt_path_with_gens = adt_path.clone();
-        let last_part = adt_path_with_gens.pop().unwrap();
-        adt_path_with_gens.push(LangPathPart(last_part.0, Some(generics.clone())));
+    ) -> Result<(), Vec<LangError>> {
+        let gens = if let Some(gens) = adt_path.gens() {
+            gens
+        } else {
+            return Ok(());
+        };
 
         let ty_env_guard = ctx.ty_env.lock().unwrap();
 
-        let adt = ctx.ast_ctx.get_adt(&ty_env_guard, &adt_path_with_gens)?;
+        let adt = ctx
+            .ast_ctx
+            .get_adt(&ty_env_guard, &adt_path)
+            .map_err(|e| vec![e])?;
         let adt = adt.as_ref().read().unwrap();
 
-        // Iterate through all generics for this ADT and make sure that the
-        // generics implements the traits specified in the "where" clause.
-        for (gen_name, gen_type_id) in generics.iter_names().zip(generics.iter_types()) {
+        for (gen_name, gen_type_id) in gens.iter_names().zip(gens.iter_types()) {
+            // The `trait_tys` will contain the traits that the generic with
+            // name `gen_name` HAVE to implement according to the declarations
+            // on the ADT.
             let trait_tys = if let Some(trait_tys) = adt
                 .implements
                 .as_ref()
@@ -71,171 +180,83 @@ impl TraitsGenericAnalyzer {
             {
                 trait_tys
             } else {
-                // If there are no "implements" clause for the specific generic,
-                // nothing to do here, continue looking at the next generic.
                 continue;
             };
 
             // The `gen_type_id` will be the instance type that has replaced the
             // generic with name `gen_name`. This is the type that should implement
-            // the traits in `trait_tys`.
-            let (generic_adt_name, generic_adt) =
-                if let Ok(Some(ident)) = get_ident(&ty_env_guard, *gen_type_id) {
-                    (ident.clone(), ctx.ast_ctx.get_adt(&ty_env_guard, &ident)?)
-                } else {
-                    let trait_names = trait_tys
-                        .iter()
-                        .map(|ty| format!("\n{}", ty.to_string()))
-                        .collect::<String>();
-                    let err = ctx.ast_ctx.err(format!(
-                        "ADT \"{0}\" has \"where\" clause for type \"{1}\" which isn't a ADT. \
+            // the traits in `trait_tys`. I.e. the adt `impl_adt` should implement
+            // the methods specified in the `trait_tys`
+            let impl_path = if let Ok(Some(path)) = get_ident(&ty_env_guard, *gen_type_id) {
+                path.clone()
+            } else {
+                let trait_names = trait_tys
+                    .iter()
+                    .map(|ty| format!("\n{}", ty.to_string()))
+                    .collect::<String>();
+                return Err(vec![ctx.ast_ctx.err(format!(
+                    "ADT \"{0}\" has \"where\" clause for type \"{1}\" which isn't a ADT. \
                         The type \"{1}\" can therefore not implement the required traits:{2}.",
-                        to_string_path(&ty_env_guard, &adt_path_with_gens),
-                        gen_type_id.to_string(),
-                        trait_names,
-                    ));
-                    return Err(err);
-                };
-            let generic_adt = generic_adt.as_ref().read().unwrap();
+                    to_string_path(&ty_env_guard, &adt_path),
+                    gen_type_id.to_string(),
+                    trait_names,
+                ))]);
+            };
 
-            let gen_struct_methods = &generic_adt.methods;
+            let impl_adt = ctx
+                .ast_ctx
+                .get_adt(&ty_env_guard, &impl_path)
+                .map_err(|e| vec![e])?;
+            let impl_adt = impl_adt.as_ref().read().unwrap();
+            let impl_methods = &impl_adt.methods;
 
             for trait_type_id in trait_tys {
-                let trait_ty = ty_env_guard.ty(*trait_type_id)?.clone();
-                let trait_name = if let Ty::CompoundType(InnerTy::Trait(trait_name), ..) = trait_ty
-                {
-                    trait_name
+                let trait_ty = ty_env_guard.ty_clone(*trait_type_id).map_err(|e| vec![e])?;
+                let trait_path = if let Ty::CompoundType(InnerTy::Trait(path), ..) = trait_ty {
+                    path
                 } else {
-                    let err = ctx.ast_ctx.err(format!(
+                    return Err(vec![ctx.ast_ctx.err(format!(
                         "Generic with name \"{}\" on ADT \"{}\" implements non trait type: {:#?}",
                         gen_name,
-                        to_string_path(&ty_env_guard, &adt_path_with_gens),
+                        to_string_path(&ty_env_guard, &adt_path),
                         trait_type_id
-                    ));
-                    return Err(err);
+                    ))]);
                 };
 
-                let trait_ = ctx.ast_ctx.get_trait(&ty_env_guard, &trait_name)?;
+                let trait_ = ctx
+                    .ast_ctx
+                    .get_trait(&ty_env_guard, &trait_path)
+                    .map_err(|e| vec![e])?;
+                let trait_ = trait_.read().unwrap();
+                let trait_methods = &trait_.methods;
 
-                for trait_method in &trait_.as_ref().read().unwrap().methods {
+                for trait_method in trait_methods {
                     let method_name = trait_method.name.clone();
 
-                    let gen_struct_method =
-                        if let Some(struct_method) = gen_struct_methods.get(&method_name) {
-                            struct_method
-                        } else {
-                            let err = ctx.ast_ctx.err(format!(
-                                "Struct \"{0}\" requires that its generic type \"{1}\" implements \
+                    let impl_method = if let Some(impl_method) = impl_methods.get(&method_name) {
+                        impl_method
+                    } else {
+                        return Err(vec![ctx.ast_ctx.err(format!(
+                            "Struct \"{0}\" requires that its generic type \"{1}\" implements \
                             the trait \"{2}\". The type \"{3}\" is used as generic \"{1}\", \
                             but it does NOT implement the function \"{4}\" from the trait \"{2}\".",
-                                to_string_path(&ty_env_guard, &adt_path_with_gens),
-                                gen_name,
-                                to_string_path(&ty_env_guard, &trait_name),
-                                to_string_path(&ty_env_guard, &generic_adt_name),
-                                method_name
-                            ));
-                            return Err(err);
-                        };
+                            to_string_path(&ty_env_guard, &adt_path),
+                            gen_name,
+                            to_string_path(&ty_env_guard, &trait_path),
+                            to_string_path(&ty_env_guard, &impl_path),
+                            method_name
+                        ))]);
+                    };
+                    let impl_method = impl_method.read().unwrap();
 
-                    // TODO: Make safe. Gets a borrow error if done as usual,
-                    //       there is a mutable borrow already. Where is that?
-                    let struct_method_borrow = gen_struct_method.as_ref().read().unwrap();
-
-                    // Make the check to ensure that the trait method are correctly implemented.
-                    if let Err(cmp_errors) = struct_method_borrow.trait_cmp(trait_method) {
-                        let err_msg_start = format!(
-                            "Struct \"{}\"s impl of trait \"{}\"s method \"{}\" is incorrect.\n",
-                            to_string_path(&ty_env_guard, &adt_path_with_gens),
-                            to_string_path(&ty_env_guard, &trait_name),
-                            method_name,
-                        );
-                        let err_msg_end = format!(
-                            "\nstruct_method: {:#?}\ntrait_method: {:#?}",
-                            struct_method_borrow, trait_method
-                        );
-
-                        for cmp_err in cmp_errors {
-                            let err_msg = match cmp_err {
-                                TraitCompareError::ParamLenDiff(s_len, t_len, contains_this) => {
-                                    let (s_len, t_len) = if contains_this {
-                                        (s_len, t_len + 1)
-                                    } else {
-                                        (s_len, t_len)
-                                    };
-                                    format!(
-                                        "Parameter list length differs. Struct len: {}, trait len: {}",
-                                        s_len,
-                                        t_len,
-                                    )
-                                }
-                                TraitCompareError::ParamTypeDiff(t_idx, contains_this) => {
-                                    let s_idx = if contains_this { t_idx + 1 } else { t_idx };
-                                    format!(
-                                        "Parameter types at idx {} differs. Struct param type: {:#?}, trait param type: {:#?}",
-                                        s_idx,
-                                        struct_method_borrow.parameters.as_ref().unwrap().get(s_idx).unwrap().as_ref().read().unwrap().ty,
-                                        trait_method.parameters.as_ref().unwrap().get(t_idx).unwrap().as_ref().read().unwrap().ty,
-                                    )
-                                }
-                                TraitCompareError::ReturnTypeDiff => {
-                                    format!(
-                                        "Return types differ. Struct return type: {:#?}, trait return type: {:#?}",
-                                        struct_method_borrow.ret_type,
-                                        trait_method.ret_type,
-                                    )
-                                }
-                                TraitCompareError::GenericsLenDiff(s_len, t_len) => {
-                                    format!(
-                                        "Generic list length differs. Struct len: {}, trait len: {}",
-                                        s_len,
-                                        t_len,
-                                    )
-                                }
-                                TraitCompareError::GenericsNameDiff(idx) => {
-                                    format!(
-                                        "Generic at idx {} differs. Struct generic name: {:#?}, trait generic name: {:#?}",
-                                        idx,
-                                        struct_method_borrow.generics.as_ref().unwrap().get_name(idx).unwrap(),
-                                        trait_method.generics.as_ref().unwrap().get_name(idx).unwrap(),
-                                    )
-                                }
-                                TraitCompareError::ImplsLenDiff(s_len, t_len) => {
-                                    format!(
-                                        "Implements list length differs. Struct len: {}, trait len: {}",
-                                        s_len,
-                                        t_len,
-                                    )
-                                }
-                                TraitCompareError::ImplsNameDiff(Some(s_name), None) => {
-                                    format!(
-                                        "Found impls for generic with name \"{}\" in struct, not found trait.",
-                                        s_name,
-                                    )
-                                }
-                                TraitCompareError::ImplsNameDiff(None, Some(t_name)) => {
-                                    format!(
-                                        "Found impls for generic with name \"{}\" in trait, not found struct.",
-                                        t_name,
-                                    )
-                                }
-                                TraitCompareError::ImplsNameDiff(..) => {
-                                    unreachable!()
-                                }
-                                TraitCompareError::ImplsTypeDiff(gen_name) => {
-                                    format!(
-                                        "Impls list diff for generic with name \"{}\".",
-                                        gen_name,
-                                    )
-                                }
-                            };
-
-                            let err = ctx
-                                .ast_ctx
-                                .err(format!("{}{}{}", err_msg_start, err_msg, err_msg_end));
-                            self.errors.push(err);
-                        }
-
-                        return Ok(());
+                    if let Err(errs) = Self::verify_method(
+                        &ty_env_guard,
+                        &impl_method,
+                        trait_method,
+                        adt_path,
+                        &trait_path,
+                    ) {
+                        self.errors.extend(errs);
                     }
                 }
             }
@@ -252,23 +273,29 @@ impl TraitsGenericAnalyzer {
         ctx: &TraverseCtx,
         type_id: TypeId,
         block_id: BlockId,
-    ) -> LangResult<()> {
-        let inf_type_id = inferred_type(&ctx.ty_env.lock().unwrap(), type_id)?;
-        let ty_clone = ctx.ty_env.lock().unwrap().ty_clone(inf_type_id)?;
+    ) -> Result<(), Vec<LangError>> {
+        let inf_type_id =
+            inferred_type(&ctx.ty_env.lock().unwrap(), type_id).map_err(|e| vec![e])?;
+        let ty_clone = ctx
+            .ty_env
+            .lock()
+            .unwrap()
+            .ty_clone(inf_type_id)
+            .map_err(|e| vec![e])?;
         match ty_clone {
-            Ty::CompoundType(inner_ty, generics, ..) => {
-                for gen_type_id in generics.iter_types() {
-                    self.check_adt_traits(ctx, *gen_type_id, block_id)?;
-                }
-
-                match inner_ty {
-                    InnerTy::Struct(path) | InnerTy::Union(path) => {
-                        if !generics.is_empty() {
-                            self.verify_adt_traits(ctx, &path, &generics)?;
-                        }
+            Ty::CompoundType(inner_ty, ..) => {
+                if let Some(gens) = inner_ty.gens() {
+                    for gen_type_id in gens.iter_types() {
+                        self.check_adt_traits(ctx, *gen_type_id, block_id)?;
                     }
-                    _ => (),
-                };
+
+                    match inner_ty {
+                        InnerTy::Struct(path) | InnerTy::Union(path) => {
+                            self.verify_adt_traits(ctx, &path)?;
+                        }
+                        _ => (),
+                    }
+                }
             }
 
             Ty::Array(arr_type_id, expr_opt, ..) => {
@@ -328,8 +355,8 @@ impl Visitor for TraitsGenericAnalyzer {
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
         if !self.seen_types.contains(type_id) {
             self.seen_types.insert(*type_id);
-            if let Err(err) = self.check_adt_traits(ctx, *type_id, ctx.block_id) {
-                self.errors.push(err);
+            if let Err(errs) = self.check_adt_traits(ctx, *type_id, ctx.block_id) {
+                self.errors.extend(errs);
             }
         }
     }

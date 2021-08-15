@@ -640,11 +640,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     ) -> LangResult<Expr> {
         let gens_opt = self.parse_generic_impls(&mut file_pos);
 
-        if let Some(gens) = &gens_opt {
-            path_builder.add_path_gen(ident, gens);
-        } else {
-            path_builder.add_path(ident);
-        }
+        path_builder.add_path_with_gen(ident, gens_opt.as_ref());
         path_builder.file_pos(file_pos.to_owned());
 
         let pos = self.iter.pos();
@@ -768,7 +764,6 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         let mut ty_env_guard = self.iter.ty_env.lock().unwrap();
                         let enum_type_id = ty_env_guard.id(&Ty::CompoundType(
                             InnerTy::Enum(adt_path),
-                            Generics::empty(),
                             TypeInfo::Default(file_pos.to_owned()),
                         ))?;
                         let enum_access =

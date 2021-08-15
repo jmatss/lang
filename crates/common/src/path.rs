@@ -39,7 +39,7 @@ impl LangPath {
         self.with_gens_opt(Some(generics))
     }
 
-    fn with_gens_opt(&self, generics: Option<Generics>) -> LangPath {
+    pub fn with_gens_opt(&self, generics: Option<Generics>) -> LangPath {
         let mut path = self.clone();
         let last_part = path.pop().unwrap();
         path.push(LangPathPart(last_part.0, generics));
@@ -93,6 +93,10 @@ impl LangPath {
 
     pub fn file_pos_mut(&mut self) -> Option<&mut FilePosition> {
         self.file_pos.as_mut()
+    }
+
+    pub fn gens(&self) -> Option<&Generics> {
+        self.last().map(|part| part.generics().as_ref()).flatten()
     }
 
     /// Creates a new LangPath by appending `other` to the end of the `self` path.
@@ -219,9 +223,8 @@ impl LangPathBuilder {
         self
     }
 
-    pub fn add_path_gen(&mut self, s: &str, generics: &Generics) -> &mut Self {
-        self.parts
-            .push(LangPathPart(s.into(), Some(generics.clone())));
+    pub fn add_path_with_gen(&mut self, s: &str, gens: Option<&Generics>) -> &mut Self {
+        self.parts.push(LangPathPart(s.into(), gens.cloned()));
         self
     }
 

@@ -955,7 +955,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         //       Is this ok?
         let enum_type_id = self.iter.ty_env.lock().unwrap().id(&Ty::CompoundType(
             InnerTy::Enum(full_path.clone()),
-            Generics::empty(),
             TypeInfo::Enum(file_pos.to_owned()),
         ))?;
 
@@ -987,13 +986,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             let member_type_info = (member.name.clone(), member_file_pos);
             let member_value_type_id = ty_env_guard.id(&Ty::CompoundType(
                 InnerTy::I32,
-                Generics::empty(),
                 TypeInfo::EnumMember(enum_type_info, member_type_info),
             ))?;
 
             let enum_type_id = ty_env_guard.id(&Ty::CompoundType(
                 InnerTy::Enum(full_path.clone()),
-                Generics::empty(),
                 TypeInfo::Enum(member_file_pos.to_owned()),
             ))?;
 

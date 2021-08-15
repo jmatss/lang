@@ -5,7 +5,7 @@ use std::{
 };
 
 use either::Either;
-use log::{debug, warn};
+use log::debug;
 
 use common::{
     ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx},

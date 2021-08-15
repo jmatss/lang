@@ -16,7 +16,6 @@ use common::{
         LangResult,
     },
     file::FilePosition,
-    path::LangPath,
     token::{
         ast::AstToken,
         block::{Adt, Block, BlockHeader, Fn},
@@ -309,15 +308,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         let fn_name = if let Some(adt_type_id) = &func.method_adt {
             let adt_ty = ty_env_guard.ty_clone(*adt_type_id)?;
-            if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
+            if let Ty::CompoundType(inner_ty, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
-                util::to_method_name(
-                    &ty_env_guard,
-                    &adt_path.last().cloned().unwrap().into(),
-                    Some(&adt_gens),
-                    &func.name,
-                    None,
-                )
+                let adt_path_without_module = adt_path.last().cloned().unwrap().into();
+                util::to_method_name(&ty_env_guard, &adt_path_without_module, &func.name, None)
             } else {
                 unreachable!("method call on non compund type: {:#?}", func);
             }
@@ -435,18 +429,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
             let adt_ty = ty_env_guard.ty_clone(*adt_type_id)?;
 
-            if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
+            if let Ty::CompoundType(inner_ty, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
-                let adt_path_without_module =
-                    LangPath::new(vec![adt_path.last().unwrap().clone()], None);
-
-                util::to_method_name(
-                    &ty_env_guard,
-                    &adt_path_without_module,
-                    Some(&adt_gens),
-                    &func.name,
-                    None,
-                )
+                let adt_path_without_module = &adt_path.last().cloned().unwrap().into();
+                util::to_method_name(&ty_env_guard, &adt_path_without_module, &func.name, None)
             } else {
                 unreachable!("method call on non compund type: {:#?}", func);
             }

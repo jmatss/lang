@@ -14,7 +14,7 @@ use common::{
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
     ty::{
         contains::contains_generic_shallow,
-        get::get_ident,
+        get::{get_gens, get_ident},
         is::is_solved,
         replace::replace_gen_impls,
         solve::{inferred_type, set_generic_names},
@@ -111,7 +111,7 @@ impl<'a> GenericAdtCollector<'a> {
         let ty_clone = ctx.ty_env.lock().unwrap().ty_clone(type_id)?;
 
         let adt_path_with_gens = match ty_clone {
-            Ty::CompoundType(inner_ty, gens, ..) if !gens.is_empty() => {
+            Ty::CompoundType(inner_ty, ..) if inner_ty.gens().is_some() => {
                 if let Some(adt_path) = inner_ty.get_ident() {
                     adt_path.without_gens()
                 } else {
@@ -303,13 +303,11 @@ impl<'a> GenericAdtCollector<'a> {
                 gen_adt_type_id,
             )?;
 
-            let gen_adt_ty = ctx.ty_env.lock().unwrap().ty_clone(gen_adt_type_id)?;
-
-            let gens = if let Ty::CompoundType(_, generics, ..) = gen_adt_ty {
-                generics
+            let gens = if let Some(gens) = get_gens(&ctx.ty_env.lock().unwrap(), gen_adt_type_id)? {
+                gens.clone()
             } else {
                 return Err(ctx.ast_ctx.err(format!(
-                    "Generic instance type not compound: {:#?}",
+                    "Expected type with id {} to contain generics.",
                     gen_adt_type_id
                 )));
             };

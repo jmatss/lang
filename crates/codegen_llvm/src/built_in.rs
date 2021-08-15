@@ -632,7 +632,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let primitive_path = types_module.clone_push(primitive_name, None, None);
         let primitive_type_id = ty_env_guard.id(&Ty::CompoundType(
             InnerTy::Struct(primitive_path),
-            Generics::empty(),
             TypeInfo::DefaultOpt(file_pos),
         ))?;
 
@@ -703,7 +702,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 pub fn type_id_u8(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangResult<TypeId> {
     ty_env.id(&Ty::CompoundType(
         InnerTy::U8,
-        Generics::empty(),
         TypeInfo::DefaultOpt(file_pos),
     ))
 }
@@ -711,7 +709,6 @@ pub fn type_id_u8(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangRes
 pub fn type_id_u32(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangResult<TypeId> {
     ty_env.id(&Ty::CompoundType(
         InnerTy::U32,
-        Generics::empty(),
         TypeInfo::DefaultOpt(file_pos),
     ))
 }
@@ -720,7 +717,6 @@ pub fn type_id_string(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> Lan
     let string_path = ["std".into(), "String".into()].into();
     ty_env.id(&Ty::CompoundType(
         InnerTy::Struct(string_path),
-        Generics::empty(),
         TypeInfo::DefaultOpt(file_pos),
     ))
 }
@@ -740,7 +736,6 @@ pub fn type_id_string_view(
     let view_path = ["std".into(), "StringView".into()].into();
     ty_env.id(&Ty::CompoundType(
         InnerTy::Struct(view_path),
-        Generics::empty(),
         TypeInfo::DefaultOpt(file_pos),
     ))
 }
@@ -749,13 +744,12 @@ pub fn type_id_result_string(
     ty_env: &mut TyEnv,
     file_pos: Option<FilePosition>,
 ) -> LangResult<TypeId> {
-    let result_path = ["std".into(), "Result".into()].into();
+    let result_path: LangPath = ["std".into(), "Result".into()].into();
     let mut gens = Generics::new();
     gens.insert("T".into(), type_id_string(ty_env, file_pos)?);
     gens.insert("E".into(), type_id_string_view(ty_env, file_pos)?);
     ty_env.id(&Ty::CompoundType(
-        InnerTy::Struct(result_path),
-        gens,
+        InnerTy::Struct(result_path.with_gens(gens)),
         TypeInfo::DefaultOpt(file_pos),
     ))
 }
@@ -764,13 +758,12 @@ pub fn type_id_result_u32(
     ty_env: &mut TyEnv,
     file_pos: Option<FilePosition>,
 ) -> LangResult<TypeId> {
-    let result_path = ["std".into(), "Result".into()].into();
+    let result_path: LangPath = ["std".into(), "Result".into()].into();
     let mut gens = Generics::new();
     gens.insert("T".into(), type_id_u32(ty_env, file_pos)?);
     gens.insert("E".into(), type_id_string_view(ty_env, file_pos)?);
     ty_env.id(&Ty::CompoundType(
-        InnerTy::Struct(result_path),
-        gens,
+        InnerTy::Struct(result_path.with_gens(gens)),
         TypeInfo::DefaultOpt(file_pos),
     ))
 }

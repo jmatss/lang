@@ -152,7 +152,7 @@ impl Visitor for TypeInferencer {
                 // handled in this function. Because of this, there is a early
                 // return in this case.
                 StringType::C => {
-                    let u8_ty = Ty::CompoundType(InnerTy::U8, Generics::empty(), type_info.clone());
+                    let u8_ty = Ty::CompoundType(InnerTy::U8, type_info.clone());
                     let u8_type_id = match ctx.ty_env.lock().unwrap().id(&u8_ty) {
                         Ok(type_id) => type_id,
                         Err(err) => {
@@ -188,11 +188,12 @@ impl Visitor for TypeInferencer {
             }
         };
 
-        let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
-            inner_ty,
-            Generics::empty(),
-            type_info,
-        )) {
+        let type_id = match ctx
+            .ty_env
+            .lock()
+            .unwrap()
+            .id(&Ty::CompoundType(inner_ty, type_info))
+        {
             Ok(type_id) => type_id,
             Err(err) => {
                 self.errors.push(err);
@@ -228,7 +229,6 @@ impl Visitor for TypeInferencer {
             let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
             let new_type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
                 InnerTy::Unknown(unique_id),
-                Generics::new(),
                 TypeInfo::VarUse(var.file_pos.unwrap()),
             )) {
                 Ok(type_id) => type_id,
@@ -362,7 +362,6 @@ impl Visitor for TypeInferencer {
             } else {
                 match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
                     InnerTy::Void,
-                    Generics::empty(),
                     TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
                 )) {
                     Ok(type_id) => type_id,
@@ -416,21 +415,28 @@ impl Visitor for TypeInferencer {
 
             // Update the generics if necessary. This will combine/check the gens
             // of this method ADT use and the actual ADT declaration.
-            let gens_was_updated = if let Ty::CompoundType(inner_ty, generic_types, ..) =
-                &mut adt_ty_clone
-            {
+            let gens_was_updated = if let Ty::CompoundType(inner_ty, ..) = &mut adt_ty_clone {
+                let gens = inner_ty.gens().cloned();
                 match combine_generics(
                     ctx,
                     inner_ty.get_ident().as_ref(),
-                    generic_types,
+                    gens.as_ref(),
                     &fn_half_path,
                 ) {
-                    Ok(combined_gens) => *generic_types = combined_gens,
+                    Ok(Some(new_gens)) => {
+                        if let Some(ident) = inner_ty.get_ident_mut() {
+                            *ident = ident.with_gens(new_gens);
+                        }
+                    }
+                    Ok(None) => (),
                     Err(err) => {
                         self.errors.push(err);
                         return;
                     }
                 }
+
+                // TODO: Don't need to set true if the gens haven't been updated.
+                //       This can be true ex. if `gens` is empty.
                 true
             } else if let Ty::Pointer(adt_type_id_i, ..) = &mut adt_ty_clone {
                 let mut adt_ty_i_clone = match ctx.ty_env.lock().unwrap().ty_clone(*adt_type_id_i) {
@@ -441,15 +447,18 @@ impl Visitor for TypeInferencer {
                     }
                 };
 
-                if let Ty::CompoundType(inner_ty, generic_types, ..) = &mut adt_ty_i_clone {
+                if let Ty::CompoundType(inner_ty, ..) = &mut adt_ty_i_clone {
+                    let gens = inner_ty.gens().cloned();
                     match combine_generics(
                         ctx,
                         inner_ty.get_ident().as_ref(),
-                        generic_types,
+                        gens.as_ref(),
                         &fn_half_path,
                     ) {
-                        Ok(combined_gens) => {
-                            *generic_types = combined_gens;
+                        Ok(Some(new_gens)) => {
+                            if let Some(ident) = inner_ty.get_ident_mut() {
+                                *ident = ident.with_gens(new_gens);
+                            }
                             let new_type_id_i = match ctx.ty_env.lock().unwrap().id(&adt_ty_i_clone)
                             {
                                 Ok(new_type_id_i) => new_type_id_i,
@@ -460,11 +469,15 @@ impl Visitor for TypeInferencer {
                             };
                             *adt_type_id_i = new_type_id_i;
                         }
+                        Ok(None) => (),
                         Err(err) => {
                             self.errors.push(err);
                             return;
                         }
                     }
+
+                    // TODO: Don't need to set true if the gens haven't been updated.
+                    //       This can be true ex. if `gens` is empty.
                     true
                 } else {
                     false
@@ -724,7 +737,6 @@ impl Visitor for TypeInferencer {
             } else {
                 match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
                     InnerTy::Void,
-                    Generics::empty(),
                     TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
                 )) {
                     Ok(type_id) => type_id,
@@ -1125,7 +1137,8 @@ impl Visitor for TypeInferencer {
         let partial_path = adt_init
             .module
             .clone_push(&adt_init.name, None, adt_init.file_pos);
-        let full_path = match ctx.ast_ctx.calculate_adt_full_path(
+
+        let full_path_without_gens = match ctx.ast_ctx.calculate_adt_full_path(
             &ctx.ty_env.lock().unwrap(),
             &partial_path,
             ctx.block_id,
@@ -1137,7 +1150,10 @@ impl Visitor for TypeInferencer {
             }
         };
 
-        let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock().unwrap(), &full_path) {
+        let adt = match ctx
+            .ast_ctx
+            .get_adt(&ctx.ty_env.lock().unwrap(), &full_path_without_gens)
+        {
             Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);
@@ -1153,14 +1169,14 @@ impl Visitor for TypeInferencer {
         // to ensure that two members of a ADT with the same ident uses the same
         // unknown generic type. It is also needed to ensure that different ADTs
         // uses different types for the generics.
-        let generics = if let Some(generics_decl) = &adt.generics {
-            let mut generics = Generics::new();
+        let gens_opt = if let Some(gens_decl) = &adt.generics {
+            let mut gens = Generics::new();
 
             // If the ADT init call has specified explicitly the implementation
             // types for the generics, use those instead of unknown generics.
             // Currently these explicit types must be solved types.
-            if let Some(generics_impl) = &adt_init.generics {
-                if generics_decl.len() != generics_impl.len() {
+            if let Some(gens_impl) = &adt_init.generics {
+                if gens_decl.len() != gens_impl.len() {
                     let err = ctx.ast_ctx.err(format!(
                         "Wrong amount of generics for ADT init. ADT init: {:#?}, ADT: {:#?}",
                         adt_init, adt
@@ -1169,14 +1185,14 @@ impl Visitor for TypeInferencer {
                     return;
                 }
 
-                for (name, gen_ty) in generics_decl.iter_names().zip(generics_impl.iter_types()) {
-                    generics.insert(name.clone(), *gen_ty);
+                for (name, gen_ty) in gens_decl.iter_names().zip(gens_impl.iter_types()) {
+                    gens.insert(name.clone(), *gen_ty);
                 }
             } else {
-                for generic_name in generics_decl.iter_names() {
+                for gen_name in gens_decl.iter_names() {
                     let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
                     let gen_type_id = match ctx.ty_env.lock().unwrap().id(&Ty::GenericInstance(
-                        generic_name.clone(),
+                        gen_name.clone(),
                         unique_id,
                         TypeInfo::None,
                     )) {
@@ -1187,19 +1203,21 @@ impl Visitor for TypeInferencer {
                         }
                     };
 
-                    generics.insert(generic_name.clone(), gen_type_id);
+                    gens.insert(gen_name.clone(), gen_type_id);
                 }
 
-                adt_init.generics = Some(generics.clone());
+                adt_init.generics = Some(gens.clone());
             }
 
-            generics
+            Some(gens)
         } else {
-            Generics::new()
+            None
         };
 
+        let full_path_with_gens = full_path_without_gens.with_gens_opt(gens_opt.clone());
+
         match adt_init
-            .ret_type
+            .adt_type_id
             .map(|id| ctx.ty_env.lock().unwrap().ty_clone(id))
         {
             Some(Ok(Ty::CompoundType(..))) => {
@@ -1212,8 +1230,7 @@ impl Visitor for TypeInferencer {
             }
             _ => {
                 let ret_type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
-                    InnerTy::UnknownIdent(full_path.clone(), ctx.block_id),
-                    generics.clone(),
+                    InnerTy::UnknownIdent(full_path_with_gens, ctx.block_id),
                     TypeInfo::Default(adt_init.file_pos.unwrap()),
                 )) {
                     Ok(type_id) => type_id,
@@ -1223,7 +1240,7 @@ impl Visitor for TypeInferencer {
                     }
                 };
 
-                adt_init.ret_type = Some(ret_type_id);
+                adt_init.adt_type_id = Some(ret_type_id);
             }
         };
 
@@ -1247,12 +1264,12 @@ impl Visitor for TypeInferencer {
 
                 for (i, arg) in adt_init.arguments.iter_mut().enumerate() {
                     // If a name is set, this is a named member init. Don't use the
-                    // iterator index, get the corrent index of the struct field with
+                    // iterator index, get the correct index of the struct field with
                     // the name `arg.name`.
                     let index: usize = if let Some(arg_name) = &arg.name {
                         match ctx.ast_ctx.get_adt_member_index(
                             &ctx.ty_env.lock().unwrap(),
-                            &full_path,
+                            &full_path_without_gens,
                             arg_name,
                         ) {
                             Ok(idx) => idx as usize,
@@ -1286,17 +1303,19 @@ impl Visitor for TypeInferencer {
                                 let member_type_id = if let Some(member_type_id) =
                                     &mut new_member.ty
                                 {
-                                    match replace_gen_impls(
-                                        &ctx.ty_env,
-                                        &ctx.ast_ctx,
-                                        *member_type_id,
-                                        &generics,
-                                    ) {
-                                        Ok(Some(new_type_id)) => *member_type_id = new_type_id,
-                                        Ok(None) => (),
-                                        Err(err) => {
-                                            self.errors.push(err);
-                                            return;
+                                    if let Some(gens) = &gens_opt {
+                                        match replace_gen_impls(
+                                            &ctx.ty_env,
+                                            &ctx.ast_ctx,
+                                            *member_type_id,
+                                            gens,
+                                        ) {
+                                            Ok(Some(new_type_id)) => *member_type_id = new_type_id,
+                                            Ok(None) => (),
+                                            Err(err) => {
+                                                self.errors.push(err);
+                                                return;
+                                            }
                                         }
                                     }
 
@@ -1321,7 +1340,7 @@ impl Visitor for TypeInferencer {
                                 let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
                                 let unknown_type_id =
                                     match ctx.ty_env.lock().unwrap().id(&Ty::UnknownAdtMember(
-                                        adt_init.ret_type.unwrap(),
+                                        adt_init.adt_type_id.unwrap(),
                                         new_member.name.clone(),
                                         unique_id,
                                         TypeInfo::DefaultOpt(arg_file_pos),
@@ -1384,7 +1403,7 @@ impl Visitor for TypeInferencer {
 
                 let member = match ctx.ast_ctx.get_adt_member(
                     &ctx.ty_env.lock().unwrap(),
-                    &full_path,
+                    &full_path_without_gens,
                     member_name,
                     adt_init.file_pos,
                 ) {
@@ -1404,14 +1423,17 @@ impl Visitor for TypeInferencer {
                         let new_member = member.as_ref().borrow().read().unwrap().clone();
 
                         let member_type_id = if let Some(type_id) = &new_member.ty {
-                            match replace_gen_impls(&ctx.ty_env, &ctx.ast_ctx, *type_id, &generics)
-                            {
-                                Ok(Some(new_type_id)) => new_type_id,
-                                Ok(None) => *type_id,
-                                Err(err) => {
-                                    self.errors.push(err);
-                                    return;
+                            if let Some(gens) = &gens_opt {
+                                match replace_gen_impls(&ctx.ty_env, &ctx.ast_ctx, *type_id, gens) {
+                                    Ok(Some(new_type_id)) => new_type_id,
+                                    Ok(None) => *type_id,
+                                    Err(err) => {
+                                        self.errors.push(err);
+                                        return;
+                                    }
                                 }
+                            } else {
+                                *type_id
                             }
                         } else {
                             let err = ctx.ast_ctx.err(format!(
@@ -1432,7 +1454,7 @@ impl Visitor for TypeInferencer {
                         let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
                         let unknown_type_id =
                             match ctx.ty_env.lock().unwrap().id(&Ty::UnknownAdtMember(
-                                adt_init.ret_type.unwrap(),
+                                adt_init.adt_type_id.unwrap(),
                                 new_member.name,
                                 unique_id,
                                 TypeInfo::DefaultOpt(arg_file_pos),
@@ -1462,7 +1484,6 @@ impl Visitor for TypeInferencer {
             let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
             let new_type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
                 InnerTy::Unknown(unique_id),
-                Generics::new(),
                 TypeInfo::Default(array_init.file_pos),
             )) {
                 Ok(type_id) => type_id,
@@ -1488,11 +1509,12 @@ impl Visitor for TypeInferencer {
         }
 
         // TODO: What should the type of the index for the array size be?
-        let arr_idx_type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
-            InnerTy::U32,
-            Generics::empty(),
-            TypeInfo::None,
-        )) {
+        let arr_idx_type_id = match ctx
+            .ty_env
+            .lock()
+            .unwrap()
+            .id(&Ty::CompoundType(InnerTy::U32, TypeInfo::None))
+        {
             Ok(type_id) => type_id,
             Err(err) => {
                 self.errors.push(err);
@@ -1547,7 +1569,6 @@ impl Visitor for TypeInferencer {
             let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
             let new_type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
                 InnerTy::Unknown(unique_id),
-                Generics::new(),
                 TypeInfo::DefaultOpt(bin_op.file_pos.to_owned()),
             )) {
                 Ok(type_id) => type_id,
@@ -1579,7 +1600,6 @@ impl Visitor for TypeInferencer {
 
         let bool_type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
             InnerTy::Boolean,
-            Generics::empty(),
             TypeInfo::DefaultOpt(bin_op.file_pos.to_owned()),
         )) {
             Ok(type_id) => type_id,
@@ -1669,7 +1689,6 @@ impl Visitor for TypeInferencer {
             let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
             let new_type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
                 InnerTy::Unknown(unique_id),
-                Generics::new(),
                 TypeInfo::Default(un_op.file_pos.unwrap()),
             )) {
                 Ok(type_id) => type_id,
@@ -1795,11 +1814,12 @@ impl Visitor for TypeInferencer {
 
                 self.insert_constraint(ctx, var_decl_type_id, unknown_type_id);
 
-                let bool_type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
-                    InnerTy::Boolean,
-                    Generics::empty(),
-                    type_info,
-                )) {
+                let bool_type_id = match ctx
+                    .ty_env
+                    .lock()
+                    .unwrap()
+                    .id(&Ty::CompoundType(InnerTy::Boolean, type_info))
+                {
                     Ok(type_id) => type_id,
                     Err(err) => {
                         self.errors.push(err);
@@ -2207,11 +2227,12 @@ impl Visitor for TypeInferencer {
                         *type_id
                     } else {
                         // TODO: Where should this pos be fetched from?
-                        match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
-                            InnerTy::Void,
-                            Generics::empty(),
-                            TypeInfo::None,
-                        )) {
+                        match ctx
+                            .ty_env
+                            .lock()
+                            .unwrap()
+                            .id(&Ty::CompoundType(InnerTy::Void, TypeInfo::None))
+                        {
                             Ok(type_id) => type_id,
                             Err(err) => {
                                 self.errors.push(err);
@@ -2363,7 +2384,6 @@ impl Visitor for TypeInferencer {
                 let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
                 match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
                     InnerTy::Unknown(unique_id),
-                    Generics::new(),
                     TypeInfo::VarDecl(var_file_pos_opt.unwrap(), false),
                 )) {
                     Ok(type_id) => type_id,

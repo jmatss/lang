@@ -151,11 +151,11 @@ impl MainArgsAnalyzer {
     /// The first item in the returned tuple is a variable representing `argc`
     /// and the second item represents `argv`.
     fn construct_params(&self, ctx: &mut TraverseCtx) -> LangResult<(Var, Var)> {
-        let i32_type_id = ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
-            InnerTy::I32,
-            Generics::empty(),
-            TypeInfo::None,
-        ))?;
+        let i32_type_id = ctx
+            .ty_env
+            .lock()
+            .unwrap()
+            .id(&Ty::CompoundType(InnerTy::I32, TypeInfo::None))?;
         let argc_param = Var::new(
             ARGC_PARAM_VAR_NAME.into(),
             Some(i32_type_id),
@@ -166,11 +166,11 @@ impl MainArgsAnalyzer {
             false,
         );
 
-        let u8_type_id = ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
-            InnerTy::U8,
-            Generics::empty(),
-            TypeInfo::None,
-        ))?;
+        let u8_type_id = ctx
+            .ty_env
+            .lock()
+            .unwrap()
+            .id(&Ty::CompoundType(InnerTy::U8, TypeInfo::None))?;
         let u8_ptr_type_id = ctx
             .ty_env
             .lock()

@@ -13,7 +13,6 @@ use log::debug;
 use common::{
     error::LangResult,
     file::FilePosition,
-    path::LangPathPart,
     token::{
         block::Adt,
         expr::Expr,
@@ -1335,13 +1334,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             .unwrap()
             .ty(adt_type_id)?
             .clone();
-        let full_path = if let Ty::CompoundType(inner_ty, generics, ..) = &adt_ty {
+        let full_path = if let Ty::CompoundType(inner_ty, ..) = &adt_ty {
             if inner_ty.is_adt() {
-                let mut full_path = inner_ty.get_ident().unwrap();
-                let last_part = full_path.pop().unwrap();
-                full_path.push(LangPathPart(last_part.0, Some(generics.clone())));
-
-                full_path
+                inner_ty.get_ident().unwrap()
             } else {
                 return Err(self.analyze_ctx.ast_ctx.err(format!(
                     "Expression that was ADT accessed wasn't ADT, was: {:#?}",

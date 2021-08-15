@@ -35,14 +35,18 @@ pub fn is_solved(
     );
 
     let is_solved_bool = match ty_env.ty(type_id)? {
-        Ty::CompoundType(inner_ty, generics, ..) => {
+        Ty::CompoundType(inner_ty, ..) => {
             let inner_solved = inner_ty.is_solved(solve_cond);
+
             let mut gens_solved = true;
-            for type_id in generics.iter_types() {
-                if !is_solved(ty_env, *type_id, check_inf, solve_cond)? {
-                    gens_solved = false;
+            if let Some(gens) = inner_ty.gens() {
+                for type_id in gens.iter_types() {
+                    if !is_solved(ty_env, *type_id, check_inf, solve_cond)? {
+                        gens_solved = false;
+                    }
                 }
             }
+
             inner_solved && gens_solved
         }
 
@@ -363,9 +367,8 @@ pub fn is_compatible(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> Lan
             is_compatible(ty_env, *inner_a, *inner_b)
         }
 
-        (Ty::CompoundType(comp_a, gens_a, ..), Ty::CompoundType(comp_b, gens_b, ..)) => {
-            Ok(is_compatible_inner_ty(ty_env, comp_a, comp_b)?
-                && is_compatible_gens(ty_env, gens_a, gens_b)?)
+        (Ty::CompoundType(comp_a, ..), Ty::CompoundType(comp_b, ..)) => {
+            is_compatible_inner_ty(ty_env, comp_a, comp_b)
         }
 
         (

@@ -74,6 +74,10 @@ impl Generics {
         self.names.is_empty() && self.types.is_empty()
     }
 
+    pub fn is_empty_names(&self) -> bool {
+        self.names.is_empty()
+    }
+
     pub fn is_empty_types(&self) -> bool {
         self.types.is_empty()
     }
