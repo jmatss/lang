@@ -271,9 +271,18 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                 }
 
                 if let Some(impls) = &mut struct_.as_ref().write().unwrap().implements {
-                    for tys in impls.values_mut() {
-                        for ty in tys {
-                            self.traverse_type(ty);
+                    for paths in impls.values_mut() {
+                        for path in paths {
+                            if let Some(gens) =
+                                path.last_mut().map(|part| part.1.as_mut()).flatten()
+                            {
+                                for type_id in gens.iter_types_mut() {
+                                    if self.ctx.stop {
+                                        return;
+                                    }
+                                    self.traverse_type(type_id);
+                                }
+                            }
                         }
                     }
                 }
@@ -347,12 +356,18 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                 }
 
                 if let Some(impls) = &mut union.as_ref().write().unwrap().implements {
-                    for tys in impls.values_mut() {
-                        for ty in tys {
-                            if self.ctx.stop {
-                                return;
+                    for paths in impls.values_mut() {
+                        for path in paths {
+                            if let Some(gens) =
+                                path.last_mut().map(|part| part.1.as_mut()).flatten()
+                            {
+                                for type_id in gens.iter_types_mut() {
+                                    if self.ctx.stop {
+                                        return;
+                                    }
+                                    self.traverse_type(type_id);
+                                }
                             }
-                            self.traverse_type(ty);
                         }
                     }
                 }

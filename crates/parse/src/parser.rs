@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::{collections::HashMap, sync::Mutex};
 
 use log::debug;
 
@@ -724,6 +724,7 @@ impl<'a> ParseTokenIter<'a> {
         &mut self,
         file_pos: &mut FilePosition,
         gens_kind: GenericsKind,
+        parse_gens: bool,
     ) -> LangResult<LangPath> {
         let mut path_builder = LangPathBuilder::default();
 
@@ -749,8 +750,8 @@ impl<'a> ParseTokenIter<'a> {
 
             file_pos.set_end(&ident_file_pos)?;
 
-            let next_token_kind = self.peek_skip_space().map(|t| t.kind);
-            if let Some(LexTokenKind::Sym(Sym::PointyBracketBegin)) = next_token_kind {
+            let next_kind = self.peek_skip_space().map(|t| t.kind);
+            if parse_gens && matches!(next_kind, Some(LexTokenKind::Sym(Sym::PointyBracketBegin))) {
                 let mut type_parser = TypeParser::new(self, None);
                 let (gens, gens_file_pos) = type_parser.parse_type_generics(gens_kind.clone())?;
 
@@ -764,23 +765,156 @@ impl<'a> ParseTokenIter<'a> {
             }
 
             // If the next token is a double colon, continue parsing the path.
-            // If a end symbol is found, the end of the path has been found,
-            // break out of this loop and return from the function.
-            // Otherwise, found unexpected symbol, something has gone wrong.
-            if let Some(lex_token) = self.peek_skip_space() {
-                if let LexTokenKind::Sym(Sym::DoubleColon) = lex_token.kind {
-                    self.next_skip_space();
-                    continue;
-                } else {
-                    break;
-                }
-            } else {
-                break;
+            // Otherwise assume that we are done parsing the path.
+            let next_kind = self.peek_skip_space().map(|t| t.kind);
+            if let Some(LexTokenKind::Sym(Sym::DoubleColon)) = next_kind {
+                self.next_skip_space();
+                continue;
             }
+
+            break;
         }
 
         path_builder.file_pos(*file_pos);
         Ok(path_builder.build())
+    }
+
+    /// Parses a generic list declaration.
+    ///
+    /// This function will parse the generic types plus potential traits that the
+    /// generics implements. If a generic implements multiple traits, the traits
+    /// will be separated by whitespace.
+    ///
+    /// # Examples of how generic lists are parsed:
+    /// `fn f<T>()`               =>  Ok(Some(Gen<T>, Map::empty()))
+    /// `fn f<T: std::AsView>()`  =>  Ok(Some(Gen(T), Map(T -> std::AsView)))
+    /// `fn f()`                  =>  Ok(None)
+    pub(crate) fn parse_gens_decl(
+        &mut self,
+        file_pos: &mut FilePosition,
+    ) -> LangResult<(Option<Generics>, Option<HashMap<String, Vec<LangPath>>>)> {
+        let next_kind = self.peek_skip_space().map(|t| t.kind);
+        if let Some(LexTokenKind::Sym(Sym::PointyBracketBegin)) = next_kind {
+            self.next_skip_space();
+        } else {
+            return Ok((None, None));
+        }
+
+        let mut gens = Generics::new();
+        let mut impls = HashMap::default();
+
+        loop {
+            let gen_name = if let Some(lex_token) = self.next_skip_space_line() {
+                if let LexTokenKind::Ident(gen_name) = lex_token.kind {
+                    file_pos.set_end(&lex_token.file_pos)?;
+                    gen_name
+                } else {
+                    return Err(self.err(
+                        format!("Expected ident when gens decl, got: {:#?}.", lex_token),
+                        Some(lex_token.file_pos),
+                    ));
+                }
+            } else {
+                return Err(self.err("Got None when parsing gens decl.".into(), Some(*file_pos)));
+            };
+
+            // If next token is a colon, this generic have declared traits that
+            // the generic should implement. Parse them and insert them into
+            // the hashmap.
+            let next_kind = self.peek_skip_space_line().map(|t| t.kind);
+            let cur_gen_impls = if let Some(LexTokenKind::Sym(Sym::Colon)) = next_kind {
+                self.next_skip_space_line();
+                self.parse_path_list(file_pos, GenericsKind::Impl)?
+            } else {
+                None
+            };
+
+            gens.insert_name(gen_name.clone());
+            if let Some(cur_gen_impls) = cur_gen_impls {
+                impls.insert(gen_name, cur_gen_impls);
+            }
+
+            let pos = self.pos();
+
+            // TODO: Copied from `parse_type_generics`, merge logic in some way.
+            //
+            //
+            // End of a type in the generic list. The next token should either
+            // be a comma if there are more arguments in the list or a
+            // "PointyBracketEnd" if the generic list have been parsed fully.
+            // It might also be a "ShiftRight" if this it is two "PointyBracketEnd"
+            // following each other, need to rewrite the token in that case.
+            if let Some(lex_token) = self.next_skip_space_line() {
+                match lex_token.kind {
+                    LexTokenKind::Sym(Sym::Comma) => {
+                        // Makes a extra check to allow for trailing commas.
+                        if let Some(next) = self.peek_skip_space_line() {
+                            if let LexTokenKind::Sym(Sym::PointyBracketEnd) = next.kind {
+                                self.next_skip_space_line();
+
+                                file_pos.set_end(&next.file_pos)?;
+                                break;
+                            }
+                        }
+                    }
+                    LexTokenKind::Sym(Sym::PointyBracketEnd) => {
+                        file_pos.set_end(&lex_token.file_pos)?;
+                        break;
+                    }
+                    LexTokenKind::Sym(Sym::ShiftRight) => {
+                        self.rewind_to_pos(pos);
+
+                        let kind = LexTokenKind::Sym(Sym::PointyBracketEnd);
+                        let token = LexToken::new(kind, lex_token.file_pos.to_owned());
+                        self.iter.replace(token);
+
+                        file_pos.set_end(&lex_token.file_pos)?;
+                        break;
+                    }
+                    _ => {
+                        return Err(self.err(
+                            format!(
+                                "Received unexpected token after argument in gens decl list: {:?}",
+                                lex_token
+                            ),
+                            Some(lex_token.file_pos),
+                        ));
+                    }
+                }
+            } else {
+                return Err(self.err(
+                    "Received None after argument in gens decl list.".into(),
+                    Some(*file_pos),
+                ));
+            }
+        }
+
+        Ok((Some(gens), Some(impls)))
+    }
+
+    /// Parses a whitespace separated list of paths.
+    /// This will be used to parse traits that a specific generics implements.
+    ///
+    /// This function will look at the next token (skipping whitespace). If it
+    /// is a "ident", it will start parsing it as a path. This will continue
+    /// until the next token isn't a ident.
+    fn parse_path_list(
+        &mut self,
+        file_pos: &mut FilePosition,
+        gens_kind: GenericsKind,
+    ) -> LangResult<Option<Vec<LangPath>>> {
+        let mut paths = Vec::default();
+
+        while let Some(LexTokenKind::Ident(_)) = self.peek_skip_space().map(|t| t.kind) {
+            let path = self.parse_path(file_pos, gens_kind.clone(), true)?;
+            paths.push(path);
+        }
+
+        if !paths.is_empty() {
+            Ok(Some(paths))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Replaces the lex token at the current position with the value of `item`.

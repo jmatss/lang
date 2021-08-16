@@ -40,7 +40,7 @@ impl TraitsGenericAnalyzer {
         adt_path: &LangPath,
         trait_path: &LangPath,
     ) -> Result<(), Vec<LangError>> {
-        if let Err(cmp_errors) = impl_method.trait_cmp(trait_method) {
+        if let Err(cmp_errors) = impl_method.trait_cmp(ty_env, trait_method) {
             let mut errs = Vec::with_capacity(cmp_errors.len());
             let err_msg_start = format!(
                 "Struct \"{}\"s impl of trait \"{}\"s method \"{}\" is incorrect.\n",
@@ -169,16 +169,16 @@ impl TraitsGenericAnalyzer {
         let adt = adt.as_ref().read().unwrap();
 
         for (gen_name, gen_type_id) in gens.iter_names().zip(gens.iter_types()) {
-            // The `trait_tys` will contain the traits that the generic with
+            // The `trait_paths` will contain the traits that the generic with
             // name `gen_name` HAVE to implement according to the declarations
             // on the ADT.
-            let trait_tys = if let Some(trait_tys) = adt
+            let trait_paths = if let Some(trait_paths) = adt
                 .implements
                 .as_ref()
                 .map(|impls| impls.get(gen_name))
                 .flatten()
             {
-                trait_tys
+                trait_paths
             } else {
                 continue;
             };
@@ -190,13 +190,13 @@ impl TraitsGenericAnalyzer {
             let impl_path = if let Ok(Some(path)) = get_ident(&ty_env_guard, *gen_type_id) {
                 path.clone()
             } else {
-                let trait_names = trait_tys
+                let trait_names = trait_paths
                     .iter()
-                    .map(|ty| format!("\n{}", ty.to_string()))
+                    .map(|path| format!("\n * {:?}", path))
                     .collect::<String>();
                 return Err(vec![ctx.ast_ctx.err(format!(
                     "ADT \"{0}\" has \"where\" clause for type \"{1}\" which isn't a ADT. \
-                        The type \"{1}\" can therefore not implement the required traits:{2}.",
+                    The type \"{1}\" can therefore not implement the required traits:{2}.",
                     to_string_path(&ty_env_guard, &adt_path),
                     gen_type_id.to_string(),
                     trait_names,
@@ -210,19 +210,7 @@ impl TraitsGenericAnalyzer {
             let impl_adt = impl_adt.as_ref().read().unwrap();
             let impl_methods = &impl_adt.methods;
 
-            for trait_type_id in trait_tys {
-                let trait_ty = ty_env_guard.ty_clone(*trait_type_id).map_err(|e| vec![e])?;
-                let trait_path = if let Ty::CompoundType(InnerTy::Trait(path), ..) = trait_ty {
-                    path
-                } else {
-                    return Err(vec![ctx.ast_ctx.err(format!(
-                        "Generic with name \"{}\" on ADT \"{}\" implements non trait type: {:#?}",
-                        gen_name,
-                        to_string_path(&ty_env_guard, &adt_path),
-                        trait_type_id
-                    ))]);
-                };
-
+            for trait_path in trait_paths {
                 let trait_ = ctx
                     .ast_ctx
                     .get_trait(&ty_env_guard, &trait_path)

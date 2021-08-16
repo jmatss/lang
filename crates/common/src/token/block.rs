@@ -10,8 +10,10 @@ use super::{
 };
 
 use crate::{
+    eq::path_eq,
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
+    hash::DerefType,
     path::LangPath,
     ty::{generics::Generics, ty_env::TyEnv},
     util, BlockId, TypeId,
@@ -130,7 +132,7 @@ pub struct Adt {
     pub generics: Option<Generics>,
     /// The key is the the name of the generic and the values are the
     /// traits that the specific generic type needs to implement.
-    pub implements: Option<HashMap<String, Vec<TypeId>>>,
+    pub implements: Option<HashMap<String, Vec<LangPath>>>,
 
     /* Values set for Enum */
     /// The type of the enum values. Will most likely be a integer type.
@@ -172,7 +174,7 @@ pub struct AdtBuilder {
 
     /* Values set for Struct and Union */
     generics: Option<Generics>,
-    implements: Option<HashMap<String, Vec<TypeId>>>,
+    implements: Option<HashMap<String, Vec<LangPath>>>,
 
     /* Values set for Enum */
     enum_ty: Option<TypeId>,
@@ -272,7 +274,7 @@ impl AdtBuilder {
         self
     }
 
-    pub fn impls(&mut self, impls: Option<HashMap<String, Vec<TypeId>>>) -> &mut Self {
+    pub fn impls(&mut self, impls: Option<HashMap<String, Vec<LangPath>>>) -> &mut Self {
         self.implements = impls;
         self
     }
@@ -333,7 +335,7 @@ pub struct Fn {
 
     /// The key is the the name of the generic type it and the values are the
     /// traits that the specific generic type needs to implement.
-    pub implements: Option<HashMap<String, Vec<TypeId>>>,
+    pub implements: Option<HashMap<String, Vec<LangPath>>>,
 
     pub parameters: Option<Vec<Arc<RwLock<Var>>>>,
     pub ret_type: Option<TypeId>,
@@ -353,7 +355,7 @@ impl Fn {
         module: LangPath,
         generics: Option<Generics>,
         file_pos: FilePosition,
-        implements: Option<HashMap<String, Vec<TypeId>>>,
+        implements: Option<HashMap<String, Vec<LangPath>>>,
         parameters: Option<Vec<Arc<RwLock<Var>>>>,
         ret_type: Option<TypeId>,
         modifiers: Vec<Modifier>,
@@ -375,7 +377,7 @@ impl Fn {
 
     /// Checks if the name, parameter count, parameters types, generic count,
     /// generic names, implements and return types are the same.
-    pub fn trait_cmp(&self, trait_func: &Fn) -> Result<(), Vec<TraitCompareError>> {
+    pub fn trait_cmp(&self, ty_env: &TyEnv, trait_func: &Fn) -> Result<(), Vec<TraitCompareError>> {
         let mut errors = Vec::default();
 
         // Since the `this`/`self` parameter won't be set for the trait function,
@@ -503,10 +505,10 @@ impl Fn {
 
             // Both functions have impls.
             (Some(self_impls), Some(trait_impls)) => {
-                for (self_impl_name, self_impl_tys) in self_impls.iter() {
-                    let trait_impl_tys =
-                        if let Some(trait_impl_tys) = trait_impls.get(self_impl_name) {
-                            trait_impl_tys
+                for (self_impl_name, self_impl_traits) in self_impls.iter() {
+                    let trait_impl_traits =
+                        if let Some(trait_impl_traits) = trait_impls.get(self_impl_name) {
+                            trait_impl_traits
                         } else {
                             errors.push(TraitCompareError::ImplsNameDiff(
                                 Some(self_impl_name.clone()),
@@ -515,8 +517,10 @@ impl Fn {
                             continue;
                         };
 
-                    if self_impl_tys != trait_impl_tys {
-                        errors.push(TraitCompareError::ImplsTypeDiff(self_impl_name.clone()));
+                    for (self_path, trait_path) in self_impl_traits.iter().zip(trait_impl_traits) {
+                        if path_eq(ty_env, self_path, trait_path, DerefType::Deep).unwrap() {
+                            errors.push(TraitCompareError::ImplsTypeDiff(self_impl_name.clone()));
+                        }
                     }
                 }
             }

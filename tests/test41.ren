@@ -10,7 +10,7 @@ trait TestTrait {
     fn this trait_func(i: i8) -> u64
 }
 
-struct TestStruct<T> where T: TestTrait {
+struct TestStruct<T: TestTrait> {
     var inner: T
 }
 

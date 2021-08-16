@@ -11,7 +11,7 @@ use common::{
         expr::FnCall,
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
-    ty::{get::get_generic_ident, inner_ty::InnerTy, is::is_generic, ty::Ty},
+    ty::{get::get_generic_ident, is::is_generic},
 };
 
 /// Goes through all function calls done on variables with a generic type and
@@ -58,22 +58,8 @@ impl TraitsFnAnalyzer {
         // The name will be the name of the generic (`gen_name`) and the
         // values are the names of methods for the traits that the generic
         // implements.
-        for (gen_name, trait_tys) in implements {
-            for trait_type_id in trait_tys {
-                let trait_ty = ctx.ty_env.lock().unwrap().ty_clone(*trait_type_id)?;
-                let trait_path = if let Ty::CompoundType(InnerTy::Trait(trait_name), ..) = trait_ty
-                {
-                    trait_name
-                } else {
-                    let err = ctx.ast_ctx.err(format!(
-                        "Non trait type used in \"where\" clause for struct \"{}\", \
-                                enforced on the generic type \"{}\". Found type: {:#?}",
-                        &adt.name, gen_name, trait_ty
-                    ));
-                    self.errors.push(err);
-                    continue;
-                };
-
+        for (gen_name, trait_paths) in implements {
+            for trait_path in trait_paths {
                 let trait_method_names = match ctx
                     .ast_ctx
                     .get_trait_method_names(&ctx.ty_env.lock().unwrap(), &trait_path.without_gens())

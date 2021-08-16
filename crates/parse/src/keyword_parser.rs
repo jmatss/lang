@@ -1,11 +1,12 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
 
 use common::{
-    error::LangResult,
+    error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
+    path::LangPath,
     token::{
         ast::AstToken,
         block::{AdtBuilder, Block, BlockHeader, Fn, Trait},
@@ -14,10 +15,7 @@ use common::{
         stmt::{ExternalDecl, Modifier, Stmt},
     },
     ty::{
-        generics::{Generics, GenericsKind},
-        inner_ty::InnerTy,
-        ty::Ty,
-        type_id::TypeId,
+        generics::GenericsKind, inner_ty::InnerTy, to_string::to_string_path, ty::Ty,
         type_info::TypeInfo,
     },
 };
@@ -489,9 +487,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     ///
     /// The "use" keyword has already been consumed when this function is called.
     fn parse_use(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
-        Ok(AstToken::Stmt(Stmt::Use(
-            self.iter.parse_path(&mut file_pos, GenericsKind::Empty)?,
-        )))
+        Ok(AstToken::Stmt(Stmt::Use(self.iter.parse_path(
+            &mut file_pos,
+            GenericsKind::Empty,
+            false,
+        )?)))
     }
 
     /// Parses a `mod` statement.
@@ -505,9 +505,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     ///
     /// The "package" keyword has already been consumed when this function is called.
     fn parse_module(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
-        Ok(AstToken::Stmt(Stmt::Module(
-            self.iter.parse_path(&mut file_pos, GenericsKind::Empty)?,
-        )))
+        Ok(AstToken::Stmt(Stmt::Module(self.iter.parse_path(
+            &mut file_pos,
+            GenericsKind::Empty,
+            false,
+        )?)))
     }
 
     // TODO: External only valid for functions atm, add for variables.
@@ -723,7 +725,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
                     LexTokenKind::Ident(_) => {
                         self.iter.rewind_skip_space()?;
-                        break self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
+                        break self
+                            .iter
+                            .parse_path(&mut file_pos, GenericsKind::Decl, false)?;
                     }
 
                     LexTokenKind::Kw(lex_kw) => {
@@ -760,13 +764,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let last_part = module.pop().unwrap();
         let name = last_part.0;
-        let generics = last_part.1;
+
+        let (gens, decl_impls) = self.iter.parse_gens_decl(&mut file_pos)?;
 
         let start_symbol = Sym::ParenthesisBegin;
         let end_symbol = Sym::ParenthesisEnd;
         let (params, is_var_arg, par_file_pos) =
             self.iter
-                .parse_par_list(start_symbol, end_symbol, generics.as_ref())?;
+                .parse_par_list(start_symbol, end_symbol, gens.as_ref())?;
 
         file_pos.set_end(&par_file_pos)?;
 
@@ -804,12 +809,19 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             file_pos.set_end(ret_ty_file_pos)?;
         }
 
-        let impls = self.parse_where(generics.as_ref())?;
-        if impls.is_some() {
-            if let Ok(next_file_pos) = self.iter.peek_file_pos() {
-                file_pos.set_end(&next_file_pos)?;
-            }
-        }
+        let where_impls = self.parse_where(&mut file_pos)?;
+
+        let fn_full_path = to_string_path(
+            &self.iter.ty_env.lock().unwrap(),
+            &module.clone_push(&name, gens.as_ref(), Some(file_pos)),
+        );
+
+        let impls = Self::combine_impls(
+            decl_impls,
+            where_impls,
+            &fn_full_path,
+            Some(file_pos).as_ref(),
+        )?;
 
         // TODO: How should the `file_pos` of the function be decided? Currently
         //       it will only include the function header, it probably should
@@ -818,7 +830,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         Ok(Fn::new(
             name,
             module,
-            generics,
+            gens,
             file_pos,
             impls,
             params_opt,
@@ -892,7 +904,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
-        let full_path = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
+        let full_path = self
+            .iter
+            .parse_path(&mut file_pos, GenericsKind::Decl, false)?;
 
         let next_token = self.iter.next_skip_space_line();
         let next_kind = next_token.as_ref().map(|t| t.kind.clone());
@@ -1023,7 +1037,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
-        let mut module = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
+        let mut module = self
+            .iter
+            .parse_path(&mut file_pos, GenericsKind::Decl, true)?;
 
         let last_part = module.pop().unwrap();
         let name = last_part.0;
@@ -1105,23 +1121,25 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         builder: &mut AdtBuilder,
         file_pos: &mut FilePosition,
     ) -> LangResult<()> {
-        let mut module = self.iter.parse_path(file_pos, GenericsKind::Decl)?;
+        let mut module = self.iter.parse_path(file_pos, GenericsKind::Decl, false)?;
 
         let last_part = module.pop().unwrap();
         let name = last_part.0;
-        let generics = last_part.1;
 
-        let impls = self.parse_where(generics.as_ref())?;
-        if impls.is_some() {
-            if let Ok(next_file_pos) = self.iter.peek_file_pos() {
-                file_pos.set_end(&next_file_pos)?;
-            }
-        }
+        let (gens, decl_impls) = self.iter.parse_gens_decl(file_pos)?;
+        let where_impls = self.parse_where(file_pos)?;
+
+        let adt_full_path = to_string_path(
+            &self.iter.ty_env.lock().unwrap(),
+            &module.clone_push(&name, gens.as_ref(), Some(file_pos.clone())),
+        );
+
+        let impls = Self::combine_impls(decl_impls, where_impls, &adt_full_path, Some(file_pos))?;
 
         builder
             .module(module)
             .name(name)
-            .generics(generics)
+            .generics(gens)
             .impls(impls);
 
         Ok(())
@@ -1212,7 +1230,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     ///   "impl <ADT_NAME>: <TRAIT_NAME> { [<FUNC> ...] }"
     /// The "impl" keyword has already been consumed when this function is called.
     fn parse_impl(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
-        let adt_path = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
+        let adt_path = self
+            .iter
+            .parse_path(&mut file_pos, GenericsKind::Decl, true)?;
 
         let next_token = self.iter.next_skip_space_line();
         let next_kind = next_token.clone().map(|t| t.kind);
@@ -1228,7 +1248,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         // TODO: How should the `file_pos` be updated before the parsing of the
         //       `trait_path`? Which FilePosition should be used?
-        let trait_path = self.iter.parse_path(&mut file_pos, GenericsKind::Decl)?;
+        let trait_path = self
+            .iter
+            .parse_path(&mut file_pos, GenericsKind::Decl, true)?;
 
         let header = BlockHeader::Implement(adt_path, trait_path);
         let impl_token = self.iter.next_block(header)?;
@@ -1279,13 +1301,12 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     ///   "where [<ident> : <trait> [,<trait>]...]"
     /// The "where" keyword has NOT been parsed at this point. If the next token
     /// isn't the "where" keyword, no where clause exists so a None should
-    /// be returned.
-    /// A "where" clause should be ended either with a CurlyBracketBegin or
-    /// a semi colon.
+    /// be returned. A "where" clause should be ended either with a CurlyBracketBegin
+    /// or a semi colon.
     fn parse_where(
         &mut self,
-        generics: Option<&Generics>,
-    ) -> LangResult<Option<HashMap<String, Vec<TypeId>>>> {
+        file_pos: &mut FilePosition,
+    ) -> LangResult<Option<HashMap<String, Vec<LangPath>>>> {
         // Next token isn't a "where" keyword => early None return.
         if let Some(LexTokenKind::Kw(Kw::Where)) = self.iter.peek_skip_space_line().map(|t| t.kind)
         {
@@ -1294,7 +1315,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             return Ok(None);
         }
 
-        let mut implements = HashMap::new();
+        let mut impls = HashMap::new();
 
         loop {
             // Start by parsing the generic identifier (ex. "T").
@@ -1328,10 +1349,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 ));
             }
 
-            let mut types = Vec::default();
+            let mut paths = Vec::default();
             loop {
-                let (type_id, _) = self.iter.parse_type(generics)?;
-                types.push(type_id);
+                let path = self.iter.parse_path(file_pos, GenericsKind::Impl, true)?;
+                paths.push(path);
 
                 // TODO: Should trailing commas be allowed?
                 // If the next token is a comma, continue parsing types. If it
@@ -1363,7 +1384,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 }
             }
 
-            implements.insert(ident, types);
+            impls.insert(ident, paths);
 
             if let Some(LexTokenKind::Sym(Sym::CurlyBracketBegin)) =
                 self.iter.peek_skip_space_line().as_ref().map(|t| &t.kind)
@@ -1372,7 +1393,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             }
         }
 
-        Ok(Some(implements))
+        Ok(Some(impls))
     }
 
     /// Parses a defer statement.
@@ -1381,5 +1402,51 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     fn parse_defer(&mut self, file_pos: FilePosition) -> LangResult<AstToken> {
         let expr = self.iter.parse_expr(&DEFAULT_STOP_CONDS)?;
         Ok(AstToken::Stmt(Stmt::Defer(expr, Some(file_pos))))
+    }
+
+    /// Combine the optional trait impls parsed from the decl position with the
+    /// optional traits impls parsed from the where-clause.
+    ///
+    /// The `print_path` and `file_pos` are used for error messages only. The
+    /// path should be the path of the ADT/fn where the impls are taken from.
+    fn combine_impls(
+        decl_impls: Option<HashMap<String, Vec<LangPath>>>,
+        where_impls: Option<HashMap<String, Vec<LangPath>>>,
+        print_path: &str,
+        file_pos: Option<&FilePosition>,
+    ) -> LangResult<Option<HashMap<String, Vec<LangPath>>>> {
+        Ok(match (decl_impls, where_impls) {
+            (Some(decl_impls), Some(where_impls)) => {
+                let gen_names = decl_impls
+                    .keys()
+                    .chain(where_impls.keys())
+                    .collect::<HashSet<_>>();
+
+                // If both implement traits for one specific generic, then
+                // we can't be sure which one is correct. An error should be
+                // returned in that case.
+                for gen_name in gen_names {
+                    if decl_impls.contains_key(gen_name) && where_impls.contains_key(gen_name) {
+                        return Err(LangError::new(
+                            format!(
+                                "Impls specified on generic \"{}\" at two places in decl \"{:?}\".",
+                                gen_name, print_path
+                            ),
+                            LangErrorKind::ParseError,
+                            file_pos.cloned(),
+                        ));
+                    }
+                }
+
+                Some(
+                    decl_impls
+                        .into_iter()
+                        .chain(where_impls.into_iter())
+                        .collect::<HashMap<_, _>>(),
+                )
+            }
+            (None, Some(impls)) | (Some(impls), None) => Some(impls),
+            (None, None) => None,
+        })
     }
 }

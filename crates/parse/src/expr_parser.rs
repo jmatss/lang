@@ -309,9 +309,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 LexTokenKind::Kw(Kw::FunctionPointer) => {
                     let mut expr_file_pos = lex_token.file_pos.to_owned();
 
-                    let mut module = self
-                        .iter
-                        .parse_path(&mut expr_file_pos, GenericsKind::Impl)?;
+                    let mut module =
+                        self.iter
+                            .parse_path(&mut expr_file_pos, GenericsKind::Impl, true)?;
 
                     let last_part = module.pop().unwrap();
                     let name = last_part.0;
