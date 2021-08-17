@@ -188,6 +188,7 @@ var z: i32 = 3 + y
 
 ### `GENERICS_LIST`
 A list of generics/type parameters. The generics are "static dispatch" which means that the generics are replaced and checked at compile-time. A new function is created for every use of a specific generic type.
+One can optionally specify a list of `trait`s on the generics to enforce that they must  implement the given `trait`s. This same information can also be specified in a `where`-clause.
 
 ### `PARAMETER_LIST`
 A comma separate list of parameters to the function. A parameter may optionaly have a default values set. If the caller doesn't specify a value for that parameter, the default value will be used (inserted at the call-site during compilation).
@@ -208,7 +209,7 @@ hid fn func(x: i32 = 5, y: i32 = 0) -> i32 {
     return x - y
 }
 
-pub fn generic_func<T>(x: T) -> T {
+pub fn generic_func<T: AsView>(x: T) -> T {
     return x
 }
 
@@ -231,12 +232,49 @@ std::assert(square(3) == 9)
 ```
 
 
+#### Static Functions
+A function can be "static" in a ADT/impl-block which means that it isn't tied to a instance of the ADT/trait (think of it as a Java static function). Example of static function for a struct and how to call it:
+```
+struct TestStruct {
+    fn static_func() -> i32 { return 0 }
+}
+
+var x = TestStruct::static_func()
+std::assert(x == 0)
+```
+
+#### Methods
+There can also be methods in a ADT/impl-block which are tied to an instance of the ADT/trait. They are declared with the `this` keyword following the `fn` keyword. Interally, when the methods are compiled, an instance of the ADT/trait are inserted as the first argument of the function call. A method can take the instance either by value or reference(/pointer).
+Examples of methods for a struct and how to call them:
+```
+struct TestStruct {
+    var member_a: i32
+
+    fn this method_by_value() {
+        this.member_a = 456
+    }
+
+    fn {this} method_by_reference() {
+        this.*.member_a = 456
+    }
+}
+
+var test_struct = TestStruct { 123 }
+
+test_struct.method_by_value()
+std::assert(test_struct.member_a == 123)
+
+test_struct.method_by_reference()
+std::assert(test_struct.member_a == 456)
+```
+
+
 ## Algebraic Data Types (ADT)
 A collective term used for convenience to refer to types that might consiting of
 multiple other types. This includes `struct`, `enum` and `union`. `trait`s are NOT
 considered ADT's in the code, but I put them under here in the readme file because I can't be arsed creating a section just for them.
 
-One can specify a `impl` block for any ADT or trait. This impl-block will contain functions/methods for the ADT/trait. For ADTs one can specify `impl-trait` blocks to implement a specific trait for the given ADT. See the sections `Impl` and `Impl Trait` below for more information.
+One can specify `impl` blocks for any ADT to implement a specific trait. This impl-block will contain implementations of the the functions declared in the trait. For ADTs one can specify `impl-trait` blocks to implement a specific trait for the given ADT. See the sections `Impl` and `Impl Trait` below for more information.
 
 
 ### Struct
@@ -245,20 +283,25 @@ Compiles into a regular C struct, no reordering of the members are done. The gen
 #### Declaration
 ```
 [<MODIFIERS>] struct <NAME> [<GENERICS_LIST> [where <TRAIT_CONSTRAINTS>]] {
-    [<MEMBER_NAME>: <MEMBER_TYPE> [,]]...
+    <VARs> ...
+    <FUNCTIONs> ...
 }
 
 pub struct TestStructA {
-    member_a: i8,
-    member_b: f32,
+    var member_a: i8
+    var member_b: f32
+
+    fn example(x: i32) -> i32 {
+        return x * 2
+    }
 }
 
 // In this example the types `K` and `V` are generics. The `where` clause enforces
 // that any type `K` must implement the trait `Hashable`. This also allows one to
 // use any functions found in trait `Hashable` on the member `member_k`.
 struct TestStructB<K, V> where K impls Hashable {
-    member_k: K,
-    member_v: V,
+    var member_k: K,
+    var member_v: V,
 }
 ```
 
@@ -311,12 +354,17 @@ The first member will be an array of the type `u8` with size equal to the larges
 #### Declaration
 ```
 [<MODIFIERS>] union <NAME> [<GENERICS_LIST> [where <TRAIT_CONSTRAINTS>]] {
-    [<MEMBER_NAME>: <MEMBER_TYPE> [,]]...
+    <VARs> ...
+    <FUNCTIONs> ...
 }
 
 pub union TestUnionA {
-    member_a: i8,
-    member_b: f32,
+    var member_a: i8,
+    var member_b: f32,
+
+    fn example(x: i32) -> i32 {
+        return x * 2
+    }
 }
 
 union TestUnionB<K, V> {
@@ -375,7 +423,25 @@ trait TestTrait {
 
 
 ### Impl
-Inside a `impl` block, one can define functions(/methods) that belongs to a specific ADT or trait. A `impl` block can currently only contain functions.
+`impl` blocks are used to implement traits for a specific ADT. These ADT types can then be used in place of any generics that reqires the type to implement a specific trait.
+
+#### Declaration
+```
+impl <ADT_NAME>: <TRAIT_NAME> {
+    [<TRAIT_FNs>]...
+}
+
+trait TestTrait {
+    fn trait_func(x: u8) -> i32 
+}
+
+struct TestStruct;
+impl TestStruct: TestTrait {
+    fn trait_func(x: u8) -> i32 {
+        return x as i32
+    }
+}
+```
 
 #### Declaration
 ```
@@ -385,68 +451,6 @@ impl <ADT_NAME/TRAIT_NAME> {
 
 impl TestStruct {
     fn func() {}
-}
-```
-
-#### Static Functions
-A function can be "static" in a impl-block which means that it isn't tied to a instance of the ADT/trait the the impl-block belongs to (think of it as a Java static function). Example of static function in impl-block and how to call it:
-```
-struct TestStruct {}
-
-impl TestStruct {
-    fn static_func() -> i32 { return 0 }
-}
-
-var x = TestStruct::static_func()
-std::assert(x == 0)
-```
-
-#### Methods
-There can also be methods in a impl-block which are tied to an instance of the ADT/trait. They are declared with the `this` keyword following the `fn` keyword. Interally, when the methods are compiled, an instance of the ADT/trait are inserted as the first argument of the function call. A method can take the instance either by value or reference(/pointer).
-Examples of methods in impl-block and how to call them:
-```
-struct TestStruct {
-    member_a: i32,
-}
-
-impl TestStruct {
-    fn this method_by_value() {
-        this.member_a = 456
-    }
-
-    fn {this} method_by_reference() {
-        this.*.member_a = 456
-    }
-}
-
-var test_struct = TestStruct { 123 }
-
-test_struct.method_by_value()
-std::assert(test_struct.member_a == 123)
-
-test_struct.method_by_reference()
-std::assert(test_struct.member_a == 456)
-```
-
-
-### Impl Trait
-`impl-trait` blocks are used to implement traits for a specific ADT. These ADT types can then be used in place of any generics that reqires the type to implement a specific trait.
-
-#### Declaration
-```
-impl <TRAIT_NAME> for <ADT_NAME> {
-    [<FN_DECL>]...
-}
-
-trait TestTrait {
-    fn trait_func(x: u8) -> i32 
-}
-
-struct TestStruct;
-impl TestTrait for TestStruct {
-    fn trait_func(x: u8) -> i32 {
-        return x as i32
-    }
 }
 ```
 
