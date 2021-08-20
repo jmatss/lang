@@ -23,9 +23,10 @@ use common::{
     BlockId,
 };
 
-/// Used when replacing generics in methods containing to a specific generic
-/// implementation. This will be used to replace all types in the body of the
-/// methods.
+/// Used when replacing generics in functions and methods containing to a
+/// specific generic implementation. This will be used to replace all types in
+/// the body of the
+/// functions/methods.
 ///
 /// This can be used for replacing generics declared in ADTs and generics
 /// declared in functions. If they are declared in functions, the ADT related
@@ -53,6 +54,7 @@ pub struct GenericsReplacer<'a> {
 }
 
 impl<'a> GenericsReplacer<'a> {
+    /// Used when one wants to create new generic ADTs.
     pub fn new_adt(
         new_adt: Arc<RwLock<Adt>>,
         generics_impl: &'a Generics,
@@ -69,6 +71,7 @@ impl<'a> GenericsReplacer<'a> {
         }
     }
 
+    /// Used when one wants to create new functions or methds.
     pub fn new_func(generics_impl: &'a Generics) -> Self {
         Self {
             modified_variables: HashSet::default(),
@@ -153,52 +156,56 @@ impl<'a> Visitor for GenericsReplacer<'a> {
     /// Since this `GenericsReplacer` is called with `deep_copy` set to true,
     /// this logic inserts a reference from the new ADT type to the new method.
     fn visit_fn(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
-        if let Some(new_adt) = &self.new_adt {
-            let module = match ctx.ast_ctx.get_module(ctx.block_id) {
-                Ok(Some(module)) => module,
-                Ok(None) => LangPath::default(),
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+        let new_adt = if let Some(new_adt) = &self.new_adt {
+            new_adt
+        } else {
+            return;
+        };
 
-            let new_adt_path = {
-                let new_adt = new_adt.as_ref().read().unwrap();
-                module.clone_push(
-                    &new_adt.name,
-                    Some(self.generics_impl),
-                    Some(new_adt.file_pos),
-                )
-            };
+        let module = match ctx.ast_ctx.get_module(ctx.block_id) {
+            Ok(Some(module)) => module,
+            Ok(None) => LangPath::default(),
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
 
-            if let Block {
-                header: BlockHeader::Fn(func),
-                ..
-            } = block
-            {
-                func.as_ref().write().unwrap().method_adt = self.new_type_id;
+        let new_adt_path = {
+            let new_adt = new_adt.as_ref().read().unwrap();
+            module.clone_push(
+                &new_adt.name,
+                Some(self.generics_impl),
+                Some(new_adt.file_pos),
+            )
+        };
 
-                // Insert a reference from the "new" ADT to this new method.
-                // The name set will be the "half name" containing the generics
-                // for the function.
-                new_adt.as_ref().write().unwrap().methods.insert(
-                    func.as_ref()
-                        .read()
-                        .unwrap()
-                        .half_name(&ctx.ty_env.lock().unwrap()),
-                    Arc::clone(&func),
-                );
+        if let Block {
+            header: BlockHeader::Fn(func),
+            ..
+        } = block
+        {
+            func.as_ref().write().unwrap().method_adt = self.new_type_id;
 
-                // Inserts a reference to this new method into the `analyze_context`
-                // look-up table.
-                if let Err(err) = ctx.ast_ctx.insert_method(
-                    &ctx.ty_env.lock().unwrap(),
-                    &new_adt_path,
-                    Arc::clone(&func),
-                ) {
-                    self.errors.push(err);
-                }
+            // Insert a reference from the "new" ADT to this new method.
+            // The name set will be the "half name" containing the generics
+            // for the function.
+            new_adt.as_ref().write().unwrap().methods.insert(
+                func.as_ref()
+                    .read()
+                    .unwrap()
+                    .half_name(&ctx.ty_env.lock().unwrap()),
+                Arc::clone(&func),
+            );
+
+            // Inserts a reference to this new method into the `analyze_context`
+            // look-up table.
+            if let Err(err) = ctx.ast_ctx.insert_method(
+                &ctx.ty_env.lock().unwrap(),
+                &new_adt_path,
+                Arc::clone(&func),
+            ) {
+                self.errors.push(err);
             }
         }
     }

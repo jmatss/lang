@@ -1,6 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap};
 
-use log::debug;
+use log::{debug, log_enabled, Level};
 
 use common::{
     ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx},
@@ -375,6 +375,8 @@ impl Visitor for BlockAnalyzer {
     }
 
     fn visit_end(&mut self, ctx: &mut TraverseCtx) {
-        debug!("BLOCK_CTX --\n{:#?}", ctx.ast_ctx.block_ctxs);
+        if log_enabled!(Level::Debug) {
+            debug!("BLOCK_CTX --\n{:#?}", ctx.ast_ctx.block_ctxs);
+        }
     }
 }

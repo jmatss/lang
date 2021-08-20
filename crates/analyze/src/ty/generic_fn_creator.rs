@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use log::debug;
 
 use common::{
+    ctx::block_ctx::BlockCtx,
     error::{LangError, LangResult},
     hash::DerefType,
     hash_map::TyEnvHashMap,
@@ -13,6 +14,7 @@ use common::{
     },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse_with_deep_copy, visitor::Visitor},
     ty::generics::Generics,
+    BlockId,
 };
 
 use super::generic_replace::GenericsReplacer;
@@ -20,19 +22,30 @@ use super::generic_replace::GenericsReplacer;
 /// Iterate through all functions that take generic parameters. Creates new
 /// instances of them replacing the generics with actual implementations.
 pub struct GenericFnCreator {
-    /// The first string is the path of the ADT and the second string is the name
-    /// of the method.
+    /// The first string is the path of the ADT and the string used as a key in
+    /// the inner map is the name of the method.
     generic_methods: TyEnvHashMap<LangPath, HashMap<String, Vec<Generics>>>,
+
+    /// The key is the path to the function without generics and the values is
+    /// a vector containing all implementation of thhe generucs.
+    generic_fns: TyEnvHashMap<LangPath, Vec<Generics>>,
 
     errors: Vec<LangError>,
 }
 
 impl GenericFnCreator {
-    pub fn new(generic_methods: TyEnvHashMap<LangPath, HashMap<String, Vec<Generics>>>) -> Self {
-        debug!("generic_methods: {:#?}", generic_methods);
+    pub fn new(
+        generic_methods: TyEnvHashMap<LangPath, HashMap<String, Vec<Generics>>>,
+        generic_fns: TyEnvHashMap<LangPath, Vec<Generics>>,
+    ) -> Self {
+        debug!(
+            "generic_methods: {:#?}\ngeneric_fns: {:#?}",
+            generic_methods, generic_fns
+        );
 
         Self {
             generic_methods,
+            generic_fns,
             errors: Vec::default(),
         }
     }
@@ -53,114 +66,119 @@ impl GenericFnCreator {
             .map_err(|err| vec![err])?
             .cloned();
 
-        if let Some(generic_methods) = &mut generic_methods_opt {
-            let mut idx = 0;
+        let generic_methods = if let Some(generic_methods) = &mut generic_methods_opt {
+            generic_methods
+        } else {
+            return Ok(());
+        };
 
-            while idx < body.len() {
-                // TODO: Change so that every method doesn't need to be cloned.
-                let method_token = body.get(idx).cloned().unwrap();
+        let mut idx = 0;
 
-                let method = if let AstToken::Block(Block {
-                    header: BlockHeader::Fn(func),
-                    ..
-                }) = &method_token
-                {
-                    Arc::clone(func)
-                } else {
-                    idx += 1;
-                    continue;
-                };
+        while idx < body.len() {
+            // TODO: Change so that every method doesn't need to be cloned.
+            let method_token = body.get(idx).cloned().unwrap();
 
-                let (method_name, has_gens) = {
-                    let method = method.read().unwrap();
-                    (
-                        method.name.clone(),
-                        method
-                            .generics
-                            .as_ref()
-                            .map_or(false, |gens| !gens.is_empty()),
-                    )
-                };
+            let method = if let AstToken::Block(Block {
+                header: BlockHeader::Fn(func),
+                ..
+            }) = &method_token
+            {
+                Arc::clone(func)
+            } else {
+                idx += 1;
+                continue;
+            };
 
-                // If this method exists in `generic_methods`, this is a method
-                // with generics that is used somewhere in the code base with
-                // "implemented"/"instances" of the generics. Go through all
-                // implementations of the generics and create a new method for
-                // every generic impl.
-                if generic_methods.contains_key(&method_name) {
-                    for method_generics in generic_methods.get_mut(&method_name).unwrap() {
-                        let mut new_method = method_token.clone();
+            let (method_name, has_gens) = {
+                let method = method.read().unwrap();
+                (
+                    method.name.clone(),
+                    method
+                        .generics
+                        .as_ref()
+                        .map_or(false, |gens| !gens.is_empty()),
+                )
+            };
 
-                        // Before creating the new functions, make sure that the
-                        // generics are fully inferred.
-                        for gen_type_id in method_generics.iter_types_mut() {
-                            let inf_type_id = ctx
-                                .ty_env
-                                .lock()
-                                .unwrap()
-                                .inferred_type(*gen_type_id)
-                                .map_err(|e| vec![e])?;
+            // If this method exists in `generic_methods`, this is a method
+            // with generics that is used somewhere in the code base with
+            // "implemented"/"instances" of the generics. Go through all
+            // implementations of the generics and create a new method for
+            // every generic impl.
+            if generic_methods.contains_key(&method_name) {
+                for method_generics in generic_methods.get_mut(&method_name).unwrap() {
+                    let mut new_method = method_token.clone();
 
-                            if *gen_type_id != inf_type_id {
-                                *gen_type_id = inf_type_id;
-                            }
+                    // TODO: Can this be removed?
+                    // Before creating the new functions, make sure that the
+                    // generics are fully inferred.
+                    for gen_type_id in method_generics.iter_types_mut() {
+                        let inf_type_id = ctx
+                            .ty_env
+                            .lock()
+                            .unwrap()
+                            .inferred_type(*gen_type_id)
+                            .map_err(|e| vec![e])?;
+
+                        if *gen_type_id != inf_type_id {
+                            *gen_type_id = inf_type_id;
                         }
-
-                        let mut generics_replacer = GenericsReplacer::new_func(method_generics);
-                        traverse_with_deep_copy(ctx, &mut generics_replacer, &mut new_method, idx)?;
-
-                        // Set the generic impls on the new copy of the function.
-                        let func = if let AstToken::Block(Block {
-                            header: BlockHeader::Fn(func),
-                            ..
-                        }) = &new_method
-                        {
-                            func.as_ref().write().unwrap().generics = Some(method_generics.clone());
-                            Arc::clone(func)
-                        } else {
-                            unreachable!()
-                        };
-
-                        // Insert the method into the ADT.
-                        ctx.ast_ctx
-                            .insert_method(&ctx.ty_env.lock().unwrap(), adt_path_without_gens, func)
-                            .map_err(|err| vec![err])?;
-
-                        // Insert the method into the AST.
-                        body.insert(idx, new_method);
-
-                        idx += 1;
                     }
 
-                    // When the logic above is done creating all generic impls for
-                    // the method, `idx` will point to the old method with no generic
-                    // impls, it should be removed.
-                    // Remove it from both the structure and the AST.
+                    let mut generics_replacer = GenericsReplacer::new_func(method_generics);
+                    traverse_with_deep_copy(ctx, &mut generics_replacer, &mut new_method, idx)?;
+
+                    // Set the generic impls on the new copy of the function.
+                    let func = if let AstToken::Block(Block {
+                        header: BlockHeader::Fn(func),
+                        ..
+                    }) = &new_method
+                    {
+                        func.as_ref().write().unwrap().generics = Some(method_generics.clone());
+                        Arc::clone(func)
+                    } else {
+                        unreachable!()
+                    };
+
+                    // Insert the method into the ADT.
                     ctx.ast_ctx
-                        .remove_method(
-                            &ctx.ty_env.lock().unwrap(),
-                            adt_path_without_gens,
-                            &method_name,
-                        )
+                        .insert_method(&ctx.ty_env.lock().unwrap(), adt_path_without_gens, func)
                         .map_err(|err| vec![err])?;
 
-                    body.remove(idx);
-                } else if has_gens {
-                    // If the method has generics, but isn't in the `generic_methods`
-                    // map, it means that it is a method that isn't used anywhere
-                    // in the code base; remove it.
-                    ctx.ast_ctx
-                        .remove_method(
-                            &ctx.ty_env.lock().unwrap(),
-                            adt_path_without_gens,
-                            &method_name,
-                        )
-                        .map_err(|err| vec![err])?;
+                    // Insert the method into the AST.
+                    body.insert(idx, new_method);
 
-                    body.remove(idx);
-                } else {
                     idx += 1;
                 }
+
+                // When the logic above is done creating all generic impls for
+                // the method, `idx` will point to the old method with no generic
+                // impls, it should be removed.
+                // Remove it from both the structure and the AST.
+                ctx.ast_ctx
+                    .remove_method(
+                        &ctx.ty_env.lock().unwrap(),
+                        adt_path_without_gens,
+                        &method_name,
+                    )
+                    .map_err(|err| vec![err])?;
+
+                body.remove(idx);
+            } else if has_gens {
+                // If the method has generics, but isn't in the `generic_methods`
+                // map, it means that it is a method that isn't used anywhere
+                // in the code base; remove it.
+                ctx.ast_ctx
+                    .remove_method(
+                        &ctx.ty_env.lock().unwrap(),
+                        adt_path_without_gens,
+                        &method_name,
+                    )
+                    .map_err(|err| vec![err])?;
+
+                body.remove(idx);
+            } else {
+                idx += 1;
             }
         }
 
@@ -226,6 +244,188 @@ impl GenericFnCreator {
 
         Ok(())
     }
+
+    /// The `default_body` is the body of the default block. The `default_idx`
+    /// is the index of the given function token inside the `default_body` that
+    /// is being "handled" in this function.
+    ///
+    /// The returned `usize` indicates how many functions that was created.
+    fn create_fn_instance(
+        &mut self,
+        ctx: &mut TraverseCtx,
+        default_body: &mut Vec<AstToken>,
+        default_idx: BlockId,
+    ) -> Result<usize, Vec<LangError>> {
+        let block_id = BlockCtx::DEFAULT_BLOCK_ID;
+
+        let fn_token = default_body.get(default_idx).unwrap();
+
+        let func = if let AstToken::Block(Block {
+            header: BlockHeader::Fn(func),
+            ..
+        }) = fn_token
+        {
+            func
+        } else {
+            unreachable!();
+        };
+
+        let fn_path_without_gens = {
+            let func = func.read().unwrap();
+            func.module
+                .clone_push(&func.name, None, Some(func.file_pos))
+        };
+
+        let mut generic_fns_opt = self
+            .generic_fns
+            .get(
+                &ctx.ty_env.lock().unwrap(),
+                DerefType::Deep,
+                &fn_path_without_gens,
+            )
+            .map_err(|err| vec![err])?
+            .cloned();
+
+        let generic_fns = if let Some(generic_fns) = &mut generic_fns_opt {
+            generic_fns
+        } else {
+            return Ok(0);
+        };
+
+        let new_fn_token = fn_token.clone();
+
+        for (idx, gens) in generic_fns.iter_mut().enumerate() {
+            let mut new_fn = new_fn_token.clone();
+
+            // TODO: Can this be removed?
+            // Before creating the new functions, make sure that the
+            // generics are fully inferred.
+            for gen_type_id in gens.iter_types_mut() {
+                let inf_type_id = ctx
+                    .ty_env
+                    .lock()
+                    .unwrap()
+                    .inferred_type(*gen_type_id)
+                    .map_err(|e| vec![e])?;
+
+                if *gen_type_id != inf_type_id {
+                    *gen_type_id = inf_type_id;
+                }
+            }
+
+            let mut generics_replacer = GenericsReplacer::new_func(gens);
+            traverse_with_deep_copy(ctx, &mut generics_replacer, &mut new_fn, idx)?;
+
+            // Set the generic impls on the new copy of the function.
+            let func = if let AstToken::Block(Block {
+                header: BlockHeader::Fn(func),
+                ..
+            }) = &new_fn
+            {
+                func.as_ref().write().unwrap().generics = Some(gens.clone());
+                Arc::clone(func)
+            } else {
+                unreachable!()
+            };
+
+            let fn_path_with_gens = {
+                let func = func.read().unwrap();
+                func.module
+                    .clone_push(&func.name, func.generics.as_ref(), Some(func.file_pos))
+            };
+
+            // Insert the function into the lookups.
+            ctx.ast_ctx
+                .fns
+                .insert(
+                    &ctx.ty_env.lock().unwrap(),
+                    DerefType::Deep,
+                    (fn_path_with_gens, block_id),
+                    func,
+                )
+                .map_err(|e| vec![e])?;
+
+            // Insert the function into the AST at the position after the
+            // original function without the generics implemented.
+            default_body.insert(default_idx + 1, new_fn);
+        }
+
+        // When the logic above is done creating all generic impls for the
+        // function, `idx` will point to the old function with no generic impls,
+        // it should be removed. Remove it from both the lookups and the AST.
+        ctx.ast_ctx
+            .fns
+            .remove(
+                &ctx.ty_env.lock().unwrap(),
+                DerefType::None,
+                &(fn_path_without_gens, block_id),
+            )
+            .map_err(|err| vec![err])?;
+
+        default_body.remove(default_idx);
+
+        Ok(generic_fns.len())
+    }
+
+    /// The `default_body` is the body of the default block. The `default_idx`
+    /// is the index of the given function token inside the `default_body` that
+    /// is being "handled" in this function.
+    ///
+    /// The returned `bool` indicates if the function was removed or not.
+    fn remove_unused_fns(
+        &mut self,
+        ctx: &mut TraverseCtx,
+        default_body: &mut Vec<AstToken>,
+        default_idx: BlockId,
+    ) -> LangResult<bool> {
+        let block_id = BlockCtx::DEFAULT_BLOCK_ID;
+
+        let fn_token = default_body.get(default_idx).unwrap();
+
+        let func = if let AstToken::Block(Block {
+            header: BlockHeader::Fn(func),
+            ..
+        }) = fn_token
+        {
+            func
+        } else {
+            unreachable!();
+        };
+        let func = func.read().unwrap();
+
+        let fn_path_without_gens = func
+            .module
+            .clone_push(&func.name, None, Some(func.file_pos));
+
+        let contains_gens_decl = func
+            .generics
+            .as_ref()
+            .map(|gens| !gens.is_empty())
+            .unwrap_or(false);
+        let contains_gens_impl = self
+            .generic_fns
+            .get(
+                &ctx.ty_env.lock().unwrap(),
+                DerefType::None,
+                &fn_path_without_gens,
+            )?
+            .is_some();
+
+        std::mem::drop(func);
+
+        if contains_gens_decl && !contains_gens_impl {
+            ctx.ast_ctx.fns.remove(
+                &ctx.ty_env.lock().unwrap(),
+                DerefType::None,
+                &(fn_path_without_gens, block_id),
+            )?;
+            default_body.remove(default_idx);
+
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 impl Visitor for GenericFnCreator {
@@ -249,7 +449,8 @@ impl Visitor for GenericFnCreator {
             unreachable!();
         };
 
-        for body_token in default_body {
+        // Create and remove methods tied to ADTs.
+        for body_token in default_body.iter_mut() {
             let (adt_path_without_gens, child_body) = if let AstToken::Block(Block {
                 header,
                 body: child_body,
@@ -277,6 +478,43 @@ impl Visitor for GenericFnCreator {
 
             if let Err(err) = self.remove_unused_methods(ctx, &adt_path_without_gens, child_body) {
                 self.errors.push(err);
+            }
+        }
+
+        // Create and remove free-standing functions.
+        let mut idx = 0;
+        while idx < default_body.len() {
+            // Will be set to true if a function was removed in the logic below.
+            let mut fn_was_removed = false;
+
+            if let AstToken::Block(Block {
+                header: BlockHeader::Fn(..),
+                ..
+            }) = default_body.get(idx).unwrap()
+            {
+                let amount_of_fns_created = match self.create_fn_instance(ctx, default_body, idx) {
+                    Ok(amount) => amount,
+                    Err(err) => {
+                        self.errors.extend(err);
+                        return;
+                    }
+                };
+
+                idx += amount_of_fns_created;
+
+                if amount_of_fns_created == 0 {
+                    fn_was_removed = match self.remove_unused_fns(ctx, default_body, idx) {
+                        Ok(removed) => removed,
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
+                        }
+                    }
+                }
+            }
+
+            if !fn_was_removed {
+                idx += 1;
             }
         }
     }

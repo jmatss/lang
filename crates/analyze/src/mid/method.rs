@@ -10,7 +10,7 @@ use common::{
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
 };
 
-use crate::util::generics::combine_generics;
+use crate::util::generics::combine_generics_adt;
 
 /// Iterates through all method calls and inserts "this"/"self" into the calls
 /// as the first argument. The bin ops representing the method call will be
@@ -200,7 +200,7 @@ impl Visitor for MethodAnalyzer {
                     );
 
                     let new_gens =
-                        match combine_generics(ctx, Some(adt_path), this_gens, &fn_call_path) {
+                        match combine_generics_adt(ctx, adt_path, this_gens, &fn_call_path) {
                             Ok(new_gens) => new_gens,
                             Err(err) => {
                                 self.errors.push(err);

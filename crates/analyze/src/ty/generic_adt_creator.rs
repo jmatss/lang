@@ -277,6 +277,8 @@ impl GenericAdtCreator {
         let key = (old_path.clone(), parent_id);
 
         ast_ctx.adts.remove(ty_env, DerefType::None, &key)?;
+        // TODO: Do I need to set it to empty? Can it not just be removed from
+        //       the `body` vector?
         *body.get_mut(old_idx).expect("Known to be in bounds.") = AstToken::Empty;
 
         Ok(())

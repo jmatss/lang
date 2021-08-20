@@ -1131,7 +1131,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let adt_full_path = to_string_path(
             &self.iter.ty_env.lock().unwrap(),
-            &module.clone_push(&name, gens.as_ref(), Some(file_pos.clone())),
+            &module.clone_push(&name, gens.as_ref(), Some(*file_pos)),
         );
 
         let impls = Self::combine_impls(decl_impls, where_impls, &adt_full_path, Some(file_pos))?;

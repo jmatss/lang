@@ -71,12 +71,14 @@ impl AstCtx {
     }
 
     pub fn debug_print(&self) {
-        debug!("Block Info:\n{:#?}", self.block_ctxs);
-        debug!("Variables:\n{:#?}", self.variables);
-        debug!("Functions:\n{:#?}", self.fns);
-        debug!("ADTs:\n{:#?}", self.adts);
-        debug!("Traits:\n{:#?}", self.traits);
-        debug!("Built-ins:\n{:#?}", self.built_ins);
+        if log_enabled!(Level::Debug) {
+            debug!("Block Info:\n{:#?}", self.block_ctxs);
+            debug!("Variables:\n{:#?}", self.variables);
+            debug!("Functions:\n{:#?}", self.fns);
+            debug!("ADTs:\n{:#?}", self.adts);
+            debug!("Traits:\n{:#?}", self.traits);
+            debug!("Built-ins:\n{:#?}", self.built_ins);
+        }
     }
 
     /// Returns the parent block ID for the block with ID `id`.

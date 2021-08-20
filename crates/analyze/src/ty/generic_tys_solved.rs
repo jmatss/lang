@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use common::{
     error::{LangError, LangErrorKind, LangResult},
+    file::FilePosition,
     token::block::Block,
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
@@ -32,7 +33,12 @@ impl GenericTysSolvedChecker {
     //       type that is incorrect. But might make more sense to let potential
     //       "wrapping" types report the error because that will give more
     //       information regarding the error.
-    fn assert_generics_solved(&mut self, ty_env: &TyEnv, type_id: TypeId) -> LangResult<()> {
+    fn assert_generics_solved(
+        &mut self,
+        ty_env: &TyEnv,
+        type_id: TypeId,
+        traverse_file_pos: &FilePosition,
+    ) -> LangResult<()> {
         let inf_type_id = ty_env.inferred_type(type_id)?;
 
         if self.seen_type_ids.contains(&inf_type_id) {
@@ -41,7 +47,12 @@ impl GenericTysSolvedChecker {
             self.seen_type_ids.insert(inf_type_id);
         }
 
-        let ty_file_pos = get_file_pos(&ty_env, inf_type_id).cloned();
+        let file_pos = if let Some(file_pos) = get_file_pos(ty_env, inf_type_id) {
+            file_pos
+        } else {
+            traverse_file_pos
+        };
+
         let ty = ty_env.ty(inf_type_id)?.clone();
         match ty {
             Ty::Generic(..) => {
@@ -51,7 +62,7 @@ impl GenericTysSolvedChecker {
                         type_id, inf_type_id, ty
                     ),
                     LangErrorKind::AnalyzeError,
-                    ty_file_pos,
+                    Some(*file_pos),
                 );
                 self.errors.push(err);
             }
@@ -59,10 +70,10 @@ impl GenericTysSolvedChecker {
                 let err = LangError::new(
                     format!(
                         "Found unsolved generic instance type. type_id: {}, inf_type_id: {}, ty: {:#?}",
-                        type_id, inf_type_id, ty
+                        type_id, inf_type_id, ty,
                     ),
                     LangErrorKind::AnalyzeError,
-                    ty_file_pos,
+                    Some(*file_pos),
                 );
                 if !self.errors.contains(&err) {
                     self.errors.push(err);
@@ -72,16 +83,18 @@ impl GenericTysSolvedChecker {
             Ty::CompoundType(inner_ty, ..) => {
                 if let Some(gens) = inner_ty.gens() {
                     for gen_type_id in gens.iter_types() {
-                        self.assert_generics_solved(ty_env, *gen_type_id)?;
+                        self.assert_generics_solved(ty_env, *gen_type_id, traverse_file_pos)?;
                     }
                 }
             }
 
-            Ty::Array(ty_box, expr_opt, _) => {
-                self.assert_generics_solved(ty_env, ty_box)?;
+            Ty::Array(type_id_i, expr_opt, _) => {
+                self.assert_generics_solved(ty_env, type_id_i, traverse_file_pos)?;
                 if let Some(expr) = expr_opt {
                     match expr.get_expr_type() {
-                        Ok(expr_type_id) => self.assert_generics_solved(ty_env, expr_type_id)?,
+                        Ok(expr_type_id) => {
+                            self.assert_generics_solved(ty_env, expr_type_id, traverse_file_pos)?
+                        }
                         Err(err) => {
                             self.errors.push(err);
                         }
@@ -91,15 +104,17 @@ impl GenericTysSolvedChecker {
 
             Ty::Fn(gen_tys, param_tys, ret_ty_opt, _) => {
                 if let Some(ret_type_id) = ret_ty_opt {
-                    self.assert_generics_solved(ty_env, ret_type_id)?;
+                    self.assert_generics_solved(ty_env, ret_type_id, traverse_file_pos)?;
                 }
                 for type_id_i in gen_tys.iter().chain(param_tys.iter()) {
-                    self.assert_generics_solved(ty_env, *type_id_i)?;
+                    self.assert_generics_solved(ty_env, *type_id_i, traverse_file_pos)?;
                 }
             }
 
             Ty::Expr(expr, _) => match expr.get_expr_type() {
-                Ok(expr_type_id) => self.assert_generics_solved(ty_env, expr_type_id)?,
+                Ok(expr_type_id) => {
+                    self.assert_generics_solved(ty_env, expr_type_id, traverse_file_pos)?
+                }
                 Err(err) => self.errors.push(err),
             },
 
@@ -107,11 +122,12 @@ impl GenericTysSolvedChecker {
             | Ty::UnknownAdtMember(type_id_i, ..)
             | Ty::UnknownAdtMethod(type_id_i, ..)
             | Ty::UnknownMethodArgument(type_id_i, ..)
-            | Ty::UnknownMethodGeneric(type_id_i, ..)
+            | Ty::UnknownFnGeneric(Some(type_id_i), ..)
             | Ty::UnknownArrayMember(type_id_i, ..) => {
-                self.assert_generics_solved(ty_env, type_id_i)?;
+                self.assert_generics_solved(ty_env, type_id_i, traverse_file_pos)?;
             }
-            Ty::Any(..) => (),
+
+            Ty::Any(..) | Ty::UnknownFnGeneric(None, ..) => (),
         }
 
         Ok(())
@@ -132,7 +148,9 @@ impl Visitor for GenericTysSolvedChecker {
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        if let Err(err) = self.assert_generics_solved(&ctx.ty_env.lock().unwrap(), *type_id) {
+        if let Err(err) =
+            self.assert_generics_solved(&ctx.ty_env.lock().unwrap(), *type_id, &ctx.file_pos)
+        {
             self.errors.push(err);
         }
     }

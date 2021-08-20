@@ -131,10 +131,14 @@ pub fn to_string_type_id(ty_env: &TyEnv, type_id: TypeId) -> LangResult<String> 
             }
             result.push(')');
         }
-        Ty::UnknownMethodGeneric(adt_type_id, ref method_name, name_or_idx, ..) => {
-            result.push_str("adtMethodGen(");
-            result.push_str(&format!("typeId({})", adt_type_id));
-            result.push('.');
+        Ty::UnknownFnGeneric(adt_type_id, ref method_name, name_or_idx, ..) => {
+            if let Some(adt_type_id) = adt_type_id {
+                result.push_str("adtMethodGen(");
+                result.push_str(&format!("typeId({})", adt_type_id));
+                result.push('.');
+            } else {
+                result.push_str("adtFnGen(");
+            }
             result.push_str(method_name);
             result.push('.');
             match name_or_idx {

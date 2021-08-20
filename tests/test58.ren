@@ -1,16 +1,36 @@
-fn test_fn(x: u8) -> u8 {
-    return x
+struct TestStruct {
+    fn test_method<T>(x: T) { }
 }
 
-fn main() -> i32 {
-    var res1: f32 = if false {
-        yield 1.0
-    } else {
-        yield 0.0
-    }
-    // std::assert(res1 == 0.0)
+struct TestGenStruct<T> {
+    fn test_method(x: T) { }
+}
 
-    var cond = 2
-    var res2 = test_fn(if cond == 2 { yield 1 } else { yield 0 })
-    //std::assert(res2 == 1)
+struct TestDoubleGenStruct<T> {
+    var x: T
+    fn this test_method<F>(z: F) { }
+}
+
+fn test_fn<T>(x: T) { }
+
+fn main() -> i32 {
+    // TODO: Implement inference of method and function
+    //       generics if not specified.
+
+    var one = 1 as u8
+    //var ts = TestStruct::test_method(one)
+
+    var two = 2 as i64
+    //var tgs = TestGenStruct::test_method(two)
+
+    var three = 3. as f32
+    var tdgs = TestDoubleGenStruct { three }
+
+    var four = 4 as u32
+    //tdgs.test_method(four)
+
+    var five = 5. as f64
+    //test_fn(five)
+
+    return 0
 }

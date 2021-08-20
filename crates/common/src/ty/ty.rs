@@ -72,7 +72,7 @@ pub enum Ty {
     /// String is the name of the member.
     UnknownAdtMember(TypeId, String, UniqueId, TypeInfo),
 
-    /// Unknown method of the struct/enum/trait type "Type" with the name of the
+    /// Unknown method of the struct/enum/trait type "TypeId" with the name of the
     /// first "String". The vector are generics specified at the function call,
     /// the usize is the index and the types are "UnknownMethodGeneric" types.
     UnknownAdtMethod(TypeId, String, Vec<TypeId>, UniqueId, TypeInfo),
@@ -90,10 +90,17 @@ pub enum Ty {
         TypeInfo,
     ),
 
-    /// Unknown method generic argument of the struct/enum/trait type "TypeId"
-    /// with the name "String". The "Either<usize, String>" is either the index
-    /// or the name of the generic argument in the method call.
-    UnknownMethodGeneric(TypeId, String, Either<usize, String>, UniqueId, TypeInfo),
+    /// Unknown generic argument for either a function or method.
+    /// If this is a method, the type of the ADT will be set as Some "TypeId".
+    /// The "String" is the name of the fn/method and the "Either<usize, String>"
+    /// is either the index or the name of the generic argument in the fn call.
+    UnknownFnGeneric(
+        Option<TypeId>,
+        String,
+        Either<usize, String>,
+        UniqueId,
+        TypeInfo,
+    ),
 
     /// Unknown type of array member of array with type "TypeId".
     UnknownArrayMember(TypeId, UniqueId, TypeInfo),
@@ -176,7 +183,7 @@ impl TyEnvHash for Ty {
                 10.hash(state);
                 unique_id.hash(state);
             }
-            Ty::UnknownMethodGeneric(.., unique_id, _) => {
+            Ty::UnknownFnGeneric(.., unique_id, _) => {
                 11.hash(state);
                 unique_id.hash(state);
             }
@@ -221,7 +228,7 @@ impl Ty {
             | Ty::UnknownAdtMember(.., type_info)
             | Ty::UnknownAdtMethod(.., type_info)
             | Ty::UnknownMethodArgument(.., type_info)
-            | Ty::UnknownMethodGeneric(.., type_info)
+            | Ty::UnknownFnGeneric(.., type_info)
             | Ty::UnknownArrayMember(.., type_info) => type_info,
         }
     }
@@ -239,7 +246,7 @@ impl Ty {
             | Ty::UnknownAdtMember(.., type_info)
             | Ty::UnknownAdtMethod(.., type_info)
             | Ty::UnknownMethodArgument(.., type_info)
-            | Ty::UnknownMethodGeneric(.., type_info)
+            | Ty::UnknownFnGeneric(.., type_info)
             | Ty::UnknownArrayMember(.., type_info) => type_info,
         }
     }

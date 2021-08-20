@@ -100,7 +100,7 @@ pub fn is_solved(
         Ty::Any(..) => true,
 
         Ty::UnknownAdtMember(type_id_i, ..)
-        | Ty::UnknownMethodGeneric(type_id_i, ..)
+        | Ty::UnknownFnGeneric(Some(type_id_i), ..)
         | Ty::UnknownArrayMember(type_id_i, ..)
             if solve_cond.can_solve_unknown() =>
         {
@@ -121,7 +121,7 @@ pub fn is_solved(
         }
 
         Ty::UnknownAdtMember(..)
-        | Ty::UnknownMethodGeneric(..)
+        | Ty::UnknownFnGeneric(..)
         | Ty::UnknownArrayMember(..)
         | Ty::UnknownAdtMethod(..)
         | Ty::UnknownMethodArgument(..) => false,
@@ -247,7 +247,7 @@ pub fn is_unknown_method_argument(ty_env: &TyEnv, id: TypeId) -> LangResult<bool
 
 pub fn is_unknown_method_generic(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
     let ty = ty_env.ty(id)?;
-    Ok(matches!(ty, Ty::UnknownMethodGeneric(..)))
+    Ok(matches!(ty, Ty::UnknownFnGeneric(..)))
 }
 
 pub fn is_unknown_array_member(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
@@ -261,7 +261,7 @@ pub fn is_unknown_any(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
         Ty::UnknownAdtMember(..)
         | Ty::UnknownAdtMethod(..)
         | Ty::UnknownMethodArgument(..)
-        | Ty::UnknownMethodGeneric(..)
+        | Ty::UnknownFnGeneric(..)
         | Ty::UnknownArrayMember(..) => true,
         Ty::CompoundType(inner_ty, ..) => {
             inner_ty.is_unknown()

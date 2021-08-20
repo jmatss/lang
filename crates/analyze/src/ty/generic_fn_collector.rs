@@ -24,14 +24,14 @@ use crate::util::order::order_step2_strings;
 
 use super::generic_nested_collector::{GenericNestedCollector, NestedMethodInfo};
 
-/// Iterates through the tokens and gathers all methods containing generics.
-/// Only the methods implementing the generic will be stored, any generic
-/// containing the generic ex. "func<T>()" will NOT be saved, only ex.
-/// "func<i64>()" & "func<f32>()".
+/// Iterates through the tokens and gathers all uses of function and methods
+/// containing generics. Only the function/method calls implementing the generics
+/// will be stored (ex. `func<i64>()` & `func<f32>()`), not the functions/methods
+/// only containing the generic declarations (ex. `func<T>()`).
 ///
-/// This information will be used to create new instances of the methods where
-/// the generics are "implemented". Ex. "func<T>()" might be implemented as
-/// "func<i64>()" & "func<f32>()".
+/// This information will be used to create new instances of the functions and
+/// methods where the generics are "implemented". Ex. `func<T>()` might be
+/// implemented as `func<i64>()` or `func<f32>()`.
 pub struct GenericFnCollector<'a> {
     /// The first LangPath is the path of the ADT that this method belongs to and
     /// the second key string is the name of the method.
@@ -40,6 +40,10 @@ pub struct GenericFnCollector<'a> {
     /// The first LangPath is the name of the ADT in which the information
     /// was found.
     nested_generic_methods: TyEnvHashMap<LangPath, TyEnvHashMap<NestedMethodInfo, Vec<Generics>>>,
+
+    /// Similar to `generic_methods`, but this will contain "free-standing"
+    // functions that aren't tied to a ADT.
+    pub generic_fns: TyEnvHashMap<LangPath, Vec<Generics>>,
 
     /// A list of all ADT's in the dependecy order. This list will be in reverse
     /// order compared to how it is calculated. This means that ADT `A` depending
@@ -55,16 +59,16 @@ impl<'a> GenericFnCollector<'a> {
         Self {
             generic_methods: TyEnvHashMap::default(),
             nested_generic_methods: TyEnvHashMap::default(),
+            generic_fns: TyEnvHashMap::default(),
             dependency_order_rev,
             errors: Vec::default(),
         }
     }
 
-    /// If the method with name `method_name`, on the ADT with type `adt_type_id`
-    /// contains generics; this function will save all "implementing" methods
-    /// where the generics have been given a "real type instance".
-    /// This function also adds the names for the generics if they aren't already
-    /// set.
+    /// If the method called in the `method_call` on the ADT with type `adt_type_id`
+    /// contains generics, store the generics in `self.generic_methods`. These
+    /// will then be used to create copies of the method where the generics have
+    /// been implemented.
     fn collect_generic_method(
         &mut self,
         ctx: &mut TraverseCtx,
@@ -182,6 +186,95 @@ impl<'a> GenericFnCollector<'a> {
                 &method_name,
                 to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path),
                 method_call_gens.len_types(),
+            )))
+        }
+    }
+
+    /// If the function called in the `fn_call` contains generics, store the
+    /// generics in `self.generic_fns`. These will then be used to create copies
+    /// of the function where the generics have been implemented.
+    fn collect_generic_fn(&mut self, ctx: &mut TraverseCtx, fn_call: &FnCall) -> LangResult<()> {
+        let fn_call_gens = if let Some(fn_call_gens) = &fn_call.generics {
+            fn_call_gens.clone()
+        } else {
+            return Ok(());
+        };
+
+        let fn_path_without_gens = fn_call
+            .module
+            .clone_push(&fn_call.name, None, fn_call.file_pos);
+
+        let func = ctx
+            .ast_ctx
+            .get_fn(&ctx.ty_env.lock().unwrap(), &fn_path_without_gens)?;
+        let func = func.read().unwrap();
+
+        if let Some(fn_gens) = &func.generics {
+            let fn_gen_names = fn_gens.iter_names().cloned().collect::<Vec<_>>();
+
+            // Skip any functions that doesn't have their generic declarations
+            // implemented, only save function calls that have had the generics
+            // implemented in with "real" types.
+            for gen_type_id in fn_call_gens.iter_types() {
+                if contains_generic_with_name(
+                    &ctx.ty_env.lock().unwrap(),
+                    *gen_type_id,
+                    &fn_gen_names,
+                )? {
+                    return Ok(());
+                }
+            }
+
+            // Ensure that the function call has the same amount of generic impls
+            // as the function declaration has declared.
+            if fn_call_gens.len_types() != fn_gen_names.len() {
+                return Err(ctx.ast_ctx.err(format!(
+                    "Function call to \"{}\" has {} generics specified, \
+                    but the function declaration has {} generics.",
+                    &to_string_path(&ctx.ty_env.lock().unwrap(), &fn_path_without_gens),
+                    fn_call_gens.len_types(),
+                    fn_gen_names.len()
+                )));
+            }
+
+            let mut new_gens = Generics::new();
+            for (name, ty) in fn_gen_names.iter().zip(fn_call_gens.iter_types()) {
+                new_gens.insert(name.clone(), *ty);
+            }
+
+            let ty_env_guard = ctx.ty_env.lock().unwrap();
+
+            if let Some(prev_gens) =
+                self.generic_fns
+                    .get_mut(&ty_env_guard, DerefType::None, &fn_path_without_gens)?
+            {
+                let mut contains_gens = false;
+                for prev_gen in prev_gens.iter() {
+                    if generics_eq(&ty_env_guard, prev_gen, &new_gens, DerefType::Deep)? {
+                        contains_gens = true;
+                        break;
+                    }
+                }
+
+                if !contains_gens {
+                    prev_gens.push(new_gens);
+                }
+            } else {
+                self.generic_fns.insert(
+                    &ty_env_guard,
+                    DerefType::None,
+                    fn_path_without_gens,
+                    vec![new_gens],
+                )?;
+            }
+
+            Ok(())
+        } else {
+            Err(ctx.ast_ctx.err(format!(
+                "Function call to \"{}\" has {} generics specified, \
+                but the function declaration has no generics declared.",
+                &to_string_path(&ctx.ty_env.lock().unwrap(), &fn_path_without_gens),
+                fn_call_gens.len_types(),
             )))
         }
     }
@@ -575,6 +668,8 @@ impl<'a> Visitor for GenericFnCollector<'a> {
             if let Err(err) = self.collect_generic_method(ctx, *adt_type_id, fn_call) {
                 self.errors.push(err);
             }
+        } else if let Err(err) = self.collect_generic_fn(ctx, fn_call) {
+            self.errors.push(err);
         }
     }
 
@@ -582,6 +677,9 @@ impl<'a> Visitor for GenericFnCollector<'a> {
         if let Err(err) = self.convert_nested_to_regular(ctx) {
             self.errors.push(err);
         }
-        debug!("self.generic_methods: {:#?}", self.generic_methods);
+        debug!(
+            "self.generic_methods: {:#?}\nself.generic_fns: {:#?}",
+            self.generic_methods, self.generic_fns
+        );
     }
 }

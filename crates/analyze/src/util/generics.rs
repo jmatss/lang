@@ -17,52 +17,69 @@ use common::{
 ///
 /// The given `fn_call_path` is just for error printing, it will never be used
 /// in a "normal flow" of this function.
-pub fn combine_generics(
+pub fn combine_generics_adt(
     ctx: &mut TraverseCtx,
-    adt_path_opt: Option<&LangPath>,
+    adt_path: &LangPath,
     gen_impls: Option<&Generics>,
     fn_call_path: &LangPath,
 ) -> LangResult<Option<Generics>> {
+    let adt = ctx.ast_ctx.get_adt_partial(
+        &ctx.ty_env.lock().unwrap(),
+        &adt_path.without_gens(),
+        ctx.block_id,
+    )?;
+    let adt = adt.read().unwrap();
+
+    let gen_names = if let Some(gens) = &adt.generics {
+        gens.iter_names().cloned().collect::<Vec<_>>()
+    } else {
+        return Ok(None);
+    };
+
+    combine_generics(ctx, &gen_names, gen_impls, fn_call_path, Some(adt_path))
+}
+
+/// `fn_call_path` and `adt_path` are only used for error printing.
+pub fn combine_generics(
+    ctx: &mut TraverseCtx,
+    gen_names: &[String],
+    gen_impls: Option<&Generics>,
+    fn_call_path: &LangPath,
+    adt_path: Option<&LangPath>,
+) -> LangResult<Option<Generics>> {
+    if gen_names.is_empty() {
+        return Ok(None);
+    }
+
     let mut new_gens = Generics::new();
-
-    let adt = if let Some(adt_path) = adt_path_opt {
-        ctx.ast_ctx.get_adt_partial(
-            &ctx.ty_env.lock().unwrap(),
-            &adt_path.without_gens(),
-            ctx.block_id,
-        )?
-    } else {
-        return Ok(None);
-    };
-
-    let adt_gen_names = if let Some(adt_gens) = &adt.read().unwrap().generics {
-        adt_gens.iter_names().cloned().collect::<Vec<_>>()
-    } else {
-        return Ok(None);
-    };
 
     // If the generics impls have been specified, use those to populate the
     // Generics inside `new_gens`.
     // Else if no generic implements have been specified, create new
     // "GenericInstance" types that will be used to create the generics.
     if let Some(gen_impls) = gen_impls {
-        if adt_gen_names.len() != gen_impls.len_types() {
+        if gen_names.len() != gen_impls.len_types() {
+            let fn_name = to_string_path(&ctx.ty_env.lock().unwrap(), &fn_call_path);
+            let err_names = if let Some(adt_path) = adt_path {
+                format!("Adt name: {:?}, method name: {}", &adt_path, &fn_name)
+            } else {
+                format!("Function name: {}", &fn_name)
+            };
+
             return Err(ctx.ast_ctx.err(format!(
-                "Wrong amount of generics on ADT for static call. Found: {}, expected: {}.\n\
-                ADT path: {:?}\nMethod name: {}\nAdt generic names: {:?}",
+                "Wrong amount of generics. Actual: {}, expected: {}\n{}\nGeneric names: {:?}",
                 gen_impls.len_types(),
-                adt_gen_names.len(),
-                adt_path_opt,
-                to_string_path(&ctx.ty_env.lock().unwrap(), &fn_call_path),
-                adt_gen_names
+                gen_names.len(),
+                err_names,
+                gen_names
             )));
         }
 
-        for (gen_name, gen_type_id) in adt_gen_names.iter().zip(gen_impls.iter_types()) {
+        for (gen_name, gen_type_id) in gen_names.iter().zip(gen_impls.iter_types()) {
             new_gens.insert(gen_name.into(), *gen_type_id);
         }
     } else {
-        for gen_name in adt_gen_names {
+        for gen_name in gen_names {
             let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
             let gen_type_id = ctx.ty_env.lock().unwrap().id(&Ty::GenericInstance(
                 gen_name.clone(),

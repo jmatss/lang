@@ -104,12 +104,15 @@ impl PathResolver {
             | Ty::UnknownAdtMember(inner_type_id, ..)
             | Ty::UnknownAdtMethod(inner_type_id, ..)
             | Ty::UnknownMethodArgument(inner_type_id, ..)
-            | Ty::UnknownMethodGeneric(inner_type_id, ..)
+            | Ty::UnknownFnGeneric(Some(inner_type_id), ..)
             | Ty::UnknownArrayMember(inner_type_id, ..) => {
                 self.resolve_ty_path(ctx, inner_type_id, block_id)?;
             }
 
-            Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => (),
+            Ty::Any(..)
+            | Ty::Generic(..)
+            | Ty::GenericInstance(..)
+            | Ty::UnknownFnGeneric(None, ..) => (),
         }
 
         Ok(())
@@ -238,6 +241,22 @@ impl Visitor for PathResolver {
                 err = ctx.ast_ctx.err_trait(&ty_env_guard, err.msg, trait_path);
 
                 if !self.errors.contains(&err) {
+                    self.errors.push(err);
+                }
+            }
+        }
+    }
+
+    fn visit_fn(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Fn(func),
+            ..
+        } = block
+        {
+            match ctx.ast_ctx.get_module(ctx.block_id) {
+                Ok(Some(module)) => func.write().unwrap().module = module,
+                Ok(None) => (),
+                Err(err) => {
                     self.errors.push(err);
                 }
             }

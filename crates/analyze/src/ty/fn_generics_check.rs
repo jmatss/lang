@@ -100,8 +100,8 @@ impl Visitor for FnGenericsCheck {
                 } else {
                     // TODO: Better error message.
                     let err = ctx.ast_ctx.err(format!(
-                        "Function declaration specifies generics, but no generics were given when \
-                        calling the function. ADT: {}, method name: {}, file_pos: {:#?}",
+                        "Method declaration specifies generics, but no generics were given when \
+                        calling the method. ADT: {}, method name: {}, file_pos: {:#?}",
                         to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path),
                         fn_call.name,
                         fn_call.file_pos

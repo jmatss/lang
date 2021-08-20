@@ -240,7 +240,6 @@ name = "lang"
 version = "0.1.0"
 dependencies = [
  "analyze",
- "backtrace",
  "clap",
  "codegen_llvm",
  "common",

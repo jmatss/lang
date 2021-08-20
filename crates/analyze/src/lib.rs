@@ -160,7 +160,10 @@ pub fn analyze<'a>(
     traverse(&mut ctx, &mut generic_fn_collector, ast_root)?;
 
     debug!("Running GenericFnCreator");
-    let mut generic_fn_creator = GenericFnCreator::new(generic_fn_collector.generic_methods);
+    let mut generic_fn_creator = GenericFnCreator::new(
+        generic_fn_collector.generic_methods,
+        generic_fn_collector.generic_fns,
+    );
     traverse(&mut ctx, &mut generic_fn_creator, ast_root)?;
 
     debug!("Running GenericAdtCollector");

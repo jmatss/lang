@@ -485,9 +485,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let mut arg_idx = 0;
         for format_part in format_parts {
             let expr = match format_part {
-                FormatPart::String(str_lit) => {
-                    self.str_lit_to_string_view(str_lit, &std_module, file_pos)?
-                }
+                FormatPart::String(str_lit) => self.str_lit_to_string_view(str_lit, file_pos)?,
                 FormatPart::Arg(expr) => {
                     let type_id = expr.get_expr_type()?;
                     let is_primitive =
@@ -543,7 +541,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     fn str_lit_to_string_view(
         &mut self,
         str_lit: &str,
-        types_module: &LangPath,
         file_pos: Option<FilePosition>,
     ) -> LangResult<Expr> {
         Ok(Expr::Lit(
@@ -554,48 +551,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             )?),
             file_pos,
         ))
-        /*
-        let mut string_view_init = FnCall::new(
-            "new".into(),
-            types_module.clone(),
-            vec![
-                Argument::new(
-                    None,
-                    None,
-                    Expr::Lit(
-                        Lit::String(str_lit.into()),
-                        Some(ty_container.u8_ptr_type_id),
-                        None,
-                    ),
-                ),
-                Argument::new(
-                    None,
-                    None,
-                    Expr::Lit(
-                        Lit::Integer("0".into(), 10),
-                        Some(ty_container.u32_type_id),
-                        None,
-                    ),
-                ),
-                Argument::new(
-                    None,
-                    None,
-                    Expr::Lit(
-                        Lit::Integer(str_lit.len().to_string(), 10),
-                        Some(ty_container.u32_type_id),
-                        None,
-                    ),
-                ),
-            ],
-            None,
-            None,
-        );
-        string_view_init.is_method = true;
-        string_view_init.method_adt = Some(ty_container.string_view_type_id);
-        string_view_init.ret_type = Some(ty_container.string_view_type_id);
-
-        Expr::FnCall(string_view_init)
-        */
     }
 
     fn primitive_to_string_view(

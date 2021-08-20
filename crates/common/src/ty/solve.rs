@@ -6,7 +6,6 @@ use crate::{
     ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx},
     error::LangResult,
     path::LangPath,
-    token::block::Fn,
     ty::{
         generics::Generics,
         get::get_file_pos,
@@ -14,6 +13,7 @@ use crate::{
         is::{is_any, is_generic, is_solved},
         replace::{replace_gen_impls, replace_gens_with_gen_instances},
         substitution_sets::{promote, union},
+        to_string::to_string_path,
         ty::SolveCond,
         type_info::TypeInfo,
     },
@@ -165,16 +165,16 @@ fn insert_constraint_inner(
         }
 
         (
-            Ty::UnknownMethodArgument(ty_a_inner, a_name, a_idx_or_name, ..),
-            Ty::UnknownMethodArgument(ty_b_inner, b_name, b_idx_or_name, ..),
+            Ty::UnknownMethodArgument(ty_a_inner, a_name, _, a_idx_or_name, ..),
+            Ty::UnknownMethodArgument(ty_b_inner, b_name, _, b_idx_or_name, ..),
         ) if a_name == b_name && a_idx_or_name == b_idx_or_name => {
             insert_constraint_inner(ty_env, ty_a_inner, ty_b_inner)?;
             insert_constraint(ty_env, ty_a_inner, ty_b_inner)
         }
 
         (
-            Ty::UnknownMethodGeneric(ty_a_inner, a_name, a_idx, ..),
-            Ty::UnknownMethodGeneric(ty_b_inner, b_name, b_idx, ..),
+            Ty::UnknownFnGeneric(Some(ty_a_inner), a_name, a_idx, ..),
+            Ty::UnknownFnGeneric(Some(ty_b_inner), b_name, b_idx, ..),
         ) if a_name == b_name && a_idx == b_idx => {
             insert_constraint_inner(ty_env, ty_a_inner, ty_b_inner)?;
             insert_constraint(ty_env, ty_a_inner, ty_b_inner)
@@ -337,9 +337,10 @@ fn solve_manual(
         Ty::UnknownMethodArgument(..) => {
             solve_unknown_method_argument(ty_env, ast_ctx, type_id, seen_type_ids)
         }
-        Ty::UnknownMethodGeneric(..) => {
+        Ty::UnknownFnGeneric(Some(_), ..) => {
             solve_unknown_method_generic(ty_env, ast_ctx, type_id, seen_type_ids)
         }
+        Ty::UnknownFnGeneric(None, ..) => solve_unknown_fn_generic(ty_env, type_id, seen_type_ids),
         Ty::UnknownArrayMember(..) => {
             solve_unknown_array_member(ty_env, ast_ctx, type_id, seen_type_ids)
         }
@@ -655,12 +656,29 @@ fn solve_unknown_adt_method(
     let method = method.as_ref().read().unwrap();
     let fn_gens = method.generics.clone().unwrap_or_else(Generics::empty);
 
-    // Create/get the generics for the function call and replace potential
-    // generics in the return type of "this function call".
-    let fn_call_gens = if fn_call_gens_vec.is_empty() {
-        new_method_generics(&mut ty_env.lock().unwrap(), &method, &type_info)?
-            .unwrap_or_else(Generics::empty)
+    let fn_call_gens = if fn_gens.is_empty() {
+        Generics::empty()
+    } else if fn_call_gens_vec.is_empty() {
+        // At this point, it is the first time that we have solved the ADT of the
+        // `UnknownAdtMethod` and we have been able to see that the method have
+        // generics declared and that the call-site didn't specify any generics.
+        // Create new unknown types at this point so that the generics of the
+        // function call can be inferred.
+        let new_fn_call_gens = new_gen_impls(
+            &ty_env,
+            method.generics.as_ref(),
+            &type_info,
+            Some(*adt_type_id),
+            Some(method_name),
+        )?
+        .unwrap_or_else(Generics::empty);
+
+        *fn_call_gens_vec = new_fn_call_gens.iter_types().cloned().collect::<Vec<_>>();
+        ty_env.lock().unwrap().update(type_id, ty_clone.clone())?;
+
+        new_fn_call_gens
     } else {
+        // !fn_gens.is_empty() && !fn_call_gens_vec.is_empty()
         let mut fn_call_gens = Generics::new();
         for (gen_name, gen_unknown_ty) in fn_gens.iter_names().zip(fn_call_gens_vec) {
             fn_call_gens.insert(gen_name.clone(), *gen_unknown_ty);
@@ -668,12 +686,9 @@ fn solve_unknown_adt_method(
         fn_call_gens
     };
 
-    debug!(
-        "solve_unknown_adt_method -- fn_call_gens: {:#?}, adt_path: {:#?}",
-        fn_call_gens, adt_path
-    );
-
     let inf_new_type_id = if let Some(mut new_type_id) = method.ret_type {
+        // Create/get the generics for the function call and replace potential
+        // generics in the return type of "this function call".
         if let Some(new_new_type_id) =
             replace_gen_impls(ty_env, ast_ctx, new_type_id, &fn_call_gens)?
         {
@@ -705,12 +720,6 @@ fn solve_unknown_adt_method(
             .unwrap()
             .id(&Ty::CompoundType(InnerTy::Void, TypeInfo::None))?
     };
-
-    debug!(
-        "solve_unknown_adt_method -- inf_new_type_id: {},  ty: {:#?}",
-        inf_new_type_id,
-        ty_env.lock().unwrap().ty(inf_new_type_id)
-    );
 
     insert_constraint(ty_env, type_id, inf_new_type_id)?;
     Ok(inf_new_type_id)
@@ -789,13 +798,14 @@ fn solve_unknown_method_argument(
     // Create/get the generics for the function call and replace potential
     // generics in the return type of "this function call".
     let fn_call_gens = if fn_call_gens_vec.is_empty() {
-        if let Some(method_gens) =
-            new_method_generics(&mut ty_env.lock().unwrap(), &method, &type_info)?
-        {
-            method_gens
-        } else {
-            Generics::empty()
-        }
+        new_gen_impls(
+            &ty_env,
+            method.generics.as_ref(),
+            &type_info,
+            Some(*adt_type_id),
+            Some(method_name),
+        )?
+        .unwrap_or_else(Generics::empty)
     } else {
         let mut fn_call_gens = Generics::new();
         for (gen_name, gen_unknown_ty) in fn_gens.iter_names().zip(fn_call_gens_vec) {
@@ -842,14 +852,18 @@ fn solve_unknown_method_generic(
         type_id, seen_type_ids, ty_clone
     );
 
-    let (adt_type_id, method_name, gen_idx_or_name, type_info) =
-        if let Ty::UnknownMethodGeneric(adt_type_id, method_name, gen_idx_or_name, _, type_info) =
-            &mut ty_clone
-        {
-            (adt_type_id, method_name, gen_idx_or_name, type_info)
-        } else {
-            unreachable!()
-        };
+    let (adt_type_id, method_name, gen_idx_or_name, type_info) = if let Ty::UnknownFnGeneric(
+        Some(adt_type_id),
+        method_name,
+        gen_idx_or_name,
+        _,
+        type_info,
+    ) = &mut ty_clone
+    {
+        (adt_type_id, method_name, gen_idx_or_name, type_info)
+    } else {
+        unreachable!()
+    };
 
     let adt_path = match solve_adt_type(ty_env, ast_ctx, *adt_type_id, seen_type_ids)? {
         AdtSolveStatus::Solved(adt_path) => adt_path,
@@ -879,10 +893,11 @@ fn solve_unknown_method_generic(
             {
                 generic_name
             } else {
+                let adt_name = to_string_path(&ty_env.lock().unwrap(), &adt_path);
                 return Err(ast_ctx.err(format!(
                     "Method call specified generic at index {}. \
-                        Method declaration for \"{}\" has no generic at that index.",
-                    gen_idx_or_name, method_name
+                    Method \"{}\" in ADT \"{}\" has no generic at that index.",
+                    gen_idx_or_name, method_name, adt_name
                 )));
             }
         }
@@ -903,7 +918,7 @@ fn solve_unknown_method_generic(
     }
 
     let new_method_gens_res =
-        new_method_generics(&mut ty_env.lock().unwrap(), &method, &type_info)?;
+        new_gen_impls(&ty_env, method.generics.as_ref(), &type_info, None, None)?;
     if let Some(method_generics) = &new_method_gens_res {
         if let Some(new_new_type_id) =
             replace_gen_impls(ty_env, ast_ctx, new_type_id, &method_generics)?
@@ -917,6 +932,22 @@ fn solve_unknown_method_generic(
 
     insert_constraint(ty_env, type_id, inf_new_type_id)?;
     Ok(inf_new_type_id)
+}
+
+fn solve_unknown_fn_generic(
+    ty_env: &Mutex<TyEnv>,
+    type_id: TypeId,
+    seen_type_ids: &mut HashSet<TypeId>,
+) -> LangResult<TypeId> {
+    let inf_type_id = inferred_type(&ty_env.lock().unwrap(), type_id)?;
+
+    debug!(
+        "solve_unknown_fn_generic -- type_id: {}, inf_type_id: {}, seen_type_ids: {:?}",
+        type_id, inf_type_id, seen_type_ids
+    );
+
+    insert_constraint(ty_env, type_id, inf_type_id)?;
+    Ok(inf_type_id)
 }
 
 fn solve_unknown_array_member(
@@ -1051,35 +1082,48 @@ fn solve_adt_type(
     }
 }
 
-/// Creates a new `Generic` where the types will be new `GenericInstance`s.
-/// This `Generic` can be used to replace `Ty::Generic` with new
-/// `Ty::GenericInstance`s found in this returned value.
-///
-/// This is needed to ensure that no "raw" `Ty::Generic`s are leaked outside
-/// the function body itself. I.e. this can be used to replace arguments and
-/// return values of function calls.
-pub fn new_method_generics(
-    ty_env: &mut TyEnv,
-    method: &Fn,
+/// Creates a new `Generic` where all types are new `GenericInstance`s.
+/// The names of the generics are taken from the parameters `gens`.
+/// New constraints will be created mapping the new `GenericInstance`s to a
+/// `UnknownFnGeneric` type if both `adt_type_id` and `method_name` is set.
+pub fn new_gen_impls(
+    ty_env: &Mutex<TyEnv>,
+    gens: Option<&Generics>,
     type_info: &TypeInfo,
+    adt_type_id: Option<TypeId>,
+    method_name: Option<&str>,
 ) -> LangResult<Option<Generics>> {
     // TODO: This should be done somewhere else. This feels like a really
     //       random place to do it.
-    if let Some(method_generics) = &method.generics {
-        let mut new_method_generics = Generics::new();
+    if let Some(gens) = gens {
+        let mut new_gens = Generics::new();
 
-        for generic_name in method_generics.iter_names() {
-            let unique_id = ty_env.new_unique_id();
-            let type_id = ty_env.id(&Ty::GenericInstance(
-                generic_name.clone(),
+        for gen_name in gens.iter_names() {
+            let unique_id = ty_env.lock().unwrap().new_unique_id();
+            let type_id = ty_env.lock().unwrap().id(&Ty::GenericInstance(
+                gen_name.clone(),
                 unique_id,
                 type_info.clone(),
             ))?;
 
-            new_method_generics.insert(generic_name.clone(), type_id);
+            new_gens.insert(gen_name.clone(), type_id);
+
+            // If both a `adt_type_id` and a `method_name` is set, create a new
+            // `UnknownFnGeneric` type which ...
+            let unique_id = ty_env.lock().unwrap().new_unique_id();
+            if let (Some(adt_type_id), Some(method_name)) = (adt_type_id, method_name) {
+                let unknown_gen_type_id = ty_env.lock().unwrap().id(&Ty::UnknownFnGeneric(
+                    Some(adt_type_id),
+                    method_name.into(),
+                    Either::Right(gen_name.clone()),
+                    unique_id,
+                    TypeInfo::None,
+                ))?;
+                insert_constraint(ty_env, unknown_gen_type_id, type_id)?;
+            }
         }
 
-        Ok(Some(new_method_generics))
+        Ok(Some(new_gens))
     } else {
         Ok(None)
     }

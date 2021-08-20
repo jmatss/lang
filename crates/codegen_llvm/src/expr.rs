@@ -398,8 +398,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             }
 
-            println!("FNS -- {:#?}", fns);
-
             return Err(self.err(
                 format!(
                     "Unable to find function with name \"{}\" to call (full name: {:#?}).",

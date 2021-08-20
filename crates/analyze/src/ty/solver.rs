@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet, VecDeque};
 
-use log::debug;
+use log::{debug, log_enabled, Level};
 
 use common::{
     error::{LangError, LangResult},
@@ -12,29 +12,98 @@ use common::{
         get::get_unsolvable,
         is::is_solved,
         replace::convert_defaults,
-        solve::{inferred_type, solve, solve_all_solvable},
+        solve::{inferred_type, solve},
         substitution_sets::sub_sets_debug_print,
         to_string::to_string_type_id,
         ty::{SolveCond, Ty},
+        ty_env::TyEnv,
         type_id::TypeId,
     },
 };
 
-/// Tries to solve all types in the type system. If unable to solve all types,
-/// a error will be returned.
-///
-/// Types containing "Generic" types are NOT solved by this function, they are
-/// counted as solved at this stage. All logic related to generic types are
-/// done after this step.
-pub(crate) fn solve_all(ctx: &mut TraverseCtx) -> LangResult<()> {
-    let unsolvables = solve_solvable(ctx, SolveCond::new().excl_gen_inst())?;
+/// Tries to solves all types given in `all_type_ids`.
+pub fn solve_all(ctx: &mut TraverseCtx, all_type_ids: HashSet<TypeId>) -> LangResult<()> {
+    if all_type_ids.is_empty() {
+        return Ok(());
+    }
 
-    if let Some(unsolvables) = solve_unsolvable(ctx, unsolvables)? {
+    // Contains a list of all type IDs that aren't solved yet.
+    //
+    // During the solving stage type IDs will be popped from the front an solved
+    // in that order. Any new types created during the solving process will be
+    // inserted at the back of the queue.
+    let mut unsolved = VecDeque::default();
+    for type_id in all_type_ids.iter() {
+        unsolved.push_back(*type_id);
+    }
+
+    // A set used for fast-lookups to see if a specific type ID is solved or not.
+    //
+    // The items in this set should be an exact copy of the items in the
+    // `unsolved` queue.
+    let mut unsolved_lookup = all_type_ids;
+
+    // Keeps a count of how many types have been traversed without solving a
+    // single one. If this counts up to `unsolved.len()`, we have traversed the
+    // whole list without solving any.
+    // The type solving have either failed, or we need to change the `SolveCond`
+    // and try solving the types again.
+    let mut iter_count = 0;
+
+    // All unsolvable types will be iterated through for every SolveCond found
+    // in `solve_conds`. It starts using the SolveCond from the start of the array
+    // which should be the "strictest" solve condition and will then, if unable
+    // to solve all types with this condition, continue using the next SolveCond
+    // in the vector. This continues until either all types are solved or until
+    // all SolveCond's have been tried and the type system isn't solvable.
+    let solve_conds = [SolveCond::new().excl_gen_inst(), SolveCond::new()];
+
+    ctx.ty_env.lock().unwrap().solve_mode = true;
+
+    for solve_cond in solve_conds {
+        while let Some(type_id) = unsolved.pop_front() {
+            iter_count += 1;
+
+            debug!(
+                "solving solver -- type_id: {}, iter_count: {}",
+                type_id, iter_count
+            );
+
+            solve(&ctx.ty_env, ctx.ast_ctx, type_id)?;
+            let inf_type_id = inferred_type(&ctx.ty_env.lock().unwrap(), type_id)?;
+
+            let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
+            // During the `solve()`, new types might potentially be created and
+            // inserted into the `new_type_ids`. They might have to be solved.
+            for new_type_id in ty_env_guard.new_type_ids.drain() {
+                unsolved.push_back(new_type_id);
+                unsolved_lookup.insert(new_type_id);
+            }
+
+            let check_inf = true;
+            if is_solved(&ty_env_guard, inf_type_id, check_inf, solve_cond)?
+                && nested_is_solved(&ty_env_guard, type_id, check_inf, solve_cond)?
+            {
+                unsolved_lookup.remove(&type_id);
+                iter_count = 0;
+            } else {
+                unsolved.push_back(type_id);
+            }
+
+            if iter_count >= unsolved.len() {
+                break;
+            }
+        }
+    }
+
+    if unsolved.is_empty() {
+        Ok(())
+    } else {
         let ty_env_guard = ctx.ty_env.lock().unwrap();
-
         let mut err_msg = "Unable to solve type system.".to_string();
 
-        for (type_id, child_type_ids) in unsolvables {
+        for type_id in unsolved {
             let inf_type_id = inferred_type(&ty_env_guard, type_id)?;
 
             err_msg.push_str(&format!(
@@ -45,163 +114,35 @@ pub(crate) fn solve_all(ctx: &mut TraverseCtx) -> LangResult<()> {
                 to_string_type_id(&ty_env_guard, inf_type_id)?,
                 ty_env_guard.ty(inf_type_id)
             ));
-
-            if !child_type_ids.is_empty() {
-                let dependant_str = child_type_ids
-                    .iter()
-                    .map(|id| id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                err_msg.push_str(&format!("\n  (dependant on type IDs: {})", dependant_str))
-            }
         }
 
         Err(ctx.ast_ctx.err(err_msg))
-    } else {
-        Ok(())
     }
 }
 
-/// This function handles the initial solving of the types. It goes through
-/// all types in the substitution sets and tries to solve them.
-///
-/// This function creates and returns a map of all types in the type environment.
-/// The keys of the map are the type IDs and the values are all unsolvable types
-/// that are contained in the specific key type ID.
-///
-/// Since the "parent" type might be needed to solve the children correctly,
-/// this map will be used to ensure that the parent continues being considered
-/// unsolved until all its chilren are solved.
-fn solve_solvable(
-    ctx: &mut TraverseCtx,
+/// Checks if all nested types of `type_id` is solved.
+/// This check is needed since the inferred type of `type_id` might be ex.
+/// a `DefaultInt` which is considered solved, but the current `type_id` might
+/// be a `UnknownMethodArgument` which contains an unsolved ADT type.
+/// In this case we wouldn't want to consider this `type_id` solved since we
+/// might find a better type than `DefaultInt` once the ADT type is solved and
+/// we can figure out the type of the unknown argument.
+fn nested_is_solved(
+    ty_env: &TyEnv,
+    type_id: TypeId,
+    check_inf: bool,
     solve_cond: SolveCond,
-) -> LangResult<HashMap<TypeId, HashSet<TypeId>>> {
-    solve_all_solvable(ctx.ty_env, &ctx.ast_ctx)?;
-
-    let mut unsolvables = HashMap::default();
-
-    let ty_env_guard = ctx.ty_env.lock().unwrap();
-    for type_id in ty_env_guard.interner.all_types() {
-        let mut nested_unsolvables = get_unsolvable(&ty_env_guard, type_id, solve_cond)?;
-        if nested_unsolvables.contains(&type_id) {
-            nested_unsolvables.remove(&type_id);
-            unsolvables.insert(type_id, nested_unsolvables);
-        } else if !nested_unsolvables.is_empty() {
-            unsolvables.insert(type_id, nested_unsolvables);
+) -> LangResult<bool> {
+    for nested_type_id in get_unsolvable(ty_env, type_id, solve_cond)? {
+        let inf_type_id = inferred_type(ty_env, nested_type_id)?;
+        if !is_solved(ty_env, inf_type_id, check_inf, solve_cond)? {
+            return Ok(false);
         }
     }
-
-    Ok(unsolvables)
+    Ok(true)
 }
 
-/// This function will do a more thorough solve of the types given in `unsolvables`.
-/// It will loop over them (potentially) multiple types until on of two points
-/// are reached:
-///   1. Success. All of the types in `unsolvables` have been solved.
-/// or
-///   2. Failure. No progress was made looping over all unsolved types. This
-///      means the type system doesn't contain enough information to solve all
-///      types. Returns a map of all unsolvable types and their children.
-fn solve_unsolvable(
-    ctx: &mut TraverseCtx,
-    mut unsolvables: HashMap<TypeId, HashSet<TypeId>>,
-) -> LangResult<Option<HashMap<TypeId, HashSet<TypeId>>>> {
-    if unsolvables.is_empty() {
-        return Ok(None);
-    }
-
-    // All unsolvable types will be iterated through for every SolveCond found
-    // in `solve_conds`. It starts using the SolveCond from the start of the array
-    // which should be the "weakest" solve condition and will then, if unable to
-    // solve all types with this condition, continue using the next SolveCond
-    // in the vector. This continues until either all types are solved or until
-    // all SolveCond's have been tried and the type system isn't solvable.
-    let solve_conds = [SolveCond::new().excl_gen_inst(), SolveCond::new()];
-
-    let mut fully_solved = false;
-
-    for solve_cond in solve_conds.iter() {
-        // For every "solve condition", loop over the types multiple times if
-        // needed until no progression was made in a iteration. At that point,
-        // break this inner `loop` and continue with the next `solve_cond`.
-        loop {
-            let mut solved_this_iteration = HashSet::new();
-            let start_len = unsolvables.len();
-
-            debug!(
-                "start unsolvable -- start len: {}, solve_cond: {:?}",
-                start_len, solve_cond
-            );
-
-            for (type_id, child_type_ids) in unsolvables.iter() {
-                debug!("solve unsolvable -- type_id: {}", type_id);
-
-                solve(&ctx.ty_env, ctx.ast_ctx, *type_id)?;
-                let inf_type_id = inferred_type(&ctx.ty_env.lock().unwrap(), *type_id)?;
-
-                let check_inf = true;
-                let is_solved_res = is_solved(
-                    &ctx.ty_env.lock().unwrap(),
-                    inf_type_id,
-                    check_inf,
-                    *solve_cond,
-                )?;
-                if is_solved_res {
-                    let mut all_children_solved = true;
-                    for child_type_id in child_type_ids {
-                        let child_is_solved = is_solved(
-                            &ctx.ty_env.lock().unwrap(),
-                            *child_type_id,
-                            check_inf,
-                            *solve_cond,
-                        )?;
-
-                        if !child_is_solved {
-                            all_children_solved = false;
-                            break;
-                        }
-                    }
-
-                    debug!(
-                        "solve unsolvable -- type_id: {}, all_children_solved: {}",
-                        type_id, all_children_solved
-                    );
-
-                    if all_children_solved {
-                        solved_this_iteration.insert(*type_id);
-                    }
-                }
-            }
-
-            for solved_type_id in &solved_this_iteration {
-                unsolvables.remove(solved_type_id);
-            }
-
-            if unsolvables.is_empty() {
-                // No unsolved types left, all of them have been solved, SUCCESS!
-                fully_solved = true;
-                break;
-            } else if solved_this_iteration.is_empty() {
-                // No types was solved this iteration meaning that no more progress
-                // can be made at this `solve_cond`. Break and start with the
-                // next `solve_cond`.
-                break;
-            }
-        }
-
-        if fully_solved {
-            break;
-        }
-    }
-
-    if unsolvables.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(unsolvables))
-    }
-}
-
-/// Iterates through all types in the token and replaces them with their correctly
+/// Iterates through all types in the AST and replaces them with their correctly
 /// solved types.
 pub struct TypeSolver {
     errors: Vec<LangError>,
@@ -239,6 +180,7 @@ impl TypeSolver {
             ctx.ty_env.lock().unwrap().forwards(),
             all_types_string
         );
+
         sub_sets_debug_print(&ctx.ty_env.lock().unwrap());
     }
 }
@@ -255,7 +197,8 @@ impl Visitor for TypeSolver {
     fn visit_default_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
         debug!("before solving -- AST: {:#?}", &block);
 
-        if let Err(err) = solve_all(ctx) {
+        let all_types = ctx.ty_env.lock().unwrap().interner.all_types();
+        if let Err(err) = solve_all(ctx, all_types) {
             self.errors.push(err);
             self.end_debug_print(ctx);
 
@@ -273,11 +216,15 @@ impl Visitor for TypeSolver {
     }
 
     fn visit_end(&mut self, ctx: &mut TraverseCtx) {
-        self.end_debug_print(ctx);
+        if log_enabled!(Level::Debug) {
+            self.end_debug_print(ctx);
+        }
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        let inf_type_id = match inferred_type(&ctx.ty_env.lock().unwrap(), *type_id) {
+        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
+        let inf_type_id = match inferred_type(&ty_env_guard, *type_id) {
             Ok(inf_type_id) => inf_type_id,
             Err(err) => {
                 if !self.errors.contains(&err) {
@@ -288,7 +235,7 @@ impl Visitor for TypeSolver {
         };
 
         if *type_id != inf_type_id {
-            match ctx.ty_env.lock().unwrap().forward(*type_id, inf_type_id) {
+            match ty_env_guard.forward(*type_id, inf_type_id) {
                 Ok(_) => *type_id = inf_type_id,
                 Err(err) => {
                     if !self.errors.contains(&err) {
@@ -301,7 +248,9 @@ impl Visitor for TypeSolver {
 
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
         if let Some(adt_type_id) = &mut fn_call.method_adt {
-            let adt_ty = match ctx.ty_env.lock().unwrap().ty_clone(*adt_type_id) {
+            let ty_env_guard = ctx.ty_env.lock().unwrap();
+
+            let adt_ty = match ty_env_guard.ty_clone(*adt_type_id) {
                 Ok(adt_ty) => adt_ty,
                 Err(err) => {
                     self.errors.push(err);
@@ -314,7 +263,7 @@ impl Visitor for TypeSolver {
             // In that case we need to "dereference" the pointer and get the
             // actual ADT type.
             if let Ty::Pointer(actual_adt_type_id, ..) = adt_ty {
-                match inferred_type(&ctx.ty_env.lock().unwrap(), actual_adt_type_id) {
+                match inferred_type(&ty_env_guard, actual_adt_type_id) {
                     Ok(inf_adt_type_id) => *adt_type_id = inf_adt_type_id,
                     Err(err) => self.errors.push(err),
                 }
