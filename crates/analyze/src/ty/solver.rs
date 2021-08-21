@@ -12,7 +12,6 @@ use common::{
         get::get_unsolvable,
         is::is_solved,
         replace::convert_defaults,
-        solve::{inferred_type, solve},
         substitution_sets::sub_sets_debug_print,
         to_string::to_string_type_id,
         ty::{SolveCond, Ty},
@@ -20,6 +19,8 @@ use common::{
         type_id::TypeId,
     },
 };
+
+use crate::ty::solve::solve;
 
 /// Tries to solves all types given in `all_type_ids`.
 pub fn solve_all(ctx: &mut TraverseCtx, all_type_ids: HashSet<TypeId>) -> LangResult<()> {
@@ -72,7 +73,7 @@ pub fn solve_all(ctx: &mut TraverseCtx, all_type_ids: HashSet<TypeId>) -> LangRe
             );
 
             solve(&mut ty_env_guard, ctx.ast_ctx, type_id)?;
-            let inf_type_id = inferred_type(&ty_env_guard, type_id)?;
+            let inf_type_id = ty_env_guard.inferred_type(type_id)?;
 
             // During the `solve()`, new types might potentially be created and
             // inserted into the `new_type_ids`. They might have to be solved.
@@ -103,7 +104,7 @@ pub fn solve_all(ctx: &mut TraverseCtx, all_type_ids: HashSet<TypeId>) -> LangRe
         let mut err_msg = "Unable to solve type system.".to_string();
 
         for type_id in unsolved {
-            let inf_type_id = inferred_type(&ty_env_guard, type_id)?;
+            let inf_type_id = ty_env_guard.inferred_type(type_id)?;
 
             err_msg.push_str(&format!(
                 "\nUnable to solve type {} ({}). Got back unsolved: {} ({}). ty:\n{:#?}",
@@ -133,7 +134,7 @@ fn nested_is_solved(
     solve_cond: SolveCond,
 ) -> LangResult<bool> {
     for nested_type_id in get_unsolvable(ty_env, type_id, solve_cond)? {
-        let inf_type_id = inferred_type(ty_env, nested_type_id)?;
+        let inf_type_id = ty_env.inferred_type(nested_type_id)?;
         if !is_solved(ty_env, inf_type_id, check_inf, solve_cond)? {
             return Ok(false);
         }
@@ -224,7 +225,7 @@ impl Visitor for TypeSolver {
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
         let mut ty_env_guard = ctx.ty_env.lock().unwrap();
 
-        let inf_type_id = match inferred_type(&ty_env_guard, *type_id) {
+        let inf_type_id = match ty_env_guard.inferred_type(*type_id) {
             Ok(inf_type_id) => inf_type_id,
             Err(err) => {
                 if !self.errors.contains(&err) {
@@ -263,7 +264,7 @@ impl Visitor for TypeSolver {
             // In that case we need to "dereference" the pointer and get the
             // actual ADT type.
             if let Ty::Pointer(actual_adt_type_id, ..) = adt_ty {
-                match inferred_type(&ty_env_guard, actual_adt_type_id) {
+                match ty_env_guard.inferred_type(actual_adt_type_id) {
                     Ok(inf_adt_type_id) => *adt_type_id = inf_adt_type_id,
                     Err(err) => self.errors.push(err),
                 }
@@ -287,7 +288,7 @@ impl Visitor for TypeSolver {
                 }
             };
 
-            let inf_type_id = match inferred_type(&ctx.ty_env.lock().unwrap(), type_id) {
+            let inf_type_id = match ctx.ty_env.lock().unwrap().inferred_type(type_id) {
                 Ok(inf_type_id) => inf_type_id,
                 Err(err) => {
                     self.errors.push(err);

@@ -12,13 +12,14 @@ use common::{
         get::{get_file_pos, get_generic_ident, get_generics},
         inner_ty::InnerTy,
         replace::replace_gen_impls,
-        solve::insert_constraint,
         ty::Ty,
         ty_env::TyEnv,
         type_id::TypeId,
         type_info::TypeInfo,
     },
 };
+
+use crate::ty::solve::insert_constraint;
 
 /// Tie the generics with the same identifier/name in this specific ADT to each
 /// other with constraints. This will be done for generics found in ADT members,

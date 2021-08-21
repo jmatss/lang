@@ -18,7 +18,6 @@ use common::{
     ty::{
         get::get_gens,
         replace::{replace_gen_impls, replace_self},
-        solve::set_generic_names,
         substitution_sets::sub_sets_debug_print,
         to_string::to_string_type_id,
         ty_env::TyEnv,
@@ -26,6 +25,8 @@ use common::{
     },
     BlockId,
 };
+
+use crate::ty::solve::set_generic_names;
 
 use super::generic_replace::GenericsReplacer;
 

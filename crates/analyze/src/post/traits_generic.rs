@@ -6,8 +6,8 @@ use common::{
     token::block::{Fn, TraitCompareError},
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
-        get::get_ident, inner_ty::InnerTy, solve::inferred_type, to_string::to_string_path, ty::Ty,
-        ty_env::TyEnv, type_id::TypeId,
+        get::get_ident, inner_ty::InnerTy, to_string::to_string_path, ty::Ty, ty_env::TyEnv,
+        type_id::TypeId,
     },
     BlockId,
 };
@@ -262,8 +262,12 @@ impl TraitsGenericAnalyzer {
         type_id: TypeId,
         block_id: BlockId,
     ) -> Result<(), Vec<LangError>> {
-        let inf_type_id =
-            inferred_type(&ctx.ty_env.lock().unwrap(), type_id).map_err(|e| vec![e])?;
+        let inf_type_id = ctx
+            .ty_env
+            .lock()
+            .unwrap()
+            .inferred_type(type_id)
+            .map_err(|e| vec![e])?;
         let ty_clone = ctx
             .ty_env
             .lock()

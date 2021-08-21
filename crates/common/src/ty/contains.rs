@@ -1,6 +1,6 @@
-use crate::{error::LangResult, TypeId};
+use crate::error::LangResult;
 
-use super::{ty::Ty, ty_env::TyEnv, type_info::TypeInfo};
+use super::{ty::Ty, ty_env::TyEnv, type_id::TypeId, type_info::TypeInfo};
 
 /// Checks if the type with ID `type_id` contains generics with any of the
 /// names found in `gen_names`. The function will check both Generic's and

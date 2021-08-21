@@ -34,13 +34,14 @@ use ty::{
     fn_generics_check::FnGenericsCheck, generic_adt_collector::GenericAdtCollector,
     generic_adt_creator::GenericAdtCreator, generic_fn_collector::GenericFnCollector,
     generic_fn_creator::GenericFnCreator, generic_tys_solved::GenericTysSolvedChecker,
-    inferencer::TypeInferencer, solver::TypeSolver, traits_fn::TraitsFnAnalyzer,
+    inferencer::TypeInferencer, traits_fn::TraitsFnAnalyzer,
 };
 use util::order::dependency_order_from_ctx;
 
 use crate::{
     post::{ext_struct_init::ExtStructInit, format::FormatParser},
     pre::signed_literals::SignedLiteralsAnalyzer,
+    ty::solver::TypeSolver,
 };
 
 fn analyzer_name<T>(_: &T) -> &str {

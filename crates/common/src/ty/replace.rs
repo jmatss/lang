@@ -1,14 +1,6 @@
 use crate::{
-    ctx::ast_ctx::AstCtx,
-    eq::path_eq,
-    error::LangResult,
-    hash::DerefType,
-    path::LangPath,
-    ty::{
-        solve::{inferred_type, solve},
-        ty::Ty,
-    },
-    TypeId,
+    ctx::ast_ctx::AstCtx, eq::path_eq, error::LangResult, hash::DerefType, path::LangPath,
+    ty::ty::Ty, TypeId,
 };
 
 use super::{generics::Generics, inner_ty::InnerTy, ty_env::TyEnv};
@@ -214,8 +206,7 @@ pub fn replace_gen_impls(
     // type ID to indicate to the caller that the type have changed.
     Ok(if ty_was_updated {
         let new_type_id = ty_env.id(&ty_clone)?;
-        solve(ty_env, ast_ctx, new_type_id)?;
-        Some(inferred_type(&ty_env, new_type_id)?)
+        Some(ty_env.inferred_type(new_type_id)?)
     } else {
         None
     })
@@ -577,7 +568,7 @@ pub fn replace_unique_ids(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<Opt
 pub fn convert_defaults(ty_env: &mut TyEnv) -> LangResult<()> {
     let all_types = ty_env.interner.all_types();
     for type_id in all_types {
-        let inf_type_id = inferred_type(&ty_env, type_id)?;
+        let inf_type_id = ty_env.inferred_type(type_id)?;
         if type_id == inf_type_id {
             convert_default(ty_env, type_id)?;
         }
@@ -589,7 +580,7 @@ pub fn convert_defaults(ty_env: &mut TyEnv) -> LangResult<()> {
 /// if possible. This includes ints and floats that are converted to i32
 /// and f32 respectively.
 pub fn convert_default(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<()> {
-    let inf_type_id = inferred_type(ty_env, type_id)?;
+    let inf_type_id = ty_env.inferred_type(type_id)?;
 
     let ty_clone = ty_env.ty_clone(inf_type_id)?;
     match ty_clone {

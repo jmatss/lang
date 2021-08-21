@@ -49,13 +49,14 @@ impl TyEnv {
     /// If the given `type_id` doesn't exist in any set, returns the given
     /// `type_id` itself.
     pub fn inferred_type(&self, type_id: TypeId) -> LangResult<TypeId> {
-        if let Some(id) = self.sub_sets.ty_to_id.get(&type_id) {
+        let fwd_type_id = self.forwarded(type_id);
+        if let Some(id) = self.sub_sets.ty_to_id.get(&fwd_type_id) {
             let root_id = self.sub_sets.find_root(*id).unwrap();
             let root_node = self.sub_sets.id_to_node.get(&root_id).unwrap();
 
             Ok(root_node.type_id)
         } else {
-            Ok(type_id)
+            Ok(fwd_type_id)
         }
     }
 

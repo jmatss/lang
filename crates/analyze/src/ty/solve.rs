@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 
 use either::Either;
+use log::debug;
 
-use crate::{
+use common::{
     ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx},
     error::LangResult,
     path::LangPath,
@@ -14,13 +15,12 @@ use crate::{
         replace::{replace_gen_impls, replace_gens_with_gen_instances},
         substitution_sets::{promote, union},
         to_string::to_string_path,
-        ty::SolveCond,
+        ty::{SolveCond, Ty},
+        ty_env::TyEnv,
+        type_id::TypeId,
         type_info::TypeInfo,
     },
-    TypeId,
 };
-
-use super::{ty::Ty, ty_env::TyEnv};
 
 /// A enum representing the status/progress of solving a ADT type.
 enum AdtSolveStatus {
@@ -38,18 +38,6 @@ enum AdtSolveStatus {
 
     /// No progress made.
     NoProgress,
-}
-
-/// Returns the type contained in the root node of the substitution set that
-/// contains the type `type_id`. This will be the type with the highest
-/// precedence in the set containing the block with ID `block_id`.
-///
-/// If the given type doesn't belong to a set, returns the type itself as the
-/// inferred type. If the given `type_id` has no root block ID set, a error
-/// will be returned.
-pub fn inferred_type(ty_env: &TyEnv, type_id: TypeId) -> LangResult<TypeId> {
-    let type_id = ty_env.forwarded(type_id);
-    ty_env.inferred_type(type_id)
 }
 
 /// Inserts a new constraint between two types.
@@ -180,16 +168,6 @@ fn insert_constraint_inner(
     }
 }
 
-/// Iterates through all types found in the TypeEnvironment and tries to
-/// solve them.
-pub fn solve_all_solvable(ty_env: &mut TyEnv, ast_ctx: &AstCtx) -> LangResult<()> {
-    let all_types = ty_env.interner.all_types();
-    for type_id in all_types {
-        solve(ty_env, ast_ctx, type_id)?;
-    }
-    Ok(())
-}
-
 /// Given a type `type_id`, tries to solve it recursively by looking at structure/
 /// function declarations. This is needed for types that can't be figured out
 /// directly from looking at the "use site" in the source code, some information
@@ -240,7 +218,7 @@ fn solve_priv(
         seen_type_ids.insert(fwd_type_id);
     }
 
-    let inf_type_id = inferred_type(&ty_env, fwd_type_id)?;
+    let inf_type_id = ty_env.inferred_type(fwd_type_id)?;
 
     let check_inf = false;
     let solve_cond = SolveCond::new()
@@ -268,7 +246,7 @@ fn solve_priv(
         return Ok(solved_type_id);
     }
 
-    let inf_type_id = inferred_type(&ty_env, fwd_type_id)?;
+    let inf_type_id = ty_env.inferred_type(fwd_type_id)?;
 
     let check_inf = true;
     let solve_cond = SolveCond::new()
@@ -283,7 +261,7 @@ fn solve_priv(
     }
 
     if seen_type_ids.contains(&inf_type_id) {
-        return inferred_type(&ty_env, inf_type_id);
+        return ty_env.inferred_type(inf_type_id);
     } else {
         seen_type_ids.insert(inf_type_id);
     }
@@ -369,7 +347,7 @@ fn solve_compound(
             solve_priv(ty_env, ast_ctx, *gen_type_id, &mut seen_type_ids_snapshot)?;
             new_nested_seen_type_ids.extend(seen_type_ids_snapshot.difference(seen_type_ids));
 
-            let inf_gen_type_id = inferred_type(&ty_env, *gen_type_id)?;
+            let inf_gen_type_id = ty_env.inferred_type(*gen_type_id)?;
             if *gen_type_id != inf_gen_type_id {
                 *gen_type_id = inf_gen_type_id;
                 was_updated = true;
@@ -445,7 +423,7 @@ fn solve_aggregate(
     let new_type_id = match &mut ty {
         Ty::Pointer(aggr_type_id, ..) | Ty::Array(aggr_type_id, ..) => {
             solve_priv(ty_env, ast_ctx, *aggr_type_id, seen_type_ids)?;
-            let inf_type_id = inferred_type(&ty_env, *aggr_type_id)?;
+            let inf_type_id = ty_env.inferred_type(*aggr_type_id)?;
 
             if &inf_type_id != aggr_type_id {
                 *aggr_type_id = inf_type_id;
@@ -461,7 +439,7 @@ fn solve_aggregate(
         _ => unreachable!(),
     };
 
-    let inf_type_id = inferred_type(&ty_env, type_id)?;
+    let inf_type_id = ty_env.inferred_type(type_id)?;
     insert_constraint_inner(ty_env, type_id, inf_type_id)?;
 
     // TODO: Should this return `inf_type_id`? The `new_type_id` is not 100%
@@ -588,7 +566,7 @@ fn solve_unknown_adt_member(
     }
 
     solve_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
-    let inf_new_type_id = inferred_type(&ty_env, new_type_id)?;
+    let inf_new_type_id = ty_env.inferred_type(new_type_id)?;
 
     insert_constraint(ty_env, type_id, inf_new_type_id)?;
     Ok(inf_new_type_id)
@@ -690,7 +668,7 @@ fn solve_unknown_adt_method(
         }
 
         solve_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
-        inferred_type(&ty_env, new_type_id)?
+        ty_env.inferred_type(new_type_id)?
     } else {
         // The return type of the method is None == Void.
         ty_env.id(&Ty::CompoundType(InnerTy::Void, TypeInfo::None))?
@@ -803,7 +781,7 @@ fn solve_unknown_method_argument(
     }
 
     solve_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
-    let inf_new_type_id = inferred_type(&ty_env, new_type_id)?;
+    let inf_new_type_id = ty_env.inferred_type(new_type_id)?;
 
     insert_constraint(ty_env, type_id, inf_new_type_id)?;
     Ok(inf_new_type_id)
@@ -891,7 +869,7 @@ fn solve_unknown_method_generic(
     }
 
     solve_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
-    let inf_new_type_id = inferred_type(&ty_env, new_type_id)?;
+    let inf_new_type_id = ty_env.inferred_type(new_type_id)?;
 
     insert_constraint(ty_env, type_id, inf_new_type_id)?;
     Ok(inf_new_type_id)
@@ -902,7 +880,7 @@ fn solve_unknown_fn_generic(
     type_id: TypeId,
     seen_type_ids: &mut HashSet<TypeId>,
 ) -> LangResult<TypeId> {
-    let inf_type_id = inferred_type(&ty_env, type_id)?;
+    let inf_type_id = ty_env.inferred_type(type_id)?;
 
     debug!(
         "solve_unknown_fn_generic -- type_id: {}, inf_type_id: {}, seen_type_ids: {:?}",
@@ -933,7 +911,7 @@ fn solve_unknown_array_member(
     };
 
     solve_priv(ty_env, ast_ctx, arr_type_id, seen_type_ids)?;
-    let new_arr_type_id = inferred_type(&ty_env, arr_type_id)?;
+    let new_arr_type_id = ty_env.inferred_type(arr_type_id)?;
 
     if arr_type_id == new_arr_type_id {
         // No progress made.
@@ -945,7 +923,7 @@ fn solve_unknown_array_member(
     let new_arr_ty = ty_env.ty_clone(new_arr_type_id)?;
     if let Ty::Array(new_member_type_id, ..) = new_arr_ty {
         solve_priv(ty_env, ast_ctx, new_member_type_id, seen_type_ids)?;
-        let inf_new_member_type_id = inferred_type(&ty_env, new_member_type_id)?;
+        let inf_new_member_type_id = ty_env.inferred_type(new_member_type_id)?;
 
         insert_constraint(ty_env, inf_new_member_type_id, type_id)?;
         Ok(new_member_type_id)
@@ -969,7 +947,7 @@ fn solve_adt_type(
     );
 
     solve_priv(ty_env, ast_ctx, adt_type_id, seen_type_ids)?;
-    let inf_adt_type_id = inferred_type(&ty_env, adt_type_id)?;
+    let inf_adt_type_id = ty_env.inferred_type(adt_type_id)?;
 
     let is_generic_res = is_generic(&ty_env, inf_adt_type_id)?;
     let check_inf = true;
@@ -994,7 +972,7 @@ fn solve_adt_type(
             //       logic in the future.
             Ty::Pointer(type_id_i, type_info) => {
                 solve_priv(ty_env, ast_ctx, type_id_i, seen_type_ids)?;
-                let inf_type_id_i = inferred_type(&ty_env, type_id_i)?;
+                let inf_type_id_i = ty_env.inferred_type(type_id_i)?;
 
                 let is_generic_res = is_generic(&ty_env, inf_type_id_i)?;
                 if is_generic_res && adt_type_id != inf_adt_type_id {

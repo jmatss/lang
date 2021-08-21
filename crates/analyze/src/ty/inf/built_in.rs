@@ -2,8 +2,10 @@ use common::{
     error::LangResult,
     token::expr::BuiltInCall,
     traverse::traverse_ctx::TraverseCtx,
-    ty::{replace::replace_unique_ids, solve::insert_constraint, ty::Ty, type_info::TypeInfo},
+    ty::{replace::replace_unique_ids, ty::Ty, type_info::TypeInfo},
 };
+
+use crate::ty::solve::insert_constraint;
 
 pub(crate) fn infer_built_in(
     built_in_call: &mut BuiltInCall,

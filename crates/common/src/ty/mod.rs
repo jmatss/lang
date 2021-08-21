@@ -5,7 +5,6 @@ pub mod inner_ty;
 pub mod is;
 pub mod precedence;
 pub mod replace;
-pub mod solve;
 pub mod substitution_sets;
 pub mod to_string;
 pub mod ty;

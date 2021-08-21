@@ -24,7 +24,6 @@ use common::{
     ty::{
         get::get_file_pos,
         inner_ty::InnerTy,
-        solve::inferred_type,
         to_string::{to_string_inner_ty, to_string_path, to_string_type_id},
         ty::Ty,
         type_id::TypeId,
@@ -373,7 +372,12 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Generic;
 
-        let inf_type_id = inferred_type(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
+        let inf_type_id = self
+            .analyze_ctx
+            .ty_env
+            .lock()
+            .unwrap()
+            .inferred_type(type_id)?;
         let inf_ty = self
             .analyze_ctx
             .ty_env

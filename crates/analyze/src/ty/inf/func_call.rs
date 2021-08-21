@@ -7,7 +7,6 @@ use common::{
         get::{get_file_pos, get_file_pos_mut, get_generics},
         inner_ty::InnerTy,
         replace::replace_gen_impls,
-        solve::insert_constraint,
         ty::Ty,
         type_id::TypeId,
         type_info::TypeInfo,
@@ -15,7 +14,10 @@ use common::{
 };
 use either::Either;
 
-use crate::util::generics::{combine_generics, combine_generics_adt};
+use crate::{
+    ty::solve::insert_constraint,
+    util::generics::{combine_generics, combine_generics_adt},
+};
 
 /// Assign the return type of the function to the function call expr.
 /// Also tie the types of the function parameter to argument types.

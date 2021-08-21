@@ -2,8 +2,10 @@ use common::{
     error::LangResult,
     token::expr::{Expr, Var},
     traverse::traverse_ctx::TraverseCtx,
-    ty::{inner_ty::InnerTy, solve::insert_constraint, ty::Ty, type_info::TypeInfo},
+    ty::{inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
 };
+
+use crate::ty::solve::insert_constraint;
 
 pub(crate) fn infer_var(var: &mut Var, ctx: &mut TraverseCtx) -> LangResult<()> {
     let var_decl = ctx.ast_ctx.get_var(&var.name, ctx.block_id)?;

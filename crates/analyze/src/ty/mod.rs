@@ -8,5 +8,6 @@ pub(super) mod generic_replace;
 pub(super) mod generic_tys_solved;
 pub(super) mod inf;
 pub(super) mod inferencer;
+pub(super) mod solve;
 pub(super) mod solver;
 pub(super) mod traits_fn;

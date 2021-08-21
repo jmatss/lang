@@ -15,21 +15,24 @@ use common::{
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
-        inner_ty::InnerTy, solve::insert_constraint, substitution_sets::sub_sets_debug_print,
-        to_string::to_string_type_id, ty::Ty, type_id::TypeId, type_info::TypeInfo,
+        inner_ty::InnerTy, substitution_sets::sub_sets_debug_print, to_string::to_string_type_id,
+        ty::Ty, type_id::TypeId, type_info::TypeInfo,
     },
 };
 
-use super::inf::{
-    adt::infer_adt_gens,
-    adt::infer_adt_init,
-    arr_init::infer_array_init,
-    built_in::infer_built_in,
-    func::{infer_fn, infer_fn_ptr},
-    func_call::infer_fn_call,
-    lit::infer_lit,
-    op::{infer_bin_op, infer_un_op},
-    var::{infer_assignment, infer_var, infer_var_decl},
+use super::{
+    inf::{
+        adt::infer_adt_gens,
+        adt::infer_adt_init,
+        arr_init::infer_array_init,
+        built_in::infer_built_in,
+        func::{infer_fn, infer_fn_ptr},
+        func_call::infer_fn_call,
+        lit::infer_lit,
+        op::{infer_bin_op, infer_un_op},
+        var::{infer_assignment, infer_var, infer_var_decl},
+    },
+    solve::insert_constraint,
 };
 
 /// Infers types for exprs that doesn't have a type explicitly set.

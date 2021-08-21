@@ -16,7 +16,6 @@ use common::{
         generics::Generics,
         is::is_solved,
         replace::{replace_gen_impls, replace_self},
-        solve::inferred_type,
         ty::SolveCond,
         type_id::TypeId,
     },
@@ -121,7 +120,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
             }
         }
 
-        let inf_type_id = match inferred_type(&ty_env_guard, *type_id) {
+        let inf_type_id = match ty_env_guard.inferred_type(*type_id) {
             Ok(inf_type_id) => inf_type_id,
             Err(err) => {
                 self.errors.push(err);

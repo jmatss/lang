@@ -6,8 +6,10 @@ use common::{
         stmt::Stmt,
     },
     traverse::traverse_ctx::TraverseCtx,
-    ty::{inner_ty::InnerTy, solve::insert_constraint, ty::Ty, type_info::TypeInfo},
+    ty::{inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
 };
+
+use crate::ty::solve::insert_constraint;
 
 pub(crate) fn infer_bin_op(bin_op: &mut BinOp, ctx: &mut TraverseCtx) -> LangResult<()> {
     let mut ty_env_guard = ctx.ty_env.lock().unwrap();

@@ -4,7 +4,7 @@ use crate::{
     error::{LangError, LangErrorKind, LangResult},
     path::{LangPath, LangPathPart},
     token::{expr::Expr, lit::Lit, op::Op},
-    ty::{solve::inferred_type, ty::Ty},
+    ty::ty::Ty,
     util, TypeId,
 };
 
@@ -14,7 +14,7 @@ use super::{generics::Generics, inner_ty::InnerTy, ty_env::TyEnv};
 pub fn to_string_type_id(ty_env: &TyEnv, type_id: TypeId) -> LangResult<String> {
     let mut result = String::new();
 
-    let inf_type_id = inferred_type(ty_env, type_id)?;
+    let inf_type_id = ty_env.inferred_type(type_id)?;
     let inf_ty = ty_env.ty_clone(inf_type_id)?;
     match inf_ty {
         Ty::CompoundType(ref inner_ty, ..) => {

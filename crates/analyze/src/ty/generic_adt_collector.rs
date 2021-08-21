@@ -17,14 +17,13 @@ use common::{
         get::{get_gens, get_ident},
         is::is_solved,
         replace::replace_gen_impls,
-        solve::{inferred_type, set_generic_names},
         to_string::to_string_type_id,
         ty::{SolveCond, Ty},
         type_id::TypeId,
     },
 };
 
-use super::generic_nested_collector::GenericNestedCollector;
+use super::{generic_nested_collector::GenericNestedCollector, solve::set_generic_names};
 
 /// Iterates through the tokens and gathers all ADTs containing generics.
 /// Only the ADTs implementing the generic will be stored, any ADT containing a
@@ -443,7 +442,7 @@ impl<'a> Visitor for GenericAdtCollector<'a> {
 
         for type_ids in self.generic_adts.values_mut() {
             for type_id in type_ids {
-                match inferred_type(&ctx.ty_env.lock().unwrap(), *type_id) {
+                match ctx.ty_env.lock().unwrap().inferred_type(*type_id) {
                     Ok(inf_type_id) => *type_id = inf_type_id,
                     Err(err) => self.errors.push(err),
                 }

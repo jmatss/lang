@@ -6,8 +6,10 @@ use common::{
         lit::Lit,
     },
     traverse::traverse_ctx::TraverseCtx,
-    ty::{inner_ty::InnerTy, solve::insert_constraint, ty::Ty, type_info::TypeInfo},
+    ty::{inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
 };
+
+use crate::ty::solve::insert_constraint;
 
 pub(crate) fn infer_array_init(
     array_init: &mut ArrayInit,
