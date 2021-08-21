@@ -3,7 +3,7 @@ use std::{collections::hash_map::Entry, sync::Arc};
 use common::{
     ctx::block_ctx::BlockCtx,
     error::LangError,
-    token::{ast::AstToken, expr::Var, stmt::Stmt},
+    token::{expr::Var, stmt::Stmt},
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     BlockId,
 };
@@ -54,10 +54,6 @@ impl Visitor for DeclVarAnalyzer {
 
             Some(std::mem::take(&mut self.errors))
         }
-    }
-
-    fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        ctx.ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
     }
 
     fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {

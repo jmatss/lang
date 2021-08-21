@@ -94,7 +94,14 @@ impl<'a> Visitor for GenericsReplacer<'a> {
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        match replace_gen_impls(&ctx.ty_env, &ctx.ast_ctx, *type_id, &self.generics_impl) {
+        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
+        match replace_gen_impls(
+            &mut ty_env_guard,
+            &ctx.ast_ctx,
+            *type_id,
+            &self.generics_impl,
+        ) {
             Ok(Some(new_type_id)) => *type_id = new_type_id,
             Ok(None) => (),
             Err(err) => {
@@ -104,7 +111,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
         }
 
         if let (Some(old_path), Some(new_ty)) = (self.old_path, self.new_type_id) {
-            match replace_self(&mut ctx.ty_env.lock().unwrap(), *type_id, old_path, new_ty) {
+            match replace_self(&mut ty_env_guard, *type_id, old_path, new_ty) {
                 Ok(Some(new_type_id)) => *type_id = new_type_id,
                 Ok(None) => (),
                 Err(err) => {
@@ -114,7 +121,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
             }
         }
 
-        let inf_type_id = match inferred_type(&ctx.ty_env.lock().unwrap(), *type_id) {
+        let inf_type_id = match inferred_type(&ty_env_guard, *type_id) {
             Ok(inf_type_id) => inf_type_id,
             Err(err) => {
                 self.errors.push(err);
@@ -124,12 +131,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
 
         let check_inf = true;
         let solve_cond = SolveCond::new();
-        match is_solved(
-            &ctx.ty_env.lock().unwrap(),
-            inf_type_id,
-            check_inf,
-            solve_cond,
-        ) {
+        match is_solved(&ty_env_guard, inf_type_id, check_inf, solve_cond) {
             Ok(true) => *type_id = inf_type_id,
             Ok(false) => {
                 let err = ctx

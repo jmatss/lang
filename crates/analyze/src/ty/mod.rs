@@ -6,7 +6,7 @@ pub(super) mod generic_fn_creator;
 pub(super) mod generic_nested_collector;
 pub(super) mod generic_replace;
 pub(super) mod generic_tys_solved;
+pub(super) mod inf;
 pub(super) mod inferencer;
-pub(super) mod inferencer_fn;
 pub(super) mod solver;
 pub(super) mod traits_fn;

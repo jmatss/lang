@@ -22,11 +22,6 @@ pub struct TraverseCtx<'a> {
 
     pub block_id: BlockId,
 
-    // TODO: Should this contains file information about the parent as well?
-    //       Ex. if this is a type, should the information about what this type
-    //       is assigned to also be here?
-    pub file_pos: FilePosition,
-
     /// Flag to indicate if the traverse should stop traversing. This will be
     /// set from one of the visitors and this traverser will check this flag
     /// before every new visit.
@@ -40,7 +35,6 @@ impl<'a> TraverseCtx<'a> {
             ty_env,
             copy_nr: None,
             block_id: 0,
-            file_pos: FilePosition::default(),
             stop: false,
         }
     }
@@ -49,7 +43,7 @@ impl<'a> TraverseCtx<'a> {
     pub fn reset(&mut self) {
         self.copy_nr = None;
         self.block_id = 0;
-        self.file_pos = FilePosition::default();
+        *self.file_pos_mut() = FilePosition::default();
         self.stop = false;
     }
 
@@ -61,5 +55,13 @@ impl<'a> TraverseCtx<'a> {
     pub fn clear_copy_nr(&mut self) -> &mut Self {
         self.copy_nr = None;
         self
+    }
+
+    pub fn file_pos(&self) -> FilePosition {
+        self.ast_ctx.file_pos
+    }
+
+    pub fn file_pos_mut(&mut self) -> &mut FilePosition {
+        &mut self.ast_ctx.file_pos
     }
 }

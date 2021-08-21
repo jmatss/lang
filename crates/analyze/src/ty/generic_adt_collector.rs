@@ -281,11 +281,12 @@ impl<'a> GenericAdtCollector<'a> {
         nested_adt_type_id: TypeId,
         nested_adt_path_without_gens: &LangPath,
     ) -> LangResult<()> {
-        let gen_adt_type_ids = if let Some(gen_adt_type_ids) = self.generic_adts.get(
-            &ctx.ty_env.lock().unwrap(),
-            DerefType::None,
-            &adt_path_without_gens,
-        )? {
+        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
+        let gen_adt_type_ids = if let Some(gen_adt_type_ids) =
+            self.generic_adts
+                .get(&ty_env_guard, DerefType::None, &adt_path_without_gens)?
+        {
             gen_adt_type_ids.clone()
         } else {
             // This can happen if there are no implementation of the `outer` ADT.
@@ -297,13 +298,9 @@ impl<'a> GenericAdtCollector<'a> {
         // use those generic instances to create new ADT instances for the nested
         // one.
         for gen_adt_type_id in gen_adt_type_ids {
-            set_generic_names(
-                &mut ctx.ty_env.lock().unwrap(),
-                &ctx.ast_ctx,
-                gen_adt_type_id,
-            )?;
+            set_generic_names(&mut ty_env_guard, &ctx.ast_ctx, gen_adt_type_id)?;
 
-            let gens = if let Some(gens) = get_gens(&ctx.ty_env.lock().unwrap(), gen_adt_type_id)? {
+            let gens = if let Some(gens) = get_gens(&ty_env_guard, gen_adt_type_id)? {
                 gens.clone()
             } else {
                 return Err(ctx.ast_ctx.err(format!(
@@ -313,12 +310,10 @@ impl<'a> GenericAdtCollector<'a> {
             };
 
             let new_nested_adt_type_id = if let Some(new_type_id) =
-                replace_gen_impls(&ctx.ty_env, &ctx.ast_ctx, nested_adt_type_id, &gens)?
+                replace_gen_impls(&mut ty_env_guard, &ctx.ast_ctx, nested_adt_type_id, &gens)?
             {
                 new_type_id
             } else {
-                let ty_env_guard = ctx.ty_env.lock().unwrap();
-
                 // Since we at this point knows that `nested_adt_type_id` contains
                 // generics; if no Generic/GenericInstance was replaced in the
                 // if-statement above, it means that the `generics` variable gotten
@@ -345,8 +340,6 @@ impl<'a> GenericAdtCollector<'a> {
                     ));
                 }
             };
-
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
 
             let deref_type = DerefType::None;
             let contains_key = self.generic_adts.contains_key(

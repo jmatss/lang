@@ -455,13 +455,15 @@ impl<'a> GenericFnCollector<'a> {
         method_info: &NestedMethodInfo,
         generics: &Generics,
     ) -> LangResult<()> {
+        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
         let func_name = &method_info.func_name;
         let method_call_name = &method_info.method_call_name;
         let method_adt_path = &method_info.method_adt_path;
 
         let gen_func_tys = if let Some(gen_func_tys) = self
             .generic_methods
-            .get(&ctx.ty_env.lock().unwrap(), DerefType::Deep, adt_path)
+            .get(&ty_env_guard, DerefType::Deep, adt_path)
             .ok()
             .flatten()
             .map(|s| s.get(func_name))
@@ -473,11 +475,9 @@ impl<'a> GenericFnCollector<'a> {
         };
 
         let method_gen_names = {
-            let method = ctx.ast_ctx.get_method(
-                &ctx.ty_env.lock().unwrap(),
-                method_adt_path,
-                method_call_name,
-            )?;
+            let method =
+                ctx.ast_ctx
+                    .get_method(&ty_env_guard, method_adt_path, method_call_name)?;
             let method = method.as_ref().read().unwrap();
 
             if let Some(method_gens) = &method.generics {
@@ -485,7 +485,7 @@ impl<'a> GenericFnCollector<'a> {
             } else {
                 unreachable!(
                     "method_adt_path: {}, method_call_name: {}",
-                    to_string_path(&ctx.ty_env.lock().unwrap(), &method_adt_path),
+                    to_string_path(&ty_env_guard, &method_adt_path),
                     method_call_name,
                 );
             }
@@ -498,7 +498,7 @@ impl<'a> GenericFnCollector<'a> {
             let mut new_gens = Generics::new();
             for (name, type_id) in method_gen_names.iter().zip(generics.iter_types()) {
                 let type_id = match replace_gen_impls(
-                    &ctx.ty_env,
+                    &mut ty_env_guard,
                     &ctx.ast_ctx,
                     *type_id,
                     &generics_impls,
@@ -509,12 +509,7 @@ impl<'a> GenericFnCollector<'a> {
                 new_gens.insert(name.clone(), type_id);
             }
 
-            if generics_eq(
-                &ctx.ty_env.lock().unwrap(),
-                &new_gens,
-                generics,
-                DerefType::Deep,
-            )? {
+            if generics_eq(&ty_env_guard, &new_gens, generics, DerefType::Deep)? {
                 continue;
             }
 
@@ -522,7 +517,7 @@ impl<'a> GenericFnCollector<'a> {
             // use that instead of the `struct_name` which represents the structure
             // in which this call was found.
             let contains_key = self.generic_methods.contains_key(
-                &ctx.ty_env.lock().unwrap(),
+                &ty_env_guard,
                 DerefType::Deep,
                 method_adt_path,
             )?;
@@ -530,17 +525,11 @@ impl<'a> GenericFnCollector<'a> {
             if contains_key {
                 let map_inner = self
                     .generic_methods
-                    .get_mut(
-                        &ctx.ty_env.lock().unwrap(),
-                        DerefType::Deep,
-                        method_adt_path,
-                    )?
+                    .get_mut(&ty_env_guard, DerefType::Deep, method_adt_path)?
                     .unwrap();
 
                 match map_inner.entry(method_call_name.clone()) {
                     Entry::Occupied(mut o_inner) => {
-                        let ty_env_guard = ctx.ty_env.lock().unwrap();
-
                         let mut contains_gens = false;
                         for inner_gens in o_inner.get() {
                             if generics_eq(&ty_env_guard, inner_gens, &new_gens, DerefType::Deep)? {
@@ -561,7 +550,7 @@ impl<'a> GenericFnCollector<'a> {
                 let mut map_inner = HashMap::default();
                 map_inner.insert(method_call_name.clone(), vec![new_gens.clone()]);
                 self.generic_methods.insert(
-                    &ctx.ty_env.lock().unwrap(),
+                    &ty_env_guard,
                     DerefType::Deep,
                     method_adt_path.clone(),
                     map_inner,

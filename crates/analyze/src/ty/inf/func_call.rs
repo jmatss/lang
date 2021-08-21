@@ -25,33 +25,35 @@ use crate::util::generics::{combine_generics, combine_generics_adt};
 /// tie them together with a constraint. This is done since a Generic can
 /// have multiple differet types depending on the context, which isn't solvable
 /// through the regular type inference logic.
-pub(super) fn infer_fn_call(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<()> {
+pub(crate) fn infer_fn_call(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<()> {
     // TODO: Support varargs for fn pointers?
     // TODO: Support named arguments for fn pointers?
 
     let mut fn_ret_type_id = if fn_call.is_fn_ptr_call {
-        infer_fn_ptr(fn_call, ctx)?
+        infer_fn_call_fn_ptr(fn_call, ctx)?
     } else if fn_call.is_method {
-        infer_method(fn_call, ctx)?
+        infer_fn_call_method(fn_call, ctx)?
     } else {
-        infer_fn(fn_call, ctx)?
+        infer_fn_call_fn(fn_call, ctx)?
     };
+
+    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
 
     // Replace any "Generic"s with "GenericInstances"s instead so that the
     // "Generic"s doesn't leak out to outside the function. Instead a
     // unique instance of a generic should be used instead. This will allow
     // for multiple different types to be mapped to the same single "Generic".
-    let fn_ret_type_id_gens = get_generics(&ctx.ty_env.lock().unwrap(), fn_ret_type_id)?;
+    let fn_ret_type_id_gens = get_generics(&ty_env_guard, fn_ret_type_id)?;
     let mut gen_impls = Generics::new();
 
     for gen_type_id in &fn_ret_type_id_gens {
-        let gen_ty = ctx.ty_env.lock().unwrap().ty_clone(*gen_type_id)?;
+        let gen_ty = ty_env_guard.ty_clone(*gen_type_id)?;
 
         if let Ty::Generic(ident, ..) = gen_ty {
-            let file_pos = get_file_pos(&ctx.ty_env.lock().unwrap(), *gen_type_id).cloned();
+            let file_pos = get_file_pos(&ty_env_guard, *gen_type_id).cloned();
 
-            let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-            let gen_impl_type_id = ctx.ty_env.lock().unwrap().id(&Ty::GenericInstance(
+            let unique_id = ty_env_guard.new_unique_id();
+            let gen_impl_type_id = ty_env_guard.id(&Ty::GenericInstance(
                 ident.clone(),
                 unique_id,
                 TypeInfo::DefaultOpt(file_pos),
@@ -64,7 +66,7 @@ pub(super) fn infer_fn_call(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
     }
 
     if let Some(new_type_id) =
-        replace_gen_impls(&ctx.ty_env, &ctx.ast_ctx, fn_ret_type_id, &gen_impls)?
+        replace_gen_impls(&mut ty_env_guard, &ctx.ast_ctx, fn_ret_type_id, &gen_impls)?
     {
         fn_ret_type_id = new_type_id;
     }
@@ -77,7 +79,7 @@ pub(super) fn infer_fn_call(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
     Ok(())
 }
 
-pub(super) fn infer_fn_ptr(fn_call: &FnCall, ctx: &mut TraverseCtx) -> LangResult<TypeId> {
+pub(super) fn infer_fn_call_fn_ptr(fn_call: &FnCall, ctx: &mut TraverseCtx) -> LangResult<TypeId> {
     let var_name = fn_call.name.clone();
     let decl_id = ctx.ast_ctx.get_var_decl_scope(&var_name, ctx.block_id)?;
 
@@ -92,8 +94,10 @@ pub(super) fn infer_fn_ptr(fn_call: &FnCall, ctx: &mut TraverseCtx) -> LangResul
         }
     };
 
+    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
     let (fn_gens, fn_params, fn_ret_type_id) = if let Some(fn_type_id) = var.read().unwrap().ty {
-        let fn_ty = ctx.ty_env.lock().unwrap().ty_clone(fn_type_id)?;
+        let fn_ty = ty_env_guard.ty_clone(fn_type_id)?;
         if let Ty::Fn(gens, params, ret_ty, _) = fn_ty {
             (gens, params, ret_ty)
         } else {
@@ -120,7 +124,7 @@ pub(super) fn infer_fn_ptr(fn_call: &FnCall, ctx: &mut TraverseCtx) -> LangResul
     // and param types since their indices is always used to map them.
     for (arg, param_type_id) in fn_call.arguments.iter().zip(fn_params.iter()) {
         let arg_type_id = arg.value.get_expr_type()?;
-        insert_constraint(&ctx.ty_env, arg_type_id, *param_type_id)?;
+        insert_constraint(&mut ty_env_guard, arg_type_id, *param_type_id)?;
     }
 
     let fn_call_gens = fn_call
@@ -138,22 +142,21 @@ pub(super) fn infer_fn_ptr(fn_call: &FnCall, ctx: &mut TraverseCtx) -> LangResul
     }
 
     for (fn_call_gen, fn_gen) in fn_call_gens.iter().zip(fn_gens.iter()) {
-        insert_constraint(&ctx.ty_env, *fn_call_gen, *fn_gen)?;
+        insert_constraint(&mut ty_env_guard, *fn_call_gen, *fn_gen)?;
     }
 
     if let Some(type_id) = fn_ret_type_id {
-        *get_file_pos_mut(&mut ctx.ty_env.lock().unwrap(), type_id).unwrap() =
-            fn_call.file_pos.unwrap();
+        *get_file_pos_mut(&mut ty_env_guard, type_id).unwrap() = fn_call.file_pos.unwrap();
         Ok(type_id)
     } else {
-        ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
+        ty_env_guard.id(&Ty::CompoundType(
             InnerTy::Void,
             TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
         ))
     }
 }
 
-pub(super) fn infer_method(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<TypeId> {
+fn infer_fn_call_method(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<TypeId> {
     // Get the "owning" ADT type of this method. If it isn't set explicitly,
     // it should be set as a expression in the first argument with name "this".
     let mut adt_type_id = if let Some(adt_type_id) = &fn_call.method_adt {
@@ -273,7 +276,11 @@ pub(super) fn infer_method(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangR
         // Don't add a constraint if the argument has the same type as
         // the ADT.
         if arg_expr_type_id != adt_type_id {
-            insert_constraint(&ctx.ty_env, arg_type_id, arg_expr_type_id)?;
+            insert_constraint(
+                &mut ctx.ty_env.lock().unwrap(),
+                arg_type_id,
+                arg_expr_type_id,
+            )?;
         }
     }
 
@@ -292,7 +299,11 @@ pub(super) fn infer_method(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangR
                 TypeInfo::DefaultOpt(type_id_file_pos),
             ))?;
 
-            insert_constraint(&ctx.ty_env, unknown_gen_type_id, *type_id)?;
+            insert_constraint(
+                &mut ctx.ty_env.lock().unwrap(),
+                unknown_gen_type_id,
+                *type_id,
+            )?;
         }
     }
 
@@ -307,7 +318,7 @@ pub(super) fn infer_method(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangR
     ))
 }
 
-pub(super) fn infer_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<TypeId> {
+fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<TypeId> {
     let partial_path = fn_call
         .module
         .clone_push(&fn_call.name, None, fn_call.file_pos);
@@ -360,7 +371,7 @@ pub(super) fn infer_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResul
                 )));
             };
 
-            insert_constraint(&ctx.ty_env, arg_type_id, param_type_id)?;
+            insert_constraint(&mut ctx.ty_env.lock().unwrap(), arg_type_id, param_type_id)?;
         }
     }
 
@@ -415,7 +426,11 @@ pub(super) fn infer_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResul
                 TypeInfo::DefaultOpt(type_id_file_pos),
             ))?;
 
-            insert_constraint(&ctx.ty_env, unknown_gen_type_id, *type_id)?;
+            insert_constraint(
+                &mut ctx.ty_env.lock().unwrap(),
+                unknown_gen_type_id,
+                *type_id,
+            )?;
         }
     }
 

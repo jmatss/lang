@@ -115,9 +115,9 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
     }
 
     fn traverse_token(&mut self, mut ast_token: &mut AstToken) {
-        let old_pos = self.ctx.file_pos.to_owned();
+        let old_pos = self.ctx.file_pos();
         if let Some(file_pos) = ast_token.file_pos() {
-            self.ctx.file_pos = file_pos.to_owned();
+            *self.ctx.file_pos_mut() = *file_pos;
         }
 
         if !self.ctx.stop {
@@ -150,13 +150,13 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             }
         }
 
-        self.ctx.file_pos = old_pos;
+        *self.ctx.file_pos_mut() = old_pos;
     }
 
     fn traverse_block(&mut self, block: &mut Block) {
-        let old_pos = self.ctx.file_pos.to_owned();
+        let old_pos = self.ctx.file_pos();
 
-        self.ctx.file_pos = block.file_pos.to_owned();
+        *self.ctx.file_pos_mut() = block.file_pos;
         self.ctx.block_id = block.id;
 
         debug!("Visiting block -- {:#?}", block);
@@ -501,13 +501,13 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             }
         }
 
-        self.ctx.file_pos = old_pos;
+        *self.ctx.file_pos_mut() = old_pos;
     }
 
     fn traverse_expr(&mut self, expr: &mut Expr) {
-        let old_pos = self.ctx.file_pos.to_owned();
+        let old_pos = self.ctx.file_pos();
         if let Some(file_pos) = expr.file_pos() {
-            self.ctx.file_pos = file_pos.to_owned();
+            *self.ctx.file_pos_mut() = *file_pos;
         }
 
         match expr {
@@ -656,7 +656,7 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             }
         }
 
-        self.ctx.file_pos = old_pos;
+        *self.ctx.file_pos_mut() = old_pos;
 
         if let Ok(ty) = expr.get_expr_type_mut() {
             self.traverse_type(ty);
@@ -669,13 +669,13 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             return;
         }
 
-        self.ctx.file_pos = old_pos;
+        *self.ctx.file_pos_mut() = old_pos;
     }
 
     fn traverse_stmt(&mut self, stmt: &mut Stmt) {
-        let old_pos = self.ctx.file_pos.to_owned();
+        let old_pos = self.ctx.file_pos();
         if let Some(file_pos) = stmt.file_pos() {
-            self.ctx.file_pos = file_pos.to_owned();
+            *self.ctx.file_pos_mut() = *file_pos;
         }
 
         match stmt {
@@ -796,7 +796,7 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             }
         }
 
-        self.ctx.file_pos = old_pos;
+        *self.ctx.file_pos_mut() = old_pos;
 
         debug!("Visiting stmt -- {:#?}", stmt);
         if !self.ctx.stop {
@@ -805,7 +805,7 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             return;
         }
 
-        self.ctx.file_pos = old_pos;
+        *self.ctx.file_pos_mut() = old_pos;
     }
 
     fn traverse_type(&mut self, type_id: &mut TypeId) {

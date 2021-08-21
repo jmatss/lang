@@ -146,7 +146,13 @@ fn main() -> LangResult<()> {
             filename,
         };
 
-        lex_and_parse(&mut parser, file_nr, file, Some(&mut mut_content));
+        lex_and_parse(
+            &mut parser,
+            file_nr,
+            file,
+            Some(&mut mut_content),
+            opts.quiet,
+        );
     }
 
     // Loop through and lex/parse the "regular" input files.
@@ -183,7 +189,7 @@ fn main() -> LangResult<()> {
 
         file_info.insert(file_nr, file.clone());
 
-        lex_and_parse(&mut parser, file_nr, file, None);
+        lex_and_parse(&mut parser, file_nr, file, None, opts.quiet);
     }
 
     let mut ast_root = parser.take_root_block();
@@ -192,7 +198,7 @@ fn main() -> LangResult<()> {
     }
 
     let analyze_timer = Instant::now();
-    let mut analyze_ctx = match analyze(&mut ast_root, &TY_ENV, file_info) {
+    let mut analyze_ctx = match analyze(&mut ast_root, &TY_ENV, file_info, opts.quiet) {
         Ok(analyze_ctx) => analyze_ctx,
         Err(errs) => {
             for e in errs {
@@ -201,7 +207,10 @@ fn main() -> LangResult<()> {
             std::process::exit(1);
         }
     };
-    println!("Analyzing complete ({:?}).", analyze_timer.elapsed());
+
+    if !opts.quiet {
+        println!("Analyzing complete ({:?}).", analyze_timer.elapsed());
+    }
     if log_enabled!(Level::Debug) {
         debug!("\nAST after analyze:\n{:#?}", ast_root);
     } else if opts.ast {
@@ -229,7 +238,9 @@ fn main() -> LangResult<()> {
         }
     }
 
-    println!("Generating complete ({:?}).", generate_timer.elapsed());
+    if !opts.quiet {
+        println!("Generating complete ({:?}).", generate_timer.elapsed());
+    }
     if opts.llvm {
         println!("\n## LLVM IR before optimization ##");
         module.print_to_stderr();
@@ -240,14 +251,16 @@ fn main() -> LangResult<()> {
         .verify()
         .map_err(|e| LangError::new(e.to_string(), LangErrorKind::CodeGenError, None))?;
     compiler::compile(target_machine, &module, &opts.output_file, opts.optimize)?;
-    println!("Compiling complete ({:?}).", compile_timer.elapsed());
+    if !opts.quiet {
+        println!("Compiling complete ({:?}).", compile_timer.elapsed());
+    }
 
     if opts.llvm && opts.optimize {
         println!("\n## LLVM IR after optimization ##");
         module.print_to_stderr();
     }
 
-    println!("Compiled to: {}", opts.output_file);
+    println!("Output: {}", opts.output_file);
 
     Ok(())
 }
@@ -257,6 +270,7 @@ fn lex_and_parse(
     file_nr: FileId,
     file: FileInfo,
     content: Option<&mut [u8]>,
+    quiet: bool,
 ) {
     let lex_timer = Instant::now();
     let lex_tokens_result = if let Some(content) = content {
@@ -274,11 +288,13 @@ fn lex_and_parse(
             std::process::exit(1);
         }
     };
-    println!(
-        "Lexing {} complete ({:?}).",
-        &file.filename,
-        lex_timer.elapsed()
-    );
+    if !quiet {
+        println!(
+            "Lexing {} complete ({:?}).",
+            &file.filename,
+            lex_timer.elapsed()
+        );
+    }
 
     let parse_timer = Instant::now();
     if let Err(errs) = parser.parse(&mut lex_tokens) {
@@ -287,11 +303,13 @@ fn lex_and_parse(
         }
         std::process::exit(1);
     }
-    println!(
-        "Parsing {} complete ({:?}).",
-        &file.filename,
-        parse_timer.elapsed()
-    );
+    if !quiet {
+        println!(
+            "Parsing {} complete ({:?}).",
+            &file.filename,
+            parse_timer.elapsed()
+        );
+    }
 }
 
 struct Options {
@@ -303,6 +321,7 @@ struct Options {
     optimize: bool,
     llvm: bool,
     ast: bool,
+    quiet: bool,
 }
 
 fn parse_opts() -> Options {
@@ -376,6 +395,14 @@ fn parse_opts() -> Options {
                 .takes_value(true)
                 .required(false),
         )
+        .arg(
+            Arg::with_name("quiet")
+                .short("q")
+                .long("quiet")
+                .help("Set to not print step progress to stdout.")
+                .takes_value(false)
+                .required(false),
+        )
         .get_matches();
 
     let mut input_files = Vec::default();
@@ -394,5 +421,6 @@ fn parse_opts() -> Options {
         optimize: matches.is_present("optimize"),
         llvm: matches.is_present("llvm"),
         ast: matches.is_present("ast"),
+        quiet: matches.is_present("quiet"),
     }
 }

@@ -100,7 +100,7 @@ impl MatchExhaustAnalyzer {
         } else {
             Err(ctx.ast_ctx.err(format!(
                 "\"match\" on enum \"{}\" at position:\n{:#?}\ndoes NOT cover all enum members. Missing members:\n{:#?}",
-                &enum_.as_ref().read().unwrap().name, ctx.file_pos, member_names
+                &enum_.as_ref().read().unwrap().name, ctx.file_pos(), member_names
             )))
         }
     }

@@ -5,6 +5,7 @@ use log::{debug, log_enabled, Level};
 use common::{
     ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx},
     error::{LangError, LangErrorKind, LangResult},
+    file::FilePosition,
     hash::DerefType,
     hash_set::TyEnvHashSet,
     path::LangPath,
@@ -127,8 +128,8 @@ impl BlockAnalyzer {
         ast_ctx: &mut AstCtx,
         stmt: &Stmt,
         id: usize,
+        file_pos: FilePosition,
     ) -> LangResult<()> {
-        let file_pos = ast_ctx.file_pos.to_owned();
         let block_ctx = ast_ctx.block_ctxs.get_mut(&id).unwrap();
 
         match stmt {
@@ -211,8 +212,6 @@ impl BlockAnalyzer {
         block: &Block,
         parent_id: usize,
     ) -> LangResult<()> {
-        ast_ctx.file_pos = block.file_pos;
-
         let is_root_block = self.is_root(&block.header);
         let is_branchable_block = self.is_branchable(&block.header);
 
@@ -313,7 +312,7 @@ impl BlockAnalyzer {
                 }
 
                 AstToken::Stmt(ref stmt) => {
-                    self.analyze_stmt(ty_env, ast_ctx, stmt, block.id)?;
+                    self.analyze_stmt(ty_env, ast_ctx, stmt, block.id, block.file_pos)?;
                 }
 
                 // Reset the "mod" statement when the end of the file is reached.

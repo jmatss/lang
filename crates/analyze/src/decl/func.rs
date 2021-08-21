@@ -185,10 +185,6 @@ impl Visitor for DeclFnAnalyzer {
         }
     }
 
-    fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        ctx.ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
-    }
-
     /// Marks the methods in ADT/impl blocks with the name of the ADTs. This
     /// lets one differentiate between functions and methods by checking the
     /// `method_adt` field in the functions.

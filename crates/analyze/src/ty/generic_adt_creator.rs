@@ -102,11 +102,9 @@ impl GenericAdtCreator {
             };
 
             for (new_idx, gen_adt_type_id) in generic_adt_tys.iter().enumerate() {
-                set_generic_names(
-                    &mut ctx.ty_env.lock().unwrap(),
-                    &ctx.ast_ctx,
-                    *gen_adt_type_id,
-                )?;
+                let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
+                set_generic_names(&mut ty_env_guard, &ctx.ast_ctx, *gen_adt_type_id)?;
 
                 // Create a new instance of the ADT. This new instance will
                 // replace all generic "placeholders" with the actual generics
@@ -119,20 +117,19 @@ impl GenericAdtCreator {
                 // then have had their generics replaced/implemented.
                 new_adt.methods.clear();
 
-                let mut gens =
-                    if let Some(gens) = get_gens(&ctx.ty_env.lock().unwrap(), *gen_adt_type_id)? {
-                        gens.clone()
-                    } else {
-                        return Err(ctx.ast_ctx.err(format!(
-                            "Expected type with id {} to contain generics.",
-                            gen_adt_type_id
-                        )));
-                    };
+                let mut gens = if let Some(gens) = get_gens(&ty_env_guard, *gen_adt_type_id)? {
+                    gens.clone()
+                } else {
+                    return Err(ctx.ast_ctx.err(format!(
+                        "Expected type with id {} to contain generics.",
+                        gen_adt_type_id
+                    )));
+                };
 
                 // Before creating the new ADT, make sure that the generics are
                 // fully inferred.
                 for gen_type_id in gens.iter_types_mut() {
-                    let inf_type_id = ctx.ty_env.lock().unwrap().inferred_type(*gen_type_id)?;
+                    let inf_type_id = ty_env_guard.inferred_type(*gen_type_id)?;
                     if *gen_type_id != inf_type_id {
                         *gen_type_id = inf_type_id;
                     }
@@ -150,14 +147,14 @@ impl GenericAdtCreator {
                     let mut new_member = member.as_ref().read().unwrap().clone();
 
                     if let Some(type_id) = &mut new_member.ty {
-                        match replace_gen_impls(&ctx.ty_env, &ctx.ast_ctx, *type_id, &gens) {
+                        match replace_gen_impls(&mut ty_env_guard, &ctx.ast_ctx, *type_id, &gens) {
                             Ok(Some(new_type_id)) => *type_id = new_type_id,
                             Ok(None) => (),
                             Err(err) => self.errors.push(err),
                         }
 
                         match replace_self(
-                            &mut ctx.ty_env.lock().unwrap(),
+                            &mut ty_env_guard,
                             *type_id,
                             &adt_path_without_gens,
                             *gen_adt_type_id,
@@ -187,7 +184,7 @@ impl GenericAdtCreator {
                 // Insert the new ADT into the lookup table.
                 let key = (new_path, parent_id);
                 ctx.ast_ctx.adts.insert(
-                    &ctx.ty_env.lock().unwrap(),
+                    &ty_env_guard,
                     DerefType::Deep,
                     key,
                     Arc::clone(&new_adt_rc),
@@ -209,6 +206,8 @@ impl GenericAdtCreator {
                     adt_path_without_gens,
                     *gen_adt_type_id,
                 );
+
+                std::mem::drop(ty_env_guard);
 
                 // For every method of the ADT, replace any generic types with
                 // the type of the generics instances. Also replace any reference

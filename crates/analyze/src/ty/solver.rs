@@ -58,7 +58,9 @@ pub fn solve_all(ctx: &mut TraverseCtx, all_type_ids: HashSet<TypeId>) -> LangRe
     // all SolveCond's have been tried and the type system isn't solvable.
     let solve_conds = [SolveCond::new().excl_gen_inst(), SolveCond::new()];
 
-    ctx.ty_env.lock().unwrap().solve_mode = true;
+    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
+    ty_env_guard.solve_mode = true;
 
     for solve_cond in solve_conds {
         while let Some(type_id) = unsolved.pop_front() {
@@ -69,10 +71,8 @@ pub fn solve_all(ctx: &mut TraverseCtx, all_type_ids: HashSet<TypeId>) -> LangRe
                 type_id, iter_count
             );
 
-            solve(&ctx.ty_env, ctx.ast_ctx, type_id)?;
-            let inf_type_id = inferred_type(&ctx.ty_env.lock().unwrap(), type_id)?;
-
-            let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+            solve(&mut ty_env_guard, ctx.ast_ctx, type_id)?;
+            let inf_type_id = inferred_type(&ty_env_guard, type_id)?;
 
             // During the `solve()`, new types might potentially be created and
             // inserted into the `new_type_ids`. They might have to be solved.
@@ -100,7 +100,6 @@ pub fn solve_all(ctx: &mut TraverseCtx, all_type_ids: HashSet<TypeId>) -> LangRe
     if unsolved.is_empty() {
         Ok(())
     } else {
-        let ty_env_guard = ctx.ty_env.lock().unwrap();
         let mut err_msg = "Unable to solve type system.".to_string();
 
         for type_id in unsolved {
@@ -206,7 +205,8 @@ impl Visitor for TypeSolver {
             return;
         }
 
-        if let Err(err) = convert_defaults(ctx.ty_env) {
+        let convert_res = convert_defaults(&mut ctx.ty_env.lock().unwrap());
+        if let Err(err) = convert_res {
             self.errors.push(err);
             self.end_debug_print(ctx);
 

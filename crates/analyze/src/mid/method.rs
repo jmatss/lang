@@ -165,7 +165,7 @@ impl Visitor for MethodAnalyzer {
             if let Some(full_path) = full_path_opt {
                 let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
                     InnerTy::UnknownIdent(full_path, ctx.block_id),
-                    TypeInfo::Default(ctx.file_pos.to_owned()),
+                    TypeInfo::Default(ctx.file_pos()),
                 )) {
                     Ok(type_id) => type_id,
                     Err(err) => {
@@ -233,7 +233,7 @@ impl Visitor for MethodAnalyzer {
                     let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::Generic(
                         possible_gen_or_this.into(),
                         unique_id,
-                        TypeInfo::Default(ctx.file_pos.to_owned()),
+                        TypeInfo::Default(ctx.file_pos()),
                     )) {
                         Ok(type_id) => type_id,
                         Err(err) => {
@@ -255,7 +255,7 @@ impl Visitor for MethodAnalyzer {
                     let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::Generic(
                         possible_gen_or_this.into(),
                         unique_id,
-                        TypeInfo::Default(ctx.file_pos.to_owned()),
+                        TypeInfo::Default(ctx.file_pos()),
                     )) {
                         Ok(type_id) => type_id,
                         Err(err) => {

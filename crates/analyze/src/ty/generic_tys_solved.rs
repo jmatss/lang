@@ -149,7 +149,7 @@ impl Visitor for GenericTysSolvedChecker {
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
         if let Err(err) =
-            self.assert_generics_solved(&ctx.ty_env.lock().unwrap(), *type_id, &ctx.file_pos)
+            self.assert_generics_solved(&ctx.ty_env.lock().unwrap(), *type_id, &ctx.file_pos())
         {
             self.errors.push(err);
         }
