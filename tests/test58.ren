@@ -18,19 +18,17 @@ fn test_fn_ret<T>() -> T { var a = 6 as i8; return a }
 fn test_fn2<K, V>(k: K, v: V) { }
 
 fn main() -> i32 {
-    // TODO: Implement inference of method and function
-    //       generics if not specified.
-
     var one: u8 = 1
-    //var ts = TestStruct::test_method(one)
+    TestStruct::test_method(one)
 
     var two: i64 = 2
-    //var tgs = TestGenStruct::test_method(two)
+    TestGenStruct::test_method(two)
 
     var three: f32 = 3.
     var tdgs = TestDoubleGenStruct { three }
 
-    var four: u32 = 4
+    // TODO: Implement inference of method generics if not specified.
+    //var four: u32 = 4
     //tdgs.test_method(four)
 
     var five: f64 = 5.
@@ -41,7 +39,7 @@ fn main() -> i32 {
 
     var seven: i32 = 7
     var eight: i8 = 8
-    test_fn2(six, seven)
+    test_fn2(seven, eight)
 
     return 0
 }

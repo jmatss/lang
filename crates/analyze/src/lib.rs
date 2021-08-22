@@ -39,7 +39,7 @@ use ty::{
 use util::order::dependency_order_from_ctx;
 
 use crate::{
-    post::{ext_struct_init::ExtStructInit, format::FormatParser},
+    post::{ext_struct_init::ExtStructInit, format::FormatParser, void::VoidAnalyzer},
     pre::signed_literals::SignedLiteralsAnalyzer,
     ty::solver::TypeSolver,
 };
@@ -152,6 +152,7 @@ pub fn analyze<'a>(
     );
 
     traverse!(&mut ctx, ast_root, quiet, GenericTysSolvedChecker::new());
+    traverse!(&mut ctx, ast_root, quiet, VoidAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, ExtStructInit::new());
     traverse!(&mut ctx, ast_root, quiet, MethodThisAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, UnionInitArg::new());
