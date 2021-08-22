@@ -1,5 +1,3 @@
-use std::collections::{hash_map::Entry, HashMap};
-
 use common::{
     error::{LangError, LangErrorKind, LangResult},
     token::{
@@ -8,93 +6,12 @@ use common::{
     },
     traverse::traverse_ctx::TraverseCtx,
     ty::{
-        generics::Generics,
-        get::{get_file_pos, get_generic_ident, get_generics},
-        inner_ty::InnerTy,
-        replace::replace_gen_impls,
-        ty::Ty,
-        ty_env::TyEnv,
-        type_id::TypeId,
-        type_info::TypeInfo,
+        generics::Generics, get::get_file_pos, inner_ty::InnerTy, replace::replace_gen_impls,
+        ty::Ty, type_info::TypeInfo,
     },
 };
 
 use crate::ty::solve::insert_constraint;
-
-/// Tie the generics with the same identifier/name in this specific ADT to each
-/// other with constraints. This will be done for generics found in ADT members,
-/// method parameters and function return types.
-pub(crate) fn infer_adt_gens(adt: &Adt, ctx: &mut TraverseCtx) -> LangResult<()> {
-    // Populate this map with the "Generic(ident)" types where the key
-    // is the name of the generic and the value is a list of all the
-    // Generics that should have constraints between each other.
-    let mut gens = HashMap::default();
-
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
-
-    // Gather all "Generic" types found in the members types into the
-    // `gens` map. All the generic types in every entry will then
-    // be tied together so that they all get inferred to the same type.
-    for member in &adt.members {
-        if let Some(member_type_id) = &member.read().unwrap().ty {
-            collect_generics(&ty_env_guard, &mut gens, *member_type_id)?;
-        }
-    }
-
-    for method in adt.methods.values() {
-        // Gather "Generic" types from method parameters.
-        if let Some(params) = &method.read().unwrap().parameters {
-            for param in params {
-                if let Some(param_type_id) = param.read().unwrap().ty.as_ref() {
-                    collect_generics(&ty_env_guard, &mut gens, *param_type_id)?;
-                }
-            }
-        }
-
-        // Gather "Generic" types from method return type.
-        if let Some(ret_type_id) = method.read().unwrap().ret_type.as_ref() {
-            collect_generics(&ty_env_guard, &mut gens, *ret_type_id)?;
-        }
-    }
-
-    // Tie the types of the generics with the same ident to each other.
-    for gens_with_same_ident in gens.values() {
-        for i in 0..gens_with_same_ident.len() {
-            let left = gens_with_same_ident.get(i).unwrap();
-            for j in i + 1..gens_with_same_ident.len() {
-                let right = gens_with_same_ident.get(j).unwrap();
-                insert_constraint(&mut ty_env_guard, *left, *right)?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Given a type ID `type_id`, collects all Generic types found and inserts
-/// their type IDs into the `gens` map.
-///
-/// The keys of the map are then names of the generics and the values are vectors
-/// of all found generics with the given name.
-fn collect_generics(
-    ty_env: &TyEnv,
-    gens: &mut HashMap<String, Vec<TypeId>>,
-    type_id: TypeId,
-) -> LangResult<()> {
-    let gen_type_ids = get_generics(ty_env, type_id)?;
-    for gen_type_id in gen_type_ids {
-        let gen_name = get_generic_ident(ty_env, gen_type_id)?;
-        match gens.entry(gen_name.to_string()) {
-            Entry::Occupied(mut o) => {
-                o.get_mut().push(gen_type_id);
-            }
-            Entry::Vacant(v) => {
-                v.insert(vec![gen_type_id]);
-            }
-        }
-    }
-    Ok(())
-}
 
 /// Creates type constraints for the arguments specified in a ADT init to the
 /// types in the specific ADT declaration.
@@ -149,10 +66,9 @@ pub(crate) fn infer_adt_init(adt_init: &mut AdtInit, ctx: &mut TraverseCtx) -> L
 
                 gens.insert(gen_name.clone(), gen_type_id);
             }
-
-            adt_init.generics = Some(gens.clone());
         }
 
+        adt_init.generics = Some(gens.clone());
         Some(gens)
     } else {
         None
@@ -213,7 +129,7 @@ fn infer_adt_init_struct(
     // TODO: Verify that all members are initialized.
     let mut ty_env_guard = ctx.ty_env.lock().unwrap();
 
-    for (i, arg) in adt_init.arguments.iter_mut().enumerate() {
+    for (i, arg) in adt_init.arguments.iter().enumerate() {
         // If a name is set, this is a named member init. Don't use the
         // iterator index, get the correct index of the struct field with
         // the name `arg.name`.
@@ -237,7 +153,8 @@ fn infer_adt_init_struct(
             // Get the "actual" type of the member. If it contains a generic,
             // it needs to get the actual unknown generic type from the `gens`.
             // Otherwise reuse the already set type.
-            let member_type_id = if let Some(mut new_member_type_id) = member.ty {
+            let member_type_id = if let Some(member_type_id) = member.ty {
+                let mut new_member_type_id = member_type_id;
                 if let Some(gens) = &gens {
                     if let Some(new_type_id) = replace_gen_impls(
                         &mut ty_env_guard,
@@ -260,7 +177,8 @@ fn infer_adt_init_struct(
             let arg_type_id = arg.value.get_expr_type()?;
             insert_constraint(&mut ty_env_guard, arg_type_id, member_type_id)?;
 
-            // Bind type of member to the struct.
+            // Bind type of member to the struct. This is required to being able
+            // to solve the generic types in the `adt_type_id`.
             let unique_id = ty_env_guard.new_unique_id();
             let type_info = TypeInfo::DefaultOpt(get_file_pos(&ty_env_guard, arg_type_id).cloned());
             let unknown_type_id = ty_env_guard.id(&Ty::UnknownAdtMember(

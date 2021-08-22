@@ -13,24 +13,35 @@ struct TestDoubleGenStruct<T> {
 
 fn test_fn<T>(x: T) { }
 
+fn test_fn_ret<T>() -> T { var a = 6 as i8; return a }
+
+fn test_fn2<K, V>(k: K, v: V) { }
+
 fn main() -> i32 {
     // TODO: Implement inference of method and function
     //       generics if not specified.
 
-    var one = 1 as u8
+    var one: u8 = 1
     //var ts = TestStruct::test_method(one)
 
-    var two = 2 as i64
+    var two: i64 = 2
     //var tgs = TestGenStruct::test_method(two)
 
-    var three = 3. as f32
+    var three: f32 = 3.
     var tdgs = TestDoubleGenStruct { three }
 
-    var four = 4 as u32
+    var four: u32 = 4
     //tdgs.test_method(four)
 
-    var five = 5. as f64
+    var five: f64 = 5.
     test_fn(five)
+
+    var six: i8
+    six = test_fn_ret()
+
+    var seven: i32 = 7
+    var eight: i8 = 8
+    test_fn2(six, seven)
 
     return 0
 }

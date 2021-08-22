@@ -22,8 +22,7 @@ use common::{
 
 use super::{
     inf::{
-        adt::infer_adt_gens,
-        adt::infer_adt_init,
+        adt_init::infer_adt_init,
         arr_init::infer_array_init,
         built_in::infer_built_in,
         func::{infer_fn, infer_fn_ptr},
@@ -183,30 +182,6 @@ impl Visitor for TypeInferencer {
             // Save the current function in a place so that the stmts/exprs in the body
             // can access the types of the parameters and the return type of the func.
             self.cur_func = Some(Arc::clone(func));
-        }
-    }
-
-    fn visit_struct(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
-        if let Block {
-            header: BlockHeader::Struct(adt),
-            ..
-        } = &block
-        {
-            if let Err(err) = infer_adt_gens(&adt.read().unwrap(), ctx) {
-                self.errors.push(err);
-            }
-        }
-    }
-
-    fn visit_union(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
-        if let Block {
-            header: BlockHeader::Union(adt),
-            ..
-        } = &block
-        {
-            if let Err(err) = infer_adt_gens(&adt.read().unwrap(), ctx) {
-                self.errors.push(err);
-            }
         }
     }
 

@@ -30,22 +30,26 @@ use super::{inner_ty::InnerTy, ty_env::TyEnv};
 /// General ordering list (most preferred at the top, least at bottom):
 ///  1.  Primitive
 ///  2.  ADT/Trait
-///  3.  UnknownInt
-///      UnknownFloat
-///  4.  Fn
+///  3.  Fn
 ///      Array
 ///      Pointer
-///  5.  GenericInstance
-///  6.  UnknownIdent
+///  4.  Generic
+///  5.  UnknownInt
+///      UnknownFloat
+///  6.  GenericInstance
+///  7.  UnknownIdent
 ///      UnknownMethodGeneric
 ///      UnknownMethodArgument
 ///      UnknownAdtMethod
 ///      UnknownAdtMember
-///  7.  UnknownArrayMember
-///  8.  Generic
+///  8.  UnknownArrayMember
 ///  9.  Unknown
 ///  10. Any
 ///  11. Expr   (expression evaluated to a type)
+///
+/// The reason for `Generic` being prefered over `UnknownInt`/`UnknownFloat` is
+/// to allow for returning a default literal int/float from a function returning
+/// a generic type.
 pub fn precedence(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangResult<Ordering> {
     match prec_allow_eq(ty_env, first_id, second_id)? {
         Ordering::Equal => Ok(prec_eq(first_id, second_id)),
@@ -109,10 +113,6 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         }
         (Ty::CompoundType(inner, ..), _) if inner.is_unknown() => Ok(Ordering::Greater),
         (_, Ty::CompoundType(inner, ..)) if inner.is_unknown() => Ok(Ordering::Less),
-
-        (Ty::Generic(_, id_a, ..), Ty::Generic(_, id_b, ..)) => Ok(id_a.cmp(id_b)),
-        (Ty::Generic(..), _) => Ok(Ordering::Greater),
-        (_, Ty::Generic(..)) => Ok(Ordering::Less),
 
         (
             Ty::UnknownArrayMember(type_id_a, unique_id_a, ..),
@@ -193,6 +193,23 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (Ty::GenericInstance(_, id_a, ..), Ty::GenericInstance(_, id_b, ..)) => Ok(id_a.cmp(id_b)),
         (Ty::GenericInstance(..), _) => Ok(Ordering::Greater),
         (_, Ty::GenericInstance(..)) => Ok(Ordering::Less),
+
+        (Ty::CompoundType(inner_a, info_a), Ty::CompoundType(inner_b, info_b))
+            if (inner_a.is_unknown_int() || inner_a.is_unknown_float())
+                && (inner_b.is_unknown_int() || inner_b.is_unknown_float()) =>
+        {
+            prec_inner_ty(inner_a, info_a.file_pos(), inner_b, info_b.file_pos())
+        }
+        (Ty::CompoundType(inner, ..), _) if inner.is_unknown_int() || inner.is_unknown_float() => {
+            Ok(Ordering::Greater)
+        }
+        (_, Ty::CompoundType(inner, ..)) if inner.is_unknown_int() || inner.is_unknown_float() => {
+            Ok(Ordering::Less)
+        }
+
+        (Ty::Generic(_, id_a, ..), Ty::Generic(_, id_b, ..)) => Ok(id_a.cmp(id_b)),
+        (Ty::Generic(..), _) => Ok(Ordering::Greater),
+        (_, Ty::Generic(..)) => Ok(Ordering::Less),
 
         (Ty::Pointer(type_id_a, ..), Ty::Pointer(type_id_b, ..)) => {
             prec_allow_eq(ty_env, *type_id_a, *type_id_b)

@@ -5,7 +5,7 @@ use common::{
     traverse::traverse_ctx::TraverseCtx,
     ty::{
         generics::Generics,
-        get::{get_file_pos, get_file_pos_mut, get_generics},
+        get::{get_file_pos, get_generics},
         inner_ty::InnerTy,
         replace::replace_gen_impls,
         ty::Ty,
@@ -32,47 +32,13 @@ pub(crate) fn infer_fn_call(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
     // TODO: Support varargs for fn pointers?
     // TODO: Support named arguments for fn pointers?
 
-    let mut fn_ret_type_id = if fn_call.is_fn_ptr_call {
+    let fn_ret_type_id = if fn_call.is_fn_ptr_call {
         infer_fn_call_fn_ptr(fn_call, ctx)?
     } else if fn_call.is_method {
         infer_fn_call_method(fn_call, ctx)?
     } else {
         infer_fn_call_fn(fn_call, ctx)?
     };
-
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
-
-    // Replace any "Generic"s with "GenericInstances"s instead so that the
-    // "Generic"s doesn't leak out to outside the function. Instead a
-    // unique instance of a generic should be used instead. This will allow
-    // for multiple different types to be mapped to the same single "Generic".
-    let fn_ret_type_id_gens = get_generics(&ty_env_guard, fn_ret_type_id)?;
-    let mut gen_impls = Generics::new();
-
-    for gen_type_id in &fn_ret_type_id_gens {
-        let gen_ty = ty_env_guard.ty_clone(*gen_type_id)?;
-
-        if let Ty::Generic(ident, ..) = gen_ty {
-            let file_pos = get_file_pos(&ty_env_guard, *gen_type_id).cloned();
-
-            let unique_id = ty_env_guard.new_unique_id();
-            let gen_impl_type_id = ty_env_guard.id(&Ty::GenericInstance(
-                ident.clone(),
-                unique_id,
-                TypeInfo::DefaultOpt(file_pos),
-            ))?;
-
-            gen_impls.insert(ident, gen_impl_type_id);
-        } else {
-            unreachable!("Got non generic from `get_generics()`.");
-        }
-    }
-
-    if let Some(new_type_id) =
-        replace_gen_impls(&mut ty_env_guard, &ctx.ast_ctx, fn_ret_type_id, &gen_impls)?
-    {
-        fn_ret_type_id = new_type_id;
-    }
 
     // TODO: Is it correct to directly set the return type for the function
     //       call? Should be inserted as a constraint instead? Will this
@@ -148,9 +114,40 @@ pub(super) fn infer_fn_call_fn_ptr(fn_call: &FnCall, ctx: &mut TraverseCtx) -> L
         insert_constraint(&mut ty_env_guard, *fn_call_gen, *fn_gen)?;
     }
 
-    if let Some(type_id) = fn_ret_type_id {
-        *get_file_pos_mut(&mut ty_env_guard, type_id).unwrap() = fn_call.file_pos.unwrap();
-        Ok(type_id)
+    if let Some(mut fn_ret_type_id) = fn_ret_type_id {
+        // Replace any "Generic"s with "GenericInstances"s instead so that the
+        // "Generic"s doesn't leak out to outside the function. Instead a
+        // unique instance of a generic should be used instead. This will allow
+        // for multiple different types to be mapped to the same single "Generic".
+        let fn_ret_type_id_gens = get_generics(&ty_env_guard, fn_ret_type_id)?;
+        let mut gen_impls = Generics::new();
+
+        for gen_type_id in &fn_ret_type_id_gens {
+            let gen_ty = ty_env_guard.ty_clone(*gen_type_id)?;
+
+            if let Ty::Generic(ident, ..) = gen_ty {
+                let file_pos = get_file_pos(&ty_env_guard, *gen_type_id).cloned();
+
+                let unique_id = ty_env_guard.new_unique_id();
+                let gen_impl_type_id = ty_env_guard.id(&Ty::GenericInstance(
+                    ident.clone(),
+                    unique_id,
+                    TypeInfo::DefaultOpt(file_pos),
+                ))?;
+
+                gen_impls.insert(ident, gen_impl_type_id);
+            } else {
+                unreachable!("Got non generic from `get_generics()`.");
+            }
+        }
+
+        if let Some(new_type_id) =
+            replace_gen_impls(&mut ty_env_guard, &ctx.ast_ctx, fn_ret_type_id, &gen_impls)?
+        {
+            fn_ret_type_id = new_type_id;
+        }
+
+        Ok(fn_ret_type_id)
     } else {
         ty_env_guard.id(&Ty::CompoundType(
             InnerTy::Void,
@@ -318,7 +315,7 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
     let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
     ctx.ty_env.lock().unwrap().id(&Ty::UnknownAdtMethod(
         adt_type_id,
-        method_name_with_gens.clone(),
+        method_name_with_gens,
         unique_id,
         TypeInfo::FuncCall(method_call.file_pos.unwrap()),
     ))
@@ -339,37 +336,81 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
         .get_fn(&ctx.ty_env.lock().unwrap(), &fn_full_path)?;
     let func = func.read().unwrap();
 
+    let new_gens = if let Some(gens_decl) = &func.generics {
+        let mut gens = Generics::new();
+
+        if let Some(gens_impl) = &fn_call.generics {
+            if gens_decl.len() != gens_impl.len() {
+                return Err(ctx.ast_ctx.err(format!(
+                    "Wrong amount of generics at func call. Func decl: {:#?}, func call: {:#?}",
+                    func, fn_call
+                )));
+            }
+
+            for (name, gen_ty) in gens_decl.iter_names().zip(gens_impl.iter_types()) {
+                gens.insert(name.clone(), *gen_ty);
+            }
+        } else {
+            for gen_name in gens_decl.iter_names() {
+                let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
+                let gen_type_id = ctx.ty_env.lock().unwrap().id(&Ty::GenericInstance(
+                    gen_name.clone(),
+                    unique_id,
+                    TypeInfo::None,
+                ))?;
+
+                gens.insert(gen_name.clone(), gen_type_id);
+            }
+        }
+
+        fn_call.generics = Some(gens.clone());
+        Some(gens)
+    } else {
+        None
+    };
+
     // Iterate through all arguments of the function call and match up their
     // types with the parameters of the function.
     // The amount of args/params will already have been checked before,
     // just make sure that this doesn't break for vararg functions.
     if let Some(params) = &func.parameters {
+        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+        let fn_path_with_gens = fn_full_path.with_gens_opt(new_gens.clone());
+
         for (idx, arg) in fn_call.arguments.iter().enumerate() {
             // If the argument is a named argument, get the index for the
             // named parameter instead of using the index of its position
             // in the function call.
             let actual_idx = if let Some(arg_name) = &arg.name {
-                ctx.ast_ctx.get_fn_param_idx(
-                    &ctx.ty_env.lock().unwrap(),
-                    &fn_full_path,
-                    &arg_name,
-                )?
+                ctx.ast_ctx
+                    .get_fn_param_idx(&ty_env_guard, &fn_full_path, &arg_name)?
             } else {
                 idx
             };
 
-            let arg_type_id = arg.value.get_expr_type()?;
-
             if func.is_var_arg && actual_idx >= params.len() {
                 continue;
             }
+
+            let arg_type_id = arg.value.get_expr_type()?;
 
             let param_type_id = if let Some(type_id) = &params
                 .get(actual_idx as usize)
                 .map(|param| param.read().unwrap().ty)
                 .flatten()
             {
-                *type_id
+                let mut new_param_type_id = *type_id;
+                if let Some(new_gens) = &new_gens {
+                    if let Some(new_type_id) = replace_gen_impls(
+                        &mut ty_env_guard,
+                        &ctx.ast_ctx,
+                        new_param_type_id,
+                        new_gens,
+                    )? {
+                        new_param_type_id = new_type_id
+                    }
+                }
+                new_param_type_id
             } else {
                 return Err(ctx.ast_ctx.err(format!(
                     "Type for parameter \"{:?}\" with index {} in function \"{}\" set to None.",
@@ -377,75 +418,38 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
                 )));
             };
 
-            insert_constraint(&mut ctx.ty_env.lock().unwrap(), arg_type_id, param_type_id)?;
-        }
-    }
+            insert_constraint(&mut ty_env_guard, arg_type_id, param_type_id)?;
 
-    let fn_gen_names = func
-        .generics
-        .clone()
-        .unwrap_or_else(Generics::empty)
-        .iter_names()
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let fn_call_gen_type_ids = fn_call
-        .generics
-        .clone()
-        .unwrap_or_else(Generics::empty)
-        .iter_types()
-        .cloned()
-        .collect::<Vec<_>>();
-
-    if !fn_call_gen_type_ids.is_empty() && fn_call_gen_type_ids.len() != fn_gen_names.len() {
-        return Err(ctx.ast_ctx.err(format!(
-            "Wrong amount of generics for fn call.\n Func call: {:#?}\nfn_gens: {:#?}",
-            fn_call, fn_gen_names
-        )));
-    }
-
-    if !fn_gen_names.is_empty() {
-        // TODO: Does this handle nested generics? Ex. if one of the fn call
-        //       generic impls is a Generic(T).
-        // Update the fn_call generics. This will assign the names declared on the
-        // ADT generics with the types specified in the fn_call generics.
-        if let Some(new_gens) = combine_generics(
-            ctx,
-            fn_gen_names.as_ref(),
-            fn_call.generics.as_ref(),
-            &fn_full_path,
-            None,
-        )? {
-            fn_call.generics = Some(new_gens);
-        }
-    }
-
-    // Insert constraints between the function calls `UnknownFnGeneric` generics
-    // and the corresponding implemented type (either hardcoded in the code or
-    // generated `GenericInstance`s from the logib aboe ).
-    if let Some(gens) = &fn_call.generics {
-        for (gen_name, type_id) in gens.iter_names().zip(gens.iter_types()) {
-            let type_id_file_pos = get_file_pos(&ctx.ty_env.lock().unwrap(), *type_id).cloned();
-
-            let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-            let unknown_gen_type_id = ctx.ty_env.lock().unwrap().id(&Ty::UnknownFnGeneric(
+            // Bind type of argument to the func. This is required to being able
+            // to solve the generic types in the `adt_type_id`.
+            let unique_id = ty_env_guard.new_unique_id();
+            let type_info = TypeInfo::DefaultOpt(get_file_pos(&ty_env_guard, arg_type_id).cloned());
+            let unknown_type_id = ty_env_guard.id(&Ty::UnknownFnArgument(
                 None,
-                fn_full_path.clone(),
-                Either::Right(gen_name.into()),
+                fn_path_with_gens.clone(),
+                Either::Left(actual_idx),
                 unique_id,
-                TypeInfo::DefaultOpt(type_id_file_pos),
+                type_info,
             ))?;
 
-            insert_constraint(
-                &mut ctx.ty_env.lock().unwrap(),
-                unknown_gen_type_id,
-                *type_id,
-            )?;
+            insert_constraint(&mut ty_env_guard, arg_type_id, unknown_type_id)?;
         }
     }
 
-    if let Some(type_id) = func.ret_type {
-        Ok(type_id)
+    if let Some(ret_type_id) = func.ret_type {
+        // Replace any `Generic`s in the returned type with the impl types in
+        // the `new_gens` (either real type or `GenericInstance`).
+        if let Some(new_gens) = &new_gens {
+            if let Some(new_ret_type_id) = replace_gen_impls(
+                &mut ctx.ty_env.lock().unwrap(),
+                ctx.ast_ctx,
+                ret_type_id,
+                &new_gens,
+            )? {
+                return Ok(new_ret_type_id);
+            }
+        }
+        Ok(ret_type_id)
     } else {
         ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
             InnerTy::Void,

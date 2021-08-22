@@ -5,66 +5,6 @@ use crate::{
 
 use super::{generics::Generics, inner_ty::InnerTy, ty_env::TyEnv};
 
-/// Recursively replaces any generic identifiers from "UnknownIdent" wrapped
-/// inside a "CompoundType" into "Generic"s.
-pub fn replace_gens(ty_env: &mut TyEnv, id: TypeId, generics: &Generics) -> LangResult<()> {
-    match ty_env.ty(id)?.clone() {
-        Ty::CompoundType(InnerTy::UnknownIdent(path, ..), type_info) => {
-            if let Some(gens) = path.gens() {
-                for gen_type_id in gens.iter_types() {
-                    replace_gens(ty_env, *gen_type_id, generics)?;
-                }
-            }
-
-            if path.count() == 1 {
-                let possible_gen_name = path.first().unwrap().name();
-                for gen_name in generics.iter_names() {
-                    if gen_name == possible_gen_name {
-                        let new_ty = Ty::Generic(
-                            possible_gen_name.into(),
-                            ty_env.new_unique_id(),
-                            type_info.clone(),
-                        );
-                        ty_env.update(id, new_ty)?;
-                    }
-                }
-            }
-        }
-
-        Ty::Pointer(type_id, ..)
-        | Ty::Array(type_id, ..)
-        | Ty::UnknownAdtMember(type_id, ..)
-        | Ty::UnknownAdtMethod(type_id, ..)
-        | Ty::UnknownFnArgument(Some(type_id), ..)
-        | Ty::UnknownFnGeneric(Some(type_id), ..)
-        | Ty::UnknownArrayMember(type_id, ..) => {
-            replace_gens(ty_env, type_id, generics)?;
-        }
-
-        Ty::Fn(gens, params, ret_type_id_opt, ..) => {
-            if let Some(ret_type_id) = ret_type_id_opt {
-                replace_gens(ty_env, ret_type_id, generics)?;
-            }
-            for gen_type_id in gens.iter() {
-                replace_gens(ty_env, *gen_type_id, generics)?;
-            }
-            for param_type_id in params.iter() {
-                replace_gens(ty_env, *param_type_id, generics)?;
-            }
-        }
-
-        Ty::Expr(expr, ..) => {
-            if let Ok(type_id) = expr.get_expr_type() {
-                replace_gens(ty_env, type_id, generics)?;
-            }
-        }
-
-        _ => (),
-    }
-
-    Ok(())
-}
-
 /// Recursively replaces any "Generic" types with the actual implementation
 /// type. I.e. any "Generic" type that has a ident that is a key in the
 /// `generics_impl` will be replaced with the value in the map.
@@ -83,18 +23,18 @@ pub fn replace_gen_impls(
     ty_env: &mut TyEnv,
     ast_ctx: &AstCtx,
     type_id: TypeId,
-    generics_impl: &Generics,
+    gen_impls: &Generics,
 ) -> LangResult<Option<TypeId>> {
     let mut ty_clone = ty_env.ty_clone(type_id)?;
 
     debug!(
         "replace_gen_impls -- type_id: {}, ty: {:#?} generics_impl: {:#?}",
-        type_id, ty_clone, generics_impl
+        type_id, ty_clone, gen_impls
     );
 
     let ty_was_updated = match &mut ty_clone {
         Ty::Generic(ident, ..) => {
-            if let Some(impl_type_id) = generics_impl.get(ident) {
+            if let Some(impl_type_id) = gen_impls.get(ident) {
                 ty_clone = ty_env.ty(impl_type_id)?.clone();
                 true
             } else {
@@ -103,7 +43,7 @@ pub fn replace_gen_impls(
         }
 
         Ty::GenericInstance(ident, unique_id, ..) => {
-            if let Some(impl_type_id) = generics_impl.get(ident) {
+            if let Some(impl_type_id) = gen_impls.get(ident) {
                 match ty_env.ty(impl_type_id)?.clone() {
                     Ty::Generic(..) => false,
                     Ty::GenericInstance(_, impl_unique_id, ..) if impl_unique_id == *unique_id => {
@@ -119,14 +59,12 @@ pub fn replace_gen_impls(
             }
         }
 
-        // Need to update generics both in the type `gens_clone` and the
-        // generics declared inside a potential LangPath of the InnerTy.
         Ty::CompoundType(inner_ty, ..) => {
             let mut was_updated = false;
             if let Some(gens) = inner_ty.gens_mut() {
                 for gen_type_id in gens.iter_types_mut() {
                     if let Some(new_gen_type_id) =
-                        replace_gen_impls(ty_env, ast_ctx, *gen_type_id, generics_impl)?
+                        replace_gen_impls(ty_env, ast_ctx, *gen_type_id, gen_impls)?
                     {
                         *gen_type_id = new_gen_type_id;
                         was_updated = true;
@@ -143,8 +81,7 @@ pub fn replace_gen_impls(
         | Ty::UnknownFnArgument(Some(type_id_i), ..)
         | Ty::UnknownFnGeneric(Some(type_id_i), ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
-            if let Some(new_type_id_i) =
-                replace_gen_impls(ty_env, ast_ctx, *type_id_i, generics_impl)?
+            if let Some(new_type_id_i) = replace_gen_impls(ty_env, ast_ctx, *type_id_i, gen_impls)?
             {
                 *type_id_i = new_type_id_i;
                 true
@@ -157,7 +94,7 @@ pub fn replace_gen_impls(
             let mut was_updated = false;
             if let Some(ret_type_id) = ret_type_id_opt {
                 if let Some(new_ret_type_id) =
-                    replace_gen_impls(ty_env, ast_ctx, *ret_type_id, generics_impl)?
+                    replace_gen_impls(ty_env, ast_ctx, *ret_type_id, gen_impls)?
                 {
                     *ret_type_id = new_ret_type_id;
                     was_updated = true;
@@ -165,7 +102,7 @@ pub fn replace_gen_impls(
             }
             for gen_type_id in gens.iter_mut() {
                 if let Some(new_gen_type_id) =
-                    replace_gen_impls(ty_env, ast_ctx, *gen_type_id, generics_impl)?
+                    replace_gen_impls(ty_env, ast_ctx, *gen_type_id, gen_impls)?
                 {
                     *gen_type_id = new_gen_type_id;
                     was_updated = true;
@@ -173,7 +110,7 @@ pub fn replace_gen_impls(
             }
             for param_type_id in params.iter_mut() {
                 if let Some(new_param_type_id) =
-                    replace_gen_impls(ty_env, ast_ctx, *param_type_id, generics_impl)?
+                    replace_gen_impls(ty_env, ast_ctx, *param_type_id, gen_impls)?
                 {
                     *param_type_id = new_param_type_id;
                     was_updated = true;
@@ -185,7 +122,7 @@ pub fn replace_gen_impls(
         Ty::Expr(expr, ..) => {
             if let Ok(type_id_i) = expr.get_expr_type_mut() {
                 if let Some(new_type_id_i) =
-                    replace_gen_impls(ty_env, ast_ctx, *type_id_i, generics_impl)?
+                    replace_gen_impls(ty_env, ast_ctx, *type_id_i, gen_impls)?
                 {
                     *type_id_i = new_type_id_i;
                     true

@@ -24,8 +24,7 @@ use common::{
 
 /// Used when replacing generics in functions and methods containing to a
 /// specific generic implementation. This will be used to replace all types in
-/// the body of the
-/// functions/methods.
+/// the body of the functions/methods.
 ///
 /// This can be used for replacing generics declared in ADTs and generics
 /// declared in functions. If they are declared in functions, the ADT related

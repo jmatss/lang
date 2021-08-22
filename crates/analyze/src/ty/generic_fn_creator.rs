@@ -493,7 +493,9 @@ impl Visitor for GenericFnCreator {
             }) = default_body.get(idx).unwrap()
             {
                 let amount_of_fns_created = match self.create_fn_instance(ctx, default_body, idx) {
-                    Ok(amount) => amount,
+                    Ok(0) => 0,
+                    // -1 since the original fn (with no generics) is removed.
+                    Ok(amount) => amount - 1,
                     Err(err) => {
                         self.errors.extend(err);
                         return;

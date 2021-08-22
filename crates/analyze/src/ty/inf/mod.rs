@@ -1,4 +1,4 @@
-pub mod adt;
+pub mod adt_init;
 pub mod arr_init;
 pub mod built_in;
 pub mod func;
