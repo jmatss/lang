@@ -232,24 +232,23 @@ fn infer_adt_init_struct(
         // Add constraints mapping the type of the ADT init argument
         // to the corresponding actual ADT member type.
         if let Some(member) = adt.members.get(index) {
-            // Make a copy of the type to allow for multiple
-            // struct inits with different types for the generics.
-            let mut new_member = member.read().unwrap().clone();
+            let member = member.read().unwrap();
 
-            // Get the "actual" type of the member. If it contains
-            // a generic, it needs to get the actual unknown
-            // generic type from the `generics` map.
+            // Get the "actual" type of the member. If it contains a generic,
+            // it needs to get the actual unknown generic type from the `gens`.
             // Otherwise reuse the already set type.
-            let member_type_id = if let Some(member_type_id) = &mut new_member.ty {
+            let member_type_id = if let Some(mut new_member_type_id) = member.ty {
                 if let Some(gens) = &gens {
-                    if let Some(new_type_id) =
-                        replace_gen_impls(&mut ty_env_guard, &ctx.ast_ctx, *member_type_id, gens)?
-                    {
-                        *member_type_id = new_type_id
+                    if let Some(new_type_id) = replace_gen_impls(
+                        &mut ty_env_guard,
+                        &ctx.ast_ctx,
+                        new_member_type_id,
+                        gens,
+                    )? {
+                        new_member_type_id = new_type_id
                     }
                 }
-
-                *member_type_id
+                new_member_type_id
             } else {
                 return Err(ctx.ast_ctx.err(format!(
                     "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
@@ -266,7 +265,7 @@ fn infer_adt_init_struct(
             let type_info = TypeInfo::DefaultOpt(get_file_pos(&ty_env_guard, arg_type_id).cloned());
             let unknown_type_id = ty_env_guard.id(&Ty::UnknownAdtMember(
                 adt_init.adt_type_id.unwrap(),
-                new_member.name.clone(),
+                member.name.clone(),
                 unique_id,
                 type_info,
             ))?;

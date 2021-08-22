@@ -100,6 +100,7 @@ pub fn is_solved(
         Ty::Any(..) => true,
 
         Ty::UnknownAdtMember(type_id_i, ..)
+        | Ty::UnknownFnArgument(Some(type_id_i), ..)
         | Ty::UnknownFnGeneric(Some(type_id_i), ..)
         | Ty::UnknownArrayMember(type_id_i, ..)
             if solve_cond.can_solve_unknown() =>
@@ -107,24 +108,23 @@ pub fn is_solved(
             is_solved(ty_env, *type_id_i, true, solve_cond)?
         }
 
-        Ty::UnknownAdtMethod(type_id_i, _, gens, ..)
-        | Ty::UnknownMethodArgument(type_id_i, _, gens, ..)
-            if solve_cond.can_solve_unknown() =>
-        {
+        Ty::UnknownAdtMethod(type_id_i, method_path, ..) if solve_cond.can_solve_unknown() => {
             let mut is_solved_bool = is_solved(ty_env, *type_id_i, true, solve_cond)?;
-            for gen_type_id in gens {
-                if !is_solved(ty_env, *gen_type_id, true, solve_cond)? {
-                    is_solved_bool = false;
+            if let Some(gens) = method_path.last().map(|part| part.generics()).unwrap() {
+                for gen_type_id in gens.iter_types() {
+                    if !is_solved(ty_env, *gen_type_id, true, solve_cond)? {
+                        is_solved_bool = false;
+                    }
                 }
             }
             is_solved_bool
         }
 
         Ty::UnknownAdtMember(..)
+        | Ty::UnknownFnArgument(..)
         | Ty::UnknownFnGeneric(..)
         | Ty::UnknownArrayMember(..)
-        | Ty::UnknownAdtMethod(..)
-        | Ty::UnknownMethodArgument(..) => false,
+        | Ty::UnknownAdtMethod(..) => false,
     };
 
     let inf_type_id = ty_env.inferred_type(type_id)?;
@@ -242,7 +242,7 @@ pub fn is_unknown_adt_method(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
 
 pub fn is_unknown_method_argument(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
     let ty = ty_env.ty(id)?;
-    Ok(matches!(ty, Ty::UnknownMethodArgument(..)))
+    Ok(matches!(ty, Ty::UnknownFnArgument(..)))
 }
 
 pub fn is_unknown_method_generic(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
@@ -260,7 +260,7 @@ pub fn is_unknown_any(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
     Ok(match ty {
         Ty::UnknownAdtMember(..)
         | Ty::UnknownAdtMethod(..)
-        | Ty::UnknownMethodArgument(..)
+        | Ty::UnknownFnArgument(..)
         | Ty::UnknownFnGeneric(..)
         | Ty::UnknownArrayMember(..) => true,
         Ty::CompoundType(inner_ty, ..) => {

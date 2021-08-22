@@ -146,8 +146,6 @@ impl Visitor for TypeInferencer {
         }
     }
 
-    /// Adds the correct type for the ADT init and ties the types of the ADT
-    /// members with the type of the ADT init arguments.
     fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &mut TraverseCtx) {
         if let Err(err) = infer_adt_init(adt_init, ctx) {
             self.errors.push(err);

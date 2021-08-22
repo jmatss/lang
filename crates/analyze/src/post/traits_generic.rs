@@ -321,7 +321,7 @@ impl TraitsGenericAnalyzer {
             Ty::Pointer(type_id_i, _)
             | Ty::UnknownAdtMember(type_id_i, ..)
             | Ty::UnknownAdtMethod(type_id_i, ..)
-            | Ty::UnknownMethodArgument(type_id_i, ..)
+            | Ty::UnknownFnArgument(Some(type_id_i), ..)
             | Ty::UnknownFnGeneric(Some(type_id_i), ..)
             | Ty::UnknownArrayMember(type_id_i, ..) => {
                 self.check_adt_traits(ctx, type_id_i, block_id)?;
@@ -330,6 +330,7 @@ impl TraitsGenericAnalyzer {
             Ty::Any(..)
             | Ty::Generic(..)
             | Ty::GenericInstance(..)
+            | Ty::UnknownFnArgument(None, ..)
             | Ty::UnknownFnGeneric(None, ..) => (),
         }
 

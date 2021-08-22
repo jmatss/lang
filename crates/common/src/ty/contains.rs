@@ -30,7 +30,7 @@ pub fn contains_generic_with_name(
         | Ty::Array(type_id, ..)
         | Ty::UnknownAdtMember(type_id, ..)
         | Ty::UnknownAdtMethod(type_id, ..)
-        | Ty::UnknownMethodArgument(type_id, ..)
+        | Ty::UnknownFnArgument(Some(type_id), ..)
         | Ty::UnknownFnGeneric(Some(type_id), ..)
         | Ty::UnknownArrayMember(type_id, ..) => {
             contains_generic_with_name(ty_env, *type_id, gen_names)?
@@ -60,7 +60,7 @@ pub fn contains_generic_with_name(
             false
         }
 
-        Ty::Any(..) | Ty::UnknownFnGeneric(None, ..) => false,
+        Ty::Any(..) | Ty::UnknownFnGeneric(None, ..) | Ty::UnknownFnArgument(None, ..) => false,
     })
 }
 
@@ -100,7 +100,7 @@ pub fn contains_ty_shallow(
         | (Ty::GenericInstance(..), Ty::GenericInstance(..))
         | (Ty::UnknownAdtMember(..), Ty::UnknownAdtMember(..))
         | (Ty::UnknownAdtMethod(..), Ty::UnknownAdtMethod(..))
-        | (Ty::UnknownMethodArgument(..), Ty::UnknownMethodArgument(..))
+        | (Ty::UnknownFnArgument(..), Ty::UnknownFnArgument(..))
         | (Ty::UnknownFnGeneric(..), Ty::UnknownFnGeneric(..))
         | (Ty::UnknownArrayMember(..), Ty::UnknownArrayMember(..)) => return Ok(true),
         _ => (),
@@ -123,15 +123,17 @@ pub fn contains_ty_shallow(
         Ty::Pointer(type_id, ..)
         | Ty::Array(type_id, ..)
         | Ty::UnknownAdtMember(type_id, ..)
+        | Ty::UnknownFnArgument(Some(type_id), ..)
         | Ty::UnknownFnGeneric(Some(type_id), ..)
         | Ty::UnknownArrayMember(type_id, ..) => contains_ty_shallow(ty_env, *type_id, child_ty)?,
 
-        Ty::UnknownAdtMethod(type_id, _, gen_type_ids, ..)
-        | Ty::UnknownMethodArgument(type_id, _, gen_type_ids, ..) => {
+        Ty::UnknownAdtMethod(type_id, method_path, ..) => {
             let mut contains_ty = contains_ty_shallow(ty_env, *type_id, child_ty)?;
-            for gen_type_id in gen_type_ids {
-                if contains_ty_shallow(ty_env, *gen_type_id, child_ty)? {
-                    contains_ty = true;
+            if let Some(gens) = method_path.last().map(|part| part.generics()).unwrap() {
+                for gen_type_id in gens.iter_types() {
+                    if contains_ty_shallow(ty_env, *gen_type_id, child_ty)? {
+                        contains_ty = true;
+                    }
                 }
             }
             contains_ty

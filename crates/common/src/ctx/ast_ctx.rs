@@ -422,8 +422,8 @@ impl AstCtx {
         }
     }
 
-    /// Given a name of a function `path` and a block scope `id`, returns
-    /// a reference to the declaration in the AST.
+    /// Given a name of a function `path`, returns a reference to the declaration
+    /// in the AST.
     pub fn get_fn(&self, ty_env: &TyEnv, path: &LangPath) -> LangResult<Arc<RwLock<Fn>>> {
         self.get(ty_env, path, &self.fns)
     }

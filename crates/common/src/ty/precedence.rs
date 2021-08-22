@@ -144,8 +144,8 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (_, Ty::UnknownAdtMember(..)) => Ok(Ordering::Less),
 
         (
-            Ty::UnknownAdtMethod(_, _, _, unique_id_a, ..),
-            Ty::UnknownAdtMethod(_, _, _, unique_id_b, ..),
+            Ty::UnknownAdtMethod(_, _, unique_id_a, ..),
+            Ty::UnknownAdtMethod(_, _, unique_id_b, ..),
         ) => {
             if unique_id_a != unique_id_b {
                 Ok(unique_id_a.cmp(unique_id_b))
@@ -157,8 +157,8 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (_, Ty::UnknownAdtMethod(..)) => Ok(Ordering::Less),
 
         (
-            Ty::UnknownMethodArgument(_, _, _, _, unique_id_a, ..),
-            Ty::UnknownMethodArgument(_, _, _, _, unique_id_b, ..),
+            Ty::UnknownFnArgument(_, _, _, unique_id_a, ..),
+            Ty::UnknownFnArgument(_, _, _, unique_id_b, ..),
         ) => {
             if unique_id_a != unique_id_b {
                 Ok(unique_id_a.cmp(unique_id_b))
@@ -166,8 +166,8 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
                 Ok(Ordering::Equal)
             }
         }
-        (Ty::UnknownMethodArgument(..), _) => Ok(Ordering::Greater),
-        (_, Ty::UnknownMethodArgument(..)) => Ok(Ordering::Less),
+        (Ty::UnknownFnArgument(..), _) => Ok(Ordering::Greater),
+        (_, Ty::UnknownFnArgument(..)) => Ok(Ordering::Less),
 
         (
             Ty::UnknownFnGeneric(_, _, _, unique_id_a, ..),

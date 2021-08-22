@@ -1,5 +1,6 @@
 use common::{
     error::LangResult,
+    path::{LangPath, LangPathPart},
     token::expr::FnCall,
     traverse::traverse_ctx::TraverseCtx,
     ty::{
@@ -158,19 +159,19 @@ pub(super) fn infer_fn_call_fn_ptr(fn_call: &FnCall, ctx: &mut TraverseCtx) -> L
     }
 }
 
-fn infer_fn_call_method(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<TypeId> {
+fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<TypeId> {
     // Get the "owning" ADT type of this method. If it isn't set explicitly,
     // it should be set as a expression in the first argument with name "this".
-    let mut adt_type_id = if let Some(adt_type_id) = &fn_call.method_adt {
+    let mut adt_type_id = if let Some(adt_type_id) = &method_call.method_adt {
         *adt_type_id
-    } else if let Some(first_arg) = fn_call.arguments.first() {
+    } else if let Some(first_arg) = method_call.arguments.first() {
         if first_arg.name.as_ref().map_or(false, |name| name == "this") {
             first_arg.value.get_expr_type()?
         } else {
-            unreachable!("First arg not this: {:#?}", fn_call);
+            unreachable!("First arg not this: {:#?}", method_call);
         }
     } else {
-        unreachable!("Unable to get ADT: {:#?}", fn_call);
+        unreachable!("Unable to get ADT: {:#?}", method_call);
     };
 
     // OBS! At this pointe the ADT type might be unknown.
@@ -191,29 +192,29 @@ fn infer_fn_call_method(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResu
             let method = ctx.ast_ctx.get_method(
                 &ctx.ty_env.lock().unwrap(),
                 &adt_path.without_gens(),
-                &fn_call.name,
+                &method_call.name,
             )?;
 
-            let fn_gen_names = if let Some(gens) = &method.read().unwrap().generics {
+            let method_gen_names = if let Some(gens) = &method.read().unwrap().generics {
                 gens.iter_names().cloned().collect::<Vec<_>>()
             } else {
                 Vec::with_capacity(0)
             };
 
-            let fn_path = fn_call.module.clone_push(
-                &fn_call.name,
-                fn_call.generics.as_ref(),
-                fn_call.file_pos,
+            let method_path = method_call.module.clone_push(
+                &method_call.name,
+                method_call.generics.as_ref(),
+                method_call.file_pos,
             );
 
             if let Some(new_fn_gens) = combine_generics(
                 ctx,
-                fn_gen_names.as_ref(),
-                fn_call.generics.as_ref(),
-                &fn_path,
+                method_gen_names.as_ref(),
+                method_call.generics.as_ref(),
+                &method_path,
                 Some(&adt_path),
             )? {
-                fn_call.generics = Some(new_fn_gens);
+                method_call.generics = Some(new_fn_gens);
             }
 
             // For the ADT, create a new `Generic`s where the types of all
@@ -223,7 +224,8 @@ fn infer_fn_call_method(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResu
             // The generic impls might also have been hard-coded in the code, in
             // that case the old hard-coded types are used.
             let adt_gens = adt_path.gens();
-            if let Some(new_adt_gens) = combine_generics_adt(ctx, adt_path, adt_gens, &fn_path)? {
+            if let Some(new_adt_gens) = combine_generics_adt(ctx, adt_path, adt_gens, &method_path)?
+            {
                 adt_path.last_mut().unwrap().1 = Some(new_adt_gens);
 
                 // Create the new ADT and use it as the "actual" ADT in the
@@ -237,33 +239,32 @@ fn infer_fn_call_method(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResu
         }
     }
 
-    fn_call.method_adt = Some(adt_type_id);
+    method_call.method_adt = Some(adt_type_id);
 
-    let fn_call_gen_type_ids = fn_call
-        .generics
-        .clone()
-        .unwrap_or_else(Generics::empty)
-        .iter_types()
-        .cloned()
-        .collect::<Vec<_>>();
+    let method_name_with_gens = LangPath::new(
+        vec![LangPathPart(
+            method_call.name.clone(),
+            method_call.generics.clone(),
+        )],
+        Some(method_call.file_pos.unwrap()),
+    );
 
     // Insert constraints between the function call argument type and
     // the method parameter types that will be figured out later.
-    for (idx, arg) in fn_call.arguments.iter().enumerate() {
+    for (idx, arg) in method_call.arguments.iter().enumerate() {
         // If the argument is a named argument, give the argument name
         // to the new "UnknownMethodArgument" to try and figure out the
         // position of the argument through it. Otherwise use the index.
         let position = if let Some(arg_name) = &arg.name {
-            Either::Left(arg_name.into())
+            Either::Right(arg_name.into())
         } else {
-            Either::Right(idx)
+            Either::Left(idx)
         };
 
         let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-        let arg_type_id = ctx.ty_env.lock().unwrap().id(&Ty::UnknownMethodArgument(
-            adt_type_id,
-            fn_call.name.clone(),
-            fn_call_gen_type_ids.clone(),
+        let arg_type_id = ctx.ty_env.lock().unwrap().id(&Ty::UnknownFnArgument(
+            Some(adt_type_id),
+            method_name_with_gens.clone(),
             position,
             unique_id,
             TypeInfo::DefaultOpt(arg.value.file_pos().cloned()),
@@ -288,14 +289,19 @@ fn infer_fn_call_method(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResu
 
     // Insert constraints between the function call generic type and
     // the method generic types that will be figured out later.
-    if let Some(gens) = &fn_call.generics {
+    if let Some(gens) = &method_call.generics {
+        let method_path = LangPath::new(
+            vec![LangPathPart(method_call.name.clone(), None)],
+            method_call.file_pos,
+        );
+
         for (idx, type_id) in gens.iter_types().enumerate() {
             let type_id_file_pos = get_file_pos(&ctx.ty_env.lock().unwrap(), *type_id).cloned();
 
             let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
             let unknown_gen_type_id = ctx.ty_env.lock().unwrap().id(&Ty::UnknownFnGeneric(
                 Some(adt_type_id),
-                fn_call.name.clone(),
+                method_path.clone(),
                 Either::Left(idx),
                 unique_id,
                 TypeInfo::DefaultOpt(type_id_file_pos),
@@ -308,15 +314,13 @@ fn infer_fn_call_method(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResu
             )?;
         }
     }
-
     // The expected return type of the method call.
     let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
     ctx.ty_env.lock().unwrap().id(&Ty::UnknownAdtMethod(
         adt_type_id,
-        fn_call.name.clone(),
-        fn_call_gen_type_ids,
+        method_name_with_gens.clone(),
         unique_id,
-        TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
+        TypeInfo::FuncCall(method_call.file_pos.unwrap()),
     ))
 }
 
@@ -400,21 +404,25 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
         )));
     }
 
-    // Update the fn_call generics. This will assign the names declared on the
-    // ADT generics with the types specified in the fn_call generics. If no types
-    // is specified in the fn_call generics, new GenericInstances will be created.
-    if let Some(new_gens) = combine_generics(
-        ctx,
-        fn_gen_names.as_ref(),
-        fn_call.generics.as_ref(),
-        &fn_full_path,
-        None,
-    )? {
-        fn_call.generics = Some(new_gens);
+    if !fn_gen_names.is_empty() {
+        // TODO: Does this handle nested generics? Ex. if one of the fn call
+        //       generic impls is a Generic(T).
+        // Update the fn_call generics. This will assign the names declared on the
+        // ADT generics with the types specified in the fn_call generics.
+        if let Some(new_gens) = combine_generics(
+            ctx,
+            fn_gen_names.as_ref(),
+            fn_call.generics.as_ref(),
+            &fn_full_path,
+            None,
+        )? {
+            fn_call.generics = Some(new_gens);
+        }
     }
 
-    // Insert constraints between the function call generic type and the function
-    // generic types.
+    // Insert constraints between the function calls `UnknownFnGeneric` generics
+    // and the corresponding implemented type (either hardcoded in the code or
+    // generated `GenericInstance`s from the logib aboe ).
     if let Some(gens) = &fn_call.generics {
         for (gen_name, type_id) in gens.iter_names().zip(gens.iter_types()) {
             let type_id_file_pos = get_file_pos(&ctx.ty_env.lock().unwrap(), *type_id).cloned();
@@ -422,7 +430,7 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
             let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
             let unknown_gen_type_id = ctx.ty_env.lock().unwrap().id(&Ty::UnknownFnGeneric(
                 None,
-                fn_call.name.clone(),
+                fn_full_path.clone(),
                 Either::Right(gen_name.into()),
                 unique_id,
                 TypeInfo::DefaultOpt(type_id_file_pos),
@@ -437,8 +445,6 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
     }
 
     if let Some(type_id) = func.ret_type {
-        *get_file_pos_mut(&mut ctx.ty_env.lock().unwrap(), type_id).unwrap() =
-            fn_call.file_pos.unwrap();
         Ok(type_id)
     } else {
         ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(

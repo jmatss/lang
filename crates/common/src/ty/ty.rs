@@ -6,6 +6,7 @@ use crate::{
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
     hash::{DerefType, TyEnvHash},
+    path::LangPath,
     token::{expr::Expr, lit::Lit},
     UniqueId,
 };
@@ -72,31 +73,31 @@ pub enum Ty {
     /// String is the name of the member.
     UnknownAdtMember(TypeId, String, UniqueId, TypeInfo),
 
-    /// Unknown method of the struct/enum/trait type "TypeId" with the name of the
-    /// first "String". The vector are generics specified at the function call,
-    /// the usize is the index and the types are "UnknownMethodGeneric" types.
-    UnknownAdtMethod(TypeId, String, Vec<TypeId>, UniqueId, TypeInfo),
+    /// Unknown method of the struct/enum/trait type "TypeId".
+    /// The "Langpath" is the name of the method + potential generics.
+    UnknownAdtMethod(TypeId, LangPath, UniqueId, TypeInfo),
 
-    /// Unknown method argument of the struct/enum/trait type "TypeId" with
-    /// the name "String". The vector are generics specified at the function call,
-    /// and the "Either" is either the name of the argument or the index of the
-    /// argument in the method call if no argument name is set.
-    UnknownMethodArgument(
-        TypeId,
-        String,
-        Vec<TypeId>,
-        Either<String, usize>,
+    /// Unknown argument for either a function or method.
+    /// If this is a method, the type of the ADT will be set as Some "TypeId".
+    /// The "Langpath" is the module+name of the fn/method and the
+    /// "Either<usize, String>" is either the index or the name of the argument
+    /// in the fn call.
+    UnknownFnArgument(
+        Option<TypeId>,
+        LangPath,
+        Either<usize, String>,
         UniqueId,
         TypeInfo,
     ),
 
     /// Unknown generic argument for either a function or method.
     /// If this is a method, the type of the ADT will be set as Some "TypeId".
-    /// The "String" is the name of the fn/method and the "Either<usize, String>"
-    /// is either the index or the name of the generic argument in the fn call.
+    /// The "Langpath" is the module+name of the fn/method and the
+    /// "Either<usize, String>" is either the index or the name of the generic
+    /// argument in the fn call.
     UnknownFnGeneric(
         Option<TypeId>,
-        String,
+        LangPath,
         Either<usize, String>,
         UniqueId,
         TypeInfo,
@@ -179,7 +180,7 @@ impl TyEnvHash for Ty {
                 9.hash(state);
                 unique_id.hash(state);
             }
-            Ty::UnknownMethodArgument(.., unique_id, _) => {
+            Ty::UnknownFnArgument(.., unique_id, _) => {
                 10.hash(state);
                 unique_id.hash(state);
             }
@@ -227,7 +228,7 @@ impl Ty {
             | Ty::Expr(.., type_info)
             | Ty::UnknownAdtMember(.., type_info)
             | Ty::UnknownAdtMethod(.., type_info)
-            | Ty::UnknownMethodArgument(.., type_info)
+            | Ty::UnknownFnArgument(.., type_info)
             | Ty::UnknownFnGeneric(.., type_info)
             | Ty::UnknownArrayMember(.., type_info) => type_info,
         }
@@ -245,7 +246,7 @@ impl Ty {
             | Ty::Expr(.., type_info)
             | Ty::UnknownAdtMember(.., type_info)
             | Ty::UnknownAdtMethod(.., type_info)
-            | Ty::UnknownMethodArgument(.., type_info)
+            | Ty::UnknownFnArgument(.., type_info)
             | Ty::UnknownFnGeneric(.., type_info)
             | Ty::UnknownArrayMember(.., type_info) => type_info,
         }

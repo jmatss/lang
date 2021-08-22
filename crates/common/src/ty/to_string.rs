@@ -110,28 +110,31 @@ pub fn to_string_type_id(ty_env: &TyEnv, type_id: TypeId) -> LangResult<String> 
             result.push_str(member_name);
             result.push(')');
         }
-        Ty::UnknownAdtMethod(adt_type_id, ref method_name, ..) => {
+        Ty::UnknownAdtMethod(adt_type_id, ref method_path, ..) => {
             result.push_str("adtMethod(");
             //result.push_str(&self.to_string_type_id(ty_ctx, *adt_type_id)?);
             result.push_str(&format!("typeId({})", adt_type_id));
             result.push('.');
-            result.push_str(method_name);
+            result.push_str(&to_string_path(ty_env, method_path));
             result.push(')');
         }
-        Ty::UnknownMethodArgument(adt_type_id, ref method_name, _, name_or_idx, ..) => {
-            result.push_str("adtMethodArg(");
-            //result.push_str(&self.to_string_type_id(ty_ctx, *adt_type_id)?);
-            result.push_str(&format!("typeId({})", adt_type_id));
-            result.push('.');
-            result.push_str(method_name);
+        Ty::UnknownFnArgument(adt_type_id, ref method_path, name_or_idx, ..) => {
+            if let Some(adt_type_id) = adt_type_id {
+                result.push_str("adtMethodGArg(");
+                result.push_str(&format!("typeId({})", adt_type_id));
+                result.push('.');
+            } else {
+                result.push_str("adtFnArg(");
+            }
+            result.push_str(&to_string_path(ty_env, method_path));
             result.push('.');
             match name_or_idx {
-                Either::Left(ref name) => result.push_str(name),
-                Either::Right(idx) => result.push_str(&idx.to_string()),
+                Either::Left(idx) => result.push_str(&idx.to_string()),
+                Either::Right(ref name) => result.push_str(name),
             }
             result.push(')');
         }
-        Ty::UnknownFnGeneric(adt_type_id, ref method_name, name_or_idx, ..) => {
+        Ty::UnknownFnGeneric(adt_type_id, ref method_path, name_or_idx, ..) => {
             if let Some(adt_type_id) = adt_type_id {
                 result.push_str("adtMethodGen(");
                 result.push_str(&format!("typeId({})", adt_type_id));
@@ -139,7 +142,7 @@ pub fn to_string_type_id(ty_env: &TyEnv, type_id: TypeId) -> LangResult<String> 
             } else {
                 result.push_str("adtFnGen(");
             }
-            result.push_str(method_name);
+            result.push_str(&to_string_path(ty_env, method_path));
             result.push('.');
             match name_or_idx {
                 Either::Left(idx) => result.push_str(&idx.to_string()),

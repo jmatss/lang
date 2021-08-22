@@ -35,7 +35,7 @@ pub fn replace_gens(ty_env: &mut TyEnv, id: TypeId, generics: &Generics) -> Lang
         | Ty::Array(type_id, ..)
         | Ty::UnknownAdtMember(type_id, ..)
         | Ty::UnknownAdtMethod(type_id, ..)
-        | Ty::UnknownMethodArgument(type_id, ..)
+        | Ty::UnknownFnArgument(Some(type_id), ..)
         | Ty::UnknownFnGeneric(Some(type_id), ..)
         | Ty::UnknownArrayMember(type_id, ..) => {
             replace_gens(ty_env, type_id, generics)?;
@@ -140,7 +140,7 @@ pub fn replace_gen_impls(
         | Ty::Array(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
         | Ty::UnknownAdtMethod(type_id_i, ..)
-        | Ty::UnknownMethodArgument(type_id_i, ..)
+        | Ty::UnknownFnArgument(Some(type_id_i), ..)
         | Ty::UnknownFnGeneric(Some(type_id_i), ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             if let Some(new_type_id_i) =
@@ -197,7 +197,7 @@ pub fn replace_gen_impls(
             }
         }
 
-        Ty::Any(..) | Ty::UnknownFnGeneric(None, ..) => false,
+        Ty::Any(..) | Ty::UnknownFnArgument(None, ..) | Ty::UnknownFnGeneric(None, ..) => false,
     };
 
     // If any nested type was updated, the `ty_clone` will have been updated
@@ -258,7 +258,7 @@ pub fn replace_self(
         | Ty::Array(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
         | Ty::UnknownAdtMethod(type_id_i, ..)
-        | Ty::UnknownMethodArgument(type_id_i, ..)
+        | Ty::UnknownFnArgument(Some(type_id_i), ..)
         | Ty::UnknownFnGeneric(Some(type_id_i), ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             if let Some(new_type_id) = replace_self(ty_env, *type_id_i, old_path, new_self_type_id)?
@@ -388,7 +388,7 @@ pub fn replace_gens_with_gen_instances(
         | Ty::Array(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
         | Ty::UnknownAdtMethod(type_id_i, ..)
-        | Ty::UnknownMethodArgument(type_id_i, ..)
+        | Ty::UnknownFnArgument(Some(type_id_i), ..)
         | Ty::UnknownFnGeneric(Some(type_id_i), ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             if let Some(new_type_id_i) =
@@ -445,7 +445,10 @@ pub fn replace_gens_with_gen_instances(
             }
         }
 
-        Ty::GenericInstance(..) | Ty::Any(..) | Ty::UnknownFnGeneric(None, ..) => false,
+        Ty::GenericInstance(..)
+        | Ty::Any(..)
+        | Ty::UnknownFnArgument(None, ..)
+        | Ty::UnknownFnGeneric(None, ..) => false,
     };
 
     // If any nested type was updated, the `ty_clone` will have been updated
@@ -473,14 +476,15 @@ pub fn replace_unique_ids(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<Opt
         Ty::GenericInstance(_, unique_id, ..)
         | Ty::Any(unique_id, ..)
         | Ty::Generic(_, unique_id, ..)
+        | Ty::UnknownFnArgument(None, _, _, unique_id, ..)
         | Ty::UnknownFnGeneric(None, _, _, unique_id, ..) => {
             *unique_id = ty_env.new_unique_id();
             true
         }
 
         Ty::UnknownAdtMember(type_id_i, _, unique_id, ..)
-        | Ty::UnknownAdtMethod(type_id_i, _, _, unique_id, ..)
-        | Ty::UnknownMethodArgument(type_id_i, _, _, _, unique_id, ..)
+        | Ty::UnknownAdtMethod(type_id_i, _, unique_id, ..)
+        | Ty::UnknownFnArgument(Some(type_id_i), _, _, unique_id, ..)
         | Ty::UnknownFnGeneric(Some(type_id_i), _, _, unique_id, ..)
         | Ty::UnknownArrayMember(type_id_i, unique_id, ..) => {
             if let Some(new_type_id_i) = replace_unique_ids(ty_env, *type_id_i)? {
@@ -627,7 +631,7 @@ pub fn convert_default(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<()> {
         Ty::Pointer(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
         | Ty::UnknownAdtMethod(type_id_i, ..)
-        | Ty::UnknownMethodArgument(type_id_i, ..)
+        | Ty::UnknownFnArgument(Some(type_id_i), ..)
         | Ty::UnknownFnGeneric(Some(type_id_i), ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             convert_default(ty_env, type_id_i)?;
@@ -636,6 +640,7 @@ pub fn convert_default(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<()> {
         Ty::Any(..)
         | Ty::Generic(..)
         | Ty::GenericInstance(..)
+        | Ty::UnknownFnArgument(None, ..)
         | Ty::UnknownFnGeneric(None, ..) => (),
     }
 

@@ -6,7 +6,7 @@ mod ty;
 pub mod util;
 //mod unitialized;
 
-use std::{collections::HashMap, sync::Mutex, time::Instant};
+use std::{collections::HashMap, io::Write, sync::Mutex, time::Instant};
 
 use common::{
     ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx},
@@ -53,11 +53,12 @@ macro_rules! traverse {
         let start_timer = Instant::now();
         let mut analyzer = $analyzer_init;
         if !$quiet {
-            print!("Running {}", analyzer_name(&analyzer));
+            print!("Running {} ", analyzer_name(&analyzer));
+            std::io::stdout().flush().unwrap();
         }
         traverse($ctx, &mut analyzer, $ast_root)?;
         if !$quiet {
-            println!(" ({:?}).", start_timer.elapsed());
+            println!("({:?}).", start_timer.elapsed());
         }
         analyzer
     }};

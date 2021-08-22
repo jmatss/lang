@@ -103,7 +103,7 @@ impl PathResolver {
             | Ty::Pointer(inner_type_id, ..)
             | Ty::UnknownAdtMember(inner_type_id, ..)
             | Ty::UnknownAdtMethod(inner_type_id, ..)
-            | Ty::UnknownMethodArgument(inner_type_id, ..)
+            | Ty::UnknownFnArgument(Some(inner_type_id), ..)
             | Ty::UnknownFnGeneric(Some(inner_type_id), ..)
             | Ty::UnknownArrayMember(inner_type_id, ..) => {
                 self.resolve_ty_path(ctx, inner_type_id, block_id)?;
@@ -112,6 +112,7 @@ impl PathResolver {
             Ty::Any(..)
             | Ty::Generic(..)
             | Ty::GenericInstance(..)
+            | Ty::UnknownFnArgument(None, ..)
             | Ty::UnknownFnGeneric(None, ..) => (),
         }
 

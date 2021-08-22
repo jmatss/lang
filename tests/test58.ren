@@ -30,7 +30,7 @@ fn main() -> i32 {
     //tdgs.test_method(four)
 
     var five = 5. as f64
-    //test_fn(five)
+    test_fn(five)
 
     return 0
 }

@@ -114,6 +114,12 @@ impl Default for LangPath {
     }
 }
 
+impl From<&str> for LangPath {
+    fn from(part: &str) -> Self {
+        LangPath::new(vec![part.into()], None)
+    }
+}
+
 impl From<LangPathPart> for LangPath {
     fn from(part: LangPathPart) -> Self {
         LangPath::new(vec![part], None)
