@@ -4,7 +4,7 @@ use std::{
 };
 
 use common::{
-    error::LangError,
+    error::{LangError, LangResult},
     path::LangPath,
     token::{
         block::{Adt, Block, BlockHeader},
@@ -16,6 +16,7 @@ use common::{
         generics::Generics,
         is::is_solved,
         replace::{replace_gen_impls, replace_self},
+        to_string::to_string_type_id,
         ty::SolveCond,
         type_id::TypeId,
     },
@@ -80,6 +81,40 @@ impl<'a> GenericsReplacer<'a> {
             errors: Vec::default(),
         }
     }
+
+    fn replace_type_id(&self, type_id: &mut TypeId, ctx: &mut TraverseCtx) -> LangResult<()> {
+        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
+        if let Some(new_type_id) = replace_gen_impls(
+            &mut ty_env_guard,
+            &ctx.ast_ctx,
+            *type_id,
+            &self.generics_impl,
+        )? {
+            *type_id = new_type_id
+        }
+
+        if let (Some(old_path), Some(new_ty)) = (self.old_path, self.new_type_id) {
+            if let Some(new_type_id) = replace_self(&mut ty_env_guard, *type_id, old_path, new_ty)?
+            {
+                *type_id = new_type_id;
+            }
+        }
+
+        let inf_type_id = ty_env_guard.inferred_type(*type_id)?;
+
+        let check_inf = true;
+        let solve_cond = SolveCond::new();
+        if is_solved(&ty_env_guard, inf_type_id, check_inf, solve_cond)? {
+            Ok(())
+        } else {
+            let new_type = to_string_type_id(&ty_env_guard, inf_type_id)?;
+            Err(ctx.ast_ctx.err(format!(
+                "Replaced generic type not solved. Type id: {} ({})",
+                new_type, type_id
+            )))
+        }
+    }
 }
 
 impl<'a> Visitor for GenericsReplacer<'a> {
@@ -92,52 +127,8 @@ impl<'a> Visitor for GenericsReplacer<'a> {
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
-
-        match replace_gen_impls(
-            &mut ty_env_guard,
-            &ctx.ast_ctx,
-            *type_id,
-            &self.generics_impl,
-        ) {
-            Ok(Some(new_type_id)) => *type_id = new_type_id,
-            Ok(None) => (),
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        }
-
-        if let (Some(old_path), Some(new_ty)) = (self.old_path, self.new_type_id) {
-            match replace_self(&mut ty_env_guard, *type_id, old_path, new_ty) {
-                Ok(Some(new_type_id)) => *type_id = new_type_id,
-                Ok(None) => (),
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            }
-        }
-
-        let inf_type_id = match ty_env_guard.inferred_type(*type_id) {
-            Ok(inf_type_id) => inf_type_id,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
-
-        let check_inf = true;
-        let solve_cond = SolveCond::new();
-        match is_solved(&ty_env_guard, inf_type_id, check_inf, solve_cond) {
-            Ok(true) => *type_id = inf_type_id,
-            Ok(false) => {
-                let err = ctx
-                    .ast_ctx
-                    .err(format!("Unable to solve type: {:#?}", type_id));
-                self.errors.push(err);
-            }
-            Err(err) => self.errors.push(err),
+        if let Err(err) = self.replace_type_id(type_id, ctx) {
+            self.errors.push(err);
         }
     }
 
