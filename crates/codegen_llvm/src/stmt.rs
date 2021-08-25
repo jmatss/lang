@@ -12,6 +12,7 @@ use common::{
         op::AssignOperator,
         stmt::{ExternalDecl, Stmt},
     },
+    ty::is::is_signed,
 };
 
 use crate::{expr::ExprTy, generator::CodeGen};
@@ -151,6 +152,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         };
         let lhs_val = self.builder.build_load(lhs_ptr, "assign.lhs.val");
 
+        let type_id = lhs.get_expr_type()?;
+        let is_signed = is_signed(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
+
         let rhs_val = self.compile_expr(rhs, ExprTy::RValue)?;
         let value = match assign_op {
             AssignOperator::Assignment => rhs_val,
@@ -233,15 +237,25 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             },
             AssignOperator::AssignDiv => match lhs_val {
-                // TODO: Check signess.
-                BasicValueEnum::IntValue(_) => self
-                    .builder
-                    .build_int_signed_div(
-                        lhs_val.into_int_value(),
-                        rhs_val.into_int_value(),
-                        "assign.div.int",
-                    )
-                    .into(),
+                BasicValueEnum::IntValue(_) => {
+                    if is_signed {
+                        self.builder
+                            .build_int_signed_div(
+                                lhs_val.into_int_value(),
+                                rhs_val.into_int_value(),
+                                "assign.div.int.signed",
+                            )
+                            .into()
+                    } else {
+                        self.builder
+                            .build_int_unsigned_div(
+                                lhs_val.into_int_value(),
+                                rhs_val.into_int_value(),
+                                "assign.div.int.unsigned",
+                            )
+                            .into()
+                    }
+                }
                 BasicValueEnum::FloatValue(_) => self
                     .builder
                     .build_float_div(
@@ -258,15 +272,25 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             },
             AssignOperator::AssignMod => match lhs_val {
-                // TODO: Check signess.
-                BasicValueEnum::IntValue(_) => self
-                    .builder
-                    .build_int_signed_rem(
-                        lhs_val.into_int_value(),
-                        rhs_val.into_int_value(),
-                        "assign.mod.int",
-                    )
-                    .into(),
+                BasicValueEnum::IntValue(_) => {
+                    if is_signed {
+                        self.builder
+                            .build_int_signed_rem(
+                                lhs_val.into_int_value(),
+                                rhs_val.into_int_value(),
+                                "assign.mod.int.signed",
+                            )
+                            .into()
+                    } else {
+                        self.builder
+                            .build_int_unsigned_rem(
+                                lhs_val.into_int_value(),
+                                rhs_val.into_int_value(),
+                                "assign.mod.int.unsigned",
+                            )
+                            .into()
+                    }
+                }
                 BasicValueEnum::FloatValue(_) => self
                     .builder
                     .build_float_rem(
