@@ -241,6 +241,16 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             InnerTy::default_int()
         };
 
+        if !inner_ty.is_signed() && lit.starts_with('-') {
+            return Err(self.err(
+                format!(
+                    "Tried to assign negative value to unsigned integer. Type: {:?}, value: {}",
+                    inner_ty, lit
+                ),
+                file_pos,
+            ));
+        }
+
         Ok(match inner_ty {
             InnerTy::I8 => {
                 let val = i8::from_str_radix(lit, radix)? as u64;
@@ -400,9 +410,11 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
             return Err(self.err(
                 format!(
-                    "Unable to find function with name \"{}\" to call (full name: {:#?}).",
+                    "Unable to find function with name \"{}\" to call (full name: {:#?}). \
+                    List of all declared functions: {}",
                     &fn_call.name,
-                    &fn_call.full_name(&ty_env_guard)
+                    &fn_call.full_name(&ty_env_guard),
+                    fns.join("\n"),
                 ),
                 fn_call.file_pos,
             ));
