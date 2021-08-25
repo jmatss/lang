@@ -7,7 +7,7 @@ fn main() -> i32 {
     var min_i8 = i8::min()
     var abs_i8 = (-1 as i8).abs()
     std::print(@format("min_i8: {}, abs_i8: {}", min_i8, abs_i8).&.as_view())
-    std::assert(min_i8 == 0 and abs_i8 == 1)
+    std::assert(min_i8 == -128 and abs_i8 == 1)
 
     var min_u16 = u16::min()
     var abs_u16 = (1 as u16).abs()
@@ -17,7 +17,7 @@ fn main() -> i32 {
     var min_i16 = i16::min()
     var abs_i16 = (-1 as i16).abs()
     std::print(@format("min_i16: {}, abs_i16: {}", min_i16, abs_i16).&.as_view())
-    std::assert(min_i16 == 0 and abs_i16 == 1)
+    std::assert(min_i16 == -32768 and abs_i16 == 1)
 
     var min_u32 = u32::min()
     var abs_u32 = (1 as u32).abs()
@@ -27,7 +27,7 @@ fn main() -> i32 {
     var min_i32 = i32::min()
     var abs_i32 = (-1 as i32).abs()
     std::print(@format("min_i32: {}, abs_i32: {}", min_i32, abs_i32).&.as_view())
-    std::assert(min_i32 == 0 and abs_i32 == 1)
+    std::assert(min_i32 == -2147483648 and abs_i32 == 1)
 
     var min_u64 = u64::min()
     var abs_u64 = (1 as u64).abs()
@@ -37,7 +37,7 @@ fn main() -> i32 {
     var min_i64 = i64::min()
     var abs_i64 = (-1 as i64).abs()
     std::print(@format("min_i64: {}, abs_i64: {}", min_i64, abs_i64).&.as_view())
-    std::assert(min_i64 == 0 and abs_i64 == 1)
+    std::assert(min_i64 == -9223372036854775808 and abs_i64 == 1)
 
     return 0
 }
