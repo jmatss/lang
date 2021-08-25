@@ -40,6 +40,8 @@ fn main() -> i32 {
     var seven: i32 = 7
     var eight: i8 = 8
     test_fn2(seven, eight)
+    test_fn2(eight, seven)
+    
 
     return 0
 }

@@ -491,8 +491,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     let is_primitive =
                         is_primitive(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
                     if is_primitive {
-                        let expr =
-                            self.primitive_to_string_view(expr, &var_name, arg_idx, &std_module)?;
+                        let expr = self.primitive_to_string_view(expr, &var_name, arg_idx)?;
                         arg_idx += 1;
                         expr
                     } else {
@@ -558,7 +557,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         primitive_expr: &Expr,
         var_name: &str,
         arg_idx: usize,
-        types_module: &LangPath,
     ) -> LangResult<Expr> {
         let file_pos = primitive_expr.file_pos().cloned();
         let type_id = primitive_expr.get_expr_type()?;
@@ -568,25 +566,27 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // TODO: What buffer size should floats have? What is their max char size?
         // `buf_size` is the max amount of bytes that a given primitive type
         // value can occupy in string form.
-        let (primitive_name, buf_size) = match get_inner(&ty_env_guard, type_id)? {
-            InnerTy::I8 => ("I8", 4),
-            InnerTy::U8 => ("U8", 3),
-            InnerTy::I16 => ("I16", 6),
-            InnerTy::U16 => ("U16", 5),
-            InnerTy::I32 => ("I32", 11),
-            InnerTy::U32 => ("U32", 10),
-            InnerTy::F32 => ("F32", 0),
-            InnerTy::I64 => ("I64", 20),
-            InnerTy::U64 => ("U64", 19),
-            InnerTy::F64 => ("F64", 0),
-            InnerTy::I128 => ("I128", 40),
-            InnerTy::U128 => ("U128", 39),
+
+        let inner_ty = get_inner(&ty_env_guard, type_id)?;
+        let primitive_ident = inner_ty.get_primitive_ident();
+        let buf_size = match inner_ty {
+            InnerTy::I8 => 4,
+            InnerTy::U8 => 3,
+            InnerTy::I16 => 6,
+            InnerTy::U16 => 5,
+            InnerTy::I32 => 11,
+            InnerTy::U32 => 10,
+            InnerTy::F32 => 0,
+            InnerTy::I64 => 20,
+            InnerTy::U64 => 19,
+            InnerTy::F64 => 0,
+            InnerTy::I128 => 40,
+            InnerTy::U128 => 39,
             _ => panic!("bad format variadic arg type: {:#?}", primitive_expr),
         };
 
-        let primitive_path = types_module.clone_push(primitive_name, None, None);
         let primitive_type_id = ty_env_guard.id(&Ty::CompoundType(
-            InnerTy::Struct(primitive_path),
+            InnerTy::Struct(primitive_ident.into()),
             TypeInfo::DefaultOpt(file_pos),
         ))?;
 
@@ -635,7 +635,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         let mut primitive_to_string_view_call = FnCall::new(
             "to_string_view".into(),
-            types_module.clone(),
+            "".into(),
             vec![
                 Argument::new(None, None, primitive_expr.clone()),
                 Argument::new(None, None, Expr::Op(Op::UnOp(buf_var_address))),

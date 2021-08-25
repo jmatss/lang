@@ -79,7 +79,8 @@ impl DeclFnAnalyzer {
     }
 
     /// If this is a non-static method, insert `this` as the first parameter
-    /// to the given function.
+    /// to the given function. If this is a "primitive struct", the `this`
+    /// should be the primitive type instead of the struct type.
     fn analyze_method_header(
         &mut self,
         ctx: &mut TraverseCtx,
@@ -96,8 +97,15 @@ impl DeclFnAnalyzer {
                 .ast_ctx
                 .get_adt(&ctx.ty_env.lock().unwrap(), &adt_path_without_gens)
             {
-                Ok(adt) => match adt.as_ref().read().unwrap().kind {
-                    AdtKind::Struct => InnerTy::Struct(adt_path_without_gens.clone()),
+                Ok(adt) => match adt.read().unwrap().kind {
+                    AdtKind::Struct => {
+                        let ident = &adt.read().unwrap().name;
+                        if InnerTy::ident_to_type(ident, 0).is_primitive() {
+                            InnerTy::ident_to_type(ident, 0)
+                        } else {
+                            InnerTy::Struct(adt_path_without_gens.clone())
+                        }
+                    }
                     AdtKind::Union => InnerTy::Union(adt_path_without_gens.clone()),
                     AdtKind::Enum => InnerTy::Enum(adt_path_without_gens.clone()),
                     AdtKind::Unknown => unreachable!("AdtKind::Unknown"),
@@ -272,7 +280,6 @@ impl Visitor for DeclFnAnalyzer {
 
     /// The `visit_block` is traversed before this function is called which
     /// means that all `method_adt`s will be set for the funtions.
-    ///
     fn visit_fn(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
         if let Block {
             header: BlockHeader::Fn(func),
@@ -293,32 +300,27 @@ impl Visitor for DeclFnAnalyzer {
             };
 
             if let Some(adt_ty) = adt_ty {
-                if let Ty::CompoundType(inner_ty, ..) = adt_ty {
-                    match inner_ty {
-                        InnerTy::Struct(adt_path)
-                        | InnerTy::Enum(adt_path)
-                        | InnerTy::Union(adt_path)
-                        | InnerTy::Trait(adt_path) => {
-                            let adt_path_without_gens = adt_path.without_gens();
-                            self.analyze_method_header(ctx, &adt_path_without_gens, func);
-
-                            // Insert this method into the ADT.
-                            if let Err(err) = ctx.ast_ctx.insert_method(
-                                &ctx.ty_env.lock().unwrap(),
-                                &adt_path_without_gens,
-                                Arc::clone(func),
-                            ) {
-                                self.errors.push(err);
-                            }
-                        }
-
-                        _ => unreachable!(
-                            "Method method_structure inner type not structure: {:#?}",
-                            func
-                        ),
+                let adt_path_without_gens = match adt_ty {
+                    Ty::CompoundType(inner_ty, ..) if inner_ty.is_primitive() => {
+                        inner_ty.get_primitive_ident().into()
                     }
-                } else {
-                    unreachable!("Method method_structure not CompoundType: {:#?}", func);
+
+                    Ty::CompoundType(InnerTy::Struct(adt_path), ..)
+                    | Ty::CompoundType(InnerTy::Enum(adt_path), ..)
+                    | Ty::CompoundType(InnerTy::Union(adt_path), ..)
+                    | Ty::CompoundType(InnerTy::Trait(adt_path), ..) => adt_path.without_gens(),
+
+                    _ => unreachable!("Method method_adt not CompoundType: {:#?}", func),
+                };
+
+                self.analyze_method_header(ctx, &adt_path_without_gens, func);
+
+                if let Err(err) = ctx.ast_ctx.insert_method(
+                    &ctx.ty_env.lock().unwrap(),
+                    &adt_path_without_gens,
+                    Arc::clone(func),
+                ) {
+                    self.errors.push(err);
                 }
             } else if let Err(err) = self.analyze_fn_header(ctx, func, *func_id) {
                 self.errors.push(err);

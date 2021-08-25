@@ -135,6 +135,12 @@ pub fn is_solved(
     }
 }
 
+pub fn is_adt(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
+    Ok(get_inner(ty_env, id)
+        .map(|inner_ty| inner_ty.is_adt())
+        .unwrap_or(false))
+}
+
 pub fn is_int(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
     Ok(get_inner(ty_env, id)
         .map(|inner_ty| inner_ty.is_int())
@@ -277,13 +283,7 @@ pub fn is_unknown_any(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
 /// integer, returns false for every other type (includingn non-int types).
 pub fn is_signed(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
     let ty = ty_env.ty(id)?;
-    Ok(match ty {
-        Ty::CompoundType(inner_ty, ..) => matches!(
-            inner_ty,
-            InnerTy::I8 | InnerTy::I16 | InnerTy::I32 | InnerTy::I64 | InnerTy::I128
-        ),
-        _ => false,
-    })
+    Ok(matches!(ty, Ty::CompoundType(inner_ty, ..) if inner_ty.is_signed()))
 }
 
 pub fn assert_compatible(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangResult<()> {

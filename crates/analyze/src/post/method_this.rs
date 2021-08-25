@@ -4,7 +4,7 @@ use common::{
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
         get::get_ident,
-        is::is_pointer,
+        is::{is_adt, is_pointer, is_primitive},
         to_string::{to_string_path, to_string_type_id},
     },
 };
@@ -45,38 +45,37 @@ impl MethodThisAnalyzer {
             return Ok(());
         };
 
+        let ty_env_guard = ctx.ty_env.lock().unwrap();
+
         let adt_type_id = fn_call.method_adt.unwrap();
-        let mut adt_path = get_ident(&ctx.ty_env.lock().unwrap(), adt_type_id)?.unwrap();
+        let mut adt_path = get_ident(&ty_env_guard, adt_type_id)?.unwrap();
         if let Some(gens) = &fn_call.generics {
             adt_path = adt_path.with_gens(gens.clone());
         }
 
-        let method =
-            ctx.ast_ctx
-                .get_method(&ctx.ty_env.lock().unwrap(), &adt_path, &fn_call.name)?;
+        let method = ctx
+            .ast_ctx
+            .get_method(&ty_env_guard, &adt_path, &fn_call.name)?;
         let method = method.as_ref().read().unwrap();
 
-        if method.is_this_by_ref() && !is_pointer(&ctx.ty_env.lock().unwrap(), arg_type_id)? {
+        if method.is_this_by_ref() && !is_pointer(&ty_env_guard, arg_type_id)? {
             Err(ctx.ast_ctx.err(format!(
                 "Method with name \"{}\" on ADT \"{}\" expected to take `this` by reference. \
                 `this` has unexpected type \"{}\" in method call at position:\n{:#?}",
                 method.name,
-                to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path),
-                to_string_type_id(&ctx.ty_env.lock().unwrap(), arg_type_id)?,
+                to_string_path(&ty_env_guard, &adt_path),
+                to_string_type_id(&ty_env_guard, arg_type_id)?,
                 first_arg.value.file_pos()
             )))
         } else if method.is_this_by_val()
-            && get_ident(&ctx.ty_env.lock().unwrap(), arg_type_id)
-                .ok()
-                .flatten()
-                .is_none()
+            && !(is_adt(&ty_env_guard, arg_type_id)? || is_primitive(&ty_env_guard, arg_type_id)?)
         {
             Err(ctx.ast_ctx.err(format!(
                 "Method with name \"{}\" on ADT \"{}\" expected to take `this` by value. \
                 `this` has unexpected type \"{}\" in method call at position:\n{:#?}",
                 method.name,
-                to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path),
-                to_string_type_id(&ctx.ty_env.lock().unwrap(), arg_type_id)?,
+                to_string_path(&ty_env_guard, &adt_path),
+                to_string_type_id(&ty_env_guard, arg_type_id)?,
                 first_arg.value.file_pos()
             )))
         } else {

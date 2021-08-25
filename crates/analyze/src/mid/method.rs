@@ -277,7 +277,7 @@ impl Visitor for MethodAnalyzer {
         // incorrectly set `is_fn_ptr_call` to true. This can then be set to false
         // again in the `visit_expr()` function where we have more context about
         // how this `fn_call` is "used" in the AST.
-        if ctx.ast_ctx.get_var(&fn_call.name, ctx.block_id).is_ok() {
+        if fn_call.module.count() == 0 && ctx.ast_ctx.get_var(&fn_call.name, ctx.block_id).is_ok() {
             fn_call.is_fn_ptr_call = true;
         }
     }

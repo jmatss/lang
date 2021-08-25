@@ -6,6 +6,7 @@ PRIMITIVES_PATH = os.path.join(CURRENT_FILE_DIR, '..', 'std', 'primitives.ren')
 def heading(file):
     output = '''/*
  * Auto generated with `generate_primitives.py`, do not edit manually.
+ * TODO: f32 & f64
  */
 mod std
 
@@ -28,46 +29,44 @@ fn digit_to_ascii(digit: u8) -> u8 {
 '''
     file.write(output)
 
-def abs_fn(is_signed, name_lower, name_unsigned=None):
+def abs_fn(is_signed, name, name_unsigned=None):
     if is_signed:
-        return '''    pub fn abs(number: {0}) -> {1} {{
-        if number >= 0 {{
-            return number as {1}
-        }} else number == this::min() {{
-            return ((number + 1) * (-1)) as {1} + 1
+        return '''    pub fn this abs() -> {1} {{
+        if this >= 0 {{
+            return this as {1}
+        }} else this == this::min() {{
+            return ((this + 1) * (-1)) as {1} + 1
         }} else {{
-            return (number * (-1)) as {1}
+            return (this * (-1)) as {1}
         }}
-    }}'''.format(name_lower, name_unsigned)
+    }}'''.format(name, name_unsigned)
     else:
-        return '''    pub fn abs(number: {0}) -> {0} {{
-        return number
-    }}'''.format(name_lower)
+        return '''    pub fn this abs() -> {0} {{
+        return this
+    }}'''.format(name)
 
 # TODO: Can merge most of the logic in `to_string` and `to_string_view`.
 def prim_struct(file, name, str_byte_size, min, max, name_unsigned=None):
-    name_upper = name[0].upper() + name[1:]
-    name_lower = name.lower()
     if not name_unsigned:
-        name_unsigned = name_lower
-    abs_output = abs_fn(name_lower != name_unsigned, name_lower, name_unsigned)
+        name_unsigned = name
+    abs_output = abs_fn(name != name_unsigned, name, name_unsigned)
 
     output = '''pub struct {0} {{
-    pub fn to_string(number: {1}) -> Result<String, StringView> {{
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+    pub fn this to_string() -> Result<String, StringView> {{
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
-        var buf: [u8: {2}]
+        var buf: [u8: {1}]
         var buf_idx = 0
 
         while true {{
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {{
+            num_abs /= 10
+            if num_abs == 0 {{
                 break
             }}
         }}
@@ -104,21 +103,21 @@ def prim_struct(file, name, str_byte_size, min, max, name_unsigned=None):
         return Result::success(str)
     }}
 
-    pub fn to_string_view(number: {1}, data: {{[u8: {2}]}}) -> StringView {{
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+    pub fn this to_string_view(data: {{[u8: {1}]}}) -> StringView {{
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
-        var buf: [u8: {2}]
+        var buf: [u8: {1}]
         var buf_idx = 0
 
         while true {{
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {{
+            num_abs /= 10
+            if num_abs == 0 {{
                 break
             }}
         }}
@@ -145,18 +144,18 @@ def prim_struct(file, name, str_byte_size, min, max, name_unsigned=None):
         return StringView::new(data as {{u8}}, 0, data_idx)
     }}
 
-    pub fn min() -> {1} {{
+{2}
+
+    pub fn min() -> {0} {{
         return {3}
     }}
 
-    pub fn max() -> {1} {{
+    pub fn max() -> {0} {{
         return {4}
     }}
-    
-{5}
 }}
 
-'''.format(name_upper, name_lower, str_byte_size, min, max, abs_output)
+'''.format(name, str_byte_size, abs_output, min, max)
     file.write(output)
 
 if __name__ == '__main__':

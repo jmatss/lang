@@ -16,6 +16,7 @@ use common::{
         LangResult,
     },
     file::FilePosition,
+    path::{LangPath, LangPathPart},
     token::{
         ast::AstToken,
         block::{Adt, Block, BlockHeader, Fn},
@@ -306,20 +307,28 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             .get_module(self.cur_block_id)?
             .unwrap_or_default();
 
-        let fn_name = if let Some(adt_type_id) = &func.method_adt {
+        let (fn_name, is_primitive_adt) = if let Some(adt_type_id) = &func.method_adt {
             let adt_ty = ty_env_guard.ty_clone(*adt_type_id)?;
             if let Ty::CompoundType(inner_ty, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
-                let adt_path_without_module = adt_path.last().cloned().unwrap().into();
-                util::to_method_name(&ty_env_guard, &adt_path_without_module, &func.name, None)
+                let adt_path_without_module = &adt_path.last().cloned().unwrap().into();
+                (
+                    util::to_method_name(&ty_env_guard, &adt_path_without_module, &func.name, None),
+                    inner_ty.is_primitive(),
+                )
             } else {
                 unreachable!("method call on non compund type: {:#?}", func);
             }
         } else {
-            func.name.clone()
+            (func.name.clone(), false)
         };
 
-        let full_path = module.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos));
+        let full_path = if is_primitive_adt {
+            let lang_part = LangPathPart(fn_name, func.generics.clone());
+            LangPath::new(vec![lang_part], Some(func.file_pos))
+        } else {
+            module.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos))
+        };
 
         let fn_val = if let Some(fn_val) = self
             .module
@@ -425,22 +434,30 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             .get_module(self.cur_block_id)?
             .unwrap_or_default();
 
-        let fn_name = if let Some(adt_type_id) = &func.method_adt {
+        let (fn_name, is_primitive_adt) = if let Some(adt_type_id) = &func.method_adt {
             let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
             let adt_ty = ty_env_guard.ty_clone(*adt_type_id)?;
 
             if let Ty::CompoundType(inner_ty, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
                 let adt_path_without_module = &adt_path.last().cloned().unwrap().into();
-                util::to_method_name(&ty_env_guard, &adt_path_without_module, &func.name, None)
+                (
+                    util::to_method_name(&ty_env_guard, &adt_path_without_module, &func.name, None),
+                    inner_ty.is_primitive(),
+                )
             } else {
                 unreachable!("method call on non compund type: {:#?}", func);
             }
         } else {
-            func.name.clone()
+            (func.name.clone(), false)
         };
 
-        let full_path = module.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos));
+        let full_path = if is_primitive_adt {
+            let lang_part = LangPathPart(fn_name, func.generics.clone());
+            LangPath::new(vec![lang_part], Some(func.file_pos))
+        } else {
+            module.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos))
+        };
 
         let param_types = if let Some(params) = &func.parameters {
             let mut inner_types = Vec::with_capacity(params.len());

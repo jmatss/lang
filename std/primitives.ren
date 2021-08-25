@@ -1,5 +1,6 @@
 /*
  * Auto generated with `generate_primitives.py`, do not edit manually.
+ * TODO: f32 & f64
  */
 mod std
 
@@ -15,22 +16,22 @@ fn digit_to_ascii(digit: u8) -> u8 {
     return digit + 48 // 48 == '0'
 }
 
-pub struct U8 {
-    pub fn to_string(number: u8) -> Result<String, StringView> {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+pub struct u8 {
+    pub fn this to_string() -> Result<String, StringView> {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 3]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -67,21 +68,21 @@ pub struct U8 {
         return Result::success(str)
     }
 
-    pub fn to_string_view(number: u8, data: {[u8: 3]}) -> StringView {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+    pub fn this to_string_view(data: {[u8: 3]}) -> StringView {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 3]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -106,6 +107,10 @@ pub struct U8 {
         }
 
         return StringView::new(data as {u8}, 0, data_idx)
+    }
+
+    pub fn this abs() -> u8 {
+        return this
     }
 
     pub fn min() -> u8 {
@@ -115,28 +120,24 @@ pub struct U8 {
     pub fn max() -> u8 {
         return 255
     }
-    
-    pub fn abs(number: u8) -> u8 {
-        return number
-    }
 }
 
-pub struct I8 {
-    pub fn to_string(number: i8) -> Result<String, StringView> {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+pub struct i8 {
+    pub fn this to_string() -> Result<String, StringView> {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 4]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -173,21 +174,21 @@ pub struct I8 {
         return Result::success(str)
     }
 
-    pub fn to_string_view(number: i8, data: {[u8: 4]}) -> StringView {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+    pub fn this to_string_view(data: {[u8: 4]}) -> StringView {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 4]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -212,6 +213,16 @@ pub struct I8 {
         }
 
         return StringView::new(data as {u8}, 0, data_idx)
+    }
+
+    pub fn this abs() -> u8 {
+        if this >= 0 {
+            return this as u8
+        } else this == this::min() {
+            return ((this + 1) * (-1)) as u8 + 1
+        } else {
+            return (this * (-1)) as u8
+        }
     }
 
     pub fn min() -> i8 {
@@ -221,34 +232,24 @@ pub struct I8 {
     pub fn max() -> i8 {
         return 127
     }
-    
-    pub fn abs(number: i8) -> u8 {
-        if number >= 0 {
-            return number as u8
-        } else number == this::min() {
-            return ((number + 1) * (-1)) as u8 + 1
-        } else {
-            return (number * (-1)) as u8
-        }
-    }
 }
 
-pub struct U16 {
-    pub fn to_string(number: u16) -> Result<String, StringView> {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+pub struct u16 {
+    pub fn this to_string() -> Result<String, StringView> {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 5]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -285,21 +286,21 @@ pub struct U16 {
         return Result::success(str)
     }
 
-    pub fn to_string_view(number: u16, data: {[u8: 5]}) -> StringView {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+    pub fn this to_string_view(data: {[u8: 5]}) -> StringView {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 5]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -324,6 +325,10 @@ pub struct U16 {
         }
 
         return StringView::new(data as {u8}, 0, data_idx)
+    }
+
+    pub fn this abs() -> u16 {
+        return this
     }
 
     pub fn min() -> u16 {
@@ -333,28 +338,24 @@ pub struct U16 {
     pub fn max() -> u16 {
         return 65535
     }
-    
-    pub fn abs(number: u16) -> u16 {
-        return number
-    }
 }
 
-pub struct I16 {
-    pub fn to_string(number: i16) -> Result<String, StringView> {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+pub struct i16 {
+    pub fn this to_string() -> Result<String, StringView> {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 6]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -391,21 +392,21 @@ pub struct I16 {
         return Result::success(str)
     }
 
-    pub fn to_string_view(number: i16, data: {[u8: 6]}) -> StringView {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+    pub fn this to_string_view(data: {[u8: 6]}) -> StringView {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 6]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -430,6 +431,16 @@ pub struct I16 {
         }
 
         return StringView::new(data as {u8}, 0, data_idx)
+    }
+
+    pub fn this abs() -> u16 {
+        if this >= 0 {
+            return this as u16
+        } else this == this::min() {
+            return ((this + 1) * (-1)) as u16 + 1
+        } else {
+            return (this * (-1)) as u16
+        }
     }
 
     pub fn min() -> i16 {
@@ -439,34 +450,24 @@ pub struct I16 {
     pub fn max() -> i16 {
         return 32767
     }
-    
-    pub fn abs(number: i16) -> u16 {
-        if number >= 0 {
-            return number as u16
-        } else number == this::min() {
-            return ((number + 1) * (-1)) as u16 + 1
-        } else {
-            return (number * (-1)) as u16
-        }
-    }
 }
 
-pub struct U32 {
-    pub fn to_string(number: u32) -> Result<String, StringView> {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+pub struct u32 {
+    pub fn this to_string() -> Result<String, StringView> {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 10]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -503,21 +504,21 @@ pub struct U32 {
         return Result::success(str)
     }
 
-    pub fn to_string_view(number: u32, data: {[u8: 10]}) -> StringView {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+    pub fn this to_string_view(data: {[u8: 10]}) -> StringView {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 10]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -542,6 +543,10 @@ pub struct U32 {
         }
 
         return StringView::new(data as {u8}, 0, data_idx)
+    }
+
+    pub fn this abs() -> u32 {
+        return this
     }
 
     pub fn min() -> u32 {
@@ -551,28 +556,24 @@ pub struct U32 {
     pub fn max() -> u32 {
         return 4294967295
     }
-    
-    pub fn abs(number: u32) -> u32 {
-        return number
-    }
 }
 
-pub struct I32 {
-    pub fn to_string(number: i32) -> Result<String, StringView> {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+pub struct i32 {
+    pub fn this to_string() -> Result<String, StringView> {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 11]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -609,21 +610,21 @@ pub struct I32 {
         return Result::success(str)
     }
 
-    pub fn to_string_view(number: i32, data: {[u8: 11]}) -> StringView {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+    pub fn this to_string_view(data: {[u8: 11]}) -> StringView {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 11]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -648,6 +649,16 @@ pub struct I32 {
         }
 
         return StringView::new(data as {u8}, 0, data_idx)
+    }
+
+    pub fn this abs() -> u32 {
+        if this >= 0 {
+            return this as u32
+        } else this == this::min() {
+            return ((this + 1) * (-1)) as u32 + 1
+        } else {
+            return (this * (-1)) as u32
+        }
     }
 
     pub fn min() -> i32 {
@@ -657,34 +668,24 @@ pub struct I32 {
     pub fn max() -> i32 {
         return 2147483647
     }
-    
-    pub fn abs(number: i32) -> u32 {
-        if number >= 0 {
-            return number as u32
-        } else number == this::min() {
-            return ((number + 1) * (-1)) as u32 + 1
-        } else {
-            return (number * (-1)) as u32
-        }
-    }
 }
 
-pub struct U64 {
-    pub fn to_string(number: u64) -> Result<String, StringView> {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+pub struct u64 {
+    pub fn this to_string() -> Result<String, StringView> {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 19]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -721,21 +722,21 @@ pub struct U64 {
         return Result::success(str)
     }
 
-    pub fn to_string_view(number: u64, data: {[u8: 19]}) -> StringView {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+    pub fn this to_string_view(data: {[u8: 19]}) -> StringView {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 19]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -760,6 +761,10 @@ pub struct U64 {
         }
 
         return StringView::new(data as {u8}, 0, data_idx)
+    }
+
+    pub fn this abs() -> u64 {
+        return this
     }
 
     pub fn min() -> u64 {
@@ -769,28 +774,24 @@ pub struct U64 {
     pub fn max() -> u64 {
         return 18446744073709551615
     }
-    
-    pub fn abs(number: u64) -> u64 {
-        return number
-    }
 }
 
-pub struct I64 {
-    pub fn to_string(number: i64) -> Result<String, StringView> {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+pub struct i64 {
+    pub fn this to_string() -> Result<String, StringView> {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 20]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -827,21 +828,21 @@ pub struct I64 {
         return Result::success(str)
     }
 
-    pub fn to_string_view(number: i64, data: {[u8: 20]}) -> StringView {
-        var is_negative = number < 0
-        var number_abs = this::abs(number)
+    pub fn this to_string_view(data: {[u8: 20]}) -> StringView {
+        var is_negative = this < 0
+        var num_abs = this.abs()
 
         var buf: [u8: 20]
         var buf_idx = 0
 
         while true {
-            var digit = number_abs % 10
+            var digit = num_abs % 10
             var ascii = digit_to_ascii(digit as u8)
             buf.[buf_idx] = ascii
             buf_idx.++
 
-            number_abs /= 10
-            if number_abs == 0 {
+            num_abs /= 10
+            if num_abs == 0 {
                 break
             }
         }
@@ -868,22 +869,22 @@ pub struct I64 {
         return StringView::new(data as {u8}, 0, data_idx)
     }
 
+    pub fn this abs() -> u64 {
+        if this >= 0 {
+            return this as u64
+        } else this == this::min() {
+            return ((this + 1) * (-1)) as u64 + 1
+        } else {
+            return (this * (-1)) as u64
+        }
+    }
+
     pub fn min() -> i64 {
         return -9223372036854775808
     }
 
     pub fn max() -> i64 {
         return 9223372036854775807
-    }
-    
-    pub fn abs(number: i64) -> u64 {
-        if number >= 0 {
-            return number as u64
-        } else number == this::min() {
-            return ((number + 1) * (-1)) as u64 + 1
-        } else {
-            return (number * (-1)) as u64
-        }
     }
 }
 

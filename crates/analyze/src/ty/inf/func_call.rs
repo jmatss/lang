@@ -246,6 +246,8 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
         Some(method_call.file_pos.unwrap()),
     );
 
+    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
     // Insert constraints between the function call argument type and
     // the method parameter types that will be figured out later.
     for (idx, arg) in method_call.arguments.iter().enumerate() {
@@ -258,8 +260,8 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
             Either::Left(idx)
         };
 
-        let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-        let arg_type_id = ctx.ty_env.lock().unwrap().id(&Ty::UnknownFnArgument(
+        let unique_id = ty_env_guard.new_unique_id();
+        let arg_type_id = ty_env_guard.id(&Ty::UnknownFnArgument(
             Some(adt_type_id),
             method_name_with_gens.clone(),
             position,
@@ -276,11 +278,7 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
         // Don't add a constraint if the argument has the same type as
         // the ADT.
         if arg_expr_type_id != adt_type_id {
-            insert_constraint(
-                &mut ctx.ty_env.lock().unwrap(),
-                arg_type_id,
-                arg_expr_type_id,
-            )?;
+            insert_constraint(&mut ty_env_guard, arg_type_id, arg_expr_type_id)?;
         }
     }
 
@@ -293,10 +291,10 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
         );
 
         for (idx, type_id) in gens.iter_types().enumerate() {
-            let type_id_file_pos = get_file_pos(&ctx.ty_env.lock().unwrap(), *type_id).cloned();
+            let type_id_file_pos = get_file_pos(&ty_env_guard, *type_id).cloned();
 
-            let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-            let unknown_gen_type_id = ctx.ty_env.lock().unwrap().id(&Ty::UnknownFnGeneric(
+            let unique_id = ty_env_guard.new_unique_id();
+            let unknown_gen_type_id = ty_env_guard.id(&Ty::UnknownFnGeneric(
                 Some(adt_type_id),
                 method_path.clone(),
                 Either::Left(idx),
@@ -304,16 +302,12 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
                 TypeInfo::DefaultOpt(type_id_file_pos),
             ))?;
 
-            insert_constraint(
-                &mut ctx.ty_env.lock().unwrap(),
-                unknown_gen_type_id,
-                *type_id,
-            )?;
+            insert_constraint(&mut ty_env_guard, unknown_gen_type_id, *type_id)?;
         }
     }
     // The expected return type of the method call.
-    let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-    ctx.ty_env.lock().unwrap().id(&Ty::UnknownAdtMethod(
+    let unique_id = ty_env_guard.new_unique_id();
+    ty_env_guard.id(&Ty::UnknownAdtMethod(
         adt_type_id,
         method_name_with_gens,
         unique_id,

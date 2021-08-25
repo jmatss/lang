@@ -21,7 +21,10 @@ use common::{
         expr::Var,
     },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
-    ty::{get::get_adt_and_trait_paths, to_string::to_string_path, ty_env::TyEnv, type_id::TypeId},
+    ty::{
+        get::get_adt_and_trait_paths, inner_ty::InnerTy, to_string::to_string_path, ty_env::TyEnv,
+        type_id::TypeId,
+    },
     BlockId,
 };
 
@@ -340,15 +343,17 @@ impl ReferenceCollector {
         &self,
         ast_ctx: &AstCtx,
         adt: &Arc<RwLock<Adt>>,
-        id: BlockId,
+        block_id: BlockId,
     ) -> LangResult<LangPath> {
         let adt_name = adt.as_ref().borrow().read().unwrap().name.clone();
         let adt_file_pos = Some(adt.as_ref().borrow().read().unwrap().file_pos);
 
-        let module = if let Some(module) = ast_ctx.get_module(id)? {
+        let module = if InnerTy::ident_to_type(&adt_name, block_id).is_primitive() {
+            LangPath::empty()
+        } else if let Some(module) = ast_ctx.get_module(block_id)? {
             module
         } else {
-            LangPath::default()
+            LangPath::empty()
         };
 
         Ok(if self.full_paths {

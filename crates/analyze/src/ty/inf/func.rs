@@ -1,46 +1,12 @@
-use std::sync::{Arc, RwLock};
-
 use common::{
     error::LangResult,
-    token::{block::Fn, expr::FnPtr, stmt::Modifier},
+    token::expr::FnPtr,
     traverse::traverse_ctx::TraverseCtx,
     ty::{
         generics::Generics, replace::replace_gen_impls, to_string::to_string_path, ty::Ty,
         type_info::TypeInfo,
     },
 };
-
-pub(crate) fn infer_fn(func: &Arc<RwLock<Fn>>, ctx: &mut TraverseCtx) -> LangResult<()> {
-    let func = func.write().unwrap();
-
-    // If this is a method and the first argument is named "this", set
-    // the type of it to the ADT that this method belongs to (which already
-    // is stored in `method_adt`).
-    if let Some(first_arg) = func.parameters.as_ref().and_then(|args| args.first()) {
-        let mut first_arg = first_arg.write().unwrap();
-
-        if &first_arg.name == "this" {
-            if let Some(adt_type_id) = &func.method_adt {
-                let type_id = if func.modifiers.contains(&Modifier::This) {
-                    *adt_type_id
-                } else if func.modifiers.contains(&Modifier::ThisPointer) {
-                    // TODO: What file_pos should this pointer have?
-                    ctx.ty_env
-                        .lock()
-                        .unwrap()
-                        .id(&Ty::Pointer(*adt_type_id, TypeInfo::None))?
-                } else {
-                    // Keywords can't be used as parameter name.
-                    unreachable!("{:#?}", func);
-                };
-
-                first_arg.ty = Some(type_id);
-            }
-        }
-    }
-
-    Ok(())
-}
 
 pub(crate) fn infer_fn_ptr(fn_ptr: &mut FnPtr, ctx: &mut TraverseCtx) -> LangResult<()> {
     let fn_ptr_gens = if let Some(gens) = &fn_ptr.generics {

@@ -317,13 +317,19 @@ fn solve_manual(
             solve_unknown_method_argument(ty_env, ast_ctx, type_id, seen_type_ids)
         }
         Ty::UnknownFnArgument(None, ..) => {
+            Ok(type_id)
+            /*
             solve_unknown_fn_argument(ty_env, ast_ctx, type_id, seen_type_ids)
+            */
         }
         Ty::UnknownFnGeneric(Some(_), ..) => {
             solve_unknown_method_generic(ty_env, ast_ctx, type_id, seen_type_ids)
         }
         Ty::UnknownFnGeneric(None, ..) => {
+            Ok(type_id)
+            /*
             solve_unknown_fn_generic(ty_env, ast_ctx, type_id, seen_type_ids)
+            */
         }
         Ty::UnknownArrayMember(..) => {
             solve_unknown_array_member(ty_env, ast_ctx, type_id, seen_type_ids)
@@ -1109,6 +1115,10 @@ fn solve_adt_type(
 
         let inf_adt_ty = ty_env.ty_clone(inf_adt_type_id)?;
         let inner_ty = match inf_adt_ty {
+            Ty::CompoundType(inner_ty, ..) if inner_ty.is_primitive() => {
+                InnerTy::Struct(inner_ty.get_primitive_ident().into())
+            }
+
             Ty::CompoundType(inner_ty, ..) => inner_ty,
 
             // TODO: Fix this edge case. This might be a pointer to ADT to

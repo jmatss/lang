@@ -25,7 +25,7 @@ use super::{
         adt_init::infer_adt_init,
         arr_init::infer_array_init,
         built_in::infer_built_in,
-        func::{infer_fn, infer_fn_ptr},
+        func::infer_fn_ptr,
         func_call::infer_fn_call,
         lit::infer_lit,
         op::{infer_bin_op, infer_un_op},
@@ -175,11 +175,7 @@ impl Visitor for TypeInferencer {
             ..
         } = &mut block
         {
-            if let Err(err) = infer_fn(func, ctx) {
-                self.errors.push(err);
-            }
-
-            // Save the current function in a place so that the stmts/exprs in the body
+            // Save the current function in self so that the stmts/exprs in the body
             // can access the types of the parameters and the return type of the func.
             self.cur_func = Some(Arc::clone(func));
         }

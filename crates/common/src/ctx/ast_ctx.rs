@@ -348,7 +348,7 @@ impl AstCtx {
             Ok(Arc::clone(item))
         } else {
             Err(self.err(format!(
-                "Unable to find decl with name \"{}\" ({:#?}) in decl block ID {}.\nMap keys:\n{:#?}",
+                "Unable to find decl with name \"{}\" ({:#?}) in block ID {}.\nMap keys:\n{:#?}",
                 to_string_path(ty_env, path),
                 path,
                 decl_block_id,

@@ -6,11 +6,11 @@ use common::{
     hash::DerefType,
     path::LangPath,
     token::{
-        block::{Adt, Block, BlockHeader},
+        block::{Adt, AdtKind, Block, BlockHeader},
         stmt::{ExternalDecl, Stmt},
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
-    ty::to_string::to_string_path,
+    ty::{inner_ty::InnerTy, to_string::to_string_path},
     BlockId,
 };
 
@@ -36,10 +36,21 @@ impl DeclTypeAnalyzer {
         adt: &Arc<RwLock<Adt>>,
         id: BlockId,
     ) -> LangResult<()> {
-        let module = ctx.ast_ctx.get_module(id)?.unwrap_or_else(LangPath::empty);
-        adt.as_ref().write().unwrap().module = module.clone();
+        let adt_name = adt.read().unwrap().name.clone();
 
-        let adt_full_path = {
+        let adt_full_path = if InnerTy::ident_to_type(&adt_name, 0).is_primitive() {
+            let adt_kind = adt.read().unwrap().kind.clone();
+            if !matches!(adt_kind, AdtKind::Struct) {
+                return Err(ctx.ast_ctx.err(format!(
+                    "Tried to create non-struct ADT with primitive name: {}",
+                    adt_name
+                )));
+            }
+            LangPath::new(vec![adt_name.into()], Some(adt.read().unwrap().file_pos))
+        } else {
+            let module = ctx.ast_ctx.get_module(id)?.unwrap_or_else(LangPath::empty);
+            adt.as_ref().write().unwrap().module = module.clone();
+
             let adt_lock = adt.as_ref().read().unwrap();
             module.clone_push(&adt_lock.name, None, Some(adt_lock.file_pos))
         };

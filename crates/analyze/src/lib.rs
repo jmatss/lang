@@ -41,7 +41,7 @@ use util::order::dependency_order_from_ctx;
 use crate::{
     post::{ext_struct_init::ExtStructInit, format::FormatParser, void::VoidAnalyzer},
     pre::signed_literals::SignedLiteralsAnalyzer,
-    ty::solver::TypeSolver,
+    ty::{inf::primitive_to_adt::PrimitiveToAdtAnalyzer, solver::TypeSolver},
 };
 
 fn analyzer_name<T>(_: &T) -> &str {
@@ -117,6 +117,7 @@ pub fn analyze<'a>(
     traverse!(&mut ctx, ast_root, quiet, DeferAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, TypeInferencer::new());
     traverse!(&mut ctx, ast_root, quiet, TypeSolver::new());
+    traverse!(&mut ctx, ast_root, quiet, PrimitiveToAdtAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, FnGenericsCheck::new());
     traverse!(&mut ctx, ast_root, quiet, TraitsFnAnalyzer::new());
 

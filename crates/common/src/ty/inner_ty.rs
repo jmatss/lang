@@ -95,6 +95,35 @@ impl InnerTy {
         }
     }
 
+    pub fn get_primitive_ident(&self) -> &'static str {
+        match self {
+            InnerTy::Character => "char",
+            InnerTy::Boolean => "bool",
+            InnerTy::I8 => "i8",
+            InnerTy::U8 => "u8",
+            InnerTy::I16 => "i16",
+            InnerTy::U16 => "u16",
+            InnerTy::I32 => "i32",
+            InnerTy::U32 => "u32",
+            InnerTy::F32 => "f32",
+            InnerTy::I64 => "i64",
+            InnerTy::U64 => "u64",
+            InnerTy::F64 => "f64",
+            InnerTy::I128 => "i128",
+            InnerTy::U128 => "u128",
+            InnerTy::UnknownIdent(path, ..) | InnerTy::Struct(path) if path.count() == 1 => {
+                let ident = path.last().unwrap().name();
+                let inner_ty = InnerTy::ident_to_type(ident, 0);
+                if inner_ty.is_primitive() {
+                    inner_ty.get_primitive_ident()
+                } else {
+                    unreachable!("{:#?}", self)
+                }
+            }
+            _ => unreachable!("{:#?}", self),
+        }
+    }
+
     pub fn gens(&self) -> Option<&Generics> {
         if let Some(ident) = self.get_ident_ref() {
             ident.last().map(|part| part.1.as_ref()).flatten()
@@ -215,6 +244,14 @@ impl InnerTy {
             | InnerTy::F64
             | InnerTy::I128
             | InnerTy::U128 => true,
+            InnerTy::UnknownIdent(path, ..) | InnerTy::Struct(path) => {
+                let ident = path.last().unwrap().name();
+                let inner_ty = InnerTy::ident_to_type(ident, 0);
+                path.count() == 1
+                    && !inner_ty.is_adt()
+                    && !inner_ty.is_unknown_ident()
+                    && inner_ty.is_primitive()
+            }
             _ => false,
         }
     }
@@ -262,6 +299,13 @@ impl InnerTy {
         } else {
             false
         }
+    }
+
+    pub fn is_signed(&self) -> bool {
+        matches!(
+            self,
+            InnerTy::I8 | InnerTy::I16 | InnerTy::I32 | InnerTy::I64 | InnerTy::I128
+        )
     }
 
     pub fn contains_inner_ty_shallow(&self, inner_ty: &InnerTy) -> bool {

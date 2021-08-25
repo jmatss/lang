@@ -5,4 +5,5 @@ pub mod func;
 pub mod func_call;
 pub mod lit;
 pub mod op;
+pub mod primitive_to_adt;
 pub mod var;

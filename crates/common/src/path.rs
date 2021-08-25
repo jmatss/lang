@@ -185,6 +185,12 @@ impl From<&str> for LangPathPart {
     }
 }
 
+impl From<String> for LangPathPart {
+    fn from(name: String) -> Self {
+        LangPathPart(name, None)
+    }
+}
+
 impl TyEnvHash for LangPathPart {
     fn hash_with_state<H: std::hash::Hasher>(
         &self,
