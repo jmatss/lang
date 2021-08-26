@@ -153,7 +153,7 @@ impl String: AsView {
 
 impl String: Disposable {
     pub fn {this} deinit() {
-        if not @is_null(this.*.ptr) {
+        if @is_not_null(this.*.ptr) {
             Allocator::deinit<u8>(this.*.ptr)
         }
     }

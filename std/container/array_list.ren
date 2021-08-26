@@ -113,7 +113,7 @@ pub struct ArrayList<T> {
 
 impl ArrayList: Disposable {
     pub fn {this} deinit() {
-        if not @is_null(this.*.ptr) {
+        if @is_not_null(this.*.ptr) {
             Allocator::deinit(this.*.ptr as {u8})
             this.*.ptr = @null()
         }

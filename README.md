@@ -567,6 +567,9 @@ Creates a null/empty value of a type inferred from its use.
 ### `@is_null(expr: T)`
 Checks if the given argument `expr` is null/0. The type `T` must be a pointer type.
 
+### `@is_not_null(expr: T)`
+Checks if the given argument `expr` isn't null/0. The type `T` must be a pointer type.
+
 ### `@ptr_add(ptr: {T}, amount: u32)`
 Adds the value of the second parameter `amount` times the size of the type `T` to the pointer `ptr`.
 

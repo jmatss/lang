@@ -95,6 +95,22 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         BuiltIn::new(name, parameters, generics, bool_type_id, false),
     );
 
+    let name = "is_not_null";
+    let parameters = vec![Var::new(
+        "value".into(),
+        Some(any_ptr_type_id),
+        None,
+        None,
+        None,
+        None,
+        false,
+    )];
+    let generics = None;
+    built_ins.insert(
+        name,
+        BuiltIn::new(name, parameters, generics, bool_type_id, false),
+    );
+
     let name = "ptr_add";
     let parameters = vec![
         Var::new(

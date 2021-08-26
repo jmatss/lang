@@ -111,8 +111,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             }
 
-            // Checks if the given argument is null/0.
-            "is_null" => {
+            // Checks if the given argument is or isn't null/0.
+            "is_null" | "is_not_null" => {
+                let check_if_true = built_in_call.name == "is_null";
+
                 if let Some(expr) = built_in_call
                     .arguments
                     .first_mut()
@@ -126,18 +128,37 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     // TODO: Which types should be allowed?
                     if value.is_pointer_value() {
                         let ptr = value.into_pointer_value();
-                        Ok(self.builder.build_is_null(ptr, "is.null.ptr").into())
+                        if check_if_true {
+                            Ok(self.builder.build_is_null(ptr, "is.null.ptr").into())
+                        } else {
+                            Ok(self
+                                .builder
+                                .build_is_not_null(ptr, "is.not.null.ptr")
+                                .into())
+                        }
                     } else if value.is_int_value() {
                         let int_value = value.into_int_value();
                         let zero = int_value.get_type().const_zero();
-                        Ok(self
-                            .builder
-                            .build_int_compare(IntPredicate::EQ, int_value, zero, "is.null.int")
-                            .into())
+                        if check_if_true {
+                            Ok(self
+                                .builder
+                                .build_int_compare(IntPredicate::EQ, int_value, zero, "is.null.int")
+                                .into())
+                        } else {
+                            Ok(self
+                                .builder
+                                .build_int_compare(
+                                    IntPredicate::NE,
+                                    int_value,
+                                    zero,
+                                    "is.not.null.int",
+                                )
+                                .into())
+                        }
                     } else {
                         Err(self.err(
                             format!(
-                                "Invalid type of argument given to @is_null(): {:#?}",
+                                "Invalid type of argument given to @is_null/@is_not_null: {:#?}",
                                 built_in_call
                             ),
                             Some(file_pos),
