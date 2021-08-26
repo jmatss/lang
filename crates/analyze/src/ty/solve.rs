@@ -71,7 +71,7 @@ pub fn insert_constraint(
         (type_id_a, is_any_a, type_id_b, is_any_b)
     };
 
-    if !is_any_a && !is_any_b {
+    if !is_any_a || !is_any_b {
         unify(ty_env, type_id_a, type_id_b)?;
     }
 
