@@ -12,7 +12,7 @@ ext fn memcpy(dest: {u8}, src: {u8}, size: u32) -> {u8}
 /// A basic heap allocator that can be used to work with heap allocated data.
 pub struct Allocator {
     pub fn init<T>(value: T = @null()) -> Result<{T}, StringView> {
-        var ptr_or_error = this::init_size<T>(@size<T>())
+        var ptr_or_error = this::init_size(@size<T>())
         if ptr is ptr_or_error.success {
             ptr.* = value
         }
@@ -43,13 +43,13 @@ pub struct Allocator {
     pub fn deinit<T>(ptr: {T}) {
         free(ptr as {u8})
     }
-    
+
     /// Clones `size` bytes from the `src` into a new heap allocation
     /// and returns a pointer to the new allocation.
     /// If `size` isn't set, it will default to the size of `T`.
     /// Implemented using libc `memcpy`.
     fn clone<T>(src: {T}, size: u32 = @size<T>() as u32) -> Result<{T}, StringView> {
-        var ptr_or_error = this::init_size<T>(size)
+        var ptr_or_error = this::init_size(size)
         if dst is ptr_or_error.success {
             memcpy(dst as {u8}, src as {u8}, size)
         }

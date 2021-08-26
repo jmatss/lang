@@ -21,7 +21,7 @@ pub struct ArrayList<T> {
         if cap == 0 { cap = 1 }
 
         var size = cap * @size<T>()
-        var ptr_or_error = Allocator::init_size<u8>(size)
+        var ptr_or_error = Allocator::init_size(size)
         if err is ptr_or_error.error {
             return Result::error(err)
         }
@@ -99,7 +99,7 @@ pub struct ArrayList<T> {
             new_cap *= 2
         }
 
-        var new_ptr_or_empty = Allocator::reinit<u8>(this.*.ptr, new_cap)
+        var new_ptr_or_empty = Allocator::reinit(this.*.ptr, new_cap)
         if new_ptr is new_ptr_or_empty.value {
             this.*.ptr = new_ptr
             this.*.cap = new_cap
@@ -114,7 +114,7 @@ pub struct ArrayList<T> {
 impl ArrayList: Disposable {
     pub fn {this} deinit() {
         if not @is_null(this.*.ptr) {
-            Allocator::deinit<u8>(this.*.ptr as {u8})
+            Allocator::deinit(this.*.ptr as {u8})
             this.*.ptr = @null()
         }
     }

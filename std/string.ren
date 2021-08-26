@@ -29,7 +29,7 @@ pub struct String {
             len = strlen(str_lit)
         }
 
-        var ptr_or_error = Allocator::clone<u8>(str_lit, len)
+        var ptr_or_error = Allocator::clone(str_lit, len)
         if ptr is ptr_or_error.success {
             var str = String { ptr, len, len }
             return Result::success(str)
@@ -40,7 +40,7 @@ pub struct String {
     }
 
     pub fn init_size(size: u32) -> Result<String, StringView> {
-        var ptr_or_error = Allocator::init_size<u8>(size)
+        var ptr_or_error = Allocator::init_size(size)
         if ptr is ptr_or_error.success {
             var str = String { ptr, 0, size }
             return Result::success(str)
@@ -85,7 +85,7 @@ pub struct String {
         }
 
         var dst = @ptr_add(this.*.ptr, this.*.len())
-        Allocator::copy<u8>(dst, str_lit, len)
+        Allocator::copy(dst, str_lit, len)
 
         this.*.len += len
         return Result::success(0)
@@ -107,13 +107,13 @@ pub struct String {
     /// which needs to be free'd by the caller.
     pub fn this to_c_string() -> Result<{u8}, StringView> {
         var len = this.len()
-        var ptr_or_error = Allocator::init_size<u8>(len + 1)
+        var ptr_or_error = Allocator::init_size(len + 1)
         if err is ptr_or_error.error {
             return Result::error(err)
         }
 
         var c_str_ptr = ptr_or_error.&.get_success()
-        Allocator::copy<u8>(c_str_ptr, this.ptr, len)
+        Allocator::copy(c_str_ptr, this.ptr, len)
 
         var null_byte_ptr = @ptr_add(c_str_ptr, len)
         null_byte_ptr.* = '\0' as u8
@@ -135,7 +135,7 @@ pub struct String {
             new_cap *= 2
         }
 
-        var new_ptr_or_empty = Allocator::reinit<u8>(this.*.ptr, new_cap)
+        var new_ptr_or_empty = Allocator::reinit(this.*.ptr, new_cap)
         if new_ptr is new_ptr_or_empty.value {
             this.*.ptr = new_ptr
             this.*.cap = new_cap

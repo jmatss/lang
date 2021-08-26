@@ -1,11 +1,8 @@
 mod std
 
-use std::AsView
 use std::StringView
 
-ext fn printf(format: {u8}, ...) -> i32
 ext fn exit(exit_code: i32)
-ext fn strlen(str: {u8}) -> u32
 
 fn assert(expr: bool, msg: StringView = @null()) {
     if not expr {
