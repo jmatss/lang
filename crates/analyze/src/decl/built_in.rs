@@ -73,7 +73,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
 
     let name = "null";
     let parameters = Vec::with_capacity(0);
-    let generics = Some(vec![any_type_id]);
+    let generics = None;
     built_ins.insert(
         name,
         BuiltIn::new(name, parameters, generics, any_type_id, false),

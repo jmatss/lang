@@ -101,18 +101,13 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             }
 
-            // Creates a null/empty value of the specified type.
+            // Creates a null/empty value of its return type.
             "null" => {
-                if let Some(arg_type_id) = built_in_call
-                    .generics
-                    .as_ref()
-                    .map(|gs| gs.iter_types().next())
-                    .flatten()
-                {
-                    let ty = self.compile_type(*arg_type_id, Some(file_pos))?;
+                if let Some(ret_type_id) = built_in_call.ret_type {
+                    let ty = self.compile_type(ret_type_id, Some(file_pos))?;
                     self.compile_null(ty, Some(file_pos))
                 } else {
-                    unreachable!("Argument count check in Analyze.");
+                    unreachable!("Type not set for @null: {:#?}", built_in_call);
                 }
             }
 

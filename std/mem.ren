@@ -11,7 +11,7 @@ ext fn memcpy(dest: {u8}, src: {u8}, size: u32) -> {u8}
 
 /// A basic heap allocator that can be used to work with heap allocated data.
 pub struct Allocator {
-    pub fn init<T>(value: T = @null<T>()) -> Result<{T}, StringView> {
+    pub fn init<T>(value: T = @null()) -> Result<{T}, StringView> {
         var ptr_or_error = this::init_size<T>(@size<T>())
         if ptr is ptr_or_error.success {
             ptr.* = value

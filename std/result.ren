@@ -4,11 +4,11 @@ pub union Result<T, E> {
     var success: T
     var error: E
 
-    fn success(val: T = @null<T>()) -> Result<T, E> {
+    fn success(val: T = @null()) -> Result<T, E> {
         return Result { success = val }
     }
 
-    fn error(err: E = @null<E>()) -> Result<T, E> {
+    fn error(err: E = @null()) -> Result<T, E> {
         return Result { error = err }
     }
 

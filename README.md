@@ -559,10 +559,10 @@ Gets the size of the specified type `T`. The size is returned as a unsigned 32 b
 Gets the type of the expression `expr`.
 
 ### `@name(var: T)`
-Gets the name of the given variable `var` as a null terminated C string.
+Gets the name of the given variable `var` as a `std::StringView`.
 
-### `@null<T>()`
-Creates a null/empty value of the specified type `T`.
+### `@null()`
+Creates a null/empty value of a type inferred from its use.
 
 ### `@is_null(expr: T)`
 Checks if the given argument `expr` is null/0. The type `T` must be a pointer type.
@@ -581,7 +581,7 @@ For example:
 ```
 @format("abc{}def{}", 123, 456)
 ```
-would result in a std::StringView containing the string "abc123def456".
+would result in a `std::String` containing the string "abc123def456".
 
 ### `@array(init_value: T, dimension: u32)`
 Creates a instance of an array with the specified length `dimension` and all values initialized to the value `init_value`.

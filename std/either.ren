@@ -4,11 +4,11 @@ pub union Either<L, R> {
     var left: L
     var right: R
 
-    fn left(val: L = @null<L>()) -> Either<L, R> {
+    fn left(val: L = @null()) -> Either<L, R> {
         return Either { left = val}
     }
 
-    fn right(val: R = @null<R>()) -> Either<L, R> {
+    fn right(val: R = @null()) -> Either<L, R> {
         return Either { right = val}
     }
 

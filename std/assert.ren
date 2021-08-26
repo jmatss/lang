@@ -7,7 +7,7 @@ ext fn printf(format: {u8}, ...) -> i32
 ext fn exit(exit_code: i32)
 ext fn strlen(str: {u8}) -> u32
 
-fn assert(expr: bool, msg: StringView = @null<StringView>()) {
+fn assert(expr: bool, msg: StringView = @null()) {
     if not expr {
         std::print("\nASSERT FAILED")
         if not @is_null(msg.ptr) {

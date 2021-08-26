@@ -4,12 +4,12 @@ pub union Optional<T> {
     var value: T
     var empty: T
 
-    fn value(val: T = @null<T>()) -> Optional<T> {
+    fn value(val: T = @null()) -> Optional<T> {
         return Optional { value = val}
     }
 
     fn empty() -> Optional<T> {
-        return Optional { empty = @null<T>() }
+        return Optional { empty = @null() }
     }
 
     fn {this} has_value() -> bool {

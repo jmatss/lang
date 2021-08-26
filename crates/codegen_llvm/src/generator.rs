@@ -580,11 +580,12 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             _ => {
                 return Err(self.err(
                     format!(
-                    "Invalid type during type codegen. Type ID: {}, inf_type_id: {}, inf_ty: {:#?}",
-                    type_id,
-                    inf_type_id,
-                    to_string_type_id(&self.analyze_ctx.ty_env.lock().unwrap(), inf_type_id)?,
-                ),
+                        "Invalid type during type codegen. \
+                        Type ID: {}, inf_type_id: {}, inf_ty: {:#?}",
+                        type_id,
+                        inf_type_id,
+                        to_string_type_id(&self.analyze_ctx.ty_env.lock().unwrap(), inf_type_id)?,
+                    ),
                     file_pos,
                 ))
             }
