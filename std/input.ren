@@ -6,13 +6,11 @@ use std::String
 ext fn _read(fd: i32, buf: {u8}, len: u32) -> i32
 
 // 10 == ascii(\n)
-pub fn input(end_delim: u8 = 10) -> Result<String, {u8}>
-{
+pub fn input(end_delim: u8 = 10) -> Result<String, {u8}> {
     var stdin_fd = 0
 
     var str_or_error = String::init_size(16)
-    if err is str_or_error.error
-    {
+    if err is str_or_error.error {
         return Result::error(err)
     }
     var str = str_or_error.&.get_success()
@@ -21,23 +19,18 @@ pub fn input(end_delim: u8 = 10) -> Result<String, {u8}>
     var len = 1
     var res
  
-    while true
-    {
+    while true {
         res = _read(stdin_fd, buf.&, len)
-        if buf == end_delim or res == 0 or res == -1
-        {
+        if buf == end_delim or res == 0 or res == -1 {
             break
         }
 
         str.&.append_ascii(buf)
     }
 
-    if res != -1
-    {
+    if res != -1 {
         return Result::success(str)
-    }
-    else
-    {
+    } else {
         return Result::error("Got error when reading from stdin.")
     }
 }
