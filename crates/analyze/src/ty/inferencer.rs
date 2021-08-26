@@ -169,7 +169,7 @@ impl Visitor for TypeInferencer {
         }
     }
 
-    fn visit_fn(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
+    fn visit_fn(&mut self, mut block: &mut Block, _ctx: &mut TraverseCtx) {
         if let Block {
             header: BlockHeader::Fn(func),
             ..

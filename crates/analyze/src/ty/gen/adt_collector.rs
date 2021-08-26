@@ -23,7 +23,9 @@ use common::{
     },
 };
 
-use super::{generic_nested_collector::GenericNestedCollector, solve::set_generic_names};
+use crate::ty::solve::set_generic_names;
+
+use super::nested_collector::GenericNestedCollector;
 
 /// Iterates through the tokens and gathers all ADTs containing generics.
 /// Only the ADTs implementing the generic will be stored, any ADT containing a

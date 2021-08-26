@@ -26,9 +26,7 @@ use common::{
     BlockId,
 };
 
-use crate::ty::solve::set_generic_names;
-
-use super::generic_replace::GenericsReplacer;
+use crate::ty::{gen::replace::GenericsReplacer, solve::set_generic_names};
 
 // TODO: Must clean-up and simplify this logic. Can for example probably merge
 //       a lot of shared logic between creating ADT and impl blocks.

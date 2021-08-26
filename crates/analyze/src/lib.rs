@@ -30,18 +30,21 @@ use post::{
     union_init_arg::UnionInitArg,
 };
 use pre::{indexing::IndexingAnalyzer, main_args::MainArgsAnalyzer};
-use ty::{
-    fn_generics_check::FnGenericsCheck, generic_adt_collector::GenericAdtCollector,
-    generic_adt_creator::GenericAdtCreator, generic_fn_collector::GenericFnCollector,
-    generic_fn_creator::GenericFnCreator, generic_tys_solved::GenericTysSolvedChecker,
-    inferencer::TypeInferencer, traits_fn::TraitsFnAnalyzer,
-};
+use ty::{inferencer::TypeInferencer, traits_fn::TraitsFnAnalyzer};
 use util::order::dependency_order_from_ctx;
 
 use crate::{
     post::{ext_struct_init::ExtStructInit, format::FormatParser, void::VoidAnalyzer},
     pre::signed_literals::SignedLiteralsAnalyzer,
-    ty::{inf::primitive_to_adt::PrimitiveToAdtAnalyzer, solver::TypeSolver},
+    ty::{
+        gen::{
+            adt_collector::GenericAdtCollector, adt_creator::GenericAdtCreator,
+            fn_collector::GenericFnCollector, fn_creator::GenericFnCreator,
+            method_check::FnGenericsCheck, tys_solved::GenericTysSolvedChecker,
+        },
+        inf::primitive_to_adt::PrimitiveToAdtAnalyzer,
+        solver::TypeSolver,
+    },
 };
 
 fn analyzer_name<T>(_: &T) -> &str {

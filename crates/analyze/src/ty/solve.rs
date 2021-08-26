@@ -316,21 +316,11 @@ fn solve_manual(
         Ty::UnknownFnArgument(Some(_), ..) => {
             solve_unknown_method_argument(ty_env, ast_ctx, type_id, seen_type_ids)
         }
-        Ty::UnknownFnArgument(None, ..) => {
-            Ok(type_id)
-            /*
-            solve_unknown_fn_argument(ty_env, ast_ctx, type_id, seen_type_ids)
-            */
-        }
+        Ty::UnknownFnArgument(None, ..) => Ok(type_id),
         Ty::UnknownFnGeneric(Some(_), ..) => {
             solve_unknown_method_generic(ty_env, ast_ctx, type_id, seen_type_ids)
         }
-        Ty::UnknownFnGeneric(None, ..) => {
-            Ok(type_id)
-            /*
-            solve_unknown_fn_generic(ty_env, ast_ctx, type_id, seen_type_ids)
-            */
-        }
+        Ty::UnknownFnGeneric(None, ..) => Ok(type_id),
         Ty::UnknownArrayMember(..) => {
             solve_unknown_array_member(ty_env, ast_ctx, type_id, seen_type_ids)
         }
@@ -967,69 +957,6 @@ fn solve_unknown_method_generic(
 
     if let Some(adt_gens) = adt_path.gens() {
         if let Some(new_new_type_id) = replace_gen_impls(ty_env, ast_ctx, new_type_id, adt_gens)? {
-            new_type_id = new_new_type_id;
-        }
-    }
-
-    solve_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
-    let inf_new_type_id = ty_env.inferred_type(new_type_id)?;
-
-    insert_constraint(ty_env, type_id, inf_new_type_id)?;
-    Ok(inf_new_type_id)
-}
-
-fn solve_unknown_fn_generic(
-    ty_env: &mut TyEnv,
-    ast_ctx: &AstCtx,
-    type_id: TypeId,
-    seen_type_ids: &mut HashSet<TypeId>,
-) -> LangResult<TypeId> {
-    let mut ty_clone = ty_env.ty_clone(type_id)?;
-
-    debug!(
-        "solve_unknown_fn_generic -- type_id: {}, seen_type_ids: {:?}, ty_clone: {:?}",
-        type_id, seen_type_ids, ty_clone
-    );
-
-    let (fn_path, gen_idx_or_name, type_info) =
-        if let Ty::UnknownFnGeneric(None, method_path, gen_idx_or_name, _, type_info) =
-            &mut ty_clone
-        {
-            (method_path, gen_idx_or_name, type_info)
-        } else {
-            unreachable!()
-        };
-
-    let func = ast_ctx.get_fn(ty_env, fn_path)?;
-    let func = func.read().unwrap();
-
-    let gen_name = match gen_idx_or_name {
-        Either::Left(idx) => {
-            if let Some(generic_name) = func
-                .generics
-                .as_ref()
-                .map(|gens| gens.get_name(*idx))
-                .flatten()
-            {
-                generic_name
-            } else {
-                let fn_name = to_string_path(&ty_env, &fn_path);
-                return Err(ast_ctx.err(format!(
-                    "Function call specified generic at index {}. \
-                    Function \"{}\" has no generic at that index.",
-                    gen_idx_or_name, fn_name
-                )));
-            }
-        }
-        Either::Right(gen_name) => gen_name.clone(),
-    };
-
-    let unique_id = ty_env.new_unique_id();
-    let mut new_type_id =
-        ty_env.id(&Ty::GenericInstance(gen_name, unique_id, type_info.clone()))?;
-
-    if let Some(fn_gens) = fn_path.gens() {
-        if let Some(new_new_type_id) = replace_gen_impls(ty_env, ast_ctx, new_type_id, fn_gens)? {
             new_type_id = new_new_type_id;
         }
     }

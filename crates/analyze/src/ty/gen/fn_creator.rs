@@ -17,7 +17,7 @@ use common::{
     BlockId,
 };
 
-use super::generic_replace::GenericsReplacer;
+use super::replace::GenericsReplacer;
 
 /// Iterate through all functions that take generic parameters. Creates new
 /// instances of them replacing the generics with actual implementations.

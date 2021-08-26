@@ -9,10 +9,11 @@ use common::{
     },
 };
 
-/// Checks so that all function calls calling functions with generics actually
-/// specifies generics at the call site. This is needed because infering the
-/// generics currently aren't supported for generics on functions, only on
-/// generics for structs. This will need to be changed in the future.
+/// Checks so that all instance method calls calling functions with generics
+/// actually specifies generics at the call site. This is needed because
+/// inferring the generics currently aren't supported for generics on instance
+/// methods (is possible with static methods and free-standing functions).
+/// This will need to be changed in the future.
 pub struct FnGenericsCheck {
     errors: Vec<LangError>,
 }

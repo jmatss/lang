@@ -22,7 +22,7 @@ use common::{
 
 use crate::util::order::order_step2_strings;
 
-use super::generic_nested_collector::{GenericNestedCollector, NestedMethodInfo};
+use super::nested_collector::{GenericNestedCollector, NestedMethodInfo};
 
 /// Iterates through the tokens and gathers all uses of function and methods
 /// containing generics. Only the function/method calls implementing the generics
