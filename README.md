@@ -468,14 +468,23 @@ struct TestStruct;
 If one wants to access the `TestStruct` in the example above from a file with another `mod` module, it would have to be accessed with the path `std::name_space::TestStruct`. Any file with the same module would be able to access it as `TestStruct`.
 
 ### use `<PATH>`
-Includes the path/namespace/module `PATH` into the current file.
+Includes the path/namespace/module `PATH` into the current file. The path can represent either a partial path, ADT or function.
 ```
+use std::assert
+use std::mem
 use std::mem::Allocator
 
-// The call below is able to find `Allocator` correctly by using the path/namespace/module
-// in the `use` statement at the top of the example. The two calls below are equivalent. 
-Allocator::init("msg on heap")
+// Doesn't use any `use` statement, full path specified.
+std::assert(true == true)
+// Uses the `use std::assert` to find the correct path.
+assert(true == true)
+
+// Doesn't use any `use` statement, full path specified.
 std::mem::Allocator::init("msg on heap")
+// Uses the `use std::mem` to find the correct path.
+mem::Allocator::init("msg on heap")
+// Uses the `use std::mem::Allocator` to find the correct path.
+Allocator::init("msg on heap")
 ```
 
 ### `return [<EXPRESSION>]`
