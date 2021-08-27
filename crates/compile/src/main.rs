@@ -208,7 +208,7 @@ fn main() -> LangResult<()> {
         }
     };
 
-    if !opts.quiet {
+    if !opts.quiet || opts.validate {
         println!("Analyzing complete ({:?}).", analyze_timer.elapsed());
     }
     if log_enabled!(Level::Debug) {
@@ -217,6 +217,12 @@ fn main() -> LangResult<()> {
         println!("\nAST after analyze:\n{:#?}", ast_root);
     }
     analyze_ctx.ast_ctx.debug_print();
+
+    // Only validate the correctness of the AST and skip code generation if
+    // `validate` is set.
+    if opts.validate {
+        return Ok(());
+    }
 
     let generate_timer = Instant::now();
     let target_machine = compiler::setup_target(&opts.target_triple)?;
@@ -322,6 +328,7 @@ struct Options {
     llvm: bool,
     ast: bool,
     quiet: bool,
+    validate: bool,
 }
 
 fn parse_opts() -> Options {
@@ -403,6 +410,14 @@ fn parse_opts() -> Options {
                 .takes_value(false)
                 .required(false),
         )
+        .arg(
+            Arg::with_name("validate")
+                .short("v")
+                .long("validate")
+                .help("Set to only validate the code and skip code generation.")
+                .takes_value(false)
+                .required(false),
+        )
         .get_matches();
 
     let mut input_files = Vec::default();
@@ -422,5 +437,6 @@ fn parse_opts() -> Options {
         llvm: matches.is_present("llvm"),
         ast: matches.is_present("ast"),
         quiet: matches.is_present("quiet"),
+        validate: matches.is_present("validate"),
     }
 }
