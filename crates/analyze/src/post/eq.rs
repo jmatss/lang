@@ -10,7 +10,7 @@ use common::{
         generics::Generics,
         get::get_ident,
         inner_ty::InnerTy,
-        is::{is_array, is_pointer, is_primitive},
+        is::{is_array, is_enum, is_pointer, is_primitive},
         to_string::to_string_path,
         ty::Ty,
         type_info::TypeInfo,
@@ -47,6 +47,7 @@ impl EqAnalyzer {
         if is_primitive(&ty_env_guard, type_id)?
             || is_pointer(&ty_env_guard, type_id)?
             || is_array(&ty_env_guard, type_id)?
+            || is_enum(&ty_env_guard, type_id)?
         {
             return Ok(());
         }
@@ -57,14 +58,15 @@ impl EqAnalyzer {
         let adt = ctx.ast_ctx.get_adt(&ty_env_guard, &adt_path)?;
         let adt = adt.read().unwrap();
 
-        // The generic type should be equal to the current ADT type.
+        // The generic type of the `Eq` trait should be equal to the current ADT
+        // type.
         let mut eq_trait_gens = Generics::new();
         eq_trait_gens.insert_type(type_id);
         let eq_trait_path =
             LangPath::new(vec!["std".into(), "Eq".into()], expr.file_pos().cloned());
         let eq_trait_path = eq_trait_path.with_gens(eq_trait_gens);
 
-        // Since the types might come from differen type environment, a textual
+        // Since the types might come from different type environment, a textual
         // comparison is done.
         let mut impls_eq_trait = false;
         let eq_trait_name = to_string_path(&ty_env_guard, &eq_trait_path);

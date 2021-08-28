@@ -141,6 +141,12 @@ pub fn is_adt(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
         .unwrap_or(false))
 }
 
+pub fn is_enum(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
+    Ok(get_inner(ty_env, id)
+        .map(|inner_ty| inner_ty.is_enum())
+        .unwrap_or(false))
+}
+
 pub fn is_int(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
     Ok(get_inner(ty_env, id)
         .map(|inner_ty| inner_ty.is_int())

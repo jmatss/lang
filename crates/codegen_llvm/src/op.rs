@@ -244,19 +244,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     ExprTy::RValue => Ok(self.builder.build_load(ptr, "array.gep.rval").into()),
                 }
             }
-            UnOperator::AdtAccess(..) => {
-                let val = self.compile_un_op_adt_access(un_op, expr_ty)?;
-                match expr_ty {
-                    ExprTy::LValue => Ok(val),
-                    ExprTy::RValue => Ok(if val.is_pointer_value() {
-                        self.builder
-                            .build_load(val.into_pointer_value(), "struct.gep.rval")
-                            .into()
-                    } else {
-                        val
-                    }),
-                }
-            }
+            UnOperator::AdtAccess(..) => self.compile_un_op_adt_access(un_op, expr_ty),
             UnOperator::EnumAccess(..) => match expr_ty {
                 ExprTy::LValue => Err(self.err(
                     format!("Enum access is not allowed as a LValue: {:?}", un_op),
@@ -585,6 +573,38 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     self.builder
                         .build_int_compare(predicate, lhs_ptr, rhs_ptr, "compare.ptr")
                         .into()
+                }
+            }
+
+            // Allow struct type if the struct type only has a single member and
+            // that member is a type that can be compared (float, int or pointer).
+            // This will for example allow compares of enums (since they are
+            // compiled down to a struct with a single i8 member).
+            BasicTypeEnum::StructType(struct_type) if struct_type.count_fields() == 1 => {
+                let field_type = struct_type.get_field_type_at_index(0).unwrap();
+                if field_type.is_int_type()
+                    || field_type.is_float_type()
+                    || field_type.is_pointer_type()
+                {
+                    let lhs_member =
+                        self.compile_struct_access(lhs.into(), ExprTy::RValue, is_const, 0)?;
+                    let rhs_member =
+                        self.compile_struct_access(rhs.into(), ExprTy::RValue, is_const, 0)?;
+                    self.compile_bin_op_compare(
+                        is_signed,
+                        is_const,
+                        op,
+                        CodeGen::any_into_basic_value(lhs_member)?,
+                        CodeGen::any_into_basic_value(rhs_member)?,
+                    )?
+                } else {
+                    return Err(self.err(
+                        format!(
+                            "Invalid struct type used in bin op compare: {:?}",
+                            lhs.get_type()
+                        ),
+                        None,
+                    ));
                 }
             }
 
@@ -1377,12 +1397,21 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         expr_ty: ExprTy,
         idx: u32,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let mut any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
         un_op.is_const = CodeGen::is_const(&[any_value]);
+        self.compile_struct_access(any_value, expr_ty, un_op.is_const, idx)
+    }
 
+    fn compile_struct_access(
+        &mut self,
+        mut any_value: AnyValueEnum<'ctx>,
+        expr_ty: ExprTy,
+        is_const: bool,
+        idx: u32,
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         debug!(
-            "Compiling struct access, idx: {} -- un_op: {:#?}\nany_value: {:#?}",
-            idx, un_op, any_value
+            "Compiling struct access, idx: {}, any_value: {:#?}",
+            idx, any_value
         );
 
         // TODO: Better way to do this? Can one skip this stack allocation
@@ -1390,7 +1419,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // If the value is given as a struct value and it isn't a const, it needs
         // to be stored temporarily on the stack to get a pointer which can then
         // be non-const GEPd.
-        if any_value.is_struct_value() && !un_op.is_const {
+        if any_value.is_struct_value() && !is_const {
             let ptr = self
                 .builder
                 .build_alloca(any_value.into_struct_value().get_type(), "struct.tmp.alloc");
@@ -1401,15 +1430,27 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         if any_value.is_pointer_value() {
             let ptr = any_value.into_pointer_value();
-            self.builder
+            let member_ptr = self
+                .builder
                 .build_struct_gep(ptr, idx, "struct.gep")
-                .map(|val| val.into())
                 .map_err(|_| {
                     self.err(
-                        format!("Unable to gep for struct member index: {:?}.", un_op),
+                        format!(
+                            "Unable to gep struct member at index {}: {:?}.",
+                            idx, any_value
+                        ),
                         None,
                     )
-                })
+                })?;
+
+            if let ExprTy::RValue = expr_ty {
+                Ok(self
+                    .builder
+                    .build_load(member_ptr, "struct.gep.member.load")
+                    .into())
+            } else {
+                Ok(member_ptr.into())
+            }
         } else if any_value.is_struct_value() {
             // Known to be const at this point, so safe to "const extract".
             if let ExprTy::RValue = expr_ty {
@@ -1419,15 +1460,15 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     .into())
             } else {
                 Err(self.err(
-                    format!("StructValue not allowed in lvalue: {:#?}", un_op),
+                    format!("StructValue not allowed in lvalue: {:#?}", any_value),
                     None,
                 ))
             }
         } else {
             Err(self.err(
                 format!(
-                    "Expr in struct access not a pointer or struct. Un up: {:#?}\ncompiled expr: {:#?}",
-                    un_op, any_value
+                    "Expr in struct access not a pointer or struct. Compiled expr: {:#?}",
+                    any_value
                 ),
                 None,
             ))
@@ -1479,14 +1520,20 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     )
                 })?;
 
-            Ok(self
-                .builder
-                .build_pointer_cast(
-                    member_ptr,
-                    basic_member_ty.ptr_type(address_space),
-                    "union.ptr.cast",
-                )
-                .into())
+            let member_ptr_correct_type = self.builder.build_pointer_cast(
+                member_ptr,
+                basic_member_ty.ptr_type(address_space),
+                "union.ptr.cast",
+            );
+
+            if let ExprTy::RValue = expr_ty {
+                Ok(self
+                    .builder
+                    .build_load(member_ptr_correct_type, "union.gep.member.load")
+                    .into())
+            } else {
+                Ok(member_ptr_correct_type.into())
+            }
         } else if any_value.is_struct_value() {
             // Known to be const at this point, so safe to "const extract".
             if let ExprTy::RValue = expr_ty {

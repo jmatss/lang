@@ -1,0 +1,17 @@
+mod std
+
+// TODO: The function currently takes both inputs as value.
+//       Should there be a function taking larger ADTs by ref?
+// TODO: Auto convert `>`, `<`, `>=` and `<=` operations into calls
+//       to the `cmp` function of the `Cmp<T>` trait.
+/// A trait used for types that can be be compared with the type `T`.
+pub trait Cmp<T> {
+    pub fn this cmp(other: T) -> Order
+}
+
+/// Represents the result of a compare operation.
+pub enum Order {
+    Lt
+    Eq
+    Gt
+}

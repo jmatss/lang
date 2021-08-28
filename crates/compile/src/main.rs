@@ -59,6 +59,7 @@ macro_rules! std_files {
 std_files!(
     "as_view.ren",
     "assert.ren",
+    "cmp.ren",
     "disposable.ren",
     "either.ren",
     "eq.ren",

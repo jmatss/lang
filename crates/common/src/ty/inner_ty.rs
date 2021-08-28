@@ -265,6 +265,10 @@ impl InnerTy {
         )
     }
 
+    pub fn is_enum(&self) -> bool {
+        matches!(self, InnerTy::Enum(_))
+    }
+
     pub fn is_trait(&self) -> bool {
         matches!(self, InnerTy::Trait(..))
     }
