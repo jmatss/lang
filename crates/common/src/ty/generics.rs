@@ -151,12 +151,14 @@ impl TyEnvHash for Generics {
         deref_type: DerefType,
         state: &mut H,
     ) -> LangResult<()> {
-        if !self.types.is_empty() {
-            for gen_type_id in self.types.iter() {
-                gen_type_id.hash_with_state(ty_env, deref_type, state)?;
+        if !matches!(deref_type, DerefType::None) {
+            if !self.types.is_empty() {
+                for gen_type_id in self.types.iter() {
+                    gen_type_id.hash_with_state(ty_env, deref_type, state)?;
+                }
+            } else if !self.names.is_empty() {
+                self.names.hash(state);
             }
-        } else if !self.names.is_empty() {
-            self.names.hash(state);
         }
         Ok(())
     }

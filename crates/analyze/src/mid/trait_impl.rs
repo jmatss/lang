@@ -1,8 +1,10 @@
 use common::{
+    eq::path_eq,
     error::LangError,
     hash::DerefType,
     token::block::{Block, BlockHeader},
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
+    ty::to_string::to_string_path,
 };
 
 /// Iterates through all impl-block and stores the path of the implemented traits
@@ -47,6 +49,44 @@ impl Visitor for TraitImplAnalyzer {
                 }
             };
             let mut adt = adt.write().unwrap();
+
+            // TODO: Better way to do this, do in constant time instead of
+            //       linear. Since `adt.implemented_traits` contains the paths
+            //       including generics, it is no easy way to lookup trait impls
+            //       without generics or with different generics.
+            let mut contains_duplicate_trait = false;
+
+            let new_trait_path_without_gens = trait_path.without_gens();
+            for old_trait_path in adt.implemented_traits.values() {
+                let is_eq = match path_eq(
+                    &ty_env_guard,
+                    &new_trait_path_without_gens,
+                    &old_trait_path.without_gens(),
+                    DerefType::None,
+                ) {
+                    Ok(is_eq) => is_eq,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+                if is_eq {
+                    contains_duplicate_trait = true;
+                    break;
+                }
+            }
+
+            if contains_duplicate_trait {
+                self.errors.push(ctx.ast_ctx.err(format!(
+                    "ADT \"{}\" contains multiple impl's of the trait \"{}\". \
+                    Only one instance of a impl is allowed per ADT. \
+                    This restriction is in place to prevent problems with multiple \
+                    implementations of a trait with different generics.",
+                    to_string_path(&ty_env_guard, adt_path),
+                    to_string_path(&ty_env_guard, &trait_path.without_gens()),
+                )));
+                return;
+            }
 
             if let Err(err) =
                 adt.implemented_traits
