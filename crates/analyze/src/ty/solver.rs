@@ -3,13 +3,14 @@ use std::collections::{HashSet, VecDeque};
 use log::{debug, log_enabled, Level};
 
 use common::{
+    ctx::ast_ctx::AstCtx,
     error::{LangError, LangResult},
     path::LangPathPart,
     token::op::UnOperator,
     token::{block::Block, expr::FnCall, op::UnOp},
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
-        get::get_unsolvable,
+        get::{get_generics, get_unsolvable},
         is::is_solved,
         replace::convert_defaults,
         substitution_sets::sub_sets_debug_print,
@@ -142,6 +143,40 @@ fn nested_is_solved(
     Ok(true)
 }
 
+/// Iterates through all traits and collects the `Generic` types.
+/// The types will be collected from the traits parameters and return type.
+///
+/// Types in traits will never be solved because traits are used as "blueprints"
+/// only. We therefore have to treat these generics specially and exclude them
+/// from some logic. They need to be excluded from the type solving since they
+/// are unsolvable.
+pub fn collect_trait_gens(ty_env: &TyEnv, ctx: &AstCtx) -> LangResult<HashSet<TypeId>> {
+    let mut gen_type_ids = HashSet::default();
+
+    for trait_ in ctx.traits.values() {
+        let trait_ = trait_.read().unwrap();
+        for method in &trait_.methods {
+            if let Some(params) = &method.parameters {
+                for param in params {
+                    if let Some(param_type_id) = param.read().unwrap().ty {
+                        for gen_type_id in get_generics(ty_env, param_type_id)? {
+                            gen_type_ids.insert(gen_type_id);
+                        }
+                    }
+                }
+            }
+
+            if let Some(ret_type_id) = method.ret_type {
+                for gen_type_id in get_generics(ty_env, ret_type_id)? {
+                    gen_type_ids.insert(gen_type_id);
+                }
+            }
+        }
+    }
+
+    Ok(gen_type_ids)
+}
+
 /// Iterates through all types in the AST and replaces them with their correctly
 /// solved types.
 pub struct TypeSolver {
@@ -197,7 +232,16 @@ impl Visitor for TypeSolver {
     fn visit_default_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
         debug!("before solving -- AST: {:#?}", &block);
 
-        let all_types = ctx.ty_env.lock().unwrap().interner.all_types();
+        let mut all_types = ctx.ty_env.lock().unwrap().interner.all_types();
+        // Remove all generic types declared in trait functions.
+        match collect_trait_gens(&ctx.ty_env.lock().unwrap(), ctx.ast_ctx) {
+            Ok(trait_gens) => all_types.retain(|type_id| !trait_gens.contains(type_id)),
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        }
+
         if let Err(err) = solve_all(ctx, all_types) {
             self.errors.push(err);
             self.end_debug_print(ctx);

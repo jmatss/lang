@@ -14,8 +14,9 @@ use crate::{
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
     hash::DerefType,
+    hash_set::TyEnvHashSet,
     path::LangPath,
-    ty::{generics::Generics, ty_env::TyEnv},
+    ty::{generics::Generics, is::is_compatible, ty_env::TyEnv},
     util, BlockId, TypeId,
 };
 
@@ -133,6 +134,9 @@ pub struct Adt {
     /// The key is the the name of the generic and the values are the
     /// traits that the specific generic type needs to implement.
     pub implements: Option<HashMap<String, Vec<LangPath>>>,
+    /// A set of all traits that the ADT implements. The trait paths should
+    /// contain the the full paths (including modules) and generics.
+    pub implemented_traits: TyEnvHashSet<LangPath>,
 
     /* Values set for Enum */
     /// The type of the enum values. Will most likely be a integer type.
@@ -240,6 +244,7 @@ impl AdtBuilder {
             kind: self.kind,
             generics: self.generics,
             implements: self.implements,
+            implemented_traits: TyEnvHashSet::default(),
             enum_ty: None,
         })
     }
@@ -296,6 +301,14 @@ impl AdtBuilder {
     }
 }
 
+/// Used to store the modifer for fns when comparing with trait fn.
+#[derive(Debug)]
+pub enum FnModifier {
+    This,
+    ThisPointer,
+    None,
+}
+
 pub enum TraitCompareError {
     /// Param len diff (`self`, `trait`). The bool indicates if `this`/`self`
     /// is exludeded.
@@ -324,6 +337,10 @@ pub enum TraitCompareError {
     //       actualy are.
     /// The string is the name generic that the impl is for.
     ImplsTypeDiff(String),
+
+    /// The impl and decl functions differs when it comes to this/thisPtr modifiers.
+    /// The first modifier is the impl modifier and the second is the decl.
+    ThisDiff(Option<FnModifier>, Option<FnModifier>),
 }
 
 #[derive(Debug, Clone)]
@@ -380,10 +397,49 @@ impl Fn {
     pub fn trait_cmp(&self, ty_env: &TyEnv, trait_func: &Fn) -> Result<(), Vec<TraitCompareError>> {
         let mut errors = Vec::default();
 
+        let trait_fn_modifier = if trait_func.modifiers.contains(&Modifier::This) {
+            FnModifier::This
+        } else if trait_func.modifiers.contains(&Modifier::ThisPointer) {
+            FnModifier::ThisPointer
+        } else {
+            FnModifier::None
+        };
+
+        let self_fn_modifier = if self.modifiers.contains(&Modifier::This) {
+            FnModifier::This
+        } else if self.modifiers.contains(&Modifier::ThisPointer) {
+            FnModifier::ThisPointer
+        } else {
+            FnModifier::None
+        };
+
         // Since the `this`/`self` parameter won't be set for the trait function,
         // need to take that into consideration if the function as a `this` modifier.
-        let contains_this = self.modifiers.contains(&Modifier::This)
-            || self.modifiers.contains(&Modifier::ThisPointer);
+        let contains_this = match (&self_fn_modifier, &trait_fn_modifier) {
+            (FnModifier::This, FnModifier::This)
+            | (FnModifier::ThisPointer, FnModifier::ThisPointer) => true,
+
+            (FnModifier::None, FnModifier::None) => false,
+
+            (FnModifier::This, FnModifier::ThisPointer)
+            | (FnModifier::ThisPointer, FnModifier::This) => {
+                errors.push(TraitCompareError::ThisDiff(
+                    Some(self_fn_modifier),
+                    Some(trait_fn_modifier),
+                ));
+                return Err(errors);
+            }
+
+            (FnModifier::This, FnModifier::None) | (FnModifier::ThisPointer, FnModifier::None) => {
+                errors.push(TraitCompareError::ThisDiff(Some(self_fn_modifier), None));
+                return Err(errors);
+            }
+
+            (FnModifier::None, FnModifier::This) | (FnModifier::None, FnModifier::ThisPointer) => {
+                errors.push(TraitCompareError::ThisDiff(None, Some(trait_fn_modifier)));
+                return Err(errors);
+            }
+        };
 
         // Check parameters in this match-statement.
         match (&self.parameters, &trait_func.parameters, contains_this) {
@@ -398,7 +454,7 @@ impl Fn {
                     return Err(errors);
                 }
 
-                // Take a slice of `self_paramss` where the `this` parameter has
+                // Take a slice of `self_params` where the `this` parameter has
                 // been skipped so that the parameters can be compared to the
                 // `trait_func` parameters correctly.
                 for (idx, (self_param, other_param)) in self_params[1..self_params.len()]
@@ -406,9 +462,9 @@ impl Fn {
                     .zip(trait_params)
                     .enumerate()
                 {
-                    if self_param.as_ref().read().unwrap().ty
-                        != other_param.as_ref().read().unwrap().ty
-                    {
+                    let first_id = self_param.as_ref().read().unwrap().ty.unwrap();
+                    let second_id = other_param.as_ref().read().unwrap().ty.unwrap();
+                    if !is_compatible(ty_env, first_id, second_id).unwrap() {
                         errors.push(TraitCompareError::ParamTypeDiff(idx, true));
                     }
                 }
@@ -428,9 +484,9 @@ impl Fn {
                 for (idx, (self_param, other_param)) in
                     self_params.iter().zip(trait_params).enumerate()
                 {
-                    if self_param.as_ref().read().unwrap().ty
-                        != other_param.as_ref().read().unwrap().ty
-                    {
+                    let first_id = self_param.as_ref().read().unwrap().ty.unwrap();
+                    let second_id = other_param.as_ref().read().unwrap().ty.unwrap();
+                    if !is_compatible(ty_env, first_id, second_id).unwrap() {
                         errors.push(TraitCompareError::ParamTypeDiff(idx, false));
                     }
                 }
@@ -529,8 +585,15 @@ impl Fn {
             (None, None) => (),
         }
 
-        if self.ret_type != trait_func.ret_type {
-            errors.push(TraitCompareError::ReturnTypeDiff);
+        // Check return types.
+        match (self.ret_type, trait_func.ret_type) {
+            (Some(first_id), Some(second_id)) => {
+                if !is_compatible(ty_env, first_id, second_id).unwrap() {
+                    errors.push(TraitCompareError::ReturnTypeDiff);
+                }
+            }
+            (None, Some(_)) | (Some(_), None) => errors.push(TraitCompareError::ReturnTypeDiff),
+            (None, None) => (),
         }
 
         if errors.is_empty() {

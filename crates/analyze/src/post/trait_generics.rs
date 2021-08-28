@@ -1,12 +1,16 @@
 use std::collections::HashSet;
 
 use common::{
-    error::{LangError, LangErrorKind},
+    error::LangError,
+    hash::DerefType,
     path::LangPath,
-    token::block::{Fn, TraitCompareError},
+    token::expr::FnCall,
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
-        get::get_ident, inner_ty::InnerTy, to_string::to_string_path, ty::Ty, ty_env::TyEnv,
+        get::get_ident,
+        inner_ty::InnerTy,
+        to_string::{to_string_path, to_string_type_id},
+        ty::Ty,
         type_id::TypeId,
     },
     BlockId,
@@ -15,15 +19,14 @@ use common::{
 /// Checks that all generics that have specified "where implements" clauses
 /// actual are instances of types that implements the specified trait and all
 /// its methods.
-pub struct TraitsGenericAnalyzer {
+pub struct TraitGenericsAnalyzer {
     /// Contains a set keeping track of all seen types. This is done to prevent
     /// checking the same type multiple times.
     seen_types: HashSet<TypeId>,
-
     errors: Vec<LangError>,
 }
 
-impl TraitsGenericAnalyzer {
+impl TraitGenericsAnalyzer {
     pub fn new() -> Self {
         Self {
             seen_types: HashSet::default(),
@@ -31,110 +34,7 @@ impl TraitsGenericAnalyzer {
         }
     }
 
-    /// Makes a check to ensure that the specified `trait_method` is correctly
-    /// implement by `impl_method`.
-    fn verify_method(
-        ty_env: &TyEnv,
-        impl_method: &Fn,
-        trait_method: &Fn,
-        adt_path: &LangPath,
-        trait_path: &LangPath,
-    ) -> Result<(), Vec<LangError>> {
-        if let Err(cmp_errors) = impl_method.trait_cmp(ty_env, trait_method) {
-            let mut errs = Vec::with_capacity(cmp_errors.len());
-            let err_msg_start = format!(
-                "Struct \"{}\"s impl of trait \"{}\"s method \"{}\" is incorrect.\n",
-                to_string_path(ty_env, &adt_path),
-                to_string_path(ty_env, &trait_path),
-                trait_method.name,
-            );
-            let err_msg_end = format!(
-                "\nstruct_method: {:#?}\ntrait_method: {:#?}",
-                impl_method, trait_method
-            );
-
-            for cmp_err in cmp_errors {
-                let err_msg = match cmp_err {
-                    TraitCompareError::ParamLenDiff(s_len, t_len, contains_this) => {
-                        let (s_len, t_len) = if contains_this {
-                            (s_len, t_len + 1)
-                        } else {
-                            (s_len, t_len)
-                        };
-                        format!(
-                            "Parameter list length differs. Struct len: {}, trait len: {}",
-                            s_len, t_len,
-                        )
-                    }
-                    TraitCompareError::ParamTypeDiff(t_idx, contains_this) => {
-                        let s_idx = if contains_this { t_idx + 1 } else { t_idx };
-                        format!(
-                            "Parameter types at idx {} differs. Struct param type: {:#?}, trait param type: {:#?}",
-                            s_idx,
-                            impl_method.parameters.as_ref().unwrap().get(s_idx).unwrap().as_ref().read().unwrap().ty,
-                            trait_method.parameters.as_ref().unwrap().get(t_idx).unwrap().as_ref().read().unwrap().ty,
-                        )
-                    }
-                    TraitCompareError::ReturnTypeDiff => {
-                        format!(
-                            "Return types differ. Struct return type: {:#?}, trait return type: {:#?}",
-                            impl_method.ret_type,
-                            trait_method.ret_type,
-                        )
-                    }
-                    TraitCompareError::GenericsLenDiff(s_len, t_len) => {
-                        format!(
-                            "Generic list length differs. Struct len: {}, trait len: {}",
-                            s_len, t_len,
-                        )
-                    }
-                    TraitCompareError::GenericsNameDiff(idx) => {
-                        format!(
-                            "Generic at idx {} differs. Struct generic name: {:#?}, trait generic name: {:#?}",
-                            idx,
-                            impl_method.generics.as_ref().unwrap().get_name(idx).unwrap(),
-                            trait_method.generics.as_ref().unwrap().get_name(idx).unwrap(),
-                        )
-                    }
-                    TraitCompareError::ImplsLenDiff(s_len, t_len) => {
-                        format!(
-                            "Implements list length differs. Struct len: {}, trait len: {}",
-                            s_len, t_len,
-                        )
-                    }
-                    TraitCompareError::ImplsNameDiff(Some(s_name), None) => {
-                        format!(
-                            "Found impls for generic with name \"{}\" in struct, not found trait.",
-                            s_name,
-                        )
-                    }
-                    TraitCompareError::ImplsNameDiff(None, Some(t_name)) => {
-                        format!(
-                            "Found impls for generic with name \"{}\" in trait, not found struct.",
-                            t_name,
-                        )
-                    }
-                    TraitCompareError::ImplsNameDiff(..) => {
-                        unreachable!()
-                    }
-                    TraitCompareError::ImplsTypeDiff(gen_name) => {
-                        format!("Impls list diff for generic with name \"{}\".", gen_name,)
-                    }
-                };
-
-                errs.push(LangError::new(
-                    format!("{}{}{}", err_msg_start, err_msg, err_msg_end),
-                    LangErrorKind::AnalyzeError,
-                    None,
-                ));
-            }
-
-            Err(errs)
-        } else {
-            Ok(())
-        }
-    }
-
+    // TODO: Merge logic `verify_adt_traits` with `verify_fn_traits`.
     /// Given a ADT with the path `adt_path`, makes sure that the "instance"s of
     /// its generics implements the traits that are required on the generic
     /// declarations in a "where" clause.
@@ -160,6 +60,7 @@ impl TraitsGenericAnalyzer {
             return Ok(());
         };
 
+        let mut errors = Vec::default();
         let ty_env_guard = ctx.ty_env.lock().unwrap();
 
         let adt = ctx
@@ -194,13 +95,14 @@ impl TraitsGenericAnalyzer {
                     .iter()
                     .map(|path| format!("\n * {:?}", path))
                     .collect::<String>();
-                return Err(vec![ctx.ast_ctx.err(format!(
+                errors.push(ctx.ast_ctx.err(format!(
                     "ADT \"{0}\" has \"where\" clause for type \"{1}\" which isn't a ADT. \
                     The type \"{1}\" can therefore not implement the required traits:{2}.",
                     to_string_path(&ty_env_guard, &adt_path),
                     gen_type_id.to_string(),
                     trait_names,
-                ))]);
+                )));
+                continue;
             };
 
             let impl_adt = ctx
@@ -220,11 +122,8 @@ impl TraitsGenericAnalyzer {
 
                 for trait_method in trait_methods {
                     let method_name = trait_method.name.clone();
-
-                    let impl_method = if let Some(impl_method) = impl_methods.get(&method_name) {
-                        impl_method
-                    } else {
-                        return Err(vec![ctx.ast_ctx.err(format!(
+                    if !impl_methods.contains_key(&method_name) {
+                        errors.push(ctx.ast_ctx.err(format!(
                             "Struct \"{0}\" requires that its generic type \"{1}\" implements \
                             the trait \"{2}\". The type \"{3}\" is used as generic \"{1}\", \
                             but it does NOT implement the function \"{4}\" from the trait \"{2}\".",
@@ -233,24 +132,182 @@ impl TraitsGenericAnalyzer {
                             to_string_path(&ty_env_guard, &trait_path),
                             to_string_path(&ty_env_guard, &impl_path),
                             method_name
-                        ))]);
+                        )));
                     };
-                    let impl_method = impl_method.read().unwrap();
+                }
+            }
 
-                    if let Err(errs) = Self::verify_method(
-                        &ty_env_guard,
-                        &impl_method,
-                        trait_method,
-                        adt_path,
-                        &trait_path,
-                    ) {
-                        self.errors.extend(errs);
-                    }
+            for trait_path in trait_paths {
+                if !impl_adt
+                    .implemented_traits
+                    .contains(&ty_env_guard, DerefType::Deep, trait_path)
+                    .map_err(|err| vec![err])?
+                {
+                    errors.push(ctx.ast_ctx.err(format!(
+                        "ADT \"{0}\" requires that its generic type \"{1}\" implements \
+                        the trait \"{2}\". The type \"{3}\" is used as generic \"{1}\", \
+                        but it does NOT implement the required \"{2}\" trait.",
+                        to_string_path(&ty_env_guard, &adt_path),
+                        gen_name,
+                        to_string_path(&ty_env_guard, &trait_path),
+                        to_string_path(&ty_env_guard, &impl_path),
+                    )));
                 }
             }
         }
 
-        Ok(())
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn verify_fn_traits(
+        &mut self,
+        ctx: &TraverseCtx,
+        fn_call: &FnCall,
+    ) -> Result<(), Vec<LangError>> {
+        // TODO: Implement for fn pointers.
+        if fn_call.is_fn_ptr_call {
+            return Ok(());
+        }
+
+        let fn_call_gens = if let Some(gens) = &fn_call.generics {
+            gens
+        } else {
+            return Ok(());
+        };
+
+        let mut errors = Vec::default();
+        let ty_env_guard = ctx.ty_env.lock().unwrap();
+
+        let (func, adt_path) = if let Some(adt_type_id) = fn_call.method_adt {
+            let adt_path = get_ident(&ty_env_guard, adt_type_id)
+                .map_err(|err| vec![err])?
+                .unwrap();
+            let func = ctx
+                .ast_ctx
+                .get_method(&ty_env_guard, &adt_path, &fn_call.half_name(&ty_env_guard))
+                .map_err(|err| vec![err])?;
+            (func, Some(adt_path))
+        } else {
+            let fn_path = fn_call.module.clone_push(
+                &fn_call.name,
+                fn_call.generics.as_ref(),
+                fn_call.file_pos,
+            );
+            let func = ctx
+                .ast_ctx
+                .get_fn(&ty_env_guard, &fn_path)
+                .map_err(|err| vec![err])?;
+            (func, None)
+        };
+        let func = func.read().unwrap();
+
+        for (gen_name, gen_type_id) in fn_call_gens.iter_names().zip(fn_call_gens.iter_types()) {
+            // The `trait_paths` will contain the traits that the generic with
+            // name `gen_name` HAVE to implement according to the declarations
+            // on the function/method.
+            let trait_paths = if let Some(trait_paths) = func
+                .implements
+                .as_ref()
+                .map(|impls| impls.get(gen_name))
+                .flatten()
+            {
+                trait_paths
+            } else {
+                continue;
+            };
+
+            // The `gen_type_id` will be the instance type that has replaced the
+            // generic with name `gen_name`. This is the type that should implement
+            // the traits in `trait_tys`. I.e. the adt `impl_adt` should implement
+            // the methods specified in the `trait_tys`
+            let impl_adt_path = if let Ok(Some(path)) = get_ident(&ty_env_guard, *gen_type_id) {
+                path.clone()
+            } else {
+                let trait_names = trait_paths
+                    .iter()
+                    .map(|path| format!("\n * {:?}", path))
+                    .collect::<String>();
+
+                let mut err_msg = String::new();
+
+                if let Some(adt_path) = &adt_path {
+                    err_msg.push_str(&format!(
+                        "Method \"{}\" in ADT \"{}\"",
+                        &func.name,
+                        to_string_path(&ty_env_guard, &adt_path)
+                    ));
+                } else {
+                    let fn_path = func
+                        .module
+                        .clone_push(&func.name, None, Some(func.file_pos));
+                    err_msg.push_str(&format!(
+                        "Function \"{}\"",
+                        to_string_path(&ty_env_guard, &fn_path)
+                    ));
+                }
+
+                errors.push(ctx.ast_ctx.err(format!(
+                    "{0} has \"where\" clause for type \"{1}\" which isn't a ADT. \
+                    The type \"{1}\" can therefore not implement the required traits:{2}.",
+                    err_msg,
+                    to_string_type_id(&ty_env_guard, *gen_type_id).map_err(|err| vec![err])?,
+                    trait_names,
+                )));
+                continue;
+            };
+
+            let impl_adt = ctx
+                .ast_ctx
+                .get_adt(&ty_env_guard, &impl_adt_path)
+                .map_err(|e| vec![e])?;
+            let impl_adt = impl_adt.as_ref().read().unwrap();
+
+            for trait_path in trait_paths {
+                if !impl_adt
+                    .implemented_traits
+                    .contains(&ty_env_guard, DerefType::Deep, trait_path)
+                    .map_err(|err| vec![err])?
+                {
+                    let mut err_msg = String::new();
+
+                    if let Some(adt_path) = &adt_path {
+                        err_msg.push_str(&format!(
+                            "Method \"{}\" in ADT \"{}\"",
+                            &func.name,
+                            to_string_path(&ty_env_guard, &adt_path)
+                        ));
+                    } else {
+                        let fn_path = func
+                            .module
+                            .clone_push(&func.name, None, Some(func.file_pos));
+                        err_msg.push_str(&format!(
+                            "Function \"{}\"",
+                            to_string_path(&ty_env_guard, &fn_path)
+                        ));
+                    }
+
+                    errors.push(ctx.ast_ctx.err(format!(
+                        "{} requires that its generic type \"{1}\" implements the trait \"{2}\". \
+                        The type \"{3}\" is used as generic \"{1}\", but it does NOT implement \
+                        the required \"{2}\" trait.",
+                        err_msg,
+                        gen_name,
+                        to_string_path(&ty_env_guard, &trait_path),
+                        to_string_path(&ty_env_guard, &impl_adt_path),
+                    )));
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 
     /// Recursively checks the types contained in the given `ty`. If any of the
@@ -338,7 +395,7 @@ impl TraitsGenericAnalyzer {
     }
 }
 
-impl Visitor for TraitsGenericAnalyzer {
+impl Visitor for TraitGenericsAnalyzer {
     fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -354,6 +411,12 @@ impl Visitor for TraitsGenericAnalyzer {
             if let Err(errs) = self.check_adt_traits(ctx, *type_id, ctx.block_id) {
                 self.errors.extend(errs);
             }
+        }
+    }
+
+    fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
+        if let Err(errs) = self.verify_fn_traits(ctx, fn_call) {
+            self.errors.extend(errs);
         }
     }
 }

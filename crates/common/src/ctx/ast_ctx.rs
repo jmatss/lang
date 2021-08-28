@@ -1,6 +1,6 @@
 use std::{
     borrow::Borrow,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::Debug,
     sync::{Arc, RwLock, RwLockWriteGuard},
 };
@@ -506,7 +506,7 @@ impl AstCtx {
         &self,
         ty_env: &TyEnv,
         trait_name: &LangPath,
-    ) -> LangResult<Vec<String>> {
+    ) -> LangResult<HashSet<String>> {
         let trait_ = self.get_trait(ty_env, trait_name)?;
         let trait_ = trait_.as_ref().read().unwrap();
 

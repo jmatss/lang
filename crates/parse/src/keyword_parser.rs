@@ -1062,6 +1062,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         // TODO: Allow to set default bodies for the functions?
         let mut methods = Vec::default();
+        let mut method_names = HashSet::new();
+        let mut duplicate_method_names = HashSet::new();
 
         let mut modifiers = Vec::default();
 
@@ -1082,8 +1084,14 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 LexTokenKind::Kw(Kw::Function) => {
                     let method = self.parse_fn_proto(modifiers, lex_token.file_pos)?;
                     file_pos.set_end(&method.file_pos)?;
-                    methods.push(method);
                     modifiers = Vec::default();
+
+                    if method_names.contains(&method.name) {
+                        duplicate_method_names.insert(method.name.clone());
+                    } else {
+                        method_names.insert(method.name.clone());
+                    }
+                    methods.push(method);
                 }
 
                 // End of trait block.
@@ -1099,6 +1107,24 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                     ))
                 }
             }
+        }
+
+        if !duplicate_method_names.is_empty() {
+            let trait_path = module.clone_push(&name, None, Some(file_pos));
+            let trait_name = to_string_path(&self.iter.ty_env.lock().unwrap(), &trait_path);
+            let mut method_names = duplicate_method_names
+                .iter()
+                .map(|name| format!(" * {}", name))
+                .collect::<Vec<_>>();
+            method_names.sort();
+            return Err(self.iter.err(
+                format!(
+                    "Found mutiple methods with same name in trait \"{}\":\n{}",
+                    trait_name,
+                    method_names.join("\n")
+                ),
+                Some(file_pos),
+            ));
         }
 
         let generic_names = generics.map(|gens| gens.iter_names().cloned().collect::<Vec<_>>());
@@ -1147,7 +1173,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
     /// Parses a ADT body i.e. the variables and methods belonging to the
     /// specific ADT.
-    ///   "{ [<VARIABLE> | <FUNC>] ... }"
+    ///   "[{ [<VARIABLE> | <FUNC>] ... }]"
     /// The returned vector is the methods parsed in the body (this will become
     /// the body tokens of the ADT).
     fn parse_adt_body(
@@ -1224,10 +1250,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         Ok(method_tokens)
     }
 
-    // TODO: Generics
     /// Parses a implement block. A "impl" block implements a specific trait
     /// for a specific ADT.
-    ///   "impl <ADT_NAME>: <TRAIT_NAME> { [<FUNC> ...] }"
+    ///   "impl <ADT_NAME>: <TRAIT_NAME> [<GENERIC_IMPLS>] { [<FUNC> ...] }"
     /// The "impl" keyword has already been consumed when this function is called.
     fn parse_impl(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let adt_path = self
@@ -1250,7 +1275,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         //       `trait_path`? Which FilePosition should be used?
         let trait_path = self
             .iter
-            .parse_path(&mut file_pos, GenericsKind::Decl, true)?;
+            .parse_path(&mut file_pos, GenericsKind::Impl, true)?;
 
         let header = BlockHeader::Implement(adt_path, trait_path);
         let impl_token = self.iter.next_block(header)?;

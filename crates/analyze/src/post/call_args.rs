@@ -21,8 +21,6 @@ use common::{
 /// arguments so that they are put in the correct index position so that
 /// the codegen works correctly. It also assigns any default values found in the
 /// function parameters to the current function call (if expected).
-/// It also wraps "this" in a pointer if the modifier of the function that it is
-/// calling expects this as a pointer.
 pub struct CallArgs {
     errors: Vec<LangError>,
 }

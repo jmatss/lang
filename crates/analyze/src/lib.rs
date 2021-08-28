@@ -4,7 +4,6 @@ mod post;
 mod pre;
 mod ty;
 pub mod util;
-//mod unitialized;
 
 use std::{collections::HashMap, io::Write, sync::Mutex, time::Instant};
 
@@ -26,7 +25,7 @@ use mid::{
 };
 use post::{
     call_args::CallArgs, clean_up::clean_up, match_exhaust::MatchExhaustAnalyzer,
-    method_this::MethodThisAnalyzer, traits_generic::TraitsGenericAnalyzer,
+    method_this::MethodThisAnalyzer, trait_generics::TraitGenericsAnalyzer,
     union_init_arg::UnionInitArg,
 };
 use pre::{indexing::IndexingAnalyzer, main_args::MainArgsAnalyzer};
@@ -34,7 +33,11 @@ use ty::{inferencer::TypeInferencer, traits_fn::TraitsFnAnalyzer};
 use util::order::dependency_order_from_ctx;
 
 use crate::{
-    post::{ext_struct_init::ExtStructInit, format::FormatParser, void::VoidAnalyzer},
+    mid::trait_impl::TraitImplAnalyzer,
+    post::{
+        ext_struct_init::ExtStructInit, format::FormatParser, trait_methods::TraitMethodsAnalyzer,
+        void::VoidAnalyzer,
+    },
     pre::signed_literals::SignedLiteralsAnalyzer,
     ty::{
         gen::{
@@ -118,6 +121,7 @@ pub fn analyze<'a>(
     traverse!(&mut ctx, ast_root, quiet, PathResolver::new());
     traverse!(&mut ctx, ast_root, quiet, GenericsAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, DeferAnalyzer::new());
+    traverse!(&mut ctx, ast_root, quiet, TraitImplAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, TypeInferencer::new());
     traverse!(&mut ctx, ast_root, quiet, TypeSolver::new());
     traverse!(&mut ctx, ast_root, quiet, PrimitiveToAdtAnalyzer::new());
@@ -160,10 +164,11 @@ pub fn analyze<'a>(
     traverse!(&mut ctx, ast_root, quiet, ExtStructInit::new());
     traverse!(&mut ctx, ast_root, quiet, MethodThisAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, UnionInitArg::new());
+    traverse!(&mut ctx, ast_root, quiet, TraitMethodsAnalyzer::new());
+    traverse!(&mut ctx, ast_root, quiet, TraitGenericsAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, CallArgs::new());
     traverse!(&mut ctx, ast_root, quiet, FormatParser::new());
     traverse!(&mut ctx, ast_root, quiet, MatchExhaustAnalyzer::new());
-    traverse!(&mut ctx, ast_root, quiet, TraitsGenericAnalyzer::new());
 
     clean_up(&mut ast_ctx);
 

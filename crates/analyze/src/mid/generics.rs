@@ -87,10 +87,10 @@ impl Visitor for GenericsAnalyzer {
             ..
         } = &block
         {
-            let struct_ = struct_.as_ref().read().unwrap();
+            let struct_ = struct_.read().unwrap();
             if let (Some(generics), members) = (&struct_.generics, &struct_.members) {
                 for member in members {
-                    if let Some(type_id) = member.as_ref().write().unwrap().ty.as_mut() {
+                    if let Some(type_id) = member.write().unwrap().ty.as_mut() {
                         if let Err(err) =
                             replace_gens(&mut ctx.ty_env.lock().unwrap(), *type_id, generics)
                         {
@@ -108,14 +108,88 @@ impl Visitor for GenericsAnalyzer {
             ..
         } = &block
         {
-            let union = union.as_ref().read().unwrap();
+            let union = union.read().unwrap();
             if let (Some(generics), members) = (&union.generics, &union.members) {
                 for member in members {
-                    if let Some(type_id) = member.as_ref().write().unwrap().ty.as_mut() {
+                    if let Some(type_id) = member.write().unwrap().ty.as_mut() {
                         if let Err(err) =
                             replace_gens(&mut ctx.ty_env.lock().unwrap(), *type_id, generics)
                         {
                             self.errors.push(err);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn visit_trait(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Trait(trait_),
+            ..
+        } = &block
+        {
+            let trait_ = trait_.read().unwrap();
+            let trait_gens = if let Some(gen_names) = &trait_.generics {
+                let mut gens = Generics::default();
+                for gen_name in gen_names {
+                    gens.insert_name(gen_name.clone());
+                }
+                Some(gens)
+            } else {
+                None
+            };
+
+            for method in &trait_.methods {
+                if let Some(params) = &method.parameters {
+                    for param in params {
+                        let param = param.read().unwrap();
+                        if let Some(param_type_id) = param.ty {
+                            // Replace generics declared on trait in method params.
+                            if let Some(trait_gens) = &trait_gens {
+                                if let Err(err) = replace_gens(
+                                    &mut ctx.ty_env.lock().unwrap(),
+                                    param_type_id,
+                                    trait_gens,
+                                ) {
+                                    self.errors.push(err);
+                                    return;
+                                }
+
+                                // Replace generics declared on method in method params.
+                                if let Some(method_gens) = &method.generics {
+                                    if let Err(err) = replace_gens(
+                                        &mut ctx.ty_env.lock().unwrap(),
+                                        param_type_id,
+                                        method_gens,
+                                    ) {
+                                        self.errors.push(err);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(ret_type_id) = &method.ret_type {
+                    // Replace generics declared on trait in method return type
+                    if let Some(trait_gens) = &trait_gens {
+                        if let Err(err) =
+                            replace_gens(&mut ctx.ty_env.lock().unwrap(), *ret_type_id, trait_gens)
+                        {
+                            self.errors.push(err);
+                            return;
+                        }
+                    }
+
+                    // Replace generics declared on method in method return type.
+                    if let Some(method_gens) = &method.generics {
+                        if let Err(err) =
+                            replace_gens(&mut ctx.ty_env.lock().unwrap(), *ret_type_id, method_gens)
+                        {
+                            self.errors.push(err);
+                            return;
                         }
                     }
                 }

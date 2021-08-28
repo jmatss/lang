@@ -4,6 +4,7 @@ pub(super) mod ext_struct_init;
 pub(super) mod format;
 pub(super) mod match_exhaust;
 pub(super) mod method_this;
-pub(super) mod traits_generic;
+pub(super) mod trait_generics;
+pub(super) mod trait_methods;
 pub(super) mod union_init_arg;
 pub(super) mod void;

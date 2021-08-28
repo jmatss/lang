@@ -204,11 +204,12 @@ impl Visitor for PathResolver {
         {
             let ty_env_guard = ctx.ty_env.lock().unwrap();
 
-            if let Ok(full_path) =
-                ctx.ast_ctx
-                    .calculate_adt_full_path(&ty_env_guard, adt_path, ctx.block_id)
-            {
-                *adt_path = full_path;
+            if let Ok(full_path) = ctx.ast_ctx.calculate_adt_full_path(
+                &ty_env_guard,
+                &adt_path.without_gens(),
+                ctx.block_id,
+            ) {
+                *adt_path = full_path.with_gens_opt(adt_path.gens().cloned());
             } else {
                 let mut err = ctx.ast_ctx.err_adt(
                     &ty_env_guard,
@@ -225,11 +226,12 @@ impl Visitor for PathResolver {
                 }
             }
 
-            if let Ok(full_path) =
-                ctx.ast_ctx
-                    .calculate_trait_full_path(&ty_env_guard, trait_path, ctx.block_id)
-            {
-                *trait_path = full_path
+            if let Ok(full_path) = ctx.ast_ctx.calculate_trait_full_path(
+                &ty_env_guard,
+                &trait_path.without_gens(),
+                ctx.block_id,
+            ) {
+                *trait_path = full_path.with_gens_opt(trait_path.gens().cloned())
             } else {
                 let mut err = ctx.ast_ctx.err_trait(
                     &ty_env_guard,

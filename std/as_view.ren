@@ -1,6 +1,8 @@
 mod std
 
+use std::StringView
+
 /// A trait used for types that can be converted to a `StringView`.
 trait AsView {
-    fn {this} as_view();
+    fn {this} as_view() -> StringView
 }

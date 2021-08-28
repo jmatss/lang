@@ -201,6 +201,7 @@ fn main() -> LangResult<()> {
     let mut analyze_ctx = match analyze(&mut ast_root, &TY_ENV, file_info, opts.quiet) {
         Ok(analyze_ctx) => analyze_ctx,
         Err(errs) => {
+            eprintln!();
             for e in errs {
                 eprintln!("[ERROR] {}", e);
             }
