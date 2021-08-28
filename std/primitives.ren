@@ -2,9 +2,8 @@
  * Auto generated with `generate_primitives.py`, do not edit manually.
  * TODO: f32 & f64
  */
-mod std
-
 use std::Result
+use std::String
 use std::StringView
 
 /// Converts a `digit` to ascii.

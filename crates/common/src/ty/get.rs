@@ -60,10 +60,11 @@ pub fn get_generic_ident(ty_env: &TyEnv, id: TypeId) -> LangResult<&str> {
 /// Returns the identifier if this type represents a ADT.
 /// If this type isn't a ADT, None is returned.
 pub fn get_ident(ty_env: &TyEnv, id: TypeId) -> LangResult<Option<LangPath>> {
-    match ty_env.ty(id)? {
+    let ty = ty_env.ty(id)?;
+    match ty {
         Ty::CompoundType(inner_ty, ..) => Ok(inner_ty.get_ident()),
         _ => Err(LangError::new(
-            format!("Type with ID {} not a CompoundType.", id),
+            format!("Type with ID {} not a CompoundType: {:#?}", id, ty),
             LangErrorKind::GeneralError,
             None,
         )),

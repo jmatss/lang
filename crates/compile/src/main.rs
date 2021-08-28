@@ -61,6 +61,7 @@ std_files!(
     "assert.ren",
     "disposable.ren",
     "either.ren",
+    "eq.ren",
     "mem.ren",
     "optional.ren",
     "primitives.ren",
