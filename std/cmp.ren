@@ -2,9 +2,51 @@ mod std
 
 // TODO: The function currently takes both inputs as value.
 //       Should there be a function taking larger ADTs by ref?
-// TODO: Auto convert `>`, `<`, `>=` and `<=` operations into calls
-//       to the `cmp` function of the `Cmp<T>` trait.
 /// A trait used for types that can be be compared with the type `T`.
+///
+/// Any comparison of a ADT with either `>`, `<`, `>=` or `<=` will be
+/// converted into a call to the `cmp` function of the `Cmp<T>` trait.
+///
+/// ```
+/// pub struct TestStruct {
+///     var member: i8
+/// }
+///
+/// impl TestStruct: Cmp<TestStruct> {
+///     pub fn this cmp(other: TestStruct) -> Order {
+///         if this.member < other.member {
+///             return Order::Lt
+///         } else this.member > other.member {
+///             return Order::Gt
+///         } else {
+///             return Order::Eq
+///         }
+///     }
+/// }
+///
+/// pub fn main() -> i32 {
+///     var ts1 = TestStruct { 3 }
+///     var ts2 = TestStruct { 5 }
+/// 
+///     // The two lines below are equivalent.
+///     var gt1 = (ts1 > ts2)
+///     var gt2 = (ts1.cmp(ts2) == Order::Gt)
+///
+///     // The two lines below are equivalent.
+///     var lt1 = (ts1 < ts2)
+///     var lt2 = (ts1.cmp(ts2) == Order::Lt)
+/// 
+///     // The two lines below are equivalent.
+///     var ge1 = (ts1 >= ts2)
+///     var ge2 = (ts1.cmp(ts2) == Order::Gt || ts1.cmp(ts2) == Order::Eq)
+///
+///     // The two lines below are equivalent.
+///     var le1 = (ts1 <= ts2)
+///     var le2 = (ts1.cmp(ts2) == Order::Lt || ts1.cmp(ts2) == Order::Eq)
+/// 
+///     return 0
+/// }
+/// ```
 pub trait Cmp<T> {
     pub fn this cmp(other: T) -> Order
 }

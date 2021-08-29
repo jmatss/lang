@@ -9,3 +9,4 @@ pub(super) mod trait_generics;
 pub(super) mod trait_methods;
 pub(super) mod union_init_arg;
 pub(super) mod void;
+pub(super) mod cmp;

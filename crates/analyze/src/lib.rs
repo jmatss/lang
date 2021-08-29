@@ -35,7 +35,7 @@ use util::order::dependency_order_from_ctx;
 use crate::{
     mid::trait_impl::TraitImplAnalyzer,
     post::{
-        eq::EqAnalyzer, ext_struct_init::ExtStructInit, format::FormatParser,
+        cmp::CmpAnalyzer, eq::EqAnalyzer, ext_struct_init::ExtStructInit, format::FormatParser,
         trait_methods::TraitMethodsAnalyzer, void::VoidAnalyzer,
     },
     pre::signed_literals::SignedLiteralsAnalyzer,
@@ -166,6 +166,7 @@ pub fn analyze<'a>(
     traverse!(&mut ctx, ast_root, quiet, UnionInitArg::new());
     traverse!(&mut ctx, ast_root, quiet, TraitMethodsAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, TraitGenericsAnalyzer::new());
+    traverse!(&mut ctx, ast_root, quiet, CmpAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, EqAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, CallArgs::new());
     traverse!(&mut ctx, ast_root, quiet, FormatParser::new());
