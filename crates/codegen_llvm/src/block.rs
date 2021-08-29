@@ -390,33 +390,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             self.compile(token)?;
         }
 
-        // Add a "invisible" return at the end of the last block if this is a
-        // function with no return type. Also check to see if this block
-        // contains a return stmt even though it should NOT return anything.
-        if func.ret_type.is_none() {
-            if let Some(last_block) = fn_val.get_last_basic_block() {
-                if last_block.get_terminator().is_none() {
-                    self.builder.position_at_end(last_block);
-                    self.builder.build_return(None);
-                    Ok(())
-                } else {
-                    Err(self.err(
-                        format!(
-                            "Found return stmt in func \"{}\", but it has no return type.",
-                            &func.name
-                        ),
-                        Some(file_pos.to_owned()),
-                    ))
-                }
-            } else {
-                Err(self.err(
-                    format!("No basic block in func: {}", &func.name),
-                    Some(file_pos.to_owned()),
-                ))
-            }
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     /// Compiles a function prototype.

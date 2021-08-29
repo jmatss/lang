@@ -35,8 +35,9 @@ use util::order::dependency_order_from_ctx;
 use crate::{
     mid::trait_impl::TraitImplAnalyzer,
     post::{
-        cmp::CmpAnalyzer, eq::EqAnalyzer, ext_struct_init::ExtStructInit, format::FormatParser,
-        trait_methods::TraitMethodsAnalyzer, void::VoidAnalyzer,
+        cmp::CmpAnalyzer, eq::EqAnalyzer, ext_struct_init::ExtStructInit,
+        fn_return::FnReturnAnalyzer, format::FormatParser, trait_methods::TraitMethodsAnalyzer,
+        void::VoidAnalyzer,
     },
     pre::signed_literals::SignedLiteralsAnalyzer,
     ty::{
@@ -160,6 +161,7 @@ pub fn analyze<'a>(
     );
 
     traverse!(&mut ctx, ast_root, quiet, GenericTysSolvedChecker::new());
+    traverse!(&mut ctx, ast_root, quiet, FnReturnAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, VoidAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, ExtStructInit::new());
     traverse!(&mut ctx, ast_root, quiet, MethodThisAnalyzer::new());

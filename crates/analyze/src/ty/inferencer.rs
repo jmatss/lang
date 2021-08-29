@@ -1,7 +1,4 @@
-use std::{
-    borrow::Borrow,
-    sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
 
 use log::{debug, log_enabled, Level};
 
@@ -14,10 +11,7 @@ use common::{
         stmt::Stmt,
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
-    ty::{
-        inner_ty::InnerTy, substitution_sets::sub_sets_debug_print, to_string::to_string_type_id,
-        ty::Ty, type_id::TypeId, type_info::TypeInfo,
-    },
+    ty::{substitution_sets::sub_sets_debug_print, to_string::to_string_type_id, type_id::TypeId},
 };
 
 use super::{
@@ -202,45 +196,50 @@ impl Visitor for TypeInferencer {
     fn visit_return(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::Return(expr_opt, ..) = stmt {
             if let Some(func) = &self.cur_func {
-                let func_ret_type_id =
-                    if let Some(type_id) = &func.as_ref().borrow().read().unwrap().ret_type {
-                        *type_id
-                    } else {
-                        // TODO: Where should this pos be fetched from?
-                        match ctx
-                            .ty_env
-                            .lock()
-                            .unwrap()
-                            .id(&Ty::CompoundType(InnerTy::Void, TypeInfo::None))
-                        {
-                            Ok(type_id) => type_id,
-                            Err(err) => {
-                                self.errors.push(err);
-                                return;
-                            }
+                let func_name = func.read().unwrap().name.clone();
+                let func_ret_type_id = func.read().unwrap().ret_type;
+
+                let expr_type_id = if let Some(expr) = expr_opt {
+                    match expr.get_expr_type() {
+                        Ok(expr_type_id) => Some(expr_type_id),
+                        Err(err) => {
+                            self.errors.push(err);
+                            return;
                         }
-                    };
-
-                let expr = if let Some(expr) = expr_opt {
-                    expr
-                } else {
-                    unreachable!("expr None -- stmt: {:#?}", stmt);
-                };
-
-                let expr_type_id = match expr.get_expr_type() {
-                    Ok(expr_type_id) => expr_type_id,
-                    Err(err) => {
-                        self.errors.push(err);
-                        return;
                     }
+                } else {
+                    None
                 };
 
-                self.insert_constraint(ctx, func_ret_type_id, expr_type_id);
+                match (func_ret_type_id, expr_type_id) {
+                    (Some(func_ret_type_id), Some(expr_type_id)) => {
+                        self.insert_constraint(ctx, func_ret_type_id, expr_type_id);
+                    }
+
+                    (None, Some(_)) => {
+                        self.errors.push(ctx.ast_ctx.err(format!(
+                            "The function \"{}\" have no return type, but a return \
+                            statement in the function have specified a return value.",
+                            func_name
+                        )));
+                    }
+
+                    (Some(ret_type_id), None) => {
+                        self.errors.push(ctx.ast_ctx.err(format!(
+                            "The function \"{}\" have a return type ({}), but a return \
+                            statement in the function have an empty return value.",
+                            func_name,
+                            to_string_type_id(&ctx.ty_env.lock().unwrap(), ret_type_id).unwrap()
+                        )));
+                    }
+
+                    (None, None) => return,
+                }
             } else {
-                let err = ctx
-                    .ast_ctx
-                    .err("Unable to get cur func when looking at return stmt type.".into());
-                self.errors.push(err);
+                self.errors.push(
+                    ctx.ast_ctx
+                        .err("Unable to get cur func when looking at return stmt type.".into()),
+                );
             }
         }
     }
