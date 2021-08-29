@@ -122,12 +122,11 @@ impl GenericTysSolvedChecker {
             | Ty::UnknownAdtMember(type_id_i, ..)
             | Ty::UnknownAdtMethod(type_id_i, ..)
             | Ty::UnknownFnArgument(Some(type_id_i), ..)
-            | Ty::UnknownFnGeneric(Some(type_id_i), ..)
             | Ty::UnknownArrayMember(type_id_i, ..) => {
                 self.assert_generics_solved(ty_env, type_id_i, traverse_file_pos)?;
             }
 
-            Ty::Any(..) | Ty::UnknownFnArgument(None, ..) | Ty::UnknownFnGeneric(None, ..) => (),
+            Ty::Any(..) | Ty::UnknownFnArgument(None, ..) => (),
         }
 
         Ok(())

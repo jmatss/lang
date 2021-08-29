@@ -336,7 +336,6 @@ fn replace_gens(ty_env: &mut TyEnv, id: TypeId, generics: &Generics) -> LangResu
         | Ty::UnknownAdtMember(type_id, ..)
         | Ty::UnknownAdtMethod(type_id, ..)
         | Ty::UnknownFnArgument(Some(type_id), ..)
-        | Ty::UnknownFnGeneric(Some(type_id), ..)
         | Ty::UnknownArrayMember(type_id, ..) => {
             replace_gens(ty_env, type_id, generics)?;
         }

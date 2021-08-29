@@ -16,7 +16,6 @@ use common::{
         is::{is_any, is_generic, is_solved},
         replace::{replace_gen_impls, replace_gens_with_gen_instances},
         substitution_sets::{promote, union},
-        to_string::to_string_path,
         ty::{SolveCond, Ty},
         ty_env::TyEnv,
         type_id::TypeId,
@@ -157,16 +156,6 @@ fn insert_constraint_inner(
         (
             Ty::UnknownFnArgument(Some(ty_a_inner), a_path, a_idx_or_name, ..),
             Ty::UnknownFnArgument(Some(ty_b_inner), b_path, b_idx_or_name, ..),
-        ) if path_eq(ty_env, &a_path, &b_path, DerefType::Deep)?
-            && a_idx_or_name == b_idx_or_name =>
-        {
-            insert_constraint_inner(ty_env, ty_a_inner, ty_b_inner)?;
-            insert_constraint(ty_env, ty_a_inner, ty_b_inner)
-        }
-
-        (
-            Ty::UnknownFnGeneric(Some(ty_a_inner), a_path, a_idx_or_name, ..),
-            Ty::UnknownFnGeneric(Some(ty_b_inner), b_path, b_idx_or_name, ..),
         ) if path_eq(ty_env, &a_path, &b_path, DerefType::Deep)?
             && a_idx_or_name == b_idx_or_name =>
         {
@@ -317,10 +306,6 @@ fn solve_manual(
             solve_unknown_method_argument(ty_env, ast_ctx, type_id, seen_type_ids)
         }
         Ty::UnknownFnArgument(None, ..) => Ok(type_id),
-        Ty::UnknownFnGeneric(Some(_), ..) => {
-            solve_unknown_method_generic(ty_env, ast_ctx, type_id, seen_type_ids)
-        }
-        Ty::UnknownFnGeneric(None, ..) => Ok(type_id),
         Ty::UnknownArrayMember(..) => {
             solve_unknown_array_member(ty_env, ast_ctx, type_id, seen_type_ids)
         }
@@ -888,86 +873,6 @@ fn solve_unknown_fn_argument(
     Ok(inf_new_type_id)
 }
 
-fn solve_unknown_method_generic(
-    ty_env: &mut TyEnv,
-    ast_ctx: &AstCtx,
-    type_id: TypeId,
-    seen_type_ids: &mut HashSet<TypeId>,
-) -> LangResult<TypeId> {
-    let mut ty_clone = ty_env.ty_clone(type_id)?;
-
-    debug!(
-        "solve_unknown_method_generic -- type_id: {}, seen_type_ids: {:?}, ty_clone: {:?}",
-        type_id, seen_type_ids, ty_clone
-    );
-
-    let (adt_type_id, method_path, gen_idx_or_name, type_info) = if let Ty::UnknownFnGeneric(
-        Some(adt_type_id),
-        method_path,
-        gen_idx_or_name,
-        _,
-        type_info,
-    ) = &mut ty_clone
-    {
-        (adt_type_id, method_path, gen_idx_or_name, type_info)
-    } else {
-        unreachable!()
-    };
-    let method_name = method_path.last().unwrap().name();
-
-    let adt_path = match solve_adt_type(ty_env, ast_ctx, *adt_type_id, seen_type_ids)? {
-        AdtSolveStatus::Solved(adt_path) => adt_path,
-        AdtSolveStatus::GenericInstance(gen_adt_type_id) => {
-            *adt_type_id = gen_adt_type_id;
-            let new_type_id = ty_env.id(&ty_clone)?;
-            insert_constraint(ty_env, type_id, new_type_id)?;
-            return Ok(new_type_id);
-        }
-        AdtSolveStatus::Progress(_) | AdtSolveStatus::NoProgress => return Ok(type_id),
-    };
-
-    let method = ast_ctx.get_method(&ty_env, &adt_path.without_gens(), method_name)?;
-    let method = method.read().unwrap();
-
-    let gen_name = match gen_idx_or_name {
-        Either::Left(idx) => {
-            if let Some(generic_name) = method
-                .generics
-                .as_ref()
-                .map(|gens| gens.get_name(*idx))
-                .flatten()
-            {
-                generic_name
-            } else {
-                let adt_name = to_string_path(&ty_env, &adt_path);
-                let method_name = to_string_path(&ty_env, &method_path);
-                return Err(ast_ctx.err(format!(
-                    "Method call specified generic at index {}. \
-                    Method \"{}\" in ADT \"{}\" has no generic at that index.",
-                    gen_idx_or_name, method_name, adt_name
-                )));
-            }
-        }
-        Either::Right(gen_name) => gen_name.clone(),
-    };
-
-    let unique_id = ty_env.new_unique_id();
-    let mut new_type_id =
-        ty_env.id(&Ty::GenericInstance(gen_name, unique_id, type_info.clone()))?;
-
-    if let Some(adt_gens) = adt_path.gens() {
-        if let Some(new_new_type_id) = replace_gen_impls(ty_env, ast_ctx, new_type_id, adt_gens)? {
-            new_type_id = new_new_type_id;
-        }
-    }
-
-    solve_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
-    let inf_new_type_id = ty_env.inferred_type(new_type_id)?;
-
-    insert_constraint(ty_env, type_id, inf_new_type_id)?;
-    Ok(inf_new_type_id)
-}
-
 fn solve_unknown_array_member(
     ty_env: &mut TyEnv,
     ast_ctx: &AstCtx,
@@ -1119,18 +1024,7 @@ pub fn new_gen_impls(
                 unique_id,
                 type_info.clone(),
             ))?;
-
             new_gens.insert(gen_name.clone(), type_id);
-
-            let unique_id = ty_env.new_unique_id();
-            let unknown_gen_type_id = ty_env.id(&Ty::UnknownFnGeneric(
-                adt_type_id,
-                method_path.clone(),
-                Either::Right(gen_name.clone()),
-                unique_id,
-                TypeInfo::None,
-            ))?;
-            insert_constraint(ty_env, unknown_gen_type_id, type_id)?;
         }
 
         Ok(Some(new_gens))

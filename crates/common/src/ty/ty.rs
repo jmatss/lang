@@ -90,19 +90,6 @@ pub enum Ty {
         TypeInfo,
     ),
 
-    /// Unknown generic argument for either a function or method.
-    /// If this is a method, the type of the ADT will be set as Some "TypeId".
-    /// The "Langpath" is the module+name of the fn/method and the
-    /// "Either<usize, String>" is either the index or the name of the generic
-    /// argument in the fn call.
-    UnknownFnGeneric(
-        Option<TypeId>,
-        LangPath,
-        Either<usize, String>,
-        UniqueId,
-        TypeInfo,
-    ),
-
     /// Unknown type of array member of array with type "TypeId".
     UnknownArrayMember(TypeId, UniqueId, TypeInfo),
 }
@@ -184,12 +171,8 @@ impl TyEnvHash for Ty {
                 10.hash(state);
                 unique_id.hash(state);
             }
-            Ty::UnknownFnGeneric(.., unique_id, _) => {
-                11.hash(state);
-                unique_id.hash(state);
-            }
             Ty::UnknownArrayMember(_, unique_id, _) => {
-                12.hash(state);
+                11.hash(state);
                 unique_id.hash(state);
             }
         }
@@ -229,7 +212,6 @@ impl Ty {
             | Ty::UnknownAdtMember(.., type_info)
             | Ty::UnknownAdtMethod(.., type_info)
             | Ty::UnknownFnArgument(.., type_info)
-            | Ty::UnknownFnGeneric(.., type_info)
             | Ty::UnknownArrayMember(.., type_info) => type_info,
         }
     }
@@ -247,7 +229,6 @@ impl Ty {
             | Ty::UnknownAdtMember(.., type_info)
             | Ty::UnknownAdtMethod(.., type_info)
             | Ty::UnknownFnArgument(.., type_info)
-            | Ty::UnknownFnGeneric(.., type_info)
             | Ty::UnknownArrayMember(.., type_info) => type_info,
         }
     }

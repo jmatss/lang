@@ -282,29 +282,6 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
         }
     }
 
-    // Insert constraints between the function call generic type and
-    // the method generic types that will be figured out later.
-    if let Some(gens) = &method_call.generics {
-        let method_path = LangPath::new(
-            vec![LangPathPart(method_call.name.clone(), None)],
-            method_call.file_pos,
-        );
-
-        for (idx, type_id) in gens.iter_types().enumerate() {
-            let type_id_file_pos = get_file_pos(&ty_env_guard, *type_id).cloned();
-
-            let unique_id = ty_env_guard.new_unique_id();
-            let unknown_gen_type_id = ty_env_guard.id(&Ty::UnknownFnGeneric(
-                Some(adt_type_id),
-                method_path.clone(),
-                Either::Left(idx),
-                unique_id,
-                TypeInfo::DefaultOpt(type_id_file_pos),
-            ))?;
-
-            insert_constraint(&mut ty_env_guard, unknown_gen_type_id, *type_id)?;
-        }
-    }
     // The expected return type of the method call.
     let unique_id = ty_env_guard.new_unique_id();
     ty_env_guard.id(&Ty::UnknownAdtMethod(

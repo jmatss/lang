@@ -169,19 +169,6 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (Ty::UnknownFnArgument(..), _) => Ok(Ordering::Greater),
         (_, Ty::UnknownFnArgument(..)) => Ok(Ordering::Less),
 
-        (
-            Ty::UnknownFnGeneric(_, _, _, unique_id_a, ..),
-            Ty::UnknownFnGeneric(_, _, _, unique_id_b, ..),
-        ) => {
-            if unique_id_a != unique_id_b {
-                Ok(unique_id_a.cmp(unique_id_b))
-            } else {
-                Ok(Ordering::Equal)
-            }
-        }
-        (Ty::UnknownFnGeneric(..), _) => Ok(Ordering::Greater),
-        (_, Ty::UnknownFnGeneric(..)) => Ok(Ordering::Less),
-
         (Ty::CompoundType(inner_a, info_a), Ty::CompoundType(inner_b, info_b))
             if inner_a.is_unknown_ident() && inner_b.is_unknown_ident() =>
         {
