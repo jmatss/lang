@@ -62,12 +62,28 @@ The batch file `scripts/run_tests.bat` can be used to compile and run the system
 ```
 
 ### String
-Represented as a C string. The type is a pointer to the type `u8` and the string is null-terminated.
+There are three different string types that are used in the languange. All three have 
+
+#### std::String
+A `std::String` is a mutable heap allocated string. The struct contains a pointer to the heap allocation, the size of the heap allocation and the length of the string in bytes. After use the string needs to be deallocated with a call to its `deinit` function.
 ```
-"A C string"
+var str: std::String = s"A heap allocated string"
+str.&.deinit()
 ```
 
-*TODO: A plain `"..."` string should probably initialize a std::String or std::StringView. Might make sense to have a syntax similar to `c"..."` for creating a C string*
+#### std::StringView
+Represents a immutable "view" of a string. The struct contains a pointer and the length of the string in bytes. Since the `std::StringView` isn't in charge of the underlying memory of the string(/pointer), one needs to be careful to not use the `std::StringView` longer than the lifetime of the underlying string(/pointer).
+This should be the preferred string representation in most situation. Creating a "normal" string literal will give back a `std::StringView` to access/view the static string literal.
+```
+var view: std::StringView = "A static string literal that is accessable through the StringView"
+```
+
+### C-string
+A null-terminated C string. The type of the C string is a `u8` pointer and is used for interoperability with C code.
+```
+var c_str: {u8} = c"A null-terminated string literal"
+```
+
 
 ### Character
 UTF-8 char, represented with type `i32`.
