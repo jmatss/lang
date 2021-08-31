@@ -29,6 +29,8 @@ FLAGS:
     -h, --help        Prints help information
     -l, --llvm        Set to dump/print the generated LLVM IR code.
     -O, --optimize    Set to run optimization of the LLVM IR.
+    -q, --quiet       Set to not print step progress to stdout.
+    -v, --validate    Set to only validate the code and skip code generation.
     -V, --version     Prints version information
 
 OPTIONS:
@@ -36,6 +38,7 @@ OPTIONS:
                              relative to this file path.
     -m, --module <module>    Set the name of the LLVM module. [default: lang_module]
     -o, --output <NAME>      The output name of the produced object file. [default: a.o]
+    -t, --triple <triple>    Target triple.
 
 ARGS:
     <INPUTS>...    List of input files.
