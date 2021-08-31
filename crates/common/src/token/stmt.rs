@@ -58,52 +58,6 @@ pub enum ExternalDecl {
     Struct(Arc<RwLock<Adt>>),
 }
 
-/*
-impl Hash for Stmt {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            Stmt::Return(a, b) => {
-                a.hash(state);
-                b.hash(state);
-            }
-            Stmt::Break(a) | Stmt::Continue(a) => {
-                a.hash(state);
-            }
-            Stmt::Use(a) | Stmt::Module(a) => {
-                a.hash(state);
-            }
-            Stmt::Yield(a, b) | Stmt::Defer(a, b) => {
-                a.hash(state);
-                b.hash(state);
-            }
-            Stmt::DeferExec(a) => {
-                a.hash(state);
-            }
-            Stmt::Assignment(a, b, c, d) => {
-                a.hash(state);
-                b.hash(state);
-                c.hash(state);
-                d.hash(state);
-            }
-            Stmt::VariableDecl(a, b) => {
-                a.as_ref().read().unwrap().hash(state);
-                b.hash(state);
-            }
-            Stmt::ExternalDecl(a, b) => {
-                let func = a.as_ref().read().unwrap();
-                func.name.hash(state);
-                func.generics.hash(state);
-                func.ret_type.hash(state);
-                func.modifiers.hash(state);
-                func.is_var_arg.hash(state);
-                func.method_adt.hash(state);
-                b.hash(state);
-            }
-        }
-    }
-}
-*/
-
 impl Stmt {
     pub fn file_pos(&self) -> Option<&FilePosition> {
         match self {
