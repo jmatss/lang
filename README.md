@@ -62,7 +62,7 @@ The batch file `scripts/run_tests.bat` can be used to compile and run the system
 ```
 
 ### String
-There are three different string types that are used in the languange. All three have 
+There are three different string types that are used in the language. 
 
 #### std::String
 A `std::String` is a mutable heap allocated string. The struct contains a pointer to the heap allocation, the size of the heap allocation and the length of the string in bytes. After use the string needs to be deallocated with a call to its `deinit` function.
