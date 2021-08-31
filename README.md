@@ -580,32 +580,32 @@ A built-in function is called in the same way as a regular function with the exc
 @ <NAME> [<GENERIC_LIST>] (<PARAMETER_LIST>)
 ```
 
-### `@size<T>()`
-Gets the size of the specified type `T`. The size is returned as a unsigned 32 bit integer.
+### `@size<T>() -> u32`
+Gets the size of the specified type `T`.
 
 ### `@type(expr: T)`
-Gets the type of the expression `expr`.
+Gets the type of the expression `expr`. The type will be solved during type inference and can be used anywhere a normal type would be used.
 
-### `@name(var: T)`
-Gets the name of the given variable `var` as a `std::StringView`.
+### `@name(var: T) -> std::StringView`
+Gets the name of the given variable `var`. The given expression `var` must be a reference to an already declared variable. It can be a local, global, ADT member or parameter.
 
-### `@null()`
+### `@null() -> any`
 Creates a null/empty value of a type inferred from its use.
 
-### `@is_null(expr: T)`
-Checks if the given argument `expr` is null/0. The type `T` must be a pointer type.
+### `@is_null(expr: {T}) -> bool`
+Checks if the given argument `expr` is null.
 
-### `@is_not_null(expr: T)`
-Checks if the given argument `expr` isn't null/0. The type `T` must be a pointer type.
+### `@is_not_null(expr: {T}) -> bool`
+Checks if the given argument `expr` isn't null.
 
-### `@ptr_add(ptr: {T}, amount: u32)`
+### `@ptr_add(ptr: {T}, amount: u32) -> {T}`
 Adds the value of the second parameter `amount` times the size of the type `T` to the pointer `ptr`.
 
-### `@ptr_sub(ptr: {T}, amount: u32)`
+### `@ptr_sub(ptr: {T}, amount: u32) -> {T}`
 Subtracts the value of the second parameter `amount` times the size of the type `T` to the pointer `ptr`.
 
-### `@format(format: {u8}, ...)`
-The first argument of the `format` call is a string literal and the rest of the arguments (variadic) are the arguments to the given format string literal.
+### `@format(format: std::StringView, ...) -> std::String`
+The first argument of the `format` call is a `std::StringView` and the rest of the arguments (variadic) are the arguments to the given format string literal. Currently the rest of the arguments must either be `std::StringView`s or primitives. In the future it would make sense to allow anything that can be turned into a `std::StringView` or `std::String` (probably enforces through a trait).
 All `{}` found in the `format` string literal will be replace with the arguments to the function in sequential order.
 
 For example:
@@ -614,22 +614,22 @@ For example:
 ```
 would result in a `std::String` containing the string "abc123def456".
 
-### `@array(init_value: T, dimension: u32)`
+### `@array(init_value: T, dimension: u32) -> [T: _]`
 Creates a instance of an array with the specified length `dimension` and all values initialized to the value `init_value`.
 
-### `@argc()`
-Gets the amount of CLI arguments used when running the program (`argc`). If no `main` function is found in this module, this value will be set to 0. The returned value is of type `u32`.
+### `@argc() -> u32`
+Gets the amount of CLI arguments used when running the program (`argc`). If no `main` function is found in this module, this value will be set to 0.
 
-### `@argv()`
+### `@argv() -> {{u8}}`
 Gets the CLI arguments used when running the program (`argv`). If no `main` function is found in this module, this value will be set to 0. The returned value is of type `{{u8}}` (pointer to array of C strings).
 
-### `@file()`
+### `@file() -> std::StringView`
 Gets the filename of the file that this built-in call is in.
 
-### `@line()`
+### `@line() -> u32`
 Gets the line number at which this built-in is called.
 
-### `@column()`
+### `@column() -> u32`
 Gets the column number at which this built-in is called.
 
 ### `@unreachable()`
