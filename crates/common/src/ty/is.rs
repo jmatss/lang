@@ -100,7 +100,7 @@ pub fn is_solved(
         Ty::Any(..) => true,
 
         Ty::UnknownAdtMember(type_id_i, ..)
-        | Ty::UnknownFnArgument(Some(type_id_i), ..)
+        | Ty::UnknownFnArgument(type_id_i, ..)
         | Ty::UnknownArrayMember(type_id_i, ..)
             if solve_cond.can_solve_unknown() =>
         {

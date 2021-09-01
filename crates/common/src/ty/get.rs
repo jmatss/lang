@@ -133,7 +133,7 @@ pub fn get_exprs_mut<'a, 'b>(ty_env: &'a mut TyEnv, id: TypeId) -> LangResult<Ve
         Ty::Pointer(type_id, ..)
         | Ty::UnknownAdtMember(type_id, ..)
         | Ty::UnknownAdtMethod(type_id, ..)
-        | Ty::UnknownFnArgument(Some(type_id), ..)
+        | Ty::UnknownFnArgument(type_id, ..)
         | Ty::UnknownArrayMember(type_id, ..) => {
             let inner_exprs = get_exprs_mut(ty_env, type_id)?;
             for inner_expr in inner_exprs {
@@ -164,10 +164,7 @@ pub fn get_exprs_mut<'a, 'b>(ty_env: &'a mut TyEnv, id: TypeId) -> LangResult<Ve
             }
         }
 
-        Ty::Any(..)
-        | Ty::Generic(..)
-        | Ty::GenericInstance(..)
-        | Ty::UnknownFnArgument(None, ..) => (),
+        Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => (),
     }
 
     Ok(exprs)
@@ -214,7 +211,7 @@ pub fn get_generics(ty_env: &TyEnv, id: TypeId) -> LangResult<Vec<TypeId>> {
         | Ty::Array(type_id, ..)
         | Ty::UnknownAdtMember(type_id, ..)
         | Ty::UnknownAdtMethod(type_id, ..)
-        | Ty::UnknownFnArgument(Some(type_id), ..)
+        | Ty::UnknownFnArgument(type_id, ..)
         | Ty::UnknownArrayMember(type_id, ..) => {
             let mut inner_generics = get_generics(ty_env, *type_id)?;
             generics.append(&mut inner_generics);
@@ -274,7 +271,7 @@ pub fn get_unsolvable(
         | Ty::Array(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
         | Ty::UnknownAdtMethod(type_id_i, ..)
-        | Ty::UnknownFnArgument(Some(type_id_i), ..)
+        | Ty::UnknownFnArgument(type_id_i, ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             unsolvable.extend(get_unsolvable(ty_env, *type_id_i, solve_cond)?);
         }
@@ -308,7 +305,7 @@ pub fn get_unsolvable(
             }
         }
 
-        Ty::Any(..) | Ty::UnknownFnArgument(None, ..) => (),
+        Ty::Any(..) => (),
     }
 
     Ok(unsolvable)
@@ -363,7 +360,7 @@ pub fn get_adt_and_trait_paths(
         | Ty::Array(type_id, ..)
         | Ty::UnknownAdtMember(type_id, ..)
         | Ty::UnknownAdtMethod(type_id, ..)
-        | Ty::UnknownFnArgument(Some(type_id), ..)
+        | Ty::UnknownFnArgument(type_id, ..)
         | Ty::UnknownArrayMember(type_id, ..) => {
             let inner_paths = get_adt_and_trait_paths(ty_env, *type_id, full_paths)?;
             paths.extend(ty_env, deref_type, &inner_paths)?;
@@ -431,7 +428,7 @@ pub fn get_nested_type_ids(
         | Ty::Array(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
         | Ty::UnknownAdtMethod(type_id_i, ..)
-        | Ty::UnknownFnArgument(Some(type_id_i), ..)
+        | Ty::UnknownFnArgument(type_id_i, ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             get_nested_type_ids(ty_env, all_nested_type_ids, *type_id_i, incl_inf)?;
         }
@@ -451,10 +448,7 @@ pub fn get_nested_type_ids(
             }
         }
 
-        Ty::Generic(..)
-        | Ty::GenericInstance(..)
-        | Ty::Any(..)
-        | Ty::UnknownFnArgument(None, ..) => (),
+        Ty::Generic(..) | Ty::GenericInstance(..) | Ty::Any(..) => (),
     }
 
     if incl_inf {

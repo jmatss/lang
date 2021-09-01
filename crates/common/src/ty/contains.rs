@@ -30,7 +30,7 @@ pub fn contains_generic_with_name(
         | Ty::Array(type_id, ..)
         | Ty::UnknownAdtMember(type_id, ..)
         | Ty::UnknownAdtMethod(type_id, ..)
-        | Ty::UnknownFnArgument(Some(type_id), ..)
+        | Ty::UnknownFnArgument(type_id, ..)
         | Ty::UnknownArrayMember(type_id, ..) => {
             contains_generic_with_name(ty_env, *type_id, gen_names)?
         }
@@ -59,7 +59,7 @@ pub fn contains_generic_with_name(
             false
         }
 
-        Ty::Any(..) | Ty::UnknownFnArgument(None, ..) => false,
+        Ty::Any(..) => false,
     })
 }
 
@@ -121,7 +121,7 @@ pub fn contains_ty_shallow(
         Ty::Pointer(type_id, ..)
         | Ty::Array(type_id, ..)
         | Ty::UnknownAdtMember(type_id, ..)
-        | Ty::UnknownFnArgument(Some(type_id), ..)
+        | Ty::UnknownFnArgument(type_id, ..)
         | Ty::UnknownArrayMember(type_id, ..) => contains_ty_shallow(ty_env, *type_id, child_ty)?,
 
         Ty::UnknownAdtMethod(type_id, method_path, ..) => {

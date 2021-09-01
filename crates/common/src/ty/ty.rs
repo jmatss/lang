@@ -77,18 +77,11 @@ pub enum Ty {
     /// The "Langpath" is the name of the method + potential generics.
     UnknownAdtMethod(TypeId, LangPath, UniqueId, TypeInfo),
 
-    /// Unknown argument for either a function or method.
-    /// If this is a method, the type of the ADT will be set as Some "TypeId".
+    /// Unknown argument for a method on the ADT "TypeId".
     /// The "Langpath" is the module+name of the fn/method and the
     /// "Either<usize, String>" is either the index or the name of the argument
     /// in the fn call.
-    UnknownFnArgument(
-        Option<TypeId>,
-        LangPath,
-        Either<usize, String>,
-        UniqueId,
-        TypeInfo,
-    ),
+    UnknownFnArgument(TypeId, LangPath, Either<usize, String>, UniqueId, TypeInfo),
 
     /// Unknown type of array member of array with type "TypeId".
     UnknownArrayMember(TypeId, UniqueId, TypeInfo),

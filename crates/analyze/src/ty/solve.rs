@@ -154,8 +154,8 @@ fn insert_constraint_inner(
         }
 
         (
-            Ty::UnknownFnArgument(Some(ty_a_inner), a_path, a_idx_or_name, ..),
-            Ty::UnknownFnArgument(Some(ty_b_inner), b_path, b_idx_or_name, ..),
+            Ty::UnknownFnArgument(ty_a_inner, a_path, a_idx_or_name, ..),
+            Ty::UnknownFnArgument(ty_b_inner, b_path, b_idx_or_name, ..),
         ) if path_eq(ty_env, &a_path, &b_path, DerefType::Deep)?
             && a_idx_or_name == b_idx_or_name =>
         {
@@ -302,10 +302,9 @@ fn solve_manual(
         Ty::UnknownAdtMethod(..) => {
             solve_unknown_adt_method(ty_env, ast_ctx, type_id, seen_type_ids)
         }
-        Ty::UnknownFnArgument(Some(_), ..) => {
+        Ty::UnknownFnArgument(..) => {
             solve_unknown_method_argument(ty_env, ast_ctx, type_id, seen_type_ids)
         }
-        Ty::UnknownFnArgument(None, ..) => Ok(type_id),
         Ty::UnknownArrayMember(..) => {
             solve_unknown_array_member(ty_env, ast_ctx, type_id, seen_type_ids)
         }
@@ -689,7 +688,7 @@ fn solve_unknown_method_argument(
     );
 
     let (adt_type_id, method_path, name_or_idx, type_info) =
-        if let Ty::UnknownFnArgument(Some(type_id), method_path, name_or_idx, _, type_info) =
+        if let Ty::UnknownFnArgument(type_id, method_path, name_or_idx, _, type_info) =
             &mut ty_clone
         {
             (type_id, method_path, name_or_idx, type_info)

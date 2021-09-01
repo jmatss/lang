@@ -262,7 +262,7 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
 
         let unique_id = ty_env_guard.new_unique_id();
         let arg_type_id = ty_env_guard.id(&Ty::UnknownFnArgument(
-            Some(adt_type_id),
+            adt_type_id,
             method_name_with_gens.clone(),
             position,
             unique_id,
@@ -390,20 +390,6 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
             };
 
             insert_constraint(&mut ty_env_guard, arg_type_id, param_type_id)?;
-
-            // Bind type of argument to the func. This is required to being able
-            // to solve the generic types in the `adt_type_id`.
-            let unique_id = ty_env_guard.new_unique_id();
-            let type_info = TypeInfo::DefaultOpt(get_file_pos(&ty_env_guard, arg_type_id).cloned());
-            let unknown_type_id = ty_env_guard.id(&Ty::UnknownFnArgument(
-                None,
-                fn_path_with_gens.clone(),
-                Either::Left(actual_idx),
-                unique_id,
-                type_info,
-            ))?;
-
-            insert_constraint(&mut ty_env_guard, arg_type_id, unknown_type_id)?;
         }
     }
 
