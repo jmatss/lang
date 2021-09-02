@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use either::Either;
 use log::debug;
@@ -9,13 +9,16 @@ use common::{
     error::LangResult,
     hash::DerefType,
     path::LangPath,
+    token::block::Fn,
+    traverse::traverse_ctx::TraverseCtx,
     ty::{
         generics::Generics,
-        get::get_file_pos,
+        get::{get_file_pos, get_generics, get_unsolvable},
         inner_ty::InnerTy,
         is::{is_any, is_generic, is_solved},
-        replace::{replace_gen_impls, replace_gens_with_gen_instances},
+        replace::{convert_defaults, replace_gen_impls, replace_gens_with_gen_instances},
         substitution_sets::{promote, union},
+        to_string::{to_string_path, to_string_type_id},
         ty::{SolveCond, Ty},
         ty_env::TyEnv,
         type_id::TypeId,
@@ -39,6 +42,118 @@ enum AdtSolveStatus {
 
     /// No progress made.
     NoProgress,
+}
+
+pub fn solve_type_system(ctx: &mut TraverseCtx) -> LangResult<()> {
+    let mut all_types = ctx.ty_env.lock().unwrap().interner.all_types();
+
+    // Remove all generic types declared in trait functions. These are types that
+    // are used in the trait "blue-print" functions and will never be solvable.
+    let trait_gens = collect_trait_gens(&ctx.ty_env.lock().unwrap(), ctx.ast_ctx)?;
+    all_types.retain(|type_id| !trait_gens.contains(type_id));
+
+    solve_types_ids(ctx, all_types)?;
+    convert_defaults(&mut ctx.ty_env.lock().unwrap())?;
+
+    Ok(())
+}
+
+/// Tries to solves all types given in `all_type_ids`.
+fn solve_types_ids(ctx: &mut TraverseCtx, all_type_ids: HashSet<TypeId>) -> LangResult<()> {
+    if all_type_ids.is_empty() {
+        return Ok(());
+    }
+
+    // Contains a list of all type IDs that aren't solved yet.
+    //
+    // During the solving stage type IDs will be popped from the front an solved
+    // in that order. Any new types created during the solving process will be
+    // inserted at the back of the queue.
+    let mut unsolved = VecDeque::default();
+    for type_id in all_type_ids.iter() {
+        unsolved.push_back(*type_id);
+    }
+
+    // A set used for fast-lookups to see if a specific type ID is solved or not.
+    //
+    // The items in this set should be an exact copy of the items in the
+    // `unsolved` queue.
+    let mut unsolved_lookup = all_type_ids;
+
+    // Keeps a count of how many types have been traversed without solving a
+    // single one. If this counts up to `unsolved.len()`, we have traversed the
+    // whole list without solving any.
+    // The type solving have either failed, or we need to change the `SolveCond`
+    // and try solving the types again.
+    let mut iter_count = 0;
+
+    // All unsolvable types will be iterated through for every SolveCond found
+    // in `solve_conds`. It starts using the SolveCond from the start of the array
+    // which should be the "strictest" solve condition and will then, if unable
+    // to solve all types with this condition, continue using the next SolveCond
+    // in the vector. This continues until either all types are solved or until
+    // all SolveCond's have been tried and the type system isn't solvable.
+    let solve_conds = [SolveCond::new().excl_gen_inst(), SolveCond::new()];
+
+    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+
+    ty_env_guard.solve_mode = true;
+
+    for solve_cond in solve_conds {
+        while let Some(type_id) = unsolved.pop_front() {
+            iter_count += 1;
+
+            debug!(
+                "solving solver -- type_id: {}, iter_count: {}",
+                type_id, iter_count
+            );
+
+            solve_type_id(&mut ty_env_guard, ctx.ast_ctx, type_id)?;
+            let inf_type_id = ty_env_guard.inferred_type(type_id)?;
+
+            // During the `solve()`, new types might potentially be created and
+            // inserted into the `new_type_ids`. They might have to be solved.
+            for new_type_id in ty_env_guard.new_type_ids.drain() {
+                unsolved.push_back(new_type_id);
+                unsolved_lookup.insert(new_type_id);
+            }
+
+            let check_inf = true;
+            if is_solved(&ty_env_guard, inf_type_id, check_inf, solve_cond)?
+                && nested_is_solved(&ty_env_guard, type_id, check_inf, solve_cond)?
+            {
+                unsolved_lookup.remove(&type_id);
+                iter_count = 0;
+            } else {
+                unsolved.push_back(type_id);
+            }
+
+            if iter_count >= unsolved.len() {
+                break;
+            }
+        }
+    }
+
+    if unsolved.is_empty() {
+        Ok(())
+    } else {
+        let mut err_msg = "Unable to solve type system.".to_string();
+
+        for type_id in unsolved {
+            let inf_type_id = ty_env_guard.inferred_type(type_id)?;
+
+            err_msg.push_str(&format!(
+                "\nUnable to solve type {} ({}). Got back unsolved: {} ({}). ty:\n{:#?}",
+                type_id,
+                to_string_type_id(&ty_env_guard, type_id)?,
+                inf_type_id,
+                to_string_type_id(&ty_env_guard, inf_type_id)?,
+                ty_env_guard.ty(inf_type_id)
+            ));
+        }
+
+        Err(ctx.ast_ctx.err(err_msg))
+    }
 }
 
 /// Inserts a new constraint between two types.
@@ -180,9 +295,9 @@ fn insert_constraint_inner(
 ///      return a partially solved type in some cases. If you want the type
 ///      ID that are "closest" to the correctly solved type ID, use the
 ///      `inferred_type()` function.
-pub fn solve(ty_env: &mut TyEnv, ast_ctx: &AstCtx, type_id: TypeId) -> LangResult<TypeId> {
+fn solve_type_id(ty_env: &mut TyEnv, ast_ctx: &AstCtx, type_id: TypeId) -> LangResult<TypeId> {
     let mut seen_type_ids = HashSet::default();
-    solve_priv(ty_env, ast_ctx, type_id, &mut seen_type_ids)
+    solve_type_id_priv(ty_env, ast_ctx, type_id, &mut seen_type_ids)
 }
 
 /// Tries to solve the given `type_id` type and also keeps track of type IDs
@@ -196,7 +311,7 @@ pub fn solve(ty_env: &mut TyEnv, ast_ctx: &AstCtx, type_id: TypeId) -> LangResul
 ///
 /// This two step logic will be applied to the given `type_id` first and if
 /// that is not solvable, the same logic will be applied to its inferred type.
-fn solve_priv(
+fn solve_type_id_priv(
     ty_env: &mut TyEnv,
     ast_ctx: &AstCtx,
     type_id: TypeId,
@@ -205,7 +320,7 @@ fn solve_priv(
     let fwd_type_id = ty_env.forwarded(type_id);
 
     debug!(
-        "solve_priv -- type_id: {}, fwd_type_id: {}, fwd_ty: {:#?}",
+        "solve_type_id_priv -- type_id: {}, fwd_type_id: {}, fwd_ty: {:#?}",
         type_id,
         fwd_type_id,
         ty_env.ty(fwd_type_id)
@@ -339,7 +454,7 @@ fn solve_compound(
     if let Some(gens) = inner_ty.gens_mut() {
         for gen_type_id in gens.iter_types_mut() {
             let mut seen_type_ids_snapshot = seen_type_ids.clone();
-            solve_priv(ty_env, ast_ctx, *gen_type_id, &mut seen_type_ids_snapshot)?;
+            solve_type_id_priv(ty_env, ast_ctx, *gen_type_id, &mut seen_type_ids_snapshot)?;
             new_nested_seen_type_ids.extend(seen_type_ids_snapshot.difference(seen_type_ids));
 
             let inf_gen_type_id = ty_env.inferred_type(*gen_type_id)?;
@@ -417,7 +532,7 @@ fn solve_aggregate(
     // TODO: Probably need to implement solving of the array dimension expr.
     let new_type_id = match &mut ty {
         Ty::Pointer(aggr_type_id, ..) | Ty::Array(aggr_type_id, ..) => {
-            solve_priv(ty_env, ast_ctx, *aggr_type_id, seen_type_ids)?;
+            solve_type_id_priv(ty_env, ast_ctx, *aggr_type_id, seen_type_ids)?;
             let inf_type_id = ty_env.inferred_type(*aggr_type_id)?;
 
             if &inf_type_id != aggr_type_id {
@@ -458,7 +573,7 @@ fn solve_expr(
 
     let inf_type_id = if let Ty::Expr(expr, ..) = ty {
         let expr_type_id = expr.get_expr_type()?;
-        solve_priv(ty_env, ast_ctx, expr_type_id, seen_type_ids)?
+        solve_type_id_priv(ty_env, ast_ctx, expr_type_id, seen_type_ids)?
     } else {
         type_id
     };
@@ -483,13 +598,13 @@ fn solve_fn(
         let mut new_nested_seen_type_ids: HashSet<TypeId> = HashSet::new();
         for type_id_i in gens.iter().chain(params.iter()) {
             let mut seen_type_ids_snapshot = seen_type_ids.clone();
-            solve_priv(ty_env, ast_ctx, *type_id_i, &mut seen_type_ids_snapshot)?;
+            solve_type_id_priv(ty_env, ast_ctx, *type_id_i, &mut seen_type_ids_snapshot)?;
             new_nested_seen_type_ids.extend(seen_type_ids_snapshot.difference(seen_type_ids));
         }
 
         if let Some(ret_type_id) = ret_type_id_opt {
             let mut seen_type_ids_snapshot = seen_type_ids.clone();
-            solve_priv(ty_env, ast_ctx, ret_type_id, &mut seen_type_ids_snapshot)?;
+            solve_type_id_priv(ty_env, ast_ctx, ret_type_id, &mut seen_type_ids_snapshot)?;
             new_nested_seen_type_ids.extend(seen_type_ids_snapshot.difference(seen_type_ids));
         }
         seen_type_ids.extend(new_nested_seen_type_ids);
@@ -560,7 +675,7 @@ fn solve_unknown_adt_member(
         new_type_id = new_new_type_id;
     }
 
-    solve_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
+    solve_type_id_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
     let inf_new_type_id = ty_env.inferred_type(new_type_id)?;
 
     insert_constraint(ty_env, type_id, inf_new_type_id)?;
@@ -580,9 +695,9 @@ fn solve_unknown_adt_method(
         type_id, seen_type_ids, ty_clone
     );
 
-    let (adt_type_id, method_path, type_info) =
-        if let Ty::UnknownAdtMethod(ty, method_path, _, type_info) = &mut ty_clone {
-            (ty, method_path, type_info)
+    let (adt_type_id, method_path, method_arg_tys) =
+        if let Ty::UnknownAdtMethod(ty, method_path, method_arg_tys, ..) = &mut ty_clone {
+            (ty, method_path, method_arg_tys)
         } else {
             unreachable!()
         };
@@ -622,16 +737,7 @@ fn solve_unknown_adt_method(
         // At this point, it is the first time that we have solved the ADT of the
         // `UnknownAdtMethod` and we have been able to see that the method have
         // generics declared and that the call-site didn't specify any generics.
-        // Create new unknown types at this point so that the generics of the
-        // function call can be inferred.
-        new_gen_impls(
-            ty_env,
-            method.generics.as_ref(),
-            &type_info,
-            Some(*adt_type_id),
-            method_path,
-        )?
-        .unwrap_or_else(Generics::empty)
+        infer_gens_from_args(ty_env, ast_ctx, &method, &method_arg_tys, Some(type_id))?
     };
 
     if let Some(last_part) = method_path.last_mut() {
@@ -663,7 +769,7 @@ fn solve_unknown_adt_method(
             new_type_id = new_new_type_id;
         }
 
-        solve_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
+        solve_type_id_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
         ty_env.inferred_type(new_type_id)?
     } else {
         // The return type of the method is None == Void.
@@ -687,11 +793,9 @@ fn solve_unknown_method_argument(
         type_id, seen_type_ids, ty_clone
     );
 
-    let (adt_type_id, method_path, name_or_idx, type_info) =
-        if let Ty::UnknownFnArgument(type_id, method_path, name_or_idx, _, type_info) =
-            &mut ty_clone
-        {
-            (type_id, method_path, name_or_idx, type_info)
+    let (adt_type_id, method_path, name_or_idx, ..) =
+        if let Ty::UnknownFnArgument(type_id, method_path, name_or_idx, ..) = &mut ty_clone {
+            (type_id, method_path, name_or_idx)
         } else {
             unreachable!()
         };
@@ -747,19 +851,7 @@ fn solve_unknown_method_argument(
         }
         method_call_gens
     } else {
-        // At this point, it is the first time that we have solved the ADT of the
-        // `UnknownAdtMethod` and we have been able to see that the method have
-        // generics declared and that the call-site didn't specify any generics.
-        // Create new unknown types at this point so that the generics of the
-        // function call can be inferred.
-        new_gen_impls(
-            ty_env,
-            method.generics.as_ref(),
-            &type_info,
-            Some(*adt_type_id),
-            method_path,
-        )?
-        .unwrap_or_else(Generics::empty)
+        Generics::empty()
     };
 
     if let Some(last_part) = method_path.last_mut() {
@@ -784,7 +876,7 @@ fn solve_unknown_method_argument(
         new_type_id = new_new_type_id;
     }
 
-    solve_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
+    solve_type_id_priv(ty_env, ast_ctx, new_type_id, seen_type_ids)?;
     let inf_new_type_id = ty_env.inferred_type(new_type_id)?;
 
     insert_constraint(ty_env, type_id, inf_new_type_id)?;
@@ -810,7 +902,7 @@ fn solve_unknown_array_member(
         unreachable!()
     };
 
-    solve_priv(ty_env, ast_ctx, arr_type_id, seen_type_ids)?;
+    solve_type_id_priv(ty_env, ast_ctx, arr_type_id, seen_type_ids)?;
     let new_arr_type_id = ty_env.inferred_type(arr_type_id)?;
 
     if arr_type_id == new_arr_type_id {
@@ -822,7 +914,7 @@ fn solve_unknown_array_member(
 
     let new_arr_ty = ty_env.ty_clone(new_arr_type_id)?;
     if let Ty::Array(new_member_type_id, ..) = new_arr_ty {
-        solve_priv(ty_env, ast_ctx, new_member_type_id, seen_type_ids)?;
+        solve_type_id_priv(ty_env, ast_ctx, new_member_type_id, seen_type_ids)?;
         let inf_new_member_type_id = ty_env.inferred_type(new_member_type_id)?;
 
         insert_constraint(ty_env, inf_new_member_type_id, type_id)?;
@@ -846,7 +938,7 @@ fn solve_adt_type(
         adt_type_id, seen_type_ids,
     );
 
-    solve_priv(ty_env, ast_ctx, adt_type_id, seen_type_ids)?;
+    solve_type_id_priv(ty_env, ast_ctx, adt_type_id, seen_type_ids)?;
     let inf_adt_type_id = ty_env.inferred_type(adt_type_id)?;
 
     let is_generic_res = is_generic(&ty_env, inf_adt_type_id)?;
@@ -875,7 +967,7 @@ fn solve_adt_type(
             //       represent a "{this}" function. Remove the need for this
             //       logic in the future.
             Ty::Pointer(type_id_i, type_info) => {
-                solve_priv(ty_env, ast_ctx, type_id_i, seen_type_ids)?;
+                solve_type_id_priv(ty_env, ast_ctx, type_id_i, seen_type_ids)?;
                 let inf_type_id_i = ty_env.inferred_type(type_id_i)?;
 
                 let is_generic_res = is_generic(&ty_env, inf_type_id_i)?;
@@ -919,36 +1011,182 @@ fn solve_adt_type(
     }
 }
 
-/// Creates a new `Generic` where all types are new `GenericInstance`s.
-/// The names of the generics are taken from the parameters `gens`.
-/// New constraints will be created mapping the new `GenericInstance`s to a
-/// `UnknownFnGeneric` type.
-pub fn new_gen_impls(
-    ty_env: &mut TyEnv,
-    gens: Option<&Generics>,
-    type_info: &TypeInfo,
-    adt_type_id: Option<TypeId>,
-    method_path: &LangPath,
-) -> LangResult<Option<Generics>> {
-    // TODO: This should be done somewhere else. This feels like a really
-    //       random place to do it.
-    if let Some(gens) = gens {
-        let mut new_gens = Generics::new();
+/// Checks if all nested types of `type_id` is solved.
+/// This check is needed since the inferred type of `type_id` might be ex.
+/// a `DefaultInt` which is considered solved, but the current `type_id` might
+/// be a `UnknownMethodArgument` which contains an unsolved ADT type.
+/// In this case we wouldn't want to consider this `type_id` solved since we
+/// might find a better type than `DefaultInt` once the ADT type is solved and
+/// we can figure out the type of the unknown argument.
+fn nested_is_solved(
+    ty_env: &TyEnv,
+    type_id: TypeId,
+    check_inf: bool,
+    solve_cond: SolveCond,
+) -> LangResult<bool> {
+    for nested_type_id in get_unsolvable(ty_env, type_id, solve_cond)? {
+        let inf_type_id = ty_env.inferred_type(nested_type_id)?;
+        if !is_solved(ty_env, inf_type_id, check_inf, solve_cond)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
 
-        for gen_name in gens.iter_names() {
-            let unique_id = ty_env.new_unique_id();
-            let type_id = ty_env.id(&Ty::GenericInstance(
-                gen_name.clone(),
-                unique_id,
-                type_info.clone(),
-            ))?;
-            new_gens.insert(gen_name.clone(), type_id);
+/// Iterates through all traits and collects the `Generic` types.
+/// The types will be collected from the traits parameters and return type.
+///
+/// Types in traits will never be solved because traits are used as "blueprints"
+/// only. We therefore have to treat these generics specially and exclude them
+/// from some logic. They need to be excluded from the type solving since they
+/// are unsolvable.
+fn collect_trait_gens(ty_env: &TyEnv, ctx: &AstCtx) -> LangResult<HashSet<TypeId>> {
+    let mut gen_type_ids = HashSet::default();
+
+    for trait_ in ctx.traits.values() {
+        let trait_ = trait_.read().unwrap();
+        for method in &trait_.methods {
+            if let Some(params) = &method.parameters {
+                for param in params {
+                    if let Some(param_type_id) = param.read().unwrap().ty {
+                        for gen_type_id in get_generics(ty_env, param_type_id)? {
+                            gen_type_ids.insert(gen_type_id);
+                        }
+                    }
+                }
+            }
+
+            if let Some(ret_type_id) = method.ret_type {
+                for gen_type_id in get_generics(ty_env, ret_type_id)? {
+                    gen_type_ids.insert(gen_type_id);
+                }
+            }
+        }
+    }
+
+    Ok(gen_type_ids)
+}
+
+/// Given a function declaration `fn_decl`, and a call to this function `fn_call`,
+/// tries to infer the types of the generics for the function call.
+///
+/// One should not call this function if the function declaration doesn't contain
+/// any generics or if the function call have specified the types of the generics
+/// manually in the code.
+///
+/// This function will "zip" the types of the parameters/arguments and return
+/// types. If a generic is found in the `fn_decl` type, the corresponding type
+/// in the `fn_call` arg/return type will become the inferred type for the generic.
+pub fn infer_gens_from_args(
+    ty_env: &TyEnv,
+    ast_ctx: &AstCtx,
+    fn_decl: &Fn,
+    fn_call_arg_tys: &[TypeId],
+    fn_call_ret_ty: Option<TypeId>,
+) -> LangResult<Generics> {
+    let decl_gens = if let Some(gens) = &fn_decl.generics {
+        gens
+    } else {
+        return Ok(Generics::empty());
+    };
+
+    let mut gen_name_to_impl = HashMap::default();
+
+    if let Some(params) = &fn_decl.parameters {
+        assert!(params.len() == fn_call_arg_tys.len());
+
+        for (param, arg_type_id) in params.iter().zip(fn_call_arg_tys) {
+            let param = param.read().unwrap();
+            collect_gen_type_id(
+                ty_env,
+                &mut gen_name_to_impl,
+                param.ty.unwrap(),
+                *arg_type_id,
+            )?;
+        }
+    }
+
+    if let (Some(decl_ret), Some(impl_ret)) = (fn_decl.ret_type, fn_call_ret_ty) {
+        collect_gen_type_id(ty_env, &mut gen_name_to_impl, decl_ret, impl_ret)?;
+    }
+
+    let mut new_gens = Generics::new();
+    for gen_name in decl_gens.iter_names() {
+        if let Some(type_id) = gen_name_to_impl.get(gen_name) {
+            new_gens.insert(gen_name.clone(), *type_id);
+        } else {
+            let err_msg_start = if let Some(adt_type_id) = fn_decl.method_adt {
+                format!(
+                    "Method {} in ADT {}",
+                    &fn_decl.name,
+                    to_string_type_id(ty_env, adt_type_id)?
+                )
+            } else {
+                let fn_path =
+                    fn_decl
+                        .module
+                        .clone_push(&fn_decl.name, None, Some(fn_decl.file_pos));
+                format!("Function {}", to_string_path(ty_env, &fn_path))
+            };
+            return Err(ast_ctx.err(format!(
+                "{} have declared a generic with name \"{}\". \
+                The compiler was unable to infer the type of this generic for the function call. \
+                Please manually specify the desired type for the generic at the function call.",
+                err_msg_start, gen_name
+            )));
+        }
+    }
+
+    Ok(new_gens)
+}
+
+// TODO: Are there any more types needed to be matched and traversed in this
+//       function when collecting type ids?
+fn collect_gen_type_id(
+    ty_env: &TyEnv,
+    gen_name_to_impl: &mut HashMap<String, TypeId>,
+    decl_type_id: TypeId,
+    impl_type_id: TypeId,
+) -> LangResult<()> {
+    let decl_ty = ty_env.ty(decl_type_id)?;
+    let impl_ty = ty_env.ty(impl_type_id)?;
+    match (decl_ty, impl_ty) {
+        (Ty::GenericInstance(gen_name, ..), _) | (Ty::Generic(gen_name, ..), _) => {
+            gen_name_to_impl.insert(gen_name.clone(), impl_type_id);
         }
 
-        Ok(Some(new_gens))
-    } else {
-        Ok(None)
+        (Ty::CompoundType(decl_inner_ty, _), Ty::CompoundType(impl_inner_ty, _)) => {
+            if let (Some(decl_gens), Some(impl_gens)) = (decl_inner_ty.gens(), impl_inner_ty.gens())
+            {
+                for (decl_id, impl_id) in decl_gens.iter_types().zip(impl_gens.iter_types()) {
+                    collect_gen_type_id(ty_env, gen_name_to_impl, *decl_id, *impl_id)?;
+                }
+            }
+        }
+
+        (Ty::Pointer(decl_id, _), Ty::Pointer(impl_id, _))
+        | (Ty::Array(decl_id, ..), Ty::Array(impl_id, ..)) => {
+            collect_gen_type_id(ty_env, gen_name_to_impl, *decl_id, *impl_id)?;
+        }
+
+        (
+            Ty::Fn(decl_gens, decl_params, decl_ret, _),
+            Ty::Fn(impl_gens, impl_params, impl_ret, _),
+        ) => {
+            for (decl_id, impl_id) in decl_gens.iter().zip(impl_gens) {
+                collect_gen_type_id(ty_env, gen_name_to_impl, *decl_id, *impl_id)?;
+            }
+            for (decl_id, impl_id) in decl_params.iter().zip(impl_params) {
+                collect_gen_type_id(ty_env, gen_name_to_impl, *decl_id, *impl_id)?;
+            }
+            if let (Some(decl_id), Some(impl_id)) = (decl_ret, impl_ret) {
+                collect_gen_type_id(ty_env, gen_name_to_impl, *decl_id, *impl_id)?;
+            }
+        }
+
+        _ => (),
     }
+    Ok(())
 }
 
 /// If the given type `ty` contains generics that don't have their "names"

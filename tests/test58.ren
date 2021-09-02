@@ -9,11 +9,12 @@ struct TestGenStruct<T> {
 struct TestDoubleGenStruct<T> {
     var x: T
     fn this test_method<F>(z: F) { }
+    fn this test_method_ret<R>() -> R { return 5 }
 }
 
 fn test_fn<T>(x: T) { }
 
-fn test_fn_ret<T>() -> T { return 6 }
+fn test_fn_ret<T>() -> T { return 7 }
 
 fn test_fn2<K, V>(k: K, v: V) { }
 
@@ -27,21 +28,22 @@ fn main() -> i32 {
     var three: f32 = 3.
     var tdgs = TestDoubleGenStruct { three }
 
-    // TODO: Implement inference of method generics if not specified.
-    //var four: u32 = 4
-    //tdgs.test_method(four)
+    var four: u32 = 4
+    tdgs.test_method(four)
 
-    var five: f64 = 5.
-    test_fn(five)
+    var five: u64
+    five = tdgs.test_method_ret()
 
-    var six: i8
-    six = test_fn_ret()
+    var six: f64 = 6.
+    test_fn(six)
 
-    var seven: i32 = 7
-    var eight: i8 = 8
-    test_fn2(seven, eight)
-    test_fn2(eight, seven)
-    
+    var seven: i8
+    seven = test_fn_ret()
+
+    var eight: i32 = 8
+    var nine: i8 = 9
+    test_fn2(eight, nine)
+    test_fn2(nine, eight)
 
     return 0
 }

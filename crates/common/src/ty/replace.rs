@@ -77,7 +77,6 @@ pub fn replace_gen_impls(
         Ty::Pointer(type_id_i, ..)
         | Ty::Array(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
-        | Ty::UnknownAdtMethod(type_id_i, ..)
         | Ty::UnknownFnArgument(type_id_i, ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             if let Some(new_type_id_i) = replace_gen_impls(ty_env, ast_ctx, *type_id_i, gen_impls)?
@@ -87,6 +86,24 @@ pub fn replace_gen_impls(
             } else {
                 false
             }
+        }
+
+        Ty::UnknownAdtMethod(type_id_i, _, arg_type_ids, ..) => {
+            let mut was_updated = false;
+            if let Some(new_type_id_i) = replace_gen_impls(ty_env, ast_ctx, *type_id_i, gen_impls)?
+            {
+                *type_id_i = new_type_id_i;
+                was_updated = true
+            }
+            for arg_type_id in arg_type_ids {
+                if let Some(new_gen_type_id) =
+                    replace_gen_impls(ty_env, ast_ctx, *arg_type_id, gen_impls)?
+                {
+                    *arg_type_id = new_gen_type_id;
+                    was_updated = true;
+                }
+            }
+            was_updated
         }
 
         Ty::Fn(gens, params, ret_type_id_opt, ..) => {
@@ -193,7 +210,6 @@ pub fn replace_self(
         Ty::Pointer(type_id_i, ..)
         | Ty::Array(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
-        | Ty::UnknownAdtMethod(type_id_i, ..)
         | Ty::UnknownFnArgument(type_id_i, ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             if let Some(new_type_id) = replace_self(ty_env, *type_id_i, old_path, new_self_type_id)?
@@ -203,6 +219,24 @@ pub fn replace_self(
             } else {
                 false
             }
+        }
+
+        Ty::UnknownAdtMethod(type_id_i, _, arg_type_ids, ..) => {
+            let mut was_updated = false;
+            if let Some(new_type_id) = replace_self(ty_env, *type_id_i, old_path, new_self_type_id)?
+            {
+                *type_id_i = new_type_id;
+                was_updated = true;
+            }
+            for arg_type_id in arg_type_ids {
+                if let Some(new_type_id) =
+                    replace_self(ty_env, *arg_type_id, old_path, new_self_type_id)?
+                {
+                    *arg_type_id = new_type_id;
+                    was_updated = true;
+                }
+            }
+            was_updated
         }
 
         Ty::Fn(gens, params, ret_type_id_opt, ..) => {
@@ -322,7 +356,6 @@ pub fn replace_gens_with_gen_instances(
         Ty::Pointer(type_id_i, ..)
         | Ty::Array(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
-        | Ty::UnknownAdtMethod(type_id_i, ..)
         | Ty::UnknownFnArgument(type_id_i, ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             if let Some(new_type_id_i) =
@@ -333,6 +366,25 @@ pub fn replace_gens_with_gen_instances(
             } else {
                 false
             }
+        }
+
+        Ty::UnknownAdtMethod(type_id_i, _, arg_type_ids, ..) => {
+            let mut was_updated = false;
+            if let Some(new_type_id_i) =
+                replace_gens_with_gen_instances(ty_env, *type_id_i, unique_id)?
+            {
+                *type_id_i = new_type_id_i;
+                was_updated = true;
+            }
+            for arg_type_id in arg_type_ids {
+                if let Some(new_gen_type_id) =
+                    replace_gens_with_gen_instances(ty_env, *arg_type_id, unique_id)?
+                {
+                    *arg_type_id = new_gen_type_id;
+                    was_updated = true;
+                }
+            }
+            was_updated
         }
 
         Ty::Fn(gens, params, ret_type_id_opt, ..) => {
@@ -412,11 +464,25 @@ pub fn replace_unique_ids(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<Opt
         }
 
         Ty::UnknownAdtMember(type_id_i, _, unique_id, ..)
-        | Ty::UnknownAdtMethod(type_id_i, _, unique_id, ..)
         | Ty::UnknownFnArgument(type_id_i, _, _, unique_id, ..)
         | Ty::UnknownArrayMember(type_id_i, unique_id, ..) => {
             if let Some(new_type_id_i) = replace_unique_ids(ty_env, *type_id_i)? {
                 *type_id_i = new_type_id_i;
+            }
+
+            *unique_id = ty_env.new_unique_id();
+            true
+        }
+
+        Ty::UnknownAdtMethod(type_id_i, _, arg_type_ids, unique_id, ..) => {
+            if let Some(new_type_id_i) = replace_unique_ids(ty_env, *type_id_i)? {
+                *type_id_i = new_type_id_i;
+            }
+
+            for arg_type_id in arg_type_ids {
+                if let Some(new_arg_type_id) = replace_unique_ids(ty_env, *arg_type_id)? {
+                    *arg_type_id = new_arg_type_id;
+                }
             }
 
             *unique_id = ty_env.new_unique_id();

@@ -75,7 +75,9 @@ pub enum Ty {
 
     /// Unknown method of the struct/enum/trait type "TypeId".
     /// The "Langpath" is the name of the method + potential generics.
-    UnknownAdtMethod(TypeId, LangPath, UniqueId, TypeInfo),
+    /// The vector of type ids are the arguments of the method (will be used
+    /// to infer generics if needed).
+    UnknownAdtMethod(TypeId, LangPath, Vec<TypeId>, UniqueId, TypeInfo),
 
     /// Unknown argument for a method on the ADT "TypeId".
     /// The "Langpath" is the module+name of the fn/method and the

@@ -9,16 +9,21 @@ use common::{
     },
 };
 
-/// Checks so that all instance method calls calling functions with generics
-/// actually specifies generics at the call site. This is needed because
-/// inferring the generics currently aren't supported for generics on instance
-/// methods (is possible with static methods and free-standing functions).
-/// This will need to be changed in the future.
-pub struct FnGenericsCheck {
+/// Checks so that calls to method instances have the correct amount of generics
+/// specified at the call site.
+/// This is needed because inferring the generics for instance methods are done
+/// at a later stage than the regular type inferrence. We therefore have to make
+/// sure that the amount of the generics are correct after the solving of the
+/// methods are solved.
+///
+/// For static method calls and free-standing functions, the amount of generics
+/// are checked/enforced at the start of the type inference, so we don't need
+/// to check them here.
+pub struct MethodGensCheck {
     errors: Vec<LangError>,
 }
 
-impl FnGenericsCheck {
+impl MethodGensCheck {
     pub fn new() -> Self {
         Self {
             errors: Vec::default(),
@@ -26,7 +31,7 @@ impl FnGenericsCheck {
     }
 }
 
-impl Visitor for FnGenericsCheck {
+impl Visitor for MethodGensCheck {
     fn take_errors(&mut self, _ctx: &mut TraverseCtx) -> Option<Vec<LangError>> {
         if self.errors.is_empty() {
             None
@@ -38,11 +43,6 @@ impl Visitor for FnGenericsCheck {
     /// If this is a method call, makes sure that the amount of generics specified
     /// at the method call is the same amount as declared on the actual method.
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
-        // This is done for function pointers at a earlier stage(during type inference).
-        if fn_call.is_fn_ptr_call {
-            return;
-        }
-
         if let Some(adt_type_id) = &fn_call.method_adt {
             let ty_env_guard = ctx.ty_env.lock().unwrap();
 
@@ -88,8 +88,8 @@ impl Visitor for FnGenericsCheck {
                 if let Some(fn_call_generics) = &fn_call.generics {
                     if generic_impls.len() != fn_call_generics.len_types() {
                         let err = ctx.ast_ctx.err(format!(
-                            "Function declaration and function call generic count differs. \
-                            Function declaration amount: {}, function call amount: {}. \
+                            "Method declaration and method call generic count differs. \
+                            Method declaration amount: {}, method call amount: {}. \
                             ADT: {}, method name: {}, file_pos: {:#?}",
                             generic_impls.len(),
                             fn_call_generics.len_types(),

@@ -282,11 +282,21 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
         }
     }
 
+    let method_arg_tys = {
+        let mut method_arg_tys = Vec::default();
+        for arg in &method_call.arguments {
+            let arg_type_id = arg.value.get_expr_type()?;
+            method_arg_tys.push(arg_type_id);
+        }
+        method_arg_tys
+    };
+
     // The expected return type of the method call.
     let unique_id = ty_env_guard.new_unique_id();
     ty_env_guard.id(&Ty::UnknownAdtMethod(
         adt_type_id,
         method_name_with_gens,
+        method_arg_tys,
         unique_id,
         TypeInfo::FuncCall(method_call.file_pos.unwrap()),
     ))
@@ -346,7 +356,6 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
     // just make sure that this doesn't break for vararg functions.
     if let Some(params) = &func.parameters {
         let mut ty_env_guard = ctx.ty_env.lock().unwrap();
-        let fn_path_with_gens = fn_full_path.with_gens_opt(new_gens.clone());
 
         for (idx, arg) in fn_call.arguments.iter().enumerate() {
             // If the argument is a named argument, get the index for the

@@ -48,15 +48,12 @@ impl MethodThisAnalyzer {
         let ty_env_guard = ctx.ty_env.lock().unwrap();
 
         let adt_type_id = fn_call.method_adt.unwrap();
-        let mut adt_path = get_ident(&ty_env_guard, adt_type_id)?.unwrap();
-        if let Some(gens) = &fn_call.generics {
-            adt_path = adt_path.with_gens(gens.clone());
-        }
+        let adt_path = get_ident(&ty_env_guard, adt_type_id)?.unwrap();
 
-        let method = ctx
-            .ast_ctx
-            .get_method(&ty_env_guard, &adt_path, &fn_call.name)?;
-        let method = method.as_ref().read().unwrap();
+        let method =
+            ctx.ast_ctx
+                .get_method(&ty_env_guard, &adt_path, &fn_call.half_name(&ty_env_guard))?;
+        let method = method.read().unwrap();
 
         if method.is_this_by_ref() && !is_pointer(&ty_env_guard, arg_type_id)? {
             Err(ctx.ast_ctx.err(format!(

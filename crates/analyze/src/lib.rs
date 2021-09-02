@@ -44,10 +44,12 @@ use crate::{
         gen::{
             adt_collector::GenericAdtCollector, adt_creator::GenericAdtCreator,
             fn_collector::GenericFnCollector, fn_creator::GenericFnCreator,
-            method_check::FnGenericsCheck, tys_solved::GenericTysSolvedChecker,
+            method_check::MethodGensCheck, method_gens::MethodGensInferencer,
+            tys_solved::GenericTysSolvedChecker,
         },
         inf::primitive_to_adt::PrimitiveToAdtAnalyzer,
-        solver::TypeSolver,
+        solve::solve_type_system,
+        updater::TypeUpdater,
     },
 };
 
@@ -69,6 +71,19 @@ macro_rules! traverse {
         }
         analyzer
     }};
+}
+
+fn run_solve_type_system(ctx: &mut TraverseCtx, quiet: bool) -> Result<(), Vec<LangError>> {
+    let start_timer = Instant::now();
+    if !quiet {
+        print!("Running TypeSolving ");
+        std::io::stdout().flush().unwrap();
+    }
+    solve_type_system(ctx).map_err(|err| vec![err])?;
+    if !quiet {
+        println!("({:?}).", start_timer.elapsed());
+    }
+    Ok(())
 }
 
 // TODO: Error if a function that doesn't have a return type has a return in it.
@@ -124,9 +139,13 @@ pub fn analyze<'a>(
     traverse!(&mut ctx, ast_root, quiet, DeferAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, TraitImplAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, TypeInferencer::new());
-    traverse!(&mut ctx, ast_root, quiet, TypeSolver::new());
+
+    run_solve_type_system(&mut ctx, quiet)?;
+
+    traverse!(&mut ctx, ast_root, quiet, MethodGensInferencer::new());
+    traverse!(&mut ctx, ast_root, quiet, TypeUpdater::new());
     traverse!(&mut ctx, ast_root, quiet, PrimitiveToAdtAnalyzer::new());
-    traverse!(&mut ctx, ast_root, quiet, FnGenericsCheck::new());
+    traverse!(&mut ctx, ast_root, quiet, MethodGensCheck::new());
     traverse!(&mut ctx, ast_root, quiet, TraitsFnAnalyzer::new());
 
     let incl_impls = true;
