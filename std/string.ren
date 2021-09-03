@@ -34,7 +34,7 @@ pub struct String {
             var str = String { ptr, len, len }
             return Result::success(str)
         } else {
-            var err = ptr_or_error.&.get_error()
+            var err = ptr_or_error.get_error()
             return Result::error(err)
         }
     }
@@ -45,7 +45,7 @@ pub struct String {
             var str = String { ptr, 0, size }
             return Result::success(str)
         } else {
-            var err = ptr_or_error.&.get_error()
+            var err = ptr_or_error.get_error()
             return Result::error(err)
         }
     }
@@ -77,17 +77,17 @@ pub struct String {
             len = strlen(str_lit)
         }
 
-        if len > this.*.cap() - this.*.len() {
+        if len > this.cap() - this.len() {
             var resize_or_empty = this.resize(len)
-            if resize_or_empty.&.is_empty() {
+            if resize_or_empty.is_empty() {
                 return Result::error("Unable to resize String")
             }
         }
 
-        var dst = @ptr_add(this.*.ptr, this.*.len())
+        var dst = @ptr_add(this.ptr, this.len())
         Allocator::copy(dst, str_lit, len)
 
-        this.*.len += len
+        this.len += len
         return Result::success(0)
     }
 
@@ -112,7 +112,7 @@ pub struct String {
             return Result::error(err)
         }
 
-        var c_str_ptr = ptr_or_error.&.get_success()
+        var c_str_ptr = ptr_or_error.get_success()
         Allocator::copy(c_str_ptr, this.ptr, len)
 
         var null_byte_ptr = @ptr_add(c_str_ptr, len)
@@ -122,23 +122,23 @@ pub struct String {
     }
 
     pub fn {this} eq(other: {String}) -> bool {   
-        if this.*.len() == other.*.len() {
-            return strncmp(this.*.ptr, other.*.ptr, this.*.len()) == 0
+        if this.len() == other.len() {
+            return strncmp(this.ptr, other.ptr, this.len()) == 0
         } else {
             return false
         }
     }
 
     fn {this} resize(min_req_resize: u32) -> Optional<{u8}> {
-        var new_cap = this.*.cap() * 2
-        while new_cap - this.*.len() < min_req_resize {
+        var new_cap = this.cap() * 2
+        while new_cap - this.len() < min_req_resize {
             new_cap *= 2
         }
 
-        var new_ptr_or_empty = Allocator::reinit(this.*.ptr, new_cap)
+        var new_ptr_or_empty = Allocator::reinit(this.ptr, new_cap)
         if new_ptr is new_ptr_or_empty.value {
-            this.*.ptr = new_ptr
-            this.*.cap = new_cap
+            this.ptr = new_ptr
+            this.cap = new_cap
         }
 
         return new_ptr_or_empty
@@ -147,14 +147,14 @@ pub struct String {
 
 impl String: AsView {
     pub fn {this} as_view() -> StringView {
-        return StringView::new(this.*.ptr, 0, this.*.len())
+        return StringView::new(this.ptr, 0, this.len())
     }
 }
 
 impl String: Disposable {
     pub fn {this} deinit() {
-        if @is_not_null(this.*.ptr) {
-            Allocator::deinit<u8>(this.*.ptr)
+        if @is_not_null(this.ptr) {
+            Allocator::deinit<u8>(this.ptr)
         }
     }
 }

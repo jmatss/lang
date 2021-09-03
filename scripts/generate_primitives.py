@@ -81,16 +81,16 @@ def prim_struct(file, name, str_byte_size, min, max, name_unsigned=None):
         if err is str_or_error.error {{
             return Result::error(err)
         }}
-        var str = str_or_error.&.get_success()
+        var str = str_or_error.get_success()
 
         if is_negative {{
-            str.&.append_ascii(45) // 45 == '-'
+            str.append_ascii(45) // 45 == '-'
         }}
 
         var idx = buf_idx - 1
         while true {{
             var ascii = buf.[idx]
-            str.&.append_ascii(ascii)
+            str.append_ascii(ascii)
 
             if idx == 0 {{
                 break

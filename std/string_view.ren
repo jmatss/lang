@@ -42,13 +42,13 @@ pub struct StringView {
     pub fn {this} eq(other: {StringView}) -> bool {
         if this == other {
             return true;
-        } else this.*.len() != other.*.len() {
+        } else this.len() != other.len() {
             return false
         }
 
         const len = this.*.len()
-        const this_ptr = this.*.ptr
-        const other_ptr = other.*.ptr
+        const this_ptr = this.ptr
+        const other_ptr = other.ptr
 
         var i = 0
         while i < len {

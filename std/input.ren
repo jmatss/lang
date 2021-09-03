@@ -13,7 +13,7 @@ pub fn input(end_delim: u8 = 10) -> Result<String, {u8}> {
     if err is str_or_error.error {
         return Result::error(err)
     }
-    var str = str_or_error.&.get_success()
+    var str = str_or_error.get_success()
 
     var buf = 0
     var len = 1
@@ -25,7 +25,7 @@ pub fn input(end_delim: u8 = 10) -> Result<String, {u8}> {
             break
         }
 
-        str.&.append_ascii(buf)
+        str.append_ascii(buf)
     }
 
     if res != -1 {

@@ -13,7 +13,7 @@ pub union Optional<T> {
     }
 
     fn {this} has_value() -> bool {
-        if _ is this.*.value {
+        if _ is this.value {
             return true
         } else {
             return false
@@ -25,11 +25,11 @@ pub union Optional<T> {
     }
 
     fn {this} get() -> T {
-        return this.*.value
+        return this.value
     }
 
     fn {this} get_or(default: T) -> T {
-        if val is this.*.value {
+        if val is this.value {
             return val
         } else {
             return default
@@ -37,6 +37,6 @@ pub union Optional<T> {
     }
 
     fn {this} set(val: T) {
-        this.*.value = val
+        this.value = val
     }
 }

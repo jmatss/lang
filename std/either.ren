@@ -13,7 +13,7 @@ pub union Either<L, R> {
     }
 
     fn {this} is_left() -> bool {
-        if _ is this.*.left {
+        if _ is this.left {
             return true
         } else {
             return false
@@ -25,10 +25,10 @@ pub union Either<L, R> {
     }
 
     fn {this} get_left() -> L {
-        return this.*.left
+        return this.left
     }
 
     fn {this} get_right() -> R {
-        return this.*.right
+        return this.right
     }
 }
