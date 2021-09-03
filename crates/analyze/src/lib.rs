@@ -24,8 +24,8 @@ use mid::{
     path_resolver::PathResolver,
 };
 use post::{
-    call_args::CallArgs, clean_up::clean_up, match_exhaust::MatchExhaustAnalyzer,
-    method_this::MethodThisAnalyzer, trait_generics::TraitGenericsAnalyzer,
+    auto_deref::AutoDerefAnalyzer, call_args::CallArgs, clean_up::clean_up,
+    match_exhaust::MatchExhaustAnalyzer, trait_generics::TraitGenericsAnalyzer,
     union_init_arg::UnionInitArg,
 };
 use pre::{indexing::IndexingAnalyzer, main_args::MainArgsAnalyzer};
@@ -183,7 +183,7 @@ pub fn analyze<'a>(
     traverse!(&mut ctx, ast_root, quiet, FnReturnAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, VoidAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, ExtStructInit::new());
-    traverse!(&mut ctx, ast_root, quiet, MethodThisAnalyzer::new());
+    traverse!(&mut ctx, ast_root, quiet, AutoDerefAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, UnionInitArg::new());
     traverse!(&mut ctx, ast_root, quiet, TraitMethodsAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, TraitGenericsAnalyzer::new());

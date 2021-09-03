@@ -1,10 +1,9 @@
 use common::{
     error::LangError,
-    path::LangPathPart,
     token::op::UnOperator,
     token::{expr::FnCall, op::UnOp},
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
-    ty::{ty::Ty, type_id::TypeId},
+    ty::{get::get_ident, is::is_pointer, to_string::to_string_type_id, ty::Ty, type_id::TypeId},
 };
 
 /// Iterates through all types in the AST and replaces them with their correctly
@@ -88,6 +87,8 @@ impl Visitor for TypeUpdater {
         // Edge case logic for ADT access. Need to figure out the index of the
         // member that is being accessed.
         if let UnOperator::AdtAccess(member_name, member_idx) = &mut un_op.operator {
+            let ty_env_guard = ctx.ty_env.lock().unwrap();
+
             let type_id = match un_op.value.get_expr_type() {
                 Ok(type_id) => type_id,
                 Err(err) => {
@@ -96,7 +97,7 @@ impl Visitor for TypeUpdater {
                 }
             };
 
-            let inf_type_id = match ctx.ty_env.lock().unwrap().inferred_type(type_id) {
+            let mut inf_type_id = match ty_env_guard.inferred_type(type_id) {
                 Ok(inf_type_id) => inf_type_id,
                 Err(err) => {
                     self.errors.push(err);
@@ -104,44 +105,53 @@ impl Visitor for TypeUpdater {
                 }
             };
 
-            let inf_ty = match ctx.ty_env.lock().unwrap().ty_clone(inf_type_id) {
-                Ok(ty) => ty,
+            // Since structs can be auto-derefed, the value might be a pointer.
+            // In that case use the wrapped type.
+            match is_pointer(&ty_env_guard, inf_type_id) {
+                Ok(true) => match ty_env_guard.ty_clone(inf_type_id) {
+                    Ok(Ty::Pointer(nested_type_id, ..)) => inf_type_id = nested_type_id,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                    _ => unreachable!(),
+                },
+
+                Ok(false) => (),
+
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            }
+
+            let adt_path_without_gens = match get_ident(&ty_env_guard, inf_type_id) {
+                Ok(Some(path)) => path.without_gens(),
+                _ => {
+                    let ty_name = to_string_type_id(&ty_env_guard, inf_type_id).unwrap();
+                    let err = ctx.ast_ctx.err(format!(
+                        "Expression that was ADT accessed wasn't ADT or pointer to ADT. \
+                        Value inferred type: {} ({}). Expr: {:#?}",
+                        ty_name, inf_type_id, un_op.value
+                    ));
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            let idx = match ctx.ast_ctx.get_adt_member_index(
+                &ty_env_guard,
+                &adt_path_without_gens,
+                member_name,
+            ) {
+                Ok(idx) => idx,
                 Err(err) => {
                     self.errors.push(err);
                     return;
                 }
             };
 
-            match inf_ty {
-                Ty::CompoundType(inner_ty, ..) if inner_ty.is_adt() => {
-                    let mut path_excluding_gens = inner_ty.get_ident().unwrap();
-                    let last_part = path_excluding_gens.pop().unwrap();
-                    path_excluding_gens.push(LangPathPart(last_part.0, None));
-
-                    let idx = match ctx.ast_ctx.get_adt_member_index(
-                        &ctx.ty_env.lock().unwrap(),
-                        &path_excluding_gens,
-                        member_name,
-                    ) {
-                        Ok(idx) => idx,
-                        Err(err) => {
-                            self.errors.push(err);
-                            return;
-                        }
-                    };
-
-                    *member_idx = Some(idx as u64);
-                }
-
-                _ => {
-                    let err = ctx.ast_ctx.err(format!(
-                        "Expression that was ADT accessed wasn't ADT or compound, was: {:#?}. \
-                        Value inferred type ID: {}, inferred ty: {:#?}",
-                        un_op.value, inf_type_id, inf_ty
-                    ));
-                    self.errors.push(err);
-                }
-            }
+            *member_idx = Some(idx as u64);
         }
     }
 }

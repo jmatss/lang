@@ -571,6 +571,16 @@ var x = 5
 ```
 
 
+## Comparison
+Any ADT that implements the `std::Eq<T>` trait and its method `eq` can be compared using the `==` or `!=` symbols. The compiler will rewrite the comparison using the symbols into a call to the `std::Eq<T>` traits `eq` method. The `std::Cmp<T>` and its `cmp` method can be used to allow comparisons with the built in `>`, `<`, `>=` and `<=` symbols.
+Any primitive type can be compared with the comparison symbols without needing to implement the traits.
+
+
+## Auto deref
+ADT instances can be auto dereferenced depend on context. Given a ADT type `T`, one can access its members or call its methods on a expression of type `T` or `{T}`.
+For method calls, the compiler will rewrite the expression (if needed) by adding a deref/address operation to match the form of `this` in the method declaration. For member access on an expression of type `{T}`, a deref operation will be added.
+
+
 ## Built-in functions
 Built-in functions can be used in the same way as regular functions. Most of the built-in functions exists because they need some extra logic that needs to interact with the compiler and therefore can't be implemented as regular functions. A few of the built-in functions could be implemented as regular functions, but are built-in for convenience.
 
