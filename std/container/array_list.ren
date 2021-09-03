@@ -78,7 +78,7 @@ pub struct ArrayList<T> {
             return Result::error(err)
         }
 
-        var item_pos_ptr = @ptr_add(this.*.ptr, idx)
+        var item_pos_ptr = @ptr_add(this.ptr, idx)
         var old_item = item_pos_ptr.*
         item_pos_ptr.* = item
 

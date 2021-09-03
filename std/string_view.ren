@@ -46,7 +46,7 @@ pub struct StringView {
             return false
         }
 
-        const len = this.*.len()
+        const len = this.len()
         const this_ptr = this.ptr
         const other_ptr = other.ptr
 
