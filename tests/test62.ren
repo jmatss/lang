@@ -21,5 +21,15 @@ fn main() -> i32 {
     std::assert(not ts3.eq(ts4))
     std::assert(ts3 != ts4)
 
+    var v1 = "abc123"
+    var v2 = "abc123"
+    std::assert(v1 == v1)
+    std::assert(v1 == v2)
+
+    var v3 = "123abc"
+    var v4 = "abc"
+    std::assert(v1 != v3)
+    std::assert(v1 != v4)
+
     return 0
 }

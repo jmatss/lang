@@ -1,17 +1,15 @@
 mod std
 
 use std::Allocator
-use std::List
 use std::AsView
 use std::Disposable
+use std::Eq
+use std::List
 use std::Optional
 use std::Result
 use std::StringView
 
 ext fn strlen(str: {u8}) -> u32
-ext fn strncmp(str1: {u8}, str2: {u8}, len: u32) -> i32
-
-// TODO: Implement Eq/Cmp.
 
 /// Represents a mutable, heap-allocated, string of text.
 pub struct String {
@@ -20,7 +18,7 @@ pub struct String {
     /// Creates a new String with the initial capacity `size`.
     ///
     /// If unable to allocate memory, the function will return an error.
-    /// If the given size is 0, the memory allocation will be lazily initialized
+    /// If the given `size` is 0, the memory allocation will be lazily initialized
     /// at the first insertion into the string.
     pub fn init(size: u32) -> Result<String, StringView> {
         var buf_or_error = List::init(size)
@@ -33,7 +31,7 @@ pub struct String {
         }
     }
 
-    /// Creates a new String from a given string literal `str_lit`.
+    /// Creates a new String from the given string literal `str_lit`.
     ///
     /// If no `start_idx` argument is given, it will be set to the default value 0.
     /// If no `len` arguments is given, or it is set to 0, this function will assume that
@@ -104,14 +102,14 @@ pub struct String {
             len = strlen(str_lit)
         }
 
-        var idx = 0
-        while idx < len {
-            var item = @ptr_add(str_lit, idx).*
+        var i = 0
+        while i < len {
+            var item = @ptr_add(str_lit, i).*
             var push_res = this.buf.push(item)
             if err is push_res.error {
                 return Result::error(err)
             }
-            idx.++
+            i.++
         }
 
         return Result::success(0)
@@ -146,14 +144,6 @@ pub struct String {
 
         return Result::success(c_str_ptr)
     }
-
-    pub fn {this} eq(other: {String}) -> bool {
-        if this.len() == other.len() {
-            return strncmp(this.ptr(), other.ptr(), this.len()) == 0
-        } else {
-            return false
-        }
-    }
 }
 
 impl String: AsView {
@@ -165,5 +155,11 @@ impl String: AsView {
 impl String: Disposable {
     pub fn {this} deinit() {
         this.buf.deinit()
+    }
+}
+
+impl String: Eq<String> {
+    pub fn this eq(other: String) -> bool {
+        return this.as_view() == other.as_view()
     }
 }

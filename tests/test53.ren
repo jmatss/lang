@@ -17,14 +17,14 @@ fn main() -> i32 {
 
     var s1: String = @format("123")
     printf(c"s1: %s", s1.to_c_string().get_success())
-    std::assert(expected_str.eq(s1.&))
+    std::assert(expected_str == s1)
     s1.deinit()
 
 
     var i2_u8: u8 = 123
     var s2: String = @format("{}", i2_u8)
     printf(c"\ns2: %s", s2.to_c_string().get_success())
-    std::assert(expected_str.eq(s2.&))
+    std::assert(expected_str == s2)
     s2.deinit()
 
 
@@ -32,21 +32,21 @@ fn main() -> i32 {
     var i3_i8: i8 = 3
     var s3: String = @format("1{}{}", i3_u8, i3_i8)
     printf(c"\ns3: %s", s3.to_c_string().get_success())
-    std::assert(expected_str.eq(s3.&))
+    std::assert(expected_str == s3)
     s3.deinit()
 
 
     var string_view = StringView::new(expected_str.ptr(), 0, expected_str.len())
     var s4: String = @format("{}", string_view)
     printf(c"\ns4: %s", s4.to_c_string().get_success())
-    std::assert(expected_str.eq(s4.&))
+    std::assert(expected_str == s4)
     s4.deinit()
 
 
     var i5_i8: i8 = -123
     var s5: String = @format("{}", i5_i8)
     printf(c"\ns5: %s", s5.to_c_string().get_success())
-    std::assert(expected_str_neg.eq(s5.&))
+    std::assert(expected_str_neg == s5)
     s5.deinit()
 
     return 0

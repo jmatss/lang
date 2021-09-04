@@ -1,5 +1,4 @@
 ext fn printf(format: {u8}, ...) -> i32
-ext fn strcmp(s1: {u8}, s2: {u8}) -> i32
 
 struct TestStruct<T> {
     var a: i64
@@ -52,11 +51,11 @@ fn main() -> i32 {
     std::assert(column_nr == 21 + 33)
 
     printf(c"\nline_nr: %d", line_nr)
-    std::assert(line_nr == 48)
+    std::assert(line_nr == 47)
 
     std::print("\nfilename: ", line_break = false)
     std::print(filename, line_break = false)
-    std::assert(filename.&.eq("test35.ren".&))
+    std::assert(filename == "test35.ren")
 
 
     var null_i: i64 = @null()
@@ -81,7 +80,7 @@ fn main() -> i32 {
     var var_name_content = @name(var_name)
     std::print("\nvar_name: ", line_break = false)
     std::print(var_name_content, line_break = false)
-    std::assert(var_name_content.&.eq("var_name".&))
+    std::assert(var_name_content == "var_name")
 
 
     if false {

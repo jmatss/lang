@@ -1,6 +1,7 @@
 mod std
 
 use std::AsView
+use std::Eq
 
 ext fn strlen(str: {u8}) -> u32
 
@@ -38,11 +39,17 @@ pub struct StringView {
     pub fn this len() -> u32 {
         return this.len
     }
-    
-    pub fn {this} eq(other: {StringView}) -> bool {
-        if this == other {
-            return true;
-        } else this.len() != other.len() {
+}
+
+impl StringView: AsView {
+    pub fn {this} as_view() -> StringView {
+        return this.*
+    }
+}
+
+impl StringView: Eq<StringView> {
+    pub fn this eq(other: StringView) -> bool {
+        if this.len() != other.len() {
             return false
         }
 
@@ -61,11 +68,5 @@ pub struct StringView {
         }
 
         return true
-    }
-}
-
-impl StringView: AsView {
-    pub fn {this} as_view() -> StringView {
-        return this.*
     }
 }

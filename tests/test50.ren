@@ -29,7 +29,7 @@ fn main() -> i32 {
     str3.append_view("second")
     var str3_c_after = str3.to_c_string().get_success()
     printf(c"\nstr3 after append -- \"%s\", len: %d, cap: %d", str3_c_after, str3.len(), str3.cap())
-    std::assert(str2.eq(str3.&))
+    std::assert(str2 == str3)
     str2.deinit()
     str3.deinit()
 
