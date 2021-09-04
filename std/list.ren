@@ -1,24 +1,25 @@
-mod std::container
+mod std
 
+use std::Allocator
+use std::Disposable
+use std::Optional
+use std::Result
 use std::StringView
-use std::mem::Allocator
-use std::types::Disposable
-use std::types::Optional
-use std::types::Result
 
-pub struct ArrayList<T> {
+pub struct List<T> {
     var ptr: {T}
     var len: u32
     var cap: u32
 
-    /// Allocates a new ArrayList with a initial capacity of `cap` items.
+    /// Allocates a new List with a initial capacity of `cap` items.
     ///
-    /// If `cap` is set to 0, the current implementation will set the capacity
-    /// to 1 so that something can be allocated. This should be changed in the
-    /// future so that a ArrayList of size 0 can be lazy initialized and only
-    /// make a heap allocation if it is ever used.
-    pub fn init(cap: u32 = 0) -> Result<ArrayList<T>, StringView> {
-        if cap == 0 { cap = 1 }
+    /// If `cap` is set to 0, the heap allocation will be done lazily at
+    /// the first use of the list. The capacity will be set to 16.
+    pub fn init(cap: u32 = 0) -> Result<List<T>, StringView> {
+        if cap == 0 {
+            var list = List { @null(), 0, 0 }
+            return Result::success(list)
+        }
 
         var size = cap * @size<T>()
         var ptr_or_error = Allocator::init_size(size)
@@ -27,11 +28,12 @@ pub struct ArrayList<T> {
         }
 
         var ptr = ptr_or_error.get_success()
-        var list = ArrayList { ptr, 0, cap }
+        var list = List { ptr, 0, cap }
 
         return Result::success(list)
     }
 
+    /// Pushes the `item` into the end of the list.
     pub fn {this} push(item: T) -> Result<u32, StringView> {
         if this.len() >= this.cap() {
             var resize_or_error = this.resize(1)
@@ -47,6 +49,8 @@ pub struct ArrayList<T> {
         return Result::success(0)
     }
 
+    /// Pops and returns the item at the end of this list.
+    /// If the list is empty, `Optional::empty` will be returned.
     pub fn {this} pop() -> Optional<T> {
         if this.len() == 0 {
             return Optional::empty()
@@ -58,9 +62,12 @@ pub struct ArrayList<T> {
         
         this.len.--
         return Optional::value(item)
-
     }
 
+    /// Gets the item at index `idx` of the list.
+    ///
+    /// If the given `idx` is greater or equal to the current list size,
+    /// `Optional::empty` will be returned.
     pub fn {this} get(idx: u32) -> Optional<T> {
         if idx >= this.len() {
             return Optional::empty()
@@ -72,9 +79,13 @@ pub struct ArrayList<T> {
         return Optional::value(item)
     }
 
+    /// Inserts then `item` into the list at index `idx`.
+    ///
+    /// If the given `idx` is greater or equal to the current list size,
+    /// an error will be returned.
     pub fn {this} set(idx: u32, item: T) -> Result<T, StringView> {
         if idx >= this.len() {
-            var err = "Tried to set value at idx greater than ArrayList length."
+            var err = "Tried to set value at idx greater than List length."
             return Result::error(err)
         }
 
@@ -93,25 +104,36 @@ pub struct ArrayList<T> {
         return this.cap
     }
 
+    /// Resizes the heap allocation.
+    /// The allocation size will be duplicated until it can fit `min_resize` new items.
+    /// If the current `this.ptr` is null (i.e. the list hasn't been initialized
+    /// yet), the initial size of the heap allocation will be set to 16 * sizeof(T).
+    /// If unable to resize the allocation, an error will be returned.
     fn {this} resize(min_resize: u32) -> Result<{u8}, StringView> {
-        var new_cap = this.cap() * 2
-        while new_cap - this.len() < min_resize {
-            new_cap *= 2
+        var new_cap
+
+        if @is_null(this.ptr) {
+            new_cap = 16
+        } else {
+            new_cap = this.cap() * 2
+            while new_cap < this.len() + min_resize {
+                new_cap *= 2
+            }
         }
 
-        var new_ptr_or_empty = Allocator::reinit(this.ptr, new_cap)
+        var new_ptr_or_empty = Allocator::reinit(this.ptr, new_cap * @size<T>())
         if new_ptr is new_ptr_or_empty.value {
             this.ptr = new_ptr
             this.cap = new_cap
             return Result::success(new_ptr)
         } else {
-            var err = "Unable to reallocate size for ArrayList."
+            var err = "Unable to reallocate size for List."
             return Result::error(err)
         }
     }
 }
 
-impl ArrayList: Disposable {
+impl List: Disposable {
     pub fn {this} deinit() {
         if @is_not_null(this.ptr) {
             Allocator::deinit(this.ptr as {u8})

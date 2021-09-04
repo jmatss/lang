@@ -1,44 +1,44 @@
-use std::container::ArrayList
+use std::List
 
 ext fn printf(format: {u8}, ...) -> i32
 
 fn main() -> i32 {
-    var list_or_error = ArrayList<u8>::init(1)
-    std::assert(list_or_error.&.is_success())
-    var list = list_or_error.&.get_success()
+    var list_or_error = List<u8>::init(1)
+    std::assert(list_or_error.is_success())
+    var list = list_or_error.get_success()
     printf(c"\nArrayList -1- len: %d, cap: %d", list.len, list.cap)
     std::assert(list.len == 0 and list.cap == 1)
 
 
     var expected_item = 2
-    var push_res = list.&.push(expected_item)
-    std::assert(push_res.&.is_success())
+    var push_res = list.push(expected_item)
+    std::assert(push_res.is_success())
     printf(c"\nArrayList -2- len: %d, cap: %d", list.len, list.cap)
     std::assert(list.len == 1 and list.cap == 1)
 
 
-    var actual_item_or_empty = list.&.get(0)
-    std::assert(actual_item_or_empty.&.has_value())
-    var actual_item = actual_item_or_empty.&.get()
+    var actual_item_or_empty = list.get(0)
+    std::assert(actual_item_or_empty.has_value())
+    var actual_item = actual_item_or_empty.get()
     printf(c"\nArrayList -3- len: %d, cap: %d, actual_item: %d", list.len, list.cap, actual_item as u32)
     std::assert(list.len == 1 and list.cap == 1 and actual_item == expected_item)
 
 
     expected_item = 4
-    push_res = list.&.push(expected_item)
-    std::assert(push_res.&.is_success())
+    push_res = list.push(expected_item)
+    std::assert(push_res.is_success())
     printf(c"\nArrayList -4- len: %d, cap: %d", list.len, list.cap)
     std::assert(list.len == 2 and list.cap == 2)
 
 
-    actual_item_or_empty = list.&.pop()
-    std::assert(actual_item_or_empty.&.has_value())
-    actual_item = actual_item_or_empty.&.get()
+    actual_item_or_empty = list.pop()
+    std::assert(actual_item_or_empty.has_value())
+    actual_item = actual_item_or_empty.get()
     printf(c"\nArrayList -5- len: %d, cap: %d, actual_item: %d", list.len, list.cap, actual_item as u32)
     std::assert(list.len == 1 and list.cap == 2 and actual_item == expected_item)
 
 
-    list.&.deinit()
+    list.deinit()
 
     return 0
 }

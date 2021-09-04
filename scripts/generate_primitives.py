@@ -77,7 +77,7 @@ def prim_struct(file, name, str_byte_size, min, max, name_unsigned=None):
             str_len = buf_idx
         }}
 
-        var str_or_error = String::init_size(str_len)
+        var str_or_error = String::init(str_len)
         if err is str_or_error.error {{
             return Result::error(err)
         }}

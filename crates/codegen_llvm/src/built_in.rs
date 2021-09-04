@@ -388,7 +388,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let std_module: LangPath = vec!["std".into()].into();
 
         let mut string_init_call = FnCall::new(
-            "init_size".into(),
+            "init".into(),
             std_module.clone(),
             vec![Argument::new(
                 None,

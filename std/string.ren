@@ -1,26 +1,44 @@
 mod std
 
 use std::Allocator
+use std::List
 use std::AsView
 use std::Disposable
 use std::Optional
 use std::Result
+use std::StringView
 
 ext fn strlen(str: {u8}) -> u32
 ext fn strncmp(str1: {u8}, str2: {u8}, len: u32) -> i32
 
+// TODO: Implement Eq/Cmp.
+
 /// Represents a mutable, heap-allocated, string of text.
 pub struct String {
-    var ptr: {u8}
-    var len: u32
-    var cap: u32
+    var buf: List<u8>
 
-    /// Creates a new String from a given string literal.
+    /// Creates a new String with the initial capacity `size`.
+    ///
+    /// If unable to allocate memory, the function will return an error.
+    /// If the given size is 0, the memory allocation will be lazily initialized
+    /// at the first insertion into the string.
+    pub fn init(size: u32) -> Result<String, StringView> {
+        var buf_or_error = List::init(size)
+        if buf is buf_or_error.success {
+            var str = String { buf }
+            return Result::success(str)
+        } else {
+            var err = buf_or_error.get_error()
+            return Result::error(err)
+        }
+    }
+
+    /// Creates a new String from a given string literal `str_lit`.
     ///
     /// If no `start_idx` argument is given, it will be set to the default value 0.
     /// If no `len` arguments is given, or it is set to 0, this function will assume that
     /// the given `str_lit` is null-terminated and calculate the length with `strlen()`.
-    pub fn init(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<String, StringView> {
+    pub fn from_lit(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<String, StringView> {
         if start_idx != 0 {
             str_lit = @ptr_add(str_lit, start_idx)
         }
@@ -29,33 +47,42 @@ pub struct String {
             len = strlen(str_lit)
         }
 
-        var ptr_or_error = Allocator::clone(str_lit, len)
-        if ptr is ptr_or_error.success {
-            var str = String { ptr, len, len }
-            return Result::success(str)
-        } else {
-            var err = ptr_or_error.get_error()
+        var buf_or_error = List::init(len)
+        if err is buf_or_error.error {
             return Result::error(err)
         }
+        var buf = buf_or_error.get_success()
+
+        var str = String { buf }
+        str.append_lit(str_lit, 0, len)
+
+        return Result::success(str)
     }
 
-    pub fn init_size(size: u32) -> Result<String, StringView> {
-        var ptr_or_error = Allocator::init_size(size)
-        if ptr is ptr_or_error.success {
-            var str = String { ptr, 0, size }
-            return Result::success(str)
-        } else {
-            var err = ptr_or_error.get_error()
-            return Result::error(err)
+    /// Creates a new String from the given StringView.
+    pub fn from_view(str_view: StringView, start_idx: u32 = 0, len: u32 = 0) -> Result<String, StringView> {
+        if len == 0 {
+            len = str_view.len()
         }
+
+        if start_idx + len > str_view.len() {
+            return Result::error("When creating String from StringView: start_idx + len > str_view.len()")
+        }
+
+        return this::from_lit(str_view.ptr, start_idx, len)
     }
 
     pub fn this len() -> u32 {
-        return this.len
+        return this.buf.len()
     }
 
     pub fn this cap() -> u32 {
-        return this.cap
+        return this.buf.cap()
+    }
+
+    /// Returns the underlying pointer to the string.
+    pub fn this ptr() -> {u8} {
+        return this.buf.ptr
     }
 
     // TODO: What should it return in the success case?
@@ -77,17 +104,16 @@ pub struct String {
             len = strlen(str_lit)
         }
 
-        if len > this.cap() - this.len() {
-            var resize_or_empty = this.resize(len)
-            if resize_or_empty.is_empty() {
-                return Result::error("Unable to resize String")
+        var idx = 0
+        while idx < len {
+            var item = @ptr_add(str_lit, idx).*
+            var push_res = this.buf.push(item)
+            if err is push_res.error {
+                return Result::error(err)
             }
+            idx.++
         }
 
-        var dst = @ptr_add(this.ptr, this.len())
-        Allocator::copy(dst, str_lit, len)
-
-        this.len += len
         return Result::success(0)
     }
 
@@ -113,7 +139,7 @@ pub struct String {
         }
 
         var c_str_ptr = ptr_or_error.get_success()
-        Allocator::copy(c_str_ptr, this.ptr, len)
+        Allocator::copy(c_str_ptr, this.buf.ptr, len)
 
         var null_byte_ptr = @ptr_add(c_str_ptr, len)
         null_byte_ptr.* = '\0' as u8
@@ -121,40 +147,23 @@ pub struct String {
         return Result::success(c_str_ptr)
     }
 
-    pub fn {this} eq(other: {String}) -> bool {   
+    pub fn {this} eq(other: {String}) -> bool {
         if this.len() == other.len() {
-            return strncmp(this.ptr, other.ptr, this.len()) == 0
+            return strncmp(this.ptr(), other.ptr(), this.len()) == 0
         } else {
             return false
         }
-    }
-
-    fn {this} resize(min_req_resize: u32) -> Optional<{u8}> {
-        var new_cap = this.cap() * 2
-        while new_cap - this.len() < min_req_resize {
-            new_cap *= 2
-        }
-
-        var new_ptr_or_empty = Allocator::reinit(this.ptr, new_cap)
-        if new_ptr is new_ptr_or_empty.value {
-            this.ptr = new_ptr
-            this.cap = new_cap
-        }
-
-        return new_ptr_or_empty
     }
 }
 
 impl String: AsView {
     pub fn {this} as_view() -> StringView {
-        return StringView::new(this.ptr, 0, this.len())
+        return StringView::new(this.ptr(), 0, this.len())
     }
 }
 
 impl String: Disposable {
     pub fn {this} deinit() {
-        if @is_not_null(this.ptr) {
-            Allocator::deinit(this.ptr)
-        }
+        this.buf.deinit()
     }
 }

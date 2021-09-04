@@ -42,7 +42,7 @@ pub struct u8 {
             str_len = buf_idx
         }
 
-        var str_or_error = String::init_size(str_len)
+        var str_or_error = String::init(str_len)
         if err is str_or_error.error {
             return Result::error(err)
         }
@@ -148,7 +148,7 @@ pub struct i8 {
             str_len = buf_idx
         }
 
-        var str_or_error = String::init_size(str_len)
+        var str_or_error = String::init(str_len)
         if err is str_or_error.error {
             return Result::error(err)
         }
@@ -260,7 +260,7 @@ pub struct u16 {
             str_len = buf_idx
         }
 
-        var str_or_error = String::init_size(str_len)
+        var str_or_error = String::init(str_len)
         if err is str_or_error.error {
             return Result::error(err)
         }
@@ -366,7 +366,7 @@ pub struct i16 {
             str_len = buf_idx
         }
 
-        var str_or_error = String::init_size(str_len)
+        var str_or_error = String::init(str_len)
         if err is str_or_error.error {
             return Result::error(err)
         }
@@ -478,7 +478,7 @@ pub struct u32 {
             str_len = buf_idx
         }
 
-        var str_or_error = String::init_size(str_len)
+        var str_or_error = String::init(str_len)
         if err is str_or_error.error {
             return Result::error(err)
         }
@@ -584,7 +584,7 @@ pub struct i32 {
             str_len = buf_idx
         }
 
-        var str_or_error = String::init_size(str_len)
+        var str_or_error = String::init(str_len)
         if err is str_or_error.error {
             return Result::error(err)
         }
@@ -696,7 +696,7 @@ pub struct u64 {
             str_len = buf_idx
         }
 
-        var str_or_error = String::init_size(str_len)
+        var str_or_error = String::init(str_len)
         if err is str_or_error.error {
             return Result::error(err)
         }
@@ -802,7 +802,7 @@ pub struct i64 {
             str_len = buf_idx
         }
 
-        var str_or_error = String::init_size(str_len)
+        var str_or_error = String::init(str_len)
         if err is str_or_error.error {
             return Result::error(err)
         }

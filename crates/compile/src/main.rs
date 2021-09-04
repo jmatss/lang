@@ -63,6 +63,7 @@ std_files!(
     "disposable.ren",
     "either.ren",
     "eq.ren",
+    "list.ren",
     "mem.ren",
     "optional.ren",
     "primitives.ren",
