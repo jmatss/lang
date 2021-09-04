@@ -372,18 +372,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Generic;
 
-        let inf_type_id = self
-            .analyze_ctx
-            .ty_env
-            .lock()
-            .unwrap()
-            .inferred_type(type_id)?;
-        let inf_ty = self
-            .analyze_ctx
-            .ty_env
-            .lock()
-            .unwrap()
-            .ty_clone(inf_type_id)?;
+        let inf_type_id = self.analyze_ctx.ty_env.lock().inferred_type(type_id)?;
+        let inf_ty = self.analyze_ctx.ty_env.lock().ty_clone(inf_type_id)?;
 
         Ok(match inf_ty {
             Ty::Pointer(ptr_type_id, ..) => {
@@ -469,8 +459,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             Ty::Fn(_, param_tys, ret_type_id_opt, type_info) => {
                 let mut param_types = Vec::with_capacity(param_tys.len());
                 for param_ty in param_tys {
-                    let file_pos =
-                        get_file_pos(&self.analyze_ctx.ty_env.lock().unwrap(), param_ty).cloned();
+                    let file_pos = get_file_pos(&self.analyze_ctx.ty_env.lock(), param_ty).cloned();
                     let compiled_ty = self.compile_type(param_ty, file_pos)?;
                     param_types.push(CodeGen::any_into_basic_type(compiled_ty)?);
                 }
@@ -498,7 +487,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 match inner_ty {
                     InnerTy::Struct(full_path) | InnerTy::Union(full_path) => {
                         let struct_type_opt = self.module.get_struct_type(&to_string_path(
-                            &self.analyze_ctx.ty_env.lock().unwrap(),
+                            &self.analyze_ctx.ty_env.lock(),
                             &full_path,
                         ));
 
@@ -508,10 +497,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                             return Err(self.err(
                                 format!(
                                     "Unable to find custom struct type with name: {}",
-                                    to_string_path(
-                                        &self.analyze_ctx.ty_env.lock().unwrap(),
-                                        &full_path
-                                    )
+                                    to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path)
                                 ),
                                 file_pos,
                             ));
@@ -519,7 +505,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     }
                     InnerTy::Enum(full_path) => {
                         let struct_type_opt = self.module.get_struct_type(&to_string_path(
-                            &self.analyze_ctx.ty_env.lock().unwrap(),
+                            &self.analyze_ctx.ty_env.lock(),
                             &full_path,
                         ));
 
@@ -559,10 +545,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     InnerTy::U128 => AnyTypeEnum::IntType(self.context.i128_type()),
 
                     _ => {
-                        let ty =
-                            to_string_type_id(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
+                        let ty = to_string_type_id(&self.analyze_ctx.ty_env.lock(), type_id)?;
                         let inner_ty =
-                            to_string_inner_ty(&self.analyze_ctx.ty_env.lock().unwrap(), &inner_ty);
+                            to_string_inner_ty(&self.analyze_ctx.ty_env.lock(), &inner_ty);
                         return Err(self.err(
                             format!(
                                 "Invalid inner type during type codegen. \
@@ -584,7 +569,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                         Type ID: {}, inf_type_id: {}, inf_ty: {:#?}",
                         type_id,
                         inf_type_id,
-                        to_string_type_id(&self.analyze_ctx.ty_env.lock().unwrap(), inf_type_id)?,
+                        to_string_type_id(&self.analyze_ctx.ty_env.lock(), inf_type_id)?,
                     ),
                     file_pos,
                 ))

@@ -45,15 +45,15 @@ enum AdtSolveStatus {
 }
 
 pub fn solve_type_system(ctx: &mut TraverseCtx) -> LangResult<()> {
-    let mut all_types = ctx.ty_env.lock().unwrap().interner.all_types();
+    let mut all_types = ctx.ty_env.lock().interner.all_types();
 
     // Remove all generic types declared in trait functions. These are types that
     // are used in the trait "blue-print" functions and will never be solvable.
-    let trait_gens = collect_trait_gens(&ctx.ty_env.lock().unwrap(), ctx.ast_ctx)?;
+    let trait_gens = collect_trait_gens(&ctx.ty_env.lock(), ctx.ast_ctx)?;
     all_types.retain(|type_id| !trait_gens.contains(type_id));
 
     solve_types_ids(ctx, all_types)?;
-    convert_defaults(&mut ctx.ty_env.lock().unwrap())?;
+    convert_defaults(&mut ctx.ty_env.lock())?;
 
     Ok(())
 }
@@ -95,7 +95,7 @@ fn solve_types_ids(ctx: &mut TraverseCtx, all_type_ids: HashSet<TypeId>) -> Lang
     // all SolveCond's have been tried and the type system isn't solvable.
     let solve_conds = [SolveCond::new().excl_gen_inst(), SolveCond::new()];
 
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+    let mut ty_env_guard = ctx.ty_env.lock();
 
     ty_env_guard.solve_mode = true;
 
@@ -654,7 +654,6 @@ fn solve_unknown_adt_member(
         ast_ctx
             .get_adt_member(ty_env, &adt_path.without_gens(), &member_name, file_pos)?
             .read()
-            .unwrap()
             .ty
             .unwrap()
     };
@@ -720,7 +719,7 @@ fn solve_unknown_adt_method(
     };
 
     let method = ast_ctx.get_method(&ty_env, &adt_path.without_gens(), &method_name)?;
-    let method = method.as_ref().read().unwrap();
+    let method = method.read();
     let fn_gens = method.generics.clone().unwrap_or_else(Generics::empty);
 
     let fn_call_gens = if fn_gens.is_empty() {
@@ -835,7 +834,7 @@ fn solve_unknown_method_argument(
     )?;
 
     let method = ast_ctx.get_method(&ty_env, &adt_path.without_gens(), &method_name)?;
-    let method = method.as_ref().read().unwrap();
+    let method = method.read();
     let fn_gens = method.generics.clone().unwrap_or_else(Generics::empty);
 
     // Create/get the generics for the function call and replace potential
@@ -1044,11 +1043,11 @@ fn collect_trait_gens(ty_env: &TyEnv, ctx: &AstCtx) -> LangResult<HashSet<TypeId
     let mut gen_type_ids = HashSet::default();
 
     for trait_ in ctx.traits.values() {
-        let trait_ = trait_.read().unwrap();
+        let trait_ = trait_.read();
         for method in &trait_.methods {
             if let Some(params) = &method.parameters {
                 for param in params {
-                    if let Some(param_type_id) = param.read().unwrap().ty {
+                    if let Some(param_type_id) = param.read().ty {
                         for gen_type_id in get_generics(ty_env, param_type_id)? {
                             gen_type_ids.insert(gen_type_id);
                         }
@@ -1096,7 +1095,7 @@ pub fn infer_gens_from_args(
         assert!(params.len() == fn_call_arg_tys.len());
 
         for (param, arg_type_id) in params.iter().zip(fn_call_arg_tys) {
-            let param = param.read().unwrap();
+            let param = param.read();
             collect_gen_type_id(
                 ty_env,
                 &mut gen_name_to_impl,
@@ -1220,7 +1219,7 @@ pub fn set_generic_names(ty_env: &mut TyEnv, ast_ctx: &AstCtx, type_id: TypeId) 
         Ok(adt) => adt,
         Err(err) => return Err(err),
     };
-    let adt = adt.as_ref().read().unwrap();
+    let adt = adt.read();
 
     if let Some(adt_gens) = adt.generics.clone() {
         let ty_mut = ty_env.ty_mut(type_id)?;

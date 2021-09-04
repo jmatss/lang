@@ -63,9 +63,9 @@ pub(super) fn infer_fn_call_fn_ptr(fn_call: &FnCall, ctx: &mut TraverseCtx) -> L
         }
     };
 
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+    let mut ty_env_guard = ctx.ty_env.lock();
 
-    let (fn_gens, fn_params, fn_ret_type_id) = if let Some(fn_type_id) = var.read().unwrap().ty {
+    let (fn_gens, fn_params, fn_ret_type_id) = if let Some(fn_type_id) = var.read().ty {
         let fn_ty = ty_env_guard.ty_clone(fn_type_id)?;
         if let Ty::Fn(gens, params, ret_ty, _) = fn_ty {
             (gens, params, ret_ty)
@@ -172,13 +172,13 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
     };
 
     // OBS! At this pointe the ADT type might be unknown.
-    let mut adt_ty_clone = ctx.ty_env.lock().unwrap().ty_clone(adt_type_id)?;
+    let mut adt_ty_clone = ctx.ty_env.lock().ty_clone(adt_type_id)?;
 
     // The `this` for the method might be wrapped in a pointer `fn {this}`.
     // Fetch and use the nested ADT in this case.
     if let Ty::Pointer(nested_adt_type_id, ..) = &adt_ty_clone {
         adt_type_id = *nested_adt_type_id;
-        adt_ty_clone = ctx.ty_env.lock().unwrap().ty_clone(adt_type_id)?;
+        adt_ty_clone = ctx.ty_env.lock().ty_clone(adt_type_id)?;
     }
 
     // Update the fn_call generics. This will assign the names declared on the
@@ -187,12 +187,12 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
     if let Ty::CompoundType(inner_ty, ..) = &mut adt_ty_clone {
         if let Some(adt_path) = inner_ty.get_ident_mut() {
             let method = ctx.ast_ctx.get_method(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 &adt_path.without_gens(),
                 &method_call.name,
             )?;
 
-            let method_gen_names = if let Some(gens) = &method.read().unwrap().generics {
+            let method_gen_names = if let Some(gens) = &method.read().generics {
                 gens.iter_names().cloned().collect::<Vec<_>>()
             } else {
                 Vec::with_capacity(0)
@@ -227,7 +227,7 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
 
                 // Create the new ADT and use it as the "actual" ADT in the
                 // rest of this function.
-                let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+                let mut ty_env_guard = ctx.ty_env.lock();
                 let new_adt_type_id = ty_env_guard.id(&adt_ty_clone)?;
                 ty_env_guard.forward(adt_type_id, new_adt_type_id)?;
 
@@ -246,7 +246,7 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
         Some(method_call.file_pos.unwrap()),
     );
 
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+    let mut ty_env_guard = ctx.ty_env.lock();
 
     // Insert constraints between the function call argument type and
     // the method parameter types that will be figured out later.
@@ -306,16 +306,12 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
     let partial_path = fn_call
         .module
         .clone_push(&fn_call.name, None, fn_call.file_pos);
-    let fn_full_path = ctx.ast_ctx.calculate_fn_full_path(
-        &ctx.ty_env.lock().unwrap(),
-        &partial_path,
-        ctx.block_id,
-    )?;
+    let fn_full_path =
+        ctx.ast_ctx
+            .calculate_fn_full_path(&ctx.ty_env.lock(), &partial_path, ctx.block_id)?;
 
-    let func = ctx
-        .ast_ctx
-        .get_fn(&ctx.ty_env.lock().unwrap(), &fn_full_path)?;
-    let func = func.read().unwrap();
+    let func = ctx.ast_ctx.get_fn(&ctx.ty_env.lock(), &fn_full_path)?;
+    let func = func.read();
 
     let new_gens = if let Some(gens_decl) = &func.generics {
         let mut gens = Generics::new();
@@ -333,8 +329,8 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
             }
         } else {
             for gen_name in gens_decl.iter_names() {
-                let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-                let gen_type_id = ctx.ty_env.lock().unwrap().id(&Ty::GenericInstance(
+                let unique_id = ctx.ty_env.lock().new_unique_id();
+                let gen_type_id = ctx.ty_env.lock().id(&Ty::GenericInstance(
                     gen_name.clone(),
                     unique_id,
                     TypeInfo::None,
@@ -355,7 +351,7 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
     // The amount of args/params will already have been checked before,
     // just make sure that this doesn't break for vararg functions.
     if let Some(params) = &func.parameters {
-        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = ctx.ty_env.lock();
 
         for (idx, arg) in fn_call.arguments.iter().enumerate() {
             // If the argument is a named argument, get the index for the
@@ -376,7 +372,7 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
 
             let param_type_id = if let Some(type_id) = &params
                 .get(actual_idx as usize)
-                .map(|param| param.read().unwrap().ty)
+                .map(|param| param.read().ty)
                 .flatten()
             {
                 let mut new_param_type_id = *type_id;
@@ -406,18 +402,15 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
         // Replace any `Generic`s in the returned type with the impl types in
         // the `new_gens` (either real type or `GenericInstance`).
         if let Some(new_gens) = &new_gens {
-            if let Some(new_ret_type_id) = replace_gen_impls(
-                &mut ctx.ty_env.lock().unwrap(),
-                ctx.ast_ctx,
-                ret_type_id,
-                &new_gens,
-            )? {
+            if let Some(new_ret_type_id) =
+                replace_gen_impls(&mut ctx.ty_env.lock(), ctx.ast_ctx, ret_type_id, &new_gens)?
+            {
                 return Ok(new_ret_type_id);
             }
         }
         Ok(ret_type_id)
     } else {
-        ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
+        ctx.ty_env.lock().id(&Ty::CompoundType(
             InnerTy::Void,
             TypeInfo::FuncCall(fn_call.file_pos.unwrap()),
         ))

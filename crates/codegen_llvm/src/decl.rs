@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use inkwell::module::Linkage;
 
 use analyze::util::order::dependency_order;
@@ -32,8 +30,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             let adt = self
                 .analyze_ctx
                 .ast_ctx
-                .get_adt(&self.analyze_ctx.ty_env.lock().unwrap(), adt_path)?;
-            let adt = adt.as_ref().borrow().read().unwrap();
+                .get_adt(&self.analyze_ctx.ty_env.lock(), adt_path)?;
+            let adt = adt.read();
 
             match adt.kind {
                 AdtKind::Struct => {
@@ -67,7 +65,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             self.cur_block_id = *id;
 
             if let BlockHeader::Fn(func) = header {
-                let func = func.as_ref().borrow().read().unwrap();
+                let func = func.read();
 
                 let linkage = if func.modifiers.contains(&Modifier::Public)
                     || (func.name == "main" && func.module.count() == 0)

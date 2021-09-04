@@ -237,7 +237,7 @@ impl Visitor for FormatParser {
                 }
             }
 
-            if let Err(err) = self.verify_arg_types(&ctx.ty_env.lock().unwrap(), &built_in_call) {
+            if let Err(err) = self.verify_arg_types(&ctx.ty_env.lock(), &built_in_call) {
                 self.errors.push(err);
             }
         }

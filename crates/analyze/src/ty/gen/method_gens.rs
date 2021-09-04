@@ -34,7 +34,7 @@ impl MethodGensInferencer {
             )));
         };
 
-        let ty_env_guard = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock();
         Ok(
             if let Ty::UnknownAdtMethod(_, path_with_gens, ..) = ty_env_guard.ty(ret_type_id)? {
                 match path_with_gens.gens() {

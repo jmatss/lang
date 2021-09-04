@@ -34,7 +34,7 @@ impl PathResolver {
         type_id: TypeId,
         block_id: BlockId,
     ) -> LangResult<()> {
-        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = ctx.ty_env.lock();
 
         let inner_ty = match get_inner(&ty_env_guard, type_id) {
             Ok(inner_ty) => inner_ty.clone(),
@@ -73,7 +73,7 @@ impl PathResolver {
         // TODO: From what I know, only Compound types needs to be solved here
         //       since they are created for enum accesses during parsing.
         //       Is this a correct assumption?
-        let ty = ctx.ty_env.lock().unwrap().ty_clone(type_id)?;
+        let ty = ctx.ty_env.lock().ty_clone(type_id)?;
         match ty {
             Ty::CompoundType(inner_ty, ..) => {
                 if let Some(gens) = inner_ty.gens() {
@@ -134,7 +134,7 @@ impl Visitor for PathResolver {
             .module
             .clone_push(&fn_call.name, None, fn_call.file_pos);
 
-        let ty_env_guard = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock();
         match ctx
             .ast_ctx
             .calculate_fn_full_path(&ty_env_guard, &half_path, ctx.block_id)
@@ -165,7 +165,7 @@ impl Visitor for PathResolver {
             .module
             .clone_push(&adt_init.name, None, adt_init.file_pos);
 
-        let ty_env_guard = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock();
         match ctx
             .ast_ctx
             .calculate_adt_full_path(&ty_env_guard, &half_path, ctx.block_id)
@@ -197,7 +197,7 @@ impl Visitor for PathResolver {
             ..
         } = block
         {
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
 
             if let Ok(full_path) = ctx.ast_ctx.calculate_adt_full_path(
                 &ty_env_guard,
@@ -252,7 +252,7 @@ impl Visitor for PathResolver {
         } = block
         {
             match ctx.ast_ctx.get_module(ctx.block_id) {
-                Ok(Some(module)) => func.write().unwrap().module = module,
+                Ok(Some(module)) => func.write().module = module,
                 Ok(None) => (),
                 Err(err) => {
                     self.errors.push(err);

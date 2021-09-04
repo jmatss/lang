@@ -61,13 +61,13 @@ impl TraitGenericsAnalyzer {
         };
 
         let mut errors = Vec::default();
-        let ty_env_guard = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock();
 
         let adt = ctx
             .ast_ctx
             .get_adt(&ty_env_guard, &adt_path)
             .map_err(|e| vec![e])?;
-        let adt = adt.as_ref().read().unwrap();
+        let adt = adt.read();
 
         for (gen_name, gen_type_id) in gens.iter_names().zip(gens.iter_types()) {
             // The `trait_paths` will contain the traits that the generic with
@@ -109,7 +109,7 @@ impl TraitGenericsAnalyzer {
                 .ast_ctx
                 .get_adt(&ty_env_guard, &impl_path)
                 .map_err(|e| vec![e])?;
-            let impl_adt = impl_adt.as_ref().read().unwrap();
+            let impl_adt = impl_adt.read();
             let impl_methods = &impl_adt.methods;
 
             for trait_path in trait_paths {
@@ -117,7 +117,7 @@ impl TraitGenericsAnalyzer {
                     .ast_ctx
                     .get_trait(&ty_env_guard, &trait_path)
                     .map_err(|e| vec![e])?;
-                let trait_ = trait_.read().unwrap();
+                let trait_ = trait_.read();
                 let trait_methods = &trait_.methods;
 
                 for trait_method in trait_methods {
@@ -180,7 +180,7 @@ impl TraitGenericsAnalyzer {
         };
 
         let mut errors = Vec::default();
-        let ty_env_guard = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock();
 
         let (func, adt_path) = if let Some(adt_type_id) = fn_call.method_adt {
             let adt_path = get_ident(&ty_env_guard, adt_type_id)
@@ -203,7 +203,7 @@ impl TraitGenericsAnalyzer {
                 .map_err(|err| vec![err])?;
             (func, None)
         };
-        let func = func.read().unwrap();
+        let func = func.read();
 
         for (gen_name, gen_type_id) in fn_call_gens.iter_names().zip(fn_call_gens.iter_types()) {
             // The `trait_paths` will contain the traits that the generic with
@@ -264,7 +264,7 @@ impl TraitGenericsAnalyzer {
                 .ast_ctx
                 .get_adt(&ty_env_guard, &impl_adt_path)
                 .map_err(|e| vec![e])?;
-            let impl_adt = impl_adt.as_ref().read().unwrap();
+            let impl_adt = impl_adt.read();
 
             for trait_path in trait_paths {
                 if !impl_adt
@@ -322,13 +322,11 @@ impl TraitGenericsAnalyzer {
         let inf_type_id = ctx
             .ty_env
             .lock()
-            .unwrap()
             .inferred_type(type_id)
             .map_err(|e| vec![e])?;
         let ty_clone = ctx
             .ty_env
             .lock()
-            .unwrap()
             .ty_clone(inf_type_id)
             .map_err(|e| vec![e])?;
         match ty_clone {

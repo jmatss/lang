@@ -45,7 +45,7 @@ impl CmpAnalyzer {
             unreachable!();
         };
 
-        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = ctx.ty_env.lock();
 
         if is_primitive(&ty_env_guard, type_id)?
             || is_pointer(&ty_env_guard, type_id)?
@@ -59,7 +59,7 @@ impl CmpAnalyzer {
         // pointer or array. All types should be solved.
         let adt_path = get_ident(&ty_env_guard, type_id)?.unwrap();
         let adt = ctx.ast_ctx.get_adt(&ty_env_guard, &adt_path)?;
-        let adt = adt.read().unwrap();
+        let adt = adt.read();
 
         // The generic type of the `Cmp` trait should be equal to the current ADT
         // type.

@@ -1,4 +1,6 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 use common::{
     ctx::block_ctx::BlockCtx,
@@ -48,7 +50,7 @@ impl DeclFnAnalyzer {
 
         let path_without_gens = {
             let module = ctx.ast_ctx.get_module(fn_id)?.unwrap_or_default();
-            let func = func.as_ref().read().unwrap();
+            let func = func.read();
 
             module.clone_push(&func.name, None, Some(func.file_pos))
         };
@@ -56,20 +58,20 @@ impl DeclFnAnalyzer {
         // TODO: Add file positions to error message.
         if ctx
             .ast_ctx
-            .get_fn(&ctx.ty_env.lock().unwrap(), &path_without_gens)
+            .get_fn(&ctx.ty_env.lock(), &path_without_gens)
             .is_ok()
         {
             let err = ctx.ast_ctx.err(format!(
                 "Two declarations of function \"{}\" founds. Full path: {}",
-                &func.as_ref().read().unwrap().name,
-                to_string_path(&ctx.ty_env.lock().unwrap(), &path_without_gens),
+                &func.read().name,
+                to_string_path(&ctx.ty_env.lock(), &path_without_gens),
             ));
             return Err(err);
         }
 
         let key = (path_without_gens, parent_id);
         ctx.ast_ctx.fns.insert(
-            &ctx.ty_env.lock().unwrap(),
+            &ctx.ty_env.lock(),
             DerefType::Shallow,
             key,
             Arc::clone(func),
@@ -89,17 +91,17 @@ impl DeclFnAnalyzer {
     ) {
         let inner_ty = if ctx
             .ast_ctx
-            .is_trait(&ctx.ty_env.lock().unwrap(), &adt_path_without_gens)
+            .is_trait(&ctx.ty_env.lock(), &adt_path_without_gens)
         {
             InnerTy::Trait(adt_path_without_gens.clone())
         } else {
             match ctx
                 .ast_ctx
-                .get_adt(&ctx.ty_env.lock().unwrap(), &adt_path_without_gens)
+                .get_adt(&ctx.ty_env.lock(), &adt_path_without_gens)
             {
-                Ok(adt) => match adt.read().unwrap().kind {
+                Ok(adt) => match adt.read().kind {
                     AdtKind::Struct => {
-                        let ident = &adt.read().unwrap().name;
+                        let ident = &adt.read().name;
                         if InnerTy::ident_to_type(ident, 0).is_primitive() {
                             InnerTy::ident_to_type(ident, 0)
                         } else {
@@ -120,14 +122,13 @@ impl DeclFnAnalyzer {
         // TODO: Should probably be changed to something better.
         // If this is a non-static method, the first parameter should be a
         // reference(/pointer) to "this"/"self".
-        if !func.as_ref().read().unwrap().is_static() {
+        if !func.read().is_static() {
             static THIS_VAR_NAME: &str = "this";
-            let mut func = func.as_ref().write().unwrap();
+            let mut func = func.write();
 
             let type_id = match ctx
                 .ty_env
                 .lock()
-                .unwrap()
                 .id(&Ty::CompoundType(inner_ty, TypeInfo::None))
             {
                 Ok(type_id) => type_id,
@@ -142,12 +143,7 @@ impl DeclFnAnalyzer {
             let type_id = if func.modifiers.contains(&Modifier::This) {
                 type_id
             } else if func.modifiers.contains(&Modifier::ThisPointer) {
-                match ctx
-                    .ty_env
-                    .lock()
-                    .unwrap()
-                    .id(&Ty::Pointer(type_id, TypeInfo::None))
-                {
+                match ctx.ty_env.lock().id(&Ty::Pointer(type_id, TypeInfo::None)) {
                     Ok(ptr_type_id) => ptr_type_id,
                     Err(err) => {
                         self.errors.push(err);
@@ -158,7 +154,7 @@ impl DeclFnAnalyzer {
                 let err = ctx.ast_ctx.err(format!(
                     "Non static function did not contain \"this\" or \"this ptr\" reference. \
                     ADT name: {}, func: {:#?}.",
-                    to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path_without_gens),
+                    to_string_path(&ctx.ty_env.lock(), &adt_path_without_gens),
                     func
                 ));
                 self.errors.push(err);
@@ -198,18 +194,18 @@ impl Visitor for DeclFnAnalyzer {
     /// `method_adt` field in the functions.
     fn visit_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
         let Block { header, body, .. } = block;
-        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = ctx.ty_env.lock();
 
         let path_without_gens = match header {
             BlockHeader::Implement(adt_path, ..) => adt_path.without_gens(),
 
             BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
-                let adt = adt.read().unwrap();
+                let adt = adt.read();
                 adt.module.clone_push(&adt.name, None, None)
             }
 
             BlockHeader::Trait(trait_) => {
-                let trait_ = trait_.read().unwrap();
+                let trait_ = trait_.read();
                 trait_.module.clone_push(&trait_.name, None, None)
             }
 
@@ -266,7 +262,7 @@ impl Visitor for DeclFnAnalyzer {
                 ..
             }) = body_token
             {
-                method.write().unwrap().method_adt = Some(adt_type_id);
+                method.write().method_adt = Some(adt_type_id);
             } else {
                 let err = ctx.ast_ctx.err(format!(
                     "AST token in ADT block with type \"{:?}\" not a method: {:?}",
@@ -287,8 +283,8 @@ impl Visitor for DeclFnAnalyzer {
             ..
         } = &mut block
         {
-            let adt_ty = if let Some(adt_type_id) = func.as_ref().read().unwrap().method_adt {
-                match ctx.ty_env.lock().unwrap().ty(adt_type_id) {
+            let adt_ty = if let Some(adt_type_id) = func.read().method_adt {
+                match ctx.ty_env.lock().ty(adt_type_id) {
                     Ok(adt_ty) => Some(adt_ty.clone()),
                     Err(err) => {
                         self.errors.push(err);
@@ -316,7 +312,7 @@ impl Visitor for DeclFnAnalyzer {
                 self.analyze_method_header(ctx, &adt_path_without_gens, func);
 
                 if let Err(err) = ctx.ast_ctx.insert_method(
-                    &ctx.ty_env.lock().unwrap(),
+                    &ctx.ty_env.lock(),
                     &adt_path_without_gens,
                     Arc::clone(func),
                 ) {
@@ -336,7 +332,7 @@ impl Visitor for DeclFnAnalyzer {
             // External declarations should always be in the default block.
 
             let key = {
-                let func = func.as_ref().read().unwrap();
+                let func = func.read();
                 let path = func
                     .module
                     .clone_push(&func.name, None, Some(func.file_pos));
@@ -344,7 +340,7 @@ impl Visitor for DeclFnAnalyzer {
             };
 
             if let Err(err) = ctx.ast_ctx.fns.insert(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 DerefType::Shallow,
                 key,
                 Arc::clone(func),

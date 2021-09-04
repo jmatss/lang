@@ -105,7 +105,7 @@ impl Visitor for FnReturnAnalyzer {
             ..
         } = block
         {
-            let func = func.read().unwrap();
+            let func = func.read();
             if let Err(err) = Self::validate_fn(&func, body, *id, ctx) {
                 self.errors.push(err);
             }

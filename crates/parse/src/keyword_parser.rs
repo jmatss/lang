@@ -1,7 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
+
+use parking_lot::RwLock;
 
 use common::{
     error::{LangError, LangErrorKind, LangResult},
@@ -636,7 +638,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             var_file_pos,
         )?));
 
-        if let Some(var_file_pos) = var.as_ref().read().unwrap().file_pos {
+        if let Some(var_file_pos) = var.read().file_pos {
             file_pos.set_end(&var_file_pos)?;
         } else {
             unreachable!();
@@ -812,7 +814,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let where_impls = self.parse_where(&mut file_pos)?;
 
         let fn_full_path = to_string_path(
-            &self.iter.ty_env.lock().unwrap(),
+            &self.iter.ty_env.lock(),
             &module.clone_push(&name, gens.as_ref(), Some(file_pos)),
         );
 
@@ -967,7 +969,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         //       to specify as a generic on the enum declaration? But in that case
         //       it would take a generic impl instead of a generic decl as structs.
         //       Is this ok?
-        let enum_type_id = self.iter.ty_env.lock().unwrap().id(&Ty::CompoundType(
+        let enum_type_id = self.iter.ty_env.lock().id(&Ty::CompoundType(
             InnerTy::Enum(full_path.clone()),
             TypeInfo::Enum(file_pos.to_owned()),
         ))?;
@@ -993,7 +995,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         // Also assign all members the type `Enum(ident)` and give them their
         // values according to their index position in the enum.
         for (idx, member) in members.iter_mut().enumerate() {
-            let mut ty_env_guard = self.iter.ty_env.lock().unwrap();
+            let mut ty_env_guard = self.iter.ty_env.lock();
             let member_file_pos = member.file_pos.unwrap();
 
             let enum_type_info = (name.clone(), file_pos.to_owned());
@@ -1111,7 +1113,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         if !duplicate_method_names.is_empty() {
             let trait_path = module.clone_push(&name, None, Some(file_pos));
-            let trait_name = to_string_path(&self.iter.ty_env.lock().unwrap(), &trait_path);
+            let trait_name = to_string_path(&self.iter.ty_env.lock(), &trait_path);
             let mut method_names = duplicate_method_names
                 .iter()
                 .map(|name| format!(" * {}", name))
@@ -1156,7 +1158,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         let where_impls = self.parse_where(file_pos)?;
 
         let adt_full_path = to_string_path(
-            &self.iter.ty_env.lock().unwrap(),
+            &self.iter.ty_env.lock(),
             &module.clone_push(&name, gens.as_ref(), Some(*file_pos)),
         );
 

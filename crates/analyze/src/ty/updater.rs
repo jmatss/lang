@@ -30,7 +30,7 @@ impl Visitor for TypeUpdater {
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = ctx.ty_env.lock();
 
         let inf_type_id = match ty_env_guard.inferred_type(*type_id) {
             Ok(inf_type_id) => inf_type_id,
@@ -56,7 +56,7 @@ impl Visitor for TypeUpdater {
 
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
         if let Some(adt_type_id) = &mut fn_call.method_adt {
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
 
             let adt_ty = match ty_env_guard.ty_clone(*adt_type_id) {
                 Ok(adt_ty) => adt_ty,
@@ -87,7 +87,7 @@ impl Visitor for TypeUpdater {
         // Edge case logic for ADT access. Need to figure out the index of the
         // member that is being accessed.
         if let UnOperator::AdtAccess(member_name, member_idx) = &mut un_op.operator {
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
 
             let type_id = match un_op.value.get_expr_type() {
                 Ok(type_id) => type_id,

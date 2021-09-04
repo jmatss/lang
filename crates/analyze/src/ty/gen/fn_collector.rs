@@ -83,19 +83,16 @@ impl<'a> GenericFnCollector<'a> {
 
         let method_name = method_call.name.clone();
 
-        let adt_path = if let Some(adt_path) = get_ident(&ctx.ty_env.lock().unwrap(), adt_type_id)?
-        {
+        let adt_path = if let Some(adt_path) = get_ident(&ctx.ty_env.lock(), adt_type_id)? {
             adt_path
         } else {
             return Ok(());
         };
 
-        let method = ctx.ast_ctx.get_method(
-            &ctx.ty_env.lock().unwrap(),
-            &adt_path.without_gens(),
-            &method_name,
-        )?;
-        let method = method.as_ref().read().unwrap();
+        let method =
+            ctx.ast_ctx
+                .get_method(&ctx.ty_env.lock(), &adt_path.without_gens(), &method_name)?;
+        let method = method.read();
 
         if let Some(method_gens) = &method.generics {
             let method_gen_names = method_gens.iter_names().cloned().collect::<Vec<_>>();
@@ -107,11 +104,8 @@ impl<'a> GenericFnCollector<'a> {
             // is allowed at this point. This is because the ADT generics will
             // be resolved at a later time, so it is not a problem here.
             for gen_type_id in method_call_gens.iter_types() {
-                if contains_generic_with_name(
-                    &ctx.ty_env.lock().unwrap(),
-                    *gen_type_id,
-                    &method_gen_names,
-                )? {
+                if contains_generic_with_name(&ctx.ty_env.lock(), *gen_type_id, &method_gen_names)?
+                {
                     return Ok(());
                 }
             }
@@ -123,7 +117,7 @@ impl<'a> GenericFnCollector<'a> {
                     "Method call \"{}\" on ADT \"{}\" has {} generics specified, \
                     but the method declaration has {} generics.",
                     &method_name,
-                    to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path),
+                    to_string_path(&ctx.ty_env.lock(), &adt_path),
                     method_call_gens.len_types(),
                     method_gen_names.len()
                 )));
@@ -134,7 +128,7 @@ impl<'a> GenericFnCollector<'a> {
                 new_gens.insert(name.clone(), *ty);
             }
 
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
             let contains_key = self.generic_methods.contains_key(
                 &ty_env_guard,
                 DerefType::None,
@@ -184,7 +178,7 @@ impl<'a> GenericFnCollector<'a> {
                 "Method call \"{}\" on ADT \"{}\" has {} generics specified, \
                 but the method declaration has no generics declared.",
                 &method_name,
-                to_string_path(&ctx.ty_env.lock().unwrap(), &adt_path),
+                to_string_path(&ctx.ty_env.lock(), &adt_path),
                 method_call_gens.len_types(),
             )))
         }
@@ -206,8 +200,8 @@ impl<'a> GenericFnCollector<'a> {
 
         let func = ctx
             .ast_ctx
-            .get_fn(&ctx.ty_env.lock().unwrap(), &fn_path_without_gens)?;
-        let func = func.read().unwrap();
+            .get_fn(&ctx.ty_env.lock(), &fn_path_without_gens)?;
+        let func = func.read();
 
         if let Some(fn_gens) = &func.generics {
             let fn_gen_names = fn_gens.iter_names().cloned().collect::<Vec<_>>();
@@ -216,11 +210,7 @@ impl<'a> GenericFnCollector<'a> {
             // implemented, only save function calls that have had the generics
             // implemented in with "real" types.
             for gen_type_id in fn_call_gens.iter_types() {
-                if contains_generic_with_name(
-                    &ctx.ty_env.lock().unwrap(),
-                    *gen_type_id,
-                    &fn_gen_names,
-                )? {
+                if contains_generic_with_name(&ctx.ty_env.lock(), *gen_type_id, &fn_gen_names)? {
                     return Ok(());
                 }
             }
@@ -231,7 +221,7 @@ impl<'a> GenericFnCollector<'a> {
                 return Err(ctx.ast_ctx.err(format!(
                     "Function call to \"{}\" has {} generics specified, \
                     but the function declaration has {} generics.",
-                    &to_string_path(&ctx.ty_env.lock().unwrap(), &fn_path_without_gens),
+                    &to_string_path(&ctx.ty_env.lock(), &fn_path_without_gens),
                     fn_call_gens.len_types(),
                     fn_gen_names.len()
                 )));
@@ -242,7 +232,7 @@ impl<'a> GenericFnCollector<'a> {
                 new_gens.insert(name.clone(), *ty);
             }
 
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
 
             if let Some(prev_gens) =
                 self.generic_fns
@@ -273,7 +263,7 @@ impl<'a> GenericFnCollector<'a> {
             Err(ctx.ast_ctx.err(format!(
                 "Function call to \"{}\" has {} generics specified, \
                 but the function declaration has no generics declared.",
-                &to_string_path(&ctx.ty_env.lock().unwrap(), &fn_path_without_gens),
+                &to_string_path(&ctx.ty_env.lock(), &fn_path_without_gens),
                 fn_call_gens.len_types(),
             )))
         }
@@ -295,7 +285,7 @@ impl<'a> GenericFnCollector<'a> {
             let adt_path_without_gens = match header {
                 BlockHeader::Implement(adt_path, ..) => adt_path.without_gens(),
                 BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
-                    let adt = adt.read().unwrap();
+                    let adt = adt.read();
                     adt.module.clone_push(&adt.name, None, Some(adt.file_pos))
                 }
                 _ => continue,
@@ -313,7 +303,7 @@ impl<'a> GenericFnCollector<'a> {
                 .zip(collector.nested_generic_methods.values())
             {
                 for gens in gens_vec {
-                    let ty_env_guard = ctx.ty_env.lock().unwrap();
+                    let ty_env_guard = ctx.ty_env.lock();
                     let contains_key = self.nested_generic_methods.contains_key(
                         &ty_env_guard,
                         DerefType::None,
@@ -385,12 +375,12 @@ impl<'a> GenericFnCollector<'a> {
         // Converts all `self.nested_generic_methods` into regular `self.generic_methods`.
         for adt_path in self.dependency_order_rev.iter() {
             let nested_gen_methods = if self.nested_generic_methods.contains_key(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 DerefType::Deep,
                 adt_path,
             )? {
                 self.nested_generic_methods
-                    .remove(&ctx.ty_env.lock().unwrap(), DerefType::Deep, adt_path)?
+                    .remove(&ctx.ty_env.lock(), DerefType::Deep, adt_path)?
                     .unwrap()
             } else {
                 continue;
@@ -398,17 +388,14 @@ impl<'a> GenericFnCollector<'a> {
 
             // Figures out and returns a list of the methods in the order that
             // they should be iterated.
-            let method_order = match Self::order(
-                &ctx.ty_env.lock().unwrap(),
-                adt_path,
-                nested_gen_methods.keys(),
-            ) {
-                Ok(order) => order,
-                Err(err) => {
-                    self.errors.push(err);
-                    continue;
-                }
-            };
+            let method_order =
+                match Self::order(&ctx.ty_env.lock(), adt_path, nested_gen_methods.keys()) {
+                    Ok(order) => order,
+                    Err(err) => {
+                        self.errors.push(err);
+                        continue;
+                    }
+                };
 
             // TODO: Fix better performance. This logic is shit in every way possible.
             // First iterate through the methods that have references to other methods
@@ -455,7 +442,7 @@ impl<'a> GenericFnCollector<'a> {
         method_info: &NestedMethodInfo,
         generics: &Generics,
     ) -> LangResult<()> {
-        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = ctx.ty_env.lock();
 
         let func_name = &method_info.func_name;
         let method_call_name = &method_info.method_call_name;
@@ -478,7 +465,7 @@ impl<'a> GenericFnCollector<'a> {
             let method =
                 ctx.ast_ctx
                     .get_method(&ty_env_guard, method_adt_path, method_call_name)?;
-            let method = method.as_ref().read().unwrap();
+            let method = method.read();
 
             if let Some(method_gens) = &method.generics {
                 method_gens.iter_names().cloned().collect::<Vec<_>>()

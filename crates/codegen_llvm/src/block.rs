@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use inkwell::{
     basic_block::BasicBlock,
     builder::Builder,
@@ -202,12 +200,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             }
             BlockHeader::Fn(func) => {
-                self.compile_fn(
-                    &func.as_ref().borrow().read().unwrap(),
-                    &block.file_pos,
-                    block.id,
-                    &mut block.body,
-                )?;
+                self.compile_fn(&func.read(), &block.file_pos, block.id, &mut block.body)?;
             }
             BlockHeader::Implement(..) | BlockHeader::Struct(..) | BlockHeader::Union(..) => {
                 for mut ast_token in &mut block.body {
@@ -218,12 +211,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                         file_pos: func_file_pos,
                     }) = &mut ast_token
                     {
-                        self.compile_fn(
-                            &func.as_ref().borrow().read().unwrap(),
-                            func_file_pos,
-                            *func_id,
-                            func_body,
-                        )?;
+                        self.compile_fn(&func.read(), func_file_pos, *func_id, func_body)?;
                     }
                 }
             }
@@ -299,7 +287,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         func_id: BlockId,
         body: &mut [AstToken],
     ) -> LangResult<()> {
-        let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+        let ty_env_guard = self.analyze_ctx.ty_env.lock();
 
         let module = self
             .analyze_ctx
@@ -377,10 +365,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         //       it is only allowed in external functions (for C interop).
         // Allocated space for the function parameters on the stack.
         for (param_value, param) in fn_val.get_param_iter().zip(params) {
-            let ptr = self.alloc_param(&param.as_ref().borrow().read().unwrap())?;
+            let ptr = self.alloc_param(&param.read())?;
             self.builder.build_store(ptr, param_value);
 
-            let key = (param.as_ref().borrow().read().unwrap().full_name(), func_id);
+            let key = (param.read().full_name(), func_id);
             self.variables.insert(key, ptr);
         }
 
@@ -409,7 +397,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             .unwrap_or_default();
 
         let (fn_name, is_primitive_adt) = if let Some(adt_type_id) = &func.method_adt {
-            let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+            let ty_env_guard = self.analyze_ctx.ty_env.lock();
             let adt_ty = ty_env_guard.ty_clone(*adt_type_id)?;
 
             if let Ty::CompoundType(inner_ty, ..) = adt_ty {
@@ -436,7 +424,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let param_types = if let Some(params) = &func.parameters {
             let mut inner_types = Vec::with_capacity(params.len());
             for param in params {
-                let param = param.as_ref().borrow().read().unwrap();
+                let param = param.read();
 
                 if let Some(param_type_id) = &param.ty {
                     let any_type = self.compile_type(*param_type_id, param.file_pos.to_owned())?;
@@ -447,7 +435,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                         format!(
                             "Bad type for parameter with name\"{}\" in function \"{}\".",
                             &param.name,
-                            to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
+                            to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path)
                         ),
                         param.file_pos.to_owned(),
                     ));
@@ -478,7 +466,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 .fn_type(param_types.as_slice(), func.is_var_arg)
         };
 
-        let fn_name = to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path);
+        let fn_name = to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path);
         if let Some(fn_ptr) = self.module.get_function(&fn_name) {
             Ok(fn_ptr)
         } else {
@@ -732,7 +720,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         })?;
 
         let codegen_ty = CodeGenTy::new(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
+            &self.analyze_ctx.ty_env.lock(),
             expr.get_expr_type()?,
             file_pos,
         )?;
@@ -907,7 +895,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // Go through all members of the struct and create a vector containing
         // all their types.
         for member in members {
-            let member = member.as_ref().borrow().read().unwrap();
+            let member = member.read();
             let member_file_pos = member.file_pos.to_owned();
 
             if let Some(member_type_id) = &member.ty {
@@ -918,7 +906,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Bad type for struct \"{}\" member \"{}\".",
-                        to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
+                        to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path),
                         &member.name
                     ),
                     member_file_pos,
@@ -926,10 +914,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             }
         }
 
-        let struct_ty = self.context.opaque_struct_type(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        ));
+        let struct_ty = self
+            .context
+            .opaque_struct_type(&to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path));
 
         if struct_.has_definition {
             let packed = false;
@@ -954,7 +941,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // set for the members as well. Only the given literal values of the members
         // will be the inner type.
         let (type_id, file_pos) = if let Some(member) = &enum_.members.first() {
-            let member = member.as_ref().borrow().read().unwrap();
+            let member = member.read();
             let member_file_pos = member.file_pos.to_owned();
 
             if let Some(ty) = &member.value {
@@ -963,7 +950,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 return Err(self.err(
                     format!(
                         "No default value set for first member in enum \"{}\".",
-                        to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
+                        to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path)
                     ),
                     member_file_pos,
                 ));
@@ -972,7 +959,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             return Err(self.err(
                 format!(
                     "Unable to find first member in enum \"{}\".",
-                    to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
+                    to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path)
                 ),
                 None,
             ));
@@ -982,10 +969,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let basic_ty = CodeGen::any_into_basic_type(any_ty)?;
 
         let packed = false;
-        let enum_ty = self.context.opaque_struct_type(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        ));
+        let enum_ty = self
+            .context
+            .opaque_struct_type(&to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path));
         enum_ty.set_body(&[basic_ty], packed);
 
         Ok(())
@@ -1008,7 +994,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // The union will contain also be created that contains an array with
         // the size of the largest member.
         for member in &union.members {
-            let member = member.as_ref().borrow().read().unwrap();
+            let member = member.read();
             let member_file_pos = member.file_pos.to_owned();
 
             if let Some(member_type_id) = &member.ty {
@@ -1026,7 +1012,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Bad type for union \"{}\" member \"{}\".",
-                        to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
+                        to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path),
                         &member.name
                     ),
                     member_file_pos,
@@ -1038,10 +1024,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let member_ty = self.context.i8_type().array_type(largest_size as u32);
 
         let packed = false;
-        let union_ty = self.context.opaque_struct_type(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        ));
+        let union_ty = self
+            .context
+            .opaque_struct_type(&to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path));
         union_ty.set_body(&[tag_ty.into(), member_ty.into()], packed);
 
         Ok(())

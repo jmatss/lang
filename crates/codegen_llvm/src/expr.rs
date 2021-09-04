@@ -161,7 +161,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             StringType::F | StringType::S => ["std".into(), "String".into()].into(),
             StringType::C => unreachable!(),
         };
-        let struct_name = to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &struct_path);
+        let struct_name = to_string_path(&self.analyze_ctx.ty_env.lock(), &struct_path);
 
         let struct_type = if let Some(struct_type) = self.module.get_struct_type(&struct_name) {
             struct_type
@@ -234,7 +234,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     ) -> LangResult<IntValue<'ctx>> {
         // TODO: Where should the integer literal conversion be made?
         let inner_ty = if let Some(type_id) = type_id_opt {
-            let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+            let ty_env_guard = self.analyze_ctx.ty_env.lock();
             let fwd_type_id = ty_env_guard.forwarded(*type_id);
             get_inner(&ty_env_guard, fwd_type_id)?.clone()
         } else {
@@ -312,7 +312,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         file_pos: Option<FilePosition>,
     ) -> LangResult<FloatValue<'ctx>> {
         let inner_ty = if let Some(type_id) = type_id_opt {
-            let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+            let ty_env_guard = self.analyze_ctx.ty_env.lock();
             let fwd_type_id = ty_env_guard.forwarded(*type_id);
             get_inner(&ty_env_guard, fwd_type_id)?.clone()
         } else {
@@ -344,7 +344,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         }
 
         // TODO: Implement check for `is_fn_ptr_call`s arg/param count as well.
-        let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+        let ty_env_guard = self.analyze_ctx.ty_env.lock();
 
         let fn_ptr = if fn_call.is_fn_ptr_call {
             let var_name = &fn_call.name;
@@ -445,22 +445,22 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 .module
                 .clone_push(&fn_ptr.name, fn_ptr.generics.as_ref(), fn_ptr.file_pos);
         let full_path = self.analyze_ctx.ast_ctx.calculate_fn_full_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
+            &self.analyze_ctx.ty_env.lock(),
             &partial_path,
             self.cur_block_id,
         )?;
 
-        if let Some(fn_value) = self.module.get_function(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        )) {
+        if let Some(fn_value) = self
+            .module
+            .get_function(&to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path))
+        {
             let fn_ptr = fn_value.as_global_value().as_pointer_value();
             Ok(fn_ptr.into())
         } else {
             Err(self.err(
                 format!(
                     "Unable to find function with full name {} (compiling fn pointer).",
-                    to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
+                    to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path)
                 ),
                 fn_ptr.file_pos.to_owned(),
             ))
@@ -472,7 +472,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         &mut self,
         struct_init: &mut AdtInit,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let full_name = struct_init.full_name(&self.analyze_ctx.ty_env.lock().unwrap())?;
+        let full_name = struct_init.full_name(&self.analyze_ctx.ty_env.lock())?;
 
         let struct_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
             inner
@@ -554,21 +554,21 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             union_init.file_pos,
         );
         let full_path = self.analyze_ctx.ast_ctx.calculate_adt_full_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
+            &self.analyze_ctx.ty_env.lock(),
             &partial_path,
             self.cur_block_id,
         )?;
 
-        let union_type = if let Some(inner) = self.module.get_struct_type(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        )) {
+        let union_type = if let Some(inner) = self
+            .module
+            .get_struct_type(&to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path))
+        {
             inner
         } else {
             return Err(self.err(
                 format!(
                     "Unable to get union with name \"{}\". Union init: {:#?}",
-                    to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
+                    to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path),
                     union_init
                 ),
                 union_init.file_pos,
@@ -580,7 +580,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let basic_value = CodeGen::any_into_basic_value(any_value)?;
 
         let tag_idx = self.analyze_ctx.ast_ctx.get_adt_member_index(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
+            &self.analyze_ctx.ty_env.lock(),
             &full_path,
             &arg.name.as_ref().unwrap(),
         )?;

@@ -1,9 +1,7 @@
-use std::{
-    borrow::Borrow,
-    sync::{Arc, RwLock},
-};
+use std::{borrow::Borrow, sync::Arc};
 
 use inkwell::{values::AnyValueEnum, AddressSpace, IntPredicate};
+use parking_lot::RwLock;
 
 use common::{
     error::LangResult,
@@ -395,10 +393,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 None,
                 Expr::Lit(
                     Lit::Integer("16".into(), 10),
-                    Some(type_id_u32(
-                        &mut self.analyze_ctx.ty_env.lock().unwrap(),
-                        file_pos,
-                    )?),
+                    Some(type_id_u32(&mut self.analyze_ctx.ty_env.lock(), file_pos)?),
                     file_pos,
                 ),
             )],
@@ -407,11 +402,11 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         );
         string_init_call.is_method = true;
         string_init_call.method_adt = Some(type_id_string(
-            &mut self.analyze_ctx.ty_env.lock().unwrap(),
+            &mut self.analyze_ctx.ty_env.lock(),
             file_pos,
         )?);
         string_init_call.ret_type = Some(type_id_result_string(
-            &mut self.analyze_ctx.ty_env.lock().unwrap(),
+            &mut self.analyze_ctx.ty_env.lock(),
             file_pos,
         )?);
 
@@ -421,7 +416,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             file_pos,
         );
         un_op_address.ret_type = Some(type_id_string_ptr(
-            &mut self.analyze_ctx.ty_env.lock().unwrap(),
+            &mut self.analyze_ctx.ty_env.lock(),
             file_pos,
         )?);
 
@@ -438,11 +433,11 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         );
         string_get_success_call.is_method = true;
         string_get_success_call.method_adt = Some(type_id_result_string(
-            &mut self.analyze_ctx.ty_env.lock().unwrap(),
+            &mut self.analyze_ctx.ty_env.lock(),
             file_pos,
         )?);
         string_get_success_call.ret_type = Some(type_id_string(
-            &mut self.analyze_ctx.ty_env.lock().unwrap(),
+            &mut self.analyze_ctx.ty_env.lock(),
             file_pos,
         )?);
 
@@ -456,7 +451,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let string_var = Arc::new(RwLock::new(Var::new(
             var_name.clone(),
             Some(type_id_string(
-                &mut self.analyze_ctx.ty_env.lock().unwrap(),
+                &mut self.analyze_ctx.ty_env.lock(),
                 file_pos,
             )?),
             None,
@@ -465,12 +460,12 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             None,
             false,
         )));
-        let mut string_var_expr = Expr::Var(string_var.as_ref().borrow().read().unwrap().clone());
+        let mut string_var_expr = Expr::Var(string_var.as_ref().borrow().read().clone());
 
         let mut string_var_decl = Stmt::VariableDecl(Arc::clone(&string_var), None);
         let mut string_var_assign = Stmt::Assignment(
             AssignOperator::Assignment,
-            Expr::Var(string_var.as_ref().borrow().read().unwrap().clone()),
+            Expr::Var(string_var.as_ref().borrow().read().clone()),
             Expr::FnCall(string_get_success_call),
             file_pos,
         );
@@ -492,7 +487,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             file_pos,
         );
         string_var_address.ret_type = Some(type_id_string_ptr(
-            &mut self.analyze_ctx.ty_env.lock().unwrap(),
+            &mut self.analyze_ctx.ty_env.lock(),
             file_pos,
         )?);
 
@@ -504,8 +499,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 FormatPart::String(str_lit) => self.str_lit_to_string_view(str_lit, file_pos)?,
                 FormatPart::Arg(expr) => {
                     let type_id = expr.get_expr_type()?;
-                    let is_primitive =
-                        is_primitive(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
+                    let is_primitive = is_primitive(&self.analyze_ctx.ty_env.lock(), type_id)?;
                     if is_primitive {
                         let expr = self.primitive_to_string_view(expr, &var_name, arg_idx)?;
                         arg_idx += 1;
@@ -541,11 +535,11 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         );
         string_append_view_call.is_method = true;
         string_append_view_call.method_adt = Some(type_id_string(
-            &mut self.analyze_ctx.ty_env.lock().unwrap(),
+            &mut self.analyze_ctx.ty_env.lock(),
             file_pos,
         )?);
         string_append_view_call.ret_type = Some(type_id_result_u32(
-            &mut self.analyze_ctx.ty_env.lock().unwrap(),
+            &mut self.analyze_ctx.ty_env.lock(),
             file_pos,
         )?);
 
@@ -561,7 +555,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         Ok(Expr::Lit(
             Lit::String(str_lit.into(), StringType::Regular),
             Some(type_id_string_view(
-                &mut self.analyze_ctx.ty_env.lock().unwrap(),
+                &mut self.analyze_ctx.ty_env.lock(),
                 file_pos,
             )?),
             file_pos,
@@ -577,7 +571,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let file_pos = primitive_expr.file_pos().cloned();
         let type_id = primitive_expr.get_expr_type()?;
 
-        let mut ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = self.analyze_ctx.ty_env.lock();
 
         // TODO: What buffer size should floats have? What is their max char size?
         // `buf_size` is the max amount of bytes that a given primitive type
@@ -644,7 +638,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         let mut buf_var_address = UnOp::new(
             UnOperator::Address,
-            Box::new(Expr::Var(buf_var.as_ref().borrow().read().unwrap().clone())),
+            Box::new(Expr::Var(buf_var.as_ref().borrow().read().clone())),
             None,
         );
         buf_var_address.ret_type = Some(arr_ptr_type_id);
@@ -662,7 +656,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         primitive_to_string_view_call.is_method = true;
         primitive_to_string_view_call.method_adt = Some(primitive_type_id);
         primitive_to_string_view_call.ret_type = Some(type_id_string_view(
-            &mut self.analyze_ctx.ty_env.lock().unwrap(),
+            &mut self.analyze_ctx.ty_env.lock(),
             file_pos,
         )?);
 

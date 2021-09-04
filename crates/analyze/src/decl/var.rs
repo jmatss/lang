@@ -43,8 +43,8 @@ impl Visitor for DeclVarAnalyzer {
                 let err = match ctx.ast_ctx.get_var(&var.name, *block_id) {
                     Ok(var_decl) => ctx.ast_ctx.err(format!(
                         "Variable \"{}\" used before declaration.\nDeclared at pos:\n{:#?}\nUsed at pos:\n{:#?}",
-                        &var_decl.as_ref().read().unwrap().name,
-                        &var_decl.as_ref().read().unwrap().file_pos,
+                        &var_decl.read().name,
+                        &var_decl.read().file_pos,
                         &var.file_pos
                     )),
                     Err(err) => err,
@@ -59,23 +59,23 @@ impl Visitor for DeclVarAnalyzer {
     fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::VariableDecl(var, ..) = stmt {
             if ctx.block_id == BlockCtx::DEFAULT_BLOCK_ID {
-                var.as_ref().write().unwrap().is_global = true;
+                var.write().is_global = true;
             }
 
-            let key = (var.as_ref().read().unwrap().name.clone(), ctx.block_id);
+            let key = (var.read().name.clone(), ctx.block_id);
             match ctx.ast_ctx.variables.entry(key) {
                 Entry::Vacant(v) => {
                     v.insert(Arc::clone(var));
                 }
                 Entry::Occupied(o) => {
-                    let old_file_pos = o.get().as_ref().read().unwrap().file_pos;
+                    let old_file_pos = o.get().read().file_pos;
                     let err = ctx.ast_ctx.err(format!(
                         "Variable \"{}\" declared multiple times in the same scope ({}).\n\
                         First declaration at pos:\n{:#?}\nRe-declared at pos:\n{:#?}",
-                        &var.as_ref().read().unwrap().name,
+                        &var.read().name,
                         ctx.block_id,
                         old_file_pos,
-                        &var.as_ref().read().unwrap().file_pos,
+                        &var.read().file_pos,
                     ));
                     self.errors.push(err);
                 }

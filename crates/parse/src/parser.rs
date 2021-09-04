@@ -1,4 +1,6 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::collections::HashMap;
+
+use parking_lot::Mutex;
 
 use log::debug;
 

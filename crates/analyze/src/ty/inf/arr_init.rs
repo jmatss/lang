@@ -15,7 +15,7 @@ pub(crate) fn infer_array_init(
     array_init: &mut ArrayInit,
     ctx: &mut TraverseCtx,
 ) -> LangResult<()> {
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+    let mut ty_env_guard = ctx.ty_env.lock();
 
     let ret_type_id = if let Some(ret_type_id) = &array_init.ret_type {
         *ret_type_id

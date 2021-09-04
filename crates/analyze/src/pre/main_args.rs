@@ -1,4 +1,6 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 use common::{
     error::{LangError, LangResult},
@@ -48,7 +50,7 @@ impl MainArgsAnalyzer {
 
     fn verify_main(&mut self, ctx: &TraverseCtx, func: &Fn) -> LangResult<()> {
         if let Some(ret_type_id) = func.ret_type {
-            let ret_ty = ctx.ty_env.lock().unwrap().ty(ret_type_id)?.clone();
+            let ret_ty = ctx.ty_env.lock().ty(ret_type_id)?.clone();
             if matches!(ret_ty, Ty::CompoundType(InnerTy::I32, ..)) {
                 if func.parameters.is_none() {
                     Ok(())
@@ -154,7 +156,6 @@ impl MainArgsAnalyzer {
         let i32_type_id = ctx
             .ty_env
             .lock()
-            .unwrap()
             .id(&Ty::CompoundType(InnerTy::I32, TypeInfo::None))?;
         let argc_param = Var::new(
             ARGC_PARAM_VAR_NAME.into(),
@@ -169,17 +170,14 @@ impl MainArgsAnalyzer {
         let u8_type_id = ctx
             .ty_env
             .lock()
-            .unwrap()
             .id(&Ty::CompoundType(InnerTy::U8, TypeInfo::None))?;
         let u8_ptr_type_id = ctx
             .ty_env
             .lock()
-            .unwrap()
             .id(&Ty::Pointer(u8_type_id, TypeInfo::None))?;
         let u8_ptr_ptr_type_id = ctx
             .ty_env
             .lock()
-            .unwrap()
             .id(&Ty::Pointer(u8_ptr_type_id, TypeInfo::None))?;
         let argv_param = Var::new(
             ARGV_PARAM_VAR_NAME.into(),
@@ -220,17 +218,15 @@ impl Visitor for MainArgsAnalyzer {
             ..
         } = block
         {
-            if func.as_ref().read().unwrap().name == "main"
-                && func.as_ref().read().unwrap().module.count() == 0
-            {
-                if let Err(err) = self.verify_main(ctx, &func.as_ref().read().unwrap()) {
+            if func.read().name == "main" && func.read().module.count() == 0 {
+                if let Err(err) = self.verify_main(ctx, &func.read()) {
                     self.errors.push(err);
                     return;
                 }
 
                 match self.construct_params(ctx) {
                     Ok((argc_param, argv_param)) => {
-                        func.as_ref().write().unwrap().parameters = Some(vec![
+                        func.write().parameters = Some(vec![
                             Arc::new(RwLock::new(argc_param)),
                             Arc::new(RwLock::new(argv_param)),
                         ]);

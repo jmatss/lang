@@ -35,7 +35,7 @@ impl Visitor for PrimitiveToAdtAnalyzer {
         }
 
         if let Some(adt_type_id) = fn_call.method_adt {
-            let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+            let mut ty_env_guard = ctx.ty_env.lock();
             let ty = match ty_env_guard.ty(adt_type_id) {
                 Ok(ty) => ty,
                 Err(err) => {

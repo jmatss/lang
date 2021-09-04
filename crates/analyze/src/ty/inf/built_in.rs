@@ -31,7 +31,7 @@ pub(crate) fn infer_built_in(
         )));
     }
 
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+    let mut ty_env_guard = ctx.ty_env.lock();
 
     for (built_in_param, built_in_call_arg) in
         built_in.parameters.iter().zip(&built_in_call.arguments)

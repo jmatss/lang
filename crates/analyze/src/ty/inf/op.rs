@@ -12,7 +12,7 @@ use common::{
 use crate::ty::solve::insert_constraint;
 
 pub(crate) fn infer_bin_op(bin_op: &mut BinOp, ctx: &mut TraverseCtx) -> LangResult<()> {
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+    let mut ty_env_guard = ctx.ty_env.lock();
 
     // The lhs and rhs exprs will already have been traversed and should
     // have been given a "unknown" type if they didn't have a type already.
@@ -110,7 +110,7 @@ pub(crate) fn infer_bin_op(bin_op: &mut BinOp, ctx: &mut TraverseCtx) -> LangRes
 }
 
 pub(crate) fn infer_un_op(un_op: &mut UnOp, ctx: &mut TraverseCtx) -> LangResult<()> {
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+    let mut ty_env_guard = ctx.ty_env.lock();
 
     // The expr value of this un op will already have been traversed and should
     // have been given a "unknown" type if it didn't have one type already.
@@ -158,7 +158,7 @@ pub(crate) fn infer_un_op(un_op: &mut UnOp, ctx: &mut TraverseCtx) -> LangResult
         }
         UnOperator::UnionIs(member_name, var_decl) => {
             let var_decl_type_id = if let Stmt::VariableDecl(var, ..) = var_decl.as_ref() {
-                *var.read().unwrap().ty.as_ref().unwrap()
+                *var.read().ty.as_ref().unwrap()
             } else {
                 return Err(ctx
                     .ast_ctx

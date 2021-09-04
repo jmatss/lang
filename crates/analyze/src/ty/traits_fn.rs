@@ -69,10 +69,9 @@ impl TraitsFnAnalyzer {
         // traits that the generic implements.
         for (gen_name, trait_paths) in implements {
             for trait_path in trait_paths {
-                let cur_trait_method_names = ctx.ast_ctx.get_trait_method_names(
-                    &ctx.ty_env.lock().unwrap(),
-                    &trait_path.without_gens(),
-                )?;
+                let cur_trait_method_names = ctx
+                    .ast_ctx
+                    .get_trait_method_names(&ctx.ty_env.lock(), &trait_path.without_gens())?;
 
                 match trait_method_names.entry(gen_name.clone()) {
                     Entry::Occupied(mut o) => {
@@ -157,10 +156,7 @@ impl Visitor for TraitsFnAnalyzer {
                     }
                 };
 
-                match ctx
-                    .ast_ctx
-                    .get_adt(&ctx.ty_env.lock().unwrap(), &path_without_gens)
-                {
+                match ctx.ast_ctx.get_adt(&ctx.ty_env.lock(), &path_without_gens) {
                     Ok(adt) => adt,
                     Err(err) => {
                         self.errors.push(err);
@@ -174,7 +170,7 @@ impl Visitor for TraitsFnAnalyzer {
             _ => return,
         };
 
-        let adt = adt.read().unwrap();
+        let adt = adt.read();
         if let Err(err) = self.store_adt_trait_method_names(&ctx, &adt) {
             self.errors.push(err);
         }
@@ -183,7 +179,7 @@ impl Visitor for TraitsFnAnalyzer {
     fn visit_fn(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
         let Block { header, .. } = block;
         if let BlockHeader::Fn(func) = header {
-            let func = func.read().unwrap();
+            let func = func.read();
             if let Err(err) = self.store_fn_trait_method_names(&ctx, &func) {
                 self.errors.push(err);
             }
@@ -193,7 +189,7 @@ impl Visitor for TraitsFnAnalyzer {
     /// Check any function call in which the `method_adt` is a generic.
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
         if let Some(method_adt_type_id) = &fn_call.method_adt {
-            match is_generic(&ctx.ty_env.lock().unwrap(), *method_adt_type_id) {
+            match is_generic(&ctx.ty_env.lock(), *method_adt_type_id) {
                 Ok(true) => (),
                 Ok(false) => return,
                 Err(err) => {
@@ -202,7 +198,7 @@ impl Visitor for TraitsFnAnalyzer {
                 }
             };
 
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
             let generic_name = match get_generic_ident(&ty_env_guard, *method_adt_type_id) {
                 Ok(name) => name,
                 Err(err) => {

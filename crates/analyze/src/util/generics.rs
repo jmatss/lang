@@ -23,12 +23,10 @@ pub fn combine_generics_adt(
     gen_impls: Option<&Generics>,
     fn_call_path: &LangPath,
 ) -> LangResult<Option<Generics>> {
-    let adt = ctx.ast_ctx.get_adt_partial(
-        &ctx.ty_env.lock().unwrap(),
-        &adt_path.without_gens(),
-        ctx.block_id,
-    )?;
-    let adt = adt.read().unwrap();
+    let adt =
+        ctx.ast_ctx
+            .get_adt_partial(&ctx.ty_env.lock(), &adt_path.without_gens(), ctx.block_id)?;
+    let adt = adt.read();
 
     let gen_names = if let Some(gens) = &adt.generics {
         gens.iter_names().cloned().collect::<Vec<_>>()
@@ -59,7 +57,7 @@ pub fn combine_generics(
     // "GenericInstance" types that will be used to create the generics.
     if let Some(gen_impls) = gen_impls {
         if gen_names.len() != gen_impls.len_types() {
-            let fn_name = to_string_path(&ctx.ty_env.lock().unwrap(), &fn_call_path);
+            let fn_name = to_string_path(&ctx.ty_env.lock(), &fn_call_path);
             let err_names = if let Some(adt_path) = adt_path {
                 format!("Adt name: {:?}, method name: {}", &adt_path, &fn_name)
             } else {
@@ -80,8 +78,8 @@ pub fn combine_generics(
         }
     } else {
         for gen_name in gen_names {
-            let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-            let gen_type_id = ctx.ty_env.lock().unwrap().id(&Ty::GenericInstance(
+            let unique_id = ctx.ty_env.lock().new_unique_id();
+            let gen_type_id = ctx.ty_env.lock().id(&Ty::GenericInstance(
                 gen_name.clone(),
                 unique_id,
                 TypeInfo::None,

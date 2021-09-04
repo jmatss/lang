@@ -1,4 +1,6 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::collections::HashMap;
+
+use parking_lot::Mutex;
 
 use common::{
     error::LangResult,
@@ -8,7 +10,7 @@ use common::{
 
 /// Stores information about all built-in functions into a hashmap.
 pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str, BuiltIn>> {
-    let mut ty_env_guard = ty_env.lock().unwrap();
+    let mut ty_env_guard = ty_env.lock();
     let mut built_ins = HashMap::with_capacity(9);
 
     let unique_id = ty_env_guard.new_unique_id();

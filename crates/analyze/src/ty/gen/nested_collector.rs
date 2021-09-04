@@ -205,7 +205,7 @@ impl Visitor for GenericNestedCollector {
             ..
         } = block
         {
-            self.cur_func_name = func.as_ref().read().unwrap().name.clone();
+            self.cur_func_name = func.read().name.clone();
         }
     }
 
@@ -214,17 +214,13 @@ impl Visitor for GenericNestedCollector {
             return;
         }
 
-        if let Err(err) =
-            self.collect_nested_generic_methods(&mut ctx.ty_env.lock().unwrap(), fn_call)
-        {
+        if let Err(err) = self.collect_nested_generic_methods(&mut ctx.ty_env.lock(), fn_call) {
             self.errors.push(err);
         }
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        if let Err(err) =
-            self.collect_nested_generic_adts(&mut ctx.ty_env.lock().unwrap(), *type_id)
-        {
+        if let Err(err) = self.collect_nested_generic_adts(&mut ctx.ty_env.lock(), *type_id) {
             self.errors.push(err);
         }
     }

@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use crate::{ctx::ast_ctx::AstCtx, file::FilePosition, ty::ty_env::TyEnv, BlockId};
 

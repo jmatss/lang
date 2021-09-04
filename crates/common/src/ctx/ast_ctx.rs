@@ -2,11 +2,12 @@ use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
     fmt::Debug,
-    sync::{Arc, RwLock, RwLockWriteGuard},
+    sync::Arc,
 };
 
 use itertools::Itertools;
 use log::Level;
+use parking_lot::{RwLock, RwLockWriteGuard};
 
 use crate::{
     error::{LangError, LangErrorKind, LangResult},
@@ -360,7 +361,7 @@ impl AstCtx {
     /// Checks if there exists a struct with name `path.
     pub fn is_struct(&self, ty_env: &TyEnv, path: &LangPath) -> bool {
         if let Ok(adt) = self.get_adt(ty_env, path) {
-            matches!(adt.as_ref().read().unwrap().kind, AdtKind::Struct)
+            matches!(adt.read().kind, AdtKind::Struct)
         } else {
             false
         }
@@ -369,7 +370,7 @@ impl AstCtx {
     /// Checks if there exists a union with name `path`.
     pub fn is_union(&self, ty_env: &TyEnv, path: &LangPath) -> bool {
         if let Ok(adt) = self.get_adt(ty_env, path) {
-            matches!(adt.as_ref().read().unwrap().kind, AdtKind::Union)
+            matches!(adt.read().kind, AdtKind::Union)
         } else {
             false
         }
@@ -378,7 +379,7 @@ impl AstCtx {
     /// Checks if there exists a enum with name `path`.
     pub fn is_enum(&self, ty_env: &TyEnv, path: &LangPath) -> bool {
         if let Ok(adt) = self.get_adt(ty_env, path) {
-            matches!(adt.as_ref().read().unwrap().kind, AdtKind::Enum)
+            matches!(adt.read().kind, AdtKind::Enum)
         } else {
             false
         }
@@ -413,7 +414,7 @@ impl AstCtx {
         let key = (ident.into(), decl_block_id);
 
         if let Some(item) = self.variables.get(&key) {
-            Ok(item.as_ref().write().unwrap())
+            Ok(item.write())
         } else {
             Err(self.err(format!(
                 "Unable to find var decl with name \"{}\" in decl block ID {}.",
@@ -486,7 +487,7 @@ impl AstCtx {
         method_name: &str,
     ) -> LangResult<Arc<RwLock<Fn>>> {
         let adt = self.get_adt(ty_env, adt_name)?;
-        let adt = adt.as_ref().read().unwrap();
+        let adt = adt.read();
 
         if let Some(method) = adt.methods.get(method_name) {
             Ok(Arc::clone(method))
@@ -508,7 +509,7 @@ impl AstCtx {
         trait_name: &LangPath,
     ) -> LangResult<HashSet<String>> {
         let trait_ = self.get_trait(ty_env, trait_name)?;
-        let trait_ = trait_.as_ref().read().unwrap();
+        let trait_ = trait_.read();
 
         Ok(trait_
             .methods
@@ -525,10 +526,10 @@ impl AstCtx {
         adt_name: &LangPath,
         method: Arc<RwLock<Fn>>,
     ) -> LangResult<()> {
-        let method_name = method.as_ref().read().unwrap().half_name(ty_env);
+        let method_name = method.read().half_name(ty_env);
 
         let adt = self.get_adt(ty_env, adt_name)?;
-        let mut adt = adt.as_ref().write().unwrap();
+        let mut adt = adt.write();
 
         adt.methods.insert(method_name, Arc::clone(&method));
 
@@ -545,7 +546,7 @@ impl AstCtx {
         method_name: &str,
     ) -> LangResult<bool> {
         let adt = self.get_adt(ty_env, adt_name)?;
-        let mut adt = adt.as_ref().write().unwrap();
+        let mut adt = adt.write();
 
         Ok(adt.methods.remove(method_name).is_some())
     }
@@ -560,12 +561,12 @@ impl AstCtx {
         file_pos: Option<FilePosition>,
     ) -> LangResult<Arc<RwLock<Var>>> {
         let adt = self.get_adt(ty_env, adt_name)?;
-        let adt = adt.as_ref().read().unwrap();
+        let adt = adt.read();
 
         if let Some(member) = adt
             .members
             .iter()
-            .find(|member| member.as_ref().read().unwrap().name == member_name)
+            .find(|member| member.read().name == member_name)
         {
             Ok(Arc::clone(member))
         } else {
@@ -592,7 +593,6 @@ impl AstCtx {
         if let Some(idx) = self
             .get_adt(ty_env, adt_name)?
             .read()
-            .unwrap()
             .member_index(member_name)
         {
             Ok(idx as u64)
@@ -608,7 +608,7 @@ impl AstCtx {
     /// Given a function or method `func`, finds the parameter with the name
     // `param_name` and also its index.
     fn get_param(&self, func: Arc<RwLock<Fn>>, param_name: &str) -> LangResult<(usize, Var)> {
-        let func = func.as_ref().read().unwrap();
+        let func = func.read();
 
         let params = if let Some(params) = &func.parameters {
             params
@@ -620,8 +620,8 @@ impl AstCtx {
         };
 
         for (idx, param) in params.iter().enumerate() {
-            if param_name == param.as_ref().read().unwrap().name {
-                return Ok((idx, param.as_ref().read().unwrap().clone()));
+            if param_name == param.read().name {
+                return Ok((idx, param.read().clone()));
             }
         }
 
@@ -634,7 +634,7 @@ impl AstCtx {
     /// Given a function or method `func`, finds the parameter with the name
     /// `param_name` and also its index.
     fn get_param_with_idx(&self, func: Arc<RwLock<Fn>>, idx: usize) -> LangResult<Var> {
-        let func = func.as_ref().read().unwrap();
+        let func = func.read();
 
         let params = if let Some(params) = &func.parameters {
             params
@@ -647,7 +647,7 @@ impl AstCtx {
 
         for (i, param) in params.iter().enumerate() {
             if idx == i {
-                return Ok(param.as_ref().read().unwrap().clone());
+                return Ok(param.read().clone());
             }
         }
 
@@ -698,7 +698,7 @@ impl AstCtx {
             Err(self.err(format!(
                 "Parameter at index \"{}\" in function \"{}\" has no type set.",
                 idx,
-                func.as_ref().read().unwrap().name
+                func.read().name
             )))
         }
     }
@@ -739,7 +739,7 @@ impl AstCtx {
         let end_ident = &err_path.last().unwrap().0;
 
         for adt_arc in self.adts.values() {
-            let adt = adt_arc.as_ref().borrow().read().unwrap();
+            let adt = adt_arc.as_ref().borrow().read();
             if end_ident == &adt.name {
                 adt_suggestions.push(adt.module.clone_push(&adt.name, None, None));
             }
@@ -769,7 +769,7 @@ impl AstCtx {
         let end_ident = &err_path.last().unwrap().0;
 
         for trait_arc in self.traits.values() {
-            let trait_ = trait_arc.as_ref().borrow().read().unwrap();
+            let trait_ = trait_arc.as_ref().borrow().read();
             if end_ident == &trait_.name {
                 trait_suggestions.push(trait_.module.clone_push(&trait_.name, None, None));
             }
@@ -799,7 +799,7 @@ impl AstCtx {
         let end_ident = &err_path.last().unwrap().0;
 
         for func_arc in self.fns.values() {
-            let func = func_arc.as_ref().borrow().read().unwrap();
+            let func = func_arc.as_ref().borrow().read();
             if end_ident == &func.name {
                 fn_suggestions.push(func.module.clone_push(&func.name, None, None));
             }

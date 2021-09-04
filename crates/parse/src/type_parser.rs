@@ -96,10 +96,10 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                                 "Generic decl in type has generics itself."
                             );
 
-                            let unique_id = self.iter.ty_env.lock().unwrap().new_unique_id();
+                            let unique_id = self.iter.ty_env.lock().new_unique_id();
                             let type_info = TypeInfo::Generic(file_pos);
                             Ok((
-                                self.iter.ty_env.lock().unwrap().id(&Ty::Generic(
+                                self.iter.ty_env.lock().id(&Ty::Generic(
                                     ident.clone(),
                                     unique_id,
                                     type_info,
@@ -126,7 +126,6 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                                 self.iter
                                     .ty_env
                                     .lock()
-                                    .unwrap()
                                     .id(&Ty::CompoundType(inner_ty, TypeInfo::Default(file_pos)))?,
                                 file_pos,
                             ))
@@ -207,7 +206,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     }
 
                     Ok((
-                        self.iter.ty_env.lock().unwrap().id(&Ty::Fn(
+                        self.iter.ty_env.lock().id(&Ty::Fn(
                             gen_type_ids,
                             params,
                             ret_type_id,
@@ -240,7 +239,6 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                             self.iter
                                 .ty_env
                                 .lock()
-                                .unwrap()
                                 .id(&Ty::Expr(Box::new(expr), TypeInfo::Default(file_pos)))?,
                             file_pos,
                         ))
@@ -494,7 +492,6 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     self.iter
                         .ty_env
                         .lock()
-                        .unwrap()
                         .id(&Ty::Pointer(type_id, TypeInfo::Default(file_pos)))?,
                     file_pos,
                 ))
@@ -565,7 +562,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
             if let LexTokenKind::Sym(Sym::SquareBracketEnd) = next_token.kind {
                 file_pos.set_end(&next_token.file_pos)?;
                 Ok((
-                    self.iter.ty_env.lock().unwrap().id(&Ty::Array(
+                    self.iter.ty_env.lock().id(&Ty::Array(
                         arr_type_id,
                         size,
                         TypeInfo::Default(file_pos),

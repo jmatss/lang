@@ -5,7 +5,9 @@ mod pre;
 mod ty;
 pub mod util;
 
-use std::{collections::HashMap, io::Write, sync::Mutex, time::Instant};
+use std::{collections::HashMap, io::Write, time::Instant};
+
+use parking_lot::Mutex;
 
 use common::{
     ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx},

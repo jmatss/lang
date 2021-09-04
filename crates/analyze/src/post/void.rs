@@ -44,9 +44,9 @@ impl Visitor for VoidAnalyzer {
 
     fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::VariableDecl(var, ..) = stmt {
-            let var = var.read().unwrap();
+            let var = var.read();
             if let Some(type_id) = var.ty {
-                let ty_env_guard = ctx.ty_env.lock().unwrap();
+                let ty_env_guard = ctx.ty_env.lock();
                 let ty = match ty_env_guard.ty(type_id) {
                     Ok(ty) => ty,
                     Err(err) => {
@@ -75,7 +75,7 @@ impl Visitor for VoidAnalyzer {
                 }
             };
 
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
             let ty = match ty_env_guard.ty(type_id) {
                 Ok(ty) => ty,
                 Err(err) => {

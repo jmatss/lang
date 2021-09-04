@@ -44,7 +44,7 @@ impl Visitor for MethodGensCheck {
     /// at the method call is the same amount as declared on the actual method.
     fn visit_fn_call(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) {
         if let Some(adt_type_id) = &fn_call.method_adt {
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
 
             if contains_generic_shallow(&ty_env_guard, *adt_type_id).unwrap_or(false) {
                 return;
@@ -78,7 +78,7 @@ impl Visitor for MethodGensCheck {
                         return;
                     }
                 };
-            let method = method.as_ref().read().unwrap();
+            let method = method.read();
 
             if let Some(generic_impls) = &method.generics {
                 if generic_impls.is_empty() {

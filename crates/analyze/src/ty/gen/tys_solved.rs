@@ -143,12 +143,11 @@ impl Visitor for GenericTysSolvedChecker {
     }
 
     fn visit_default_block(&mut self, _block: &mut Block, ctx: &mut TraverseCtx) {
-        sub_sets_debug_print(&ctx.ty_env.lock().unwrap());
+        sub_sets_debug_print(&ctx.ty_env.lock());
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        if let Err(err) =
-            self.assert_generics_solved(&ctx.ty_env.lock().unwrap(), *type_id, &ctx.file_pos())
+        if let Err(err) = self.assert_generics_solved(&ctx.ty_env.lock(), *type_id, &ctx.file_pos())
         {
             self.errors.push(err);
         }

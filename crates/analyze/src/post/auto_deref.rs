@@ -34,7 +34,7 @@ impl AutoDerefAnalyzer {
     }
 
     fn auto_deref_method(&mut self, fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<()> {
-        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = ctx.ty_env.lock();
         let fn_name_with_gens = fn_call.half_name(&ty_env_guard);
 
         let first_arg = if let Some(first_arg) = fn_call.arguments.first_mut() {
@@ -60,7 +60,7 @@ impl AutoDerefAnalyzer {
         let method = ctx
             .ast_ctx
             .get_method(&ty_env_guard, &adt_path, &fn_name_with_gens)?;
-        let method = method.read().unwrap();
+        let method = method.read();
 
         if method.is_this_by_ref() && !is_pointer(&ty_env_guard, arg_type_id)? {
             let mut un_op = UnOp::new(
@@ -120,7 +120,7 @@ impl Visitor for AutoDerefAnalyzer {
 
     fn visit_un_op(&mut self, un_op: &mut UnOp, ctx: &mut TraverseCtx) {
         if let UnOperator::AdtAccess(..) = &un_op.operator {
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
 
             let type_id = match un_op.value.get_expr_type() {
                 Ok(type_id) => type_id,

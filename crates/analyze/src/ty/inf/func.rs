@@ -15,7 +15,7 @@ pub(crate) fn infer_fn_ptr(fn_ptr: &mut FnPtr, ctx: &mut TraverseCtx) -> LangRes
         Generics::empty()
     };
 
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+    let mut ty_env_guard = ctx.ty_env.lock();
 
     let partial_path =
         fn_ptr
@@ -26,7 +26,7 @@ pub(crate) fn infer_fn_ptr(fn_ptr: &mut FnPtr, ctx: &mut TraverseCtx) -> LangRes
             .calculate_fn_full_path(&ty_env_guard, &partial_path, ctx.block_id)?;
 
     let func = ctx.ast_ctx.get_fn(&ty_env_guard, &full_path)?;
-    let func = func.read().unwrap();
+    let func = func.read();
 
     let fn_gen_names = if let Some(gens) = &func.generics {
         gens.iter_names().cloned().collect::<Vec<_>>()
@@ -37,7 +37,7 @@ pub(crate) fn infer_fn_ptr(fn_ptr: &mut FnPtr, ctx: &mut TraverseCtx) -> LangRes
     let mut fn_param_tys = if let Some(params) = &func.parameters {
         params
             .iter()
-            .map(|var| var.read().unwrap().ty.as_ref().unwrap().to_owned())
+            .map(|var| var.read().ty.as_ref().unwrap().to_owned())
             .collect::<Vec<_>>()
     } else {
         Vec::with_capacity(0)

@@ -1,7 +1,9 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
+
+use parking_lot::RwLock;
 
 use common::{
     ctx::ast_ctx::AstCtx,
@@ -85,7 +87,7 @@ impl CallArgs {
 
         let mut param_name_to_idx = HashMap::new();
         for (idx, param) in params.iter().enumerate() {
-            param_name_to_idx.insert(param.as_ref().read().unwrap().name.clone(), idx);
+            param_name_to_idx.insert(param.read().name.clone(), idx);
         }
 
         let mut arg_idx = 0;
@@ -135,7 +137,7 @@ impl CallArgs {
         if !is_variadic && fn_call.arguments.len() < params.len() {
             let start_idx = fn_call.arguments.len();
             for param in params[start_idx..].iter() {
-                let param = param.as_ref().read().unwrap();
+                let param = param.read();
 
                 if let Some(default_value) = &param.value {
                     let default_arg =
@@ -175,7 +177,7 @@ impl Visitor for CallArgs {
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
         let func_res = {
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
 
             if let Some(adt_type_id) = &fn_call.method_adt {
                 let adt_ty = match ty_env_guard.ty(*adt_type_id) {
@@ -239,7 +241,7 @@ impl Visitor for CallArgs {
             }
         };
 
-        let func = func.as_ref().read().unwrap();
+        let func = func.read();
 
         // Get the parameters for the function. This will be used to reorder
         // the arguments in the function call correctly.
@@ -276,7 +278,7 @@ impl Visitor for CallArgs {
             adt_init.file_pos,
         );
 
-        let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock().unwrap(), &adt_path) {
+        let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock(), &adt_path) {
             Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);
@@ -284,11 +286,7 @@ impl Visitor for CallArgs {
             }
         };
 
-        self.reorder(
-            &ctx.ast_ctx,
-            &mut adt_init.arguments,
-            &adt.read().unwrap().members,
-        );
+        self.reorder(&ctx.ast_ctx, &mut adt_init.arguments, &adt.read().members);
 
         // TODO: Should there be default values for structs (?). Arrange that
         //       here in that case.

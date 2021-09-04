@@ -33,6 +33,7 @@ dependencies = [
  "common",
  "either",
  "log",
+ "parking_lot",
  "parse",
 ]
 
@@ -127,6 +128,7 @@ dependencies = [
  "either",
  "inkwell",
  "log",
+ "parking_lot",
  "rand",
 ]
 
@@ -139,6 +141,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
+ "parking_lot",
  "rand",
 ]
 
@@ -361,6 +364,7 @@ dependencies = [
  "common",
  "lex",
  "log",
+ "parking_lot",
 ]
 
 [[package]]

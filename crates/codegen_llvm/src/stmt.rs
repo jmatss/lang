@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use inkwell::{module::Linkage, values::BasicValueEnum, values::InstructionValue};
 use log::debug;
 
@@ -36,7 +34,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             }
 
             Stmt::VariableDecl(var, ..) => {
-                let mut var = var.as_ref().borrow().write().unwrap();
+                let mut var = var.write();
 
                 self.compile_var_decl(&mut var)?;
                 if var.is_global {
@@ -60,14 +58,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 match ext_decl {
                     ExternalDecl::Fn(func) => {
                         let linkage = Linkage::External;
-                        self.compile_fn_proto(
-                            &func.as_ref().borrow().read().unwrap(),
-                            file_pos.to_owned(),
-                            Some(linkage),
-                        )?;
+                        self.compile_fn_proto(&func.read(), file_pos.to_owned(), Some(linkage))?;
                     }
                     ExternalDecl::Struct(struct_) => {
-                        self.compile_struct_decl(&struct_.as_ref().borrow().read().unwrap())?;
+                        self.compile_struct_decl(&struct_.read())?;
                     }
                 }
                 Ok(())
@@ -153,7 +147,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let lhs_val = self.builder.build_load(lhs_ptr, "assign.lhs.val");
 
         let type_id = lhs.get_expr_type()?;
-        let is_signed = is_signed(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
+        let is_signed = is_signed(&self.analyze_ctx.ty_env.lock(), type_id)?;
 
         let rhs_val = self.compile_expr(rhs, ExprTy::RValue)?;
         let value = match assign_op {

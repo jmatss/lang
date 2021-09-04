@@ -39,7 +39,7 @@ impl TraitMethodsAnalyzer {
         trait_path: &LangPath,
         impl_body: &[AstToken],
     ) -> Result<(), Vec<LangError>> {
-        let ty_env_guard = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock();
 
         // Will start of containing all names of the method declared in the
         // trait. When iterating through the methods of the trait implementation,
@@ -54,7 +54,7 @@ impl TraitMethodsAnalyzer {
             .ast_ctx
             .get_trait(&ty_env_guard, &trait_path.without_gens())
             .map_err(|err| vec![err])?;
-        let trait_ = trait_.read().unwrap();
+        let trait_ = trait_.read();
 
         let trait_methods = {
             let mut trait_methods = HashMap::with_capacity(trait_.methods.len());
@@ -134,7 +134,7 @@ impl TraitMethodsAnalyzer {
                 )));
                 continue;
             };
-            let impl_method = impl_method.read().unwrap();
+            let impl_method = impl_method.read();
 
             let trait_method = if let Some(trait_method) = trait_methods.get(&impl_method.name) {
                 trait_method
@@ -243,7 +243,6 @@ impl TraitMethodsAnalyzer {
                                 .get(s_idx)
                                 .unwrap()
                                 .read()
-                                .unwrap()
                                 .ty
                                 .unwrap(),
                         );
@@ -256,7 +255,6 @@ impl TraitMethodsAnalyzer {
                                 .get(t_idx)
                                 .unwrap()
                                 .read()
-                                .unwrap()
                                 .ty
                                 .unwrap(),
                         );
@@ -411,8 +409,8 @@ impl TraitMethodsAnalyzer {
                 for (impl_param, decl_param) in
                     impl_params[1..impl_params.len()].iter().zip(decl_params)
                 {
-                    let impl_id = impl_param.as_ref().read().unwrap().ty.unwrap();
-                    let decl_id = decl_param.as_ref().read().unwrap().ty.unwrap();
+                    let impl_id = impl_param.read().ty.unwrap();
+                    let decl_id = decl_param.read().ty.unwrap();
                     type_ids.insert((impl_id, decl_id));
                 }
             }
@@ -420,8 +418,8 @@ impl TraitMethodsAnalyzer {
             // Both functions have parameters and does NOT contain "this".
             (Some(impl_params), Some(decl_params), false) => {
                 for (impl_param, decl_param) in impl_params.iter().zip(decl_params) {
-                    let impl_id = impl_param.as_ref().read().unwrap().ty.unwrap();
-                    let decl_id = decl_param.as_ref().read().unwrap().ty.unwrap();
+                    let impl_id = impl_param.read().ty.unwrap();
+                    let decl_id = decl_param.read().ty.unwrap();
                     type_ids.insert((impl_id, decl_id));
                 }
             }

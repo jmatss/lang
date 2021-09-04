@@ -1,9 +1,7 @@
-use std::{
-    sync::{Arc, RwLock},
-    time::Instant,
-};
+use std::{sync::Arc, time::Instant};
 
 use log::debug;
+use parking_lot::RwLock;
 
 use crate::{
     error::LangError,
@@ -177,11 +175,11 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             }
             BlockHeader::Fn(func) => {
                 if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                    let mut new_func = func.as_ref().read().unwrap().clone();
+                    let mut new_func = func.read().clone();
 
                     if let Some(params) = &mut new_func.parameters {
                         for param in params {
-                            let mut new_param = param.as_ref().read().unwrap().clone();
+                            let mut new_param = param.read().clone();
                             new_param.set_copy_nr(deep_copy_nr);
                             *param = Arc::new(RwLock::new(new_param));
                         }
@@ -191,12 +189,12 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                 }
 
                 // TODO: Iterate through the `generics`.
-                if let Some(params) = &mut func.as_ref().write().unwrap().parameters {
+                if let Some(params) = &mut func.write().parameters {
                     for param in params {
-                        if let Some(type_id) = &mut param.as_ref().write().unwrap().ty {
+                        if let Some(type_id) = &mut param.write().ty {
                             self.traverse_type(type_id);
                         }
-                        if let Some(value) = &mut param.as_ref().write().unwrap().value {
+                        if let Some(value) = &mut param.write().value {
                             self.traverse_expr(value);
                         }
 
@@ -204,7 +202,7 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                         // variable declarations. One have to temporary wrap
                         // them in a `Stmt::VariableDecl` for it to work
                         // smoothly.
-                        let file_pos = param.as_ref().read().unwrap().file_pos.to_owned();
+                        let file_pos = param.read().file_pos.to_owned();
                         let mut var_decl = Stmt::VariableDecl(Arc::clone(param), file_pos);
                         if !self.ctx.stop {
                             self.visitor.visit_var_decl(&mut var_decl, &mut self.ctx);
@@ -214,17 +212,17 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                     }
                 }
 
-                if let Some(generic_impls) = &mut func.as_ref().write().unwrap().generics {
+                if let Some(generic_impls) = &mut func.write().generics {
                     for ty in generic_impls.iter_types_mut() {
                         self.traverse_type(ty);
                     }
                 }
 
-                if let Some(ret_type_id) = &mut func.as_ref().write().unwrap().ret_type {
+                if let Some(ret_type_id) = &mut func.write().ret_type {
                     self.traverse_type(ret_type_id);
                 }
 
-                if let Some(adt_type_id) = &mut func.as_ref().write().unwrap().method_adt {
+                if let Some(adt_type_id) = &mut func.write().method_adt {
                     self.traverse_type(adt_type_id);
                 }
 
@@ -237,10 +235,10 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             }
             BlockHeader::Struct(struct_) => {
                 if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                    let mut new_struct = struct_.as_ref().read().unwrap().clone();
+                    let mut new_struct = struct_.read().clone();
 
                     for member in new_struct.members.iter_mut() {
-                        let mut new_member = member.as_ref().read().unwrap().clone();
+                        let mut new_member = member.read().clone();
                         new_member.set_copy_nr(deep_copy_nr);
                         *member = Arc::new(RwLock::new(new_member));
                     }
@@ -249,28 +247,28 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                 }
 
                 // TODO: Visit `implements`?
-                for member in struct_.as_ref().write().unwrap().members.iter_mut() {
+                for member in struct_.write().members.iter_mut() {
                     if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                        let mut new_member = member.as_ref().read().unwrap().clone();
+                        let mut new_member = member.read().clone();
                         new_member.set_copy_nr(deep_copy_nr);
                         *member = Arc::new(RwLock::new(new_member));
                     }
 
-                    if let Some(ty) = &mut member.as_ref().write().unwrap().ty {
+                    if let Some(ty) = &mut member.write().ty {
                         self.traverse_type(ty);
                     }
-                    if let Some(value) = &mut member.as_ref().write().unwrap().value {
+                    if let Some(value) = &mut member.write().value {
                         self.traverse_expr(value);
                     }
                 }
 
-                if let Some(gens) = &mut struct_.as_ref().write().unwrap().generics {
+                if let Some(gens) = &mut struct_.write().generics {
                     for ty in gens.iter_types_mut() {
                         self.traverse_type(ty);
                     }
                 }
 
-                if let Some(impls) = &mut struct_.as_ref().write().unwrap().implements {
+                if let Some(impls) = &mut struct_.write().implements {
                     for paths in impls.values_mut() {
                         for path in paths {
                             if let Some(gens) =
@@ -296,10 +294,10 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             }
             BlockHeader::Enum(enum_) => {
                 if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                    let mut new_enum = enum_.as_ref().read().unwrap().clone();
+                    let mut new_enum = enum_.read().clone();
 
                     for member in new_enum.members.iter_mut() {
-                        let mut new_member = member.as_ref().read().unwrap().clone();
+                        let mut new_member = member.read().clone();
                         new_member.set_copy_nr(deep_copy_nr);
                         *member = Arc::new(RwLock::new(new_member));
                     }
@@ -308,8 +306,8 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                 }
 
                 // TODO: Visit possible generics?
-                for member in enum_.as_ref().write().unwrap().members.iter_mut() {
-                    if let Some(ty) = &mut member.as_ref().write().unwrap().ty {
+                for member in enum_.write().members.iter_mut() {
+                    if let Some(ty) = &mut member.write().ty {
                         self.traverse_type(ty);
                     }
                 }
@@ -323,10 +321,10 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             }
             BlockHeader::Union(union) => {
                 if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                    let mut new_union = union.as_ref().read().unwrap().clone();
+                    let mut new_union = union.read().clone();
 
                     for member in new_union.members.iter_mut() {
-                        let mut new_member = member.as_ref().read().unwrap().clone();
+                        let mut new_member = member.read().clone();
                         new_member.set_copy_nr(deep_copy_nr);
                         *member = Arc::new(RwLock::new(new_member));
                     }
@@ -334,28 +332,28 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                     *union = Arc::new(RwLock::new(new_union));
                 }
 
-                for member in union.as_ref().write().unwrap().members.iter_mut() {
+                for member in union.write().members.iter_mut() {
                     if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                        let mut new_member = member.as_ref().read().unwrap().clone();
+                        let mut new_member = member.read().clone();
                         new_member.set_copy_nr(deep_copy_nr);
                         *member = Arc::new(RwLock::new(new_member));
                     }
 
-                    if let Some(ty) = &mut member.as_ref().write().unwrap().ty {
+                    if let Some(ty) = &mut member.write().ty {
                         self.traverse_type(ty);
                     }
-                    if let Some(value) = &mut member.as_ref().write().unwrap().value {
+                    if let Some(value) = &mut member.write().value {
                         self.traverse_expr(value);
                     }
                 }
 
-                if let Some(gens) = &mut union.as_ref().write().unwrap().generics {
+                if let Some(gens) = &mut union.write().generics {
                     for ty in gens.iter_types_mut() {
                         self.traverse_type(ty);
                     }
                 }
 
-                if let Some(impls) = &mut union.as_ref().write().unwrap().implements {
+                if let Some(impls) = &mut union.write().implements {
                     for paths in impls.values_mut() {
                         for path in paths {
                             if let Some(gens) =
@@ -472,7 +470,7 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                 if let Some(deep_copy_nr) = self.ctx.copy_nr {
                     if let Some(params) = &mut func.parameters {
                         for param in params {
-                            let mut new_param = param.as_ref().read().unwrap().clone();
+                            let mut new_param = param.read().clone();
                             new_param.set_copy_nr(deep_copy_nr);
                             *param = Arc::new(RwLock::new(new_param));
                         }
@@ -482,7 +480,7 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                 // TODO: Iterate through the `generics`.
                 if let Some(params) = &mut func.parameters {
                     for param in params {
-                        if let Some(ty) = &mut param.as_ref().write().unwrap().ty {
+                        if let Some(ty) = &mut param.write().ty {
                             self.traverse_type(ty);
                         }
                     }
@@ -761,13 +759,13 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             }
             Stmt::VariableDecl(var, _) => {
                 if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                    let mut new_var = var.as_ref().read().unwrap().clone();
+                    let mut new_var = var.read().clone();
                     new_var.set_copy_nr(deep_copy_nr);
                     *var = Arc::new(RwLock::new(new_var));
                 }
 
                 let unsafe_var_value = unsafe {
-                    ((&mut var.as_ref().write().unwrap().value) as *mut Option<Box<Expr>>)
+                    ((&mut var.write().value) as *mut Option<Box<Expr>>)
                         .as_mut()
                         .unwrap()
                 };
@@ -775,7 +773,7 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                     self.traverse_expr(value);
                 }
 
-                if let Some(ty) = &mut var.as_ref().write().unwrap().ty {
+                if let Some(ty) = &mut var.write().ty {
                     self.traverse_type(ty);
                 }
 
@@ -816,7 +814,7 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             //       expression found in types in a separate data-structure and
             //       only store IDs/references to those expression inside the
             //       types.
-            let ty_exprs = match get_exprs_mut(&mut self.ctx.ty_env.lock().unwrap(), *type_id) {
+            let ty_exprs = match get_exprs_mut(&mut self.ctx.ty_env.lock(), *type_id) {
                 Ok(ty_exprs) => ty_exprs,
                 Err(err) => {
                     self.errors.push(err);

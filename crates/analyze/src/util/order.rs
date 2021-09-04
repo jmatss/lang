@@ -1,11 +1,12 @@
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 use either::Either;
 use log::debug;
+use parking_lot::RwLock;
 
 use common::{
     ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx},
@@ -63,7 +64,7 @@ pub fn dependency_order_from_ctx(
     // is referenced from the given "key" ADT. This does NOT include recursive
     // dependencies, only direct "top level" references.
     let references = order_step1(traverse_ctx, ast_token, include_impls, full_paths)?;
-    match order_step2(&traverse_ctx.ty_env.lock().unwrap(), &references) {
+    match order_step2(&traverse_ctx.ty_env.lock(), &references) {
         Ok(order) => {
             debug!("ADTs -- references: {:#?}, order: {:#?}", references, order);
             Ok(order)
@@ -323,7 +324,7 @@ impl ReferenceCollector {
         let mut local_references = TyEnvHashSet::default();
 
         for member in members {
-            if let Some(type_id) = &member.as_ref().borrow().read().unwrap().ty {
+            if let Some(type_id) = &member.as_ref().borrow().read().ty {
                 let adt_and_trait_paths =
                     get_adt_and_trait_paths(&ty_env, *type_id, self.full_paths)?;
 
@@ -346,8 +347,8 @@ impl ReferenceCollector {
         adt: &Arc<RwLock<Adt>>,
         block_id: BlockId,
     ) -> LangResult<LangPath> {
-        let adt_name = adt.as_ref().borrow().read().unwrap().name.clone();
-        let adt_file_pos = Some(adt.as_ref().borrow().read().unwrap().file_pos);
+        let adt_name = adt.as_ref().borrow().read().name.clone();
+        let adt_file_pos = Some(adt.as_ref().borrow().read().file_pos);
 
         let module = if InnerTy::ident_to_type(&adt_name, block_id).is_primitive() {
             LangPath::empty()
@@ -358,7 +359,7 @@ impl ReferenceCollector {
         };
 
         Ok(if self.full_paths {
-            let generics = adt.read().unwrap().generics.as_ref().cloned();
+            let generics = adt.read().generics.as_ref().cloned();
             module.clone_push(&adt_name, generics.as_ref(), adt_file_pos)
         } else {
             module.clone_push(&adt_name, None, adt_file_pos)
@@ -389,9 +390,9 @@ impl Visitor for ReferenceCollector {
                 }
             };
             if let Err(err) = self.collect_member_references(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 &adt_path,
-                &adt.as_ref().borrow().read().unwrap().members,
+                &adt.as_ref().borrow().read().members,
             ) {
                 self.errors.push(err);
             }
@@ -412,9 +413,9 @@ impl Visitor for ReferenceCollector {
                 }
             };
             if let Err(err) = self.collect_member_references(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 &adt_path,
-                &adt.as_ref().borrow().read().unwrap().members,
+                &adt.as_ref().borrow().read().members,
             ) {
                 self.errors.push(err);
             }
@@ -435,9 +436,9 @@ impl Visitor for ReferenceCollector {
                 }
             };
             if let Err(err) = self.collect_member_references(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 &adt_path,
-                &adt.as_ref().borrow().read().unwrap().members,
+                &adt.as_ref().borrow().read().members,
             ) {
                 self.errors.push(err);
             }
@@ -455,7 +456,7 @@ impl Visitor for ReferenceCollector {
             };
 
             if let Err(err) = self.references.insert(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 DerefType::Deep,
                 adt_path,
                 TyEnvHashSet::default(),
@@ -474,7 +475,7 @@ impl Visitor for ReferenceCollector {
             BlockHeader::Implement(impl_path, ..) => Some(impl_path.clone()),
 
             BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
-                let adt = adt.read().unwrap();
+                let adt = adt.read();
                 Some(
                     adt.module
                         .clone_push(&adt.name, adt.generics.as_ref(), Some(adt.file_pos)),
@@ -483,7 +484,7 @@ impl Visitor for ReferenceCollector {
 
             // This is a function, not a method. It is not located inside a impl
             // block, so reset the ADT name since it doesn't belong to the ADT.
-            BlockHeader::Fn(func) if func.read().unwrap().method_adt.is_none() => None,
+            BlockHeader::Fn(func) if func.read().method_adt.is_none() => None,
 
             _ => return,
         };
@@ -494,7 +495,7 @@ impl Visitor for ReferenceCollector {
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
         if self.include_impls {
             if let Some(cur_adt_path) = &self.cur_adt_path {
-                let ty_env_guard = &ctx.ty_env.lock().unwrap();
+                let ty_env_guard = &ctx.ty_env.lock();
 
                 let mut references =
                     match get_adt_and_trait_paths(&ty_env_guard, *type_id, self.full_paths) {

@@ -39,7 +39,7 @@ impl Visitor for TraitImplAnalyzer {
             ..
         } = block
         {
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
 
             let adt = match ctx.ast_ctx.get_adt(&ty_env_guard, &adt_path.without_gens()) {
                 Ok(adt) => adt,
@@ -48,7 +48,7 @@ impl Visitor for TraitImplAnalyzer {
                     return;
                 }
             };
-            let mut adt = adt.write().unwrap();
+            let mut adt = adt.write();
 
             // TODO: Better way to do this, do in constant time instead of
             //       linear. Since `adt.implemented_traits` contains the paths

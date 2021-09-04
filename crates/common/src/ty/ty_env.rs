@@ -1,9 +1,7 @@
-use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
-    sync::Mutex,
-};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use lazy_static::lazy_static;
+use parking_lot::Mutex;
 
 use crate::{
     error::{LangError, LangErrorKind, LangResult},

@@ -10,7 +10,7 @@ use crate::ty::solve::insert_constraint;
 pub(crate) fn infer_var(var: &mut Var, ctx: &mut TraverseCtx) -> LangResult<()> {
     let var_decl = ctx.ast_ctx.get_var(&var.name, ctx.block_id)?;
 
-    let var_decl_type_id = if let Some(type_id) = var_decl.as_ref().read().unwrap().ty {
+    let var_decl_type_id = if let Some(type_id) = var_decl.read().ty {
         type_id
     } else {
         return Err(ctx
@@ -21,8 +21,8 @@ pub(crate) fn infer_var(var: &mut Var, ctx: &mut TraverseCtx) -> LangResult<()> 
     let var_type_id = if let Some(type_id) = &var.ty {
         *type_id
     } else {
-        let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-        let new_type_id = ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
+        let unique_id = ctx.ty_env.lock().new_unique_id();
+        let new_type_id = ctx.ty_env.lock().id(&Ty::CompoundType(
             InnerTy::Unknown(unique_id),
             TypeInfo::VarUse(var.file_pos.unwrap()),
         ))?;
@@ -31,11 +31,7 @@ pub(crate) fn infer_var(var: &mut Var, ctx: &mut TraverseCtx) -> LangResult<()> 
         new_type_id
     };
 
-    insert_constraint(
-        &mut ctx.ty_env.lock().unwrap(),
-        var_decl_type_id,
-        var_type_id,
-    )?;
+    insert_constraint(&mut ctx.ty_env.lock(), var_decl_type_id, var_type_id)?;
 
     Ok(())
 }
@@ -51,8 +47,8 @@ pub(crate) fn infer_var_decl(var: &mut Var, ctx: &mut TraverseCtx) -> LangResult
 
     // Create a unkown type if a type isn't already set.
     if var.ty.is_none() {
-        let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-        let new_type_id = ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
+        let unique_id = ctx.ty_env.lock().new_unique_id();
+        let new_type_id = ctx.ty_env.lock().id(&Ty::CompoundType(
             InnerTy::Unknown(unique_id),
             TypeInfo::VarDecl(var.file_pos.unwrap(), false),
         ))?;
@@ -62,11 +58,7 @@ pub(crate) fn infer_var_decl(var: &mut Var, ctx: &mut TraverseCtx) -> LangResult
 
     // Add constraints only if this var decl has a init value.
     if let Some(rhs_type_id) = rhs_type_id_opt {
-        insert_constraint(
-            &mut ctx.ty_env.lock().unwrap(),
-            var.ty.unwrap(),
-            rhs_type_id,
-        )?;
+        insert_constraint(&mut ctx.ty_env.lock(), var.ty.unwrap(), rhs_type_id)?;
     }
 
     Ok(())
@@ -81,6 +73,6 @@ pub(crate) fn infer_assignment(
 ) -> LangResult<()> {
     let lhs_type_id = lhs.get_expr_type()?;
     let rhs_type_id = rhs.get_expr_type()?;
-    insert_constraint(&mut ctx.ty_env.lock().unwrap(), lhs_type_id, rhs_type_id)?;
+    insert_constraint(&mut ctx.ty_env.lock(), lhs_type_id, rhs_type_id)?;
     Ok(())
 }

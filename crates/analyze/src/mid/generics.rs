@@ -40,7 +40,7 @@ impl GenericsAnalyzer {
             ..
         }) = fn_token
         {
-            func.as_ref().read().unwrap().generics.clone()
+            func.read().generics.clone()
         } else {
             return;
         };
@@ -87,13 +87,11 @@ impl Visitor for GenericsAnalyzer {
             ..
         } = &block
         {
-            let struct_ = struct_.read().unwrap();
+            let struct_ = struct_.read();
             if let (Some(generics), members) = (&struct_.generics, &struct_.members) {
                 for member in members {
-                    if let Some(type_id) = member.write().unwrap().ty.as_mut() {
-                        if let Err(err) =
-                            replace_gens(&mut ctx.ty_env.lock().unwrap(), *type_id, generics)
-                        {
+                    if let Some(type_id) = member.write().ty.as_mut() {
+                        if let Err(err) = replace_gens(&mut ctx.ty_env.lock(), *type_id, generics) {
                             self.errors.push(err);
                         }
                     }
@@ -108,13 +106,11 @@ impl Visitor for GenericsAnalyzer {
             ..
         } = &block
         {
-            let union = union.read().unwrap();
+            let union = union.read();
             if let (Some(generics), members) = (&union.generics, &union.members) {
                 for member in members {
-                    if let Some(type_id) = member.write().unwrap().ty.as_mut() {
-                        if let Err(err) =
-                            replace_gens(&mut ctx.ty_env.lock().unwrap(), *type_id, generics)
-                        {
+                    if let Some(type_id) = member.write().ty.as_mut() {
+                        if let Err(err) = replace_gens(&mut ctx.ty_env.lock(), *type_id, generics) {
                             self.errors.push(err);
                         }
                     }
@@ -129,7 +125,7 @@ impl Visitor for GenericsAnalyzer {
             ..
         } = &block
         {
-            let trait_ = trait_.read().unwrap();
+            let trait_ = trait_.read();
             let trait_gens = if let Some(gen_names) = &trait_.generics {
                 let mut gens = Generics::default();
                 for gen_name in gen_names {
@@ -143,15 +139,13 @@ impl Visitor for GenericsAnalyzer {
             for method in &trait_.methods {
                 if let Some(params) = &method.parameters {
                     for param in params {
-                        let param = param.read().unwrap();
+                        let param = param.read();
                         if let Some(param_type_id) = param.ty {
                             // Replace generics declared on trait in method params.
                             if let Some(trait_gens) = &trait_gens {
-                                if let Err(err) = replace_gens(
-                                    &mut ctx.ty_env.lock().unwrap(),
-                                    param_type_id,
-                                    trait_gens,
-                                ) {
+                                if let Err(err) =
+                                    replace_gens(&mut ctx.ty_env.lock(), param_type_id, trait_gens)
+                                {
                                     self.errors.push(err);
                                     return;
                                 }
@@ -159,7 +153,7 @@ impl Visitor for GenericsAnalyzer {
                                 // Replace generics declared on method in method params.
                                 if let Some(method_gens) = &method.generics {
                                     if let Err(err) = replace_gens(
-                                        &mut ctx.ty_env.lock().unwrap(),
+                                        &mut ctx.ty_env.lock(),
                                         param_type_id,
                                         method_gens,
                                     ) {
@@ -176,7 +170,7 @@ impl Visitor for GenericsAnalyzer {
                     // Replace generics declared on trait in method return type
                     if let Some(trait_gens) = &trait_gens {
                         if let Err(err) =
-                            replace_gens(&mut ctx.ty_env.lock().unwrap(), *ret_type_id, trait_gens)
+                            replace_gens(&mut ctx.ty_env.lock(), *ret_type_id, trait_gens)
                         {
                             self.errors.push(err);
                             return;
@@ -186,7 +180,7 @@ impl Visitor for GenericsAnalyzer {
                     // Replace generics declared on method in method return type.
                     if let Some(method_gens) = &method.generics {
                         if let Err(err) =
-                            replace_gens(&mut ctx.ty_env.lock().unwrap(), *ret_type_id, method_gens)
+                            replace_gens(&mut ctx.ty_env.lock(), *ret_type_id, method_gens)
                         {
                             self.errors.push(err);
                             return;
@@ -217,30 +211,25 @@ impl Visitor for GenericsAnalyzer {
                     }
                 };
 
-                if let Ok(adt) = ctx
-                    .ast_ctx
-                    .get_adt(&ctx.ty_env.lock().unwrap(), &path_without_gens)
-                {
-                    adt.read().unwrap().generics.clone()
+                if let Ok(adt) = ctx.ast_ctx.get_adt(&ctx.ty_env.lock(), &path_without_gens) {
+                    adt.read().generics.clone()
                 } else if ctx
                     .ast_ctx
-                    .get_trait(&ctx.ty_env.lock().unwrap(), &path_without_gens)
+                    .get_trait(&ctx.ty_env.lock(), &path_without_gens)
                     .is_ok()
                 {
                     None
                 } else {
                     let err = ctx.ast_ctx.err(format!(
                         "Unable to find ADT/Trait for impl block with name \"{}\".",
-                        to_string_path(&ctx.ty_env.lock().unwrap(), &path_without_gens),
+                        to_string_path(&ctx.ty_env.lock(), &path_without_gens),
                     ));
                     self.errors.push(err);
                     return;
                 }
             }
 
-            BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
-                adt.read().unwrap().generics.clone()
-            }
+            BlockHeader::Struct(adt) | BlockHeader::Union(adt) => adt.read().generics.clone(),
 
             BlockHeader::Trait(_) => None,
 
@@ -299,7 +288,7 @@ impl<'a> Visitor for FuncGenericsReplacer<'a> {
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        if let Err(err) = replace_gens(&mut ctx.ty_env.lock().unwrap(), *type_id, self.gen_decls) {
+        if let Err(err) = replace_gens(&mut ctx.ty_env.lock(), *type_id, self.gen_decls) {
             self.errors.push(err);
         }
     }

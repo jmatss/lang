@@ -359,12 +359,9 @@ impl Visitor for BlockAnalyzer {
     /// will be used. The reason being that this needs to be called recursively
     /// on blocks, which currently isn't possible to do with the regular traverser.
     fn visit_default_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
-        if let Err(err) = self.analyze_block(
-            &ctx.ty_env.lock().unwrap(),
-            &mut ctx.ast_ctx,
-            block,
-            usize::MAX,
-        ) {
+        if let Err(err) =
+            self.analyze_block(&ctx.ty_env.lock(), &mut ctx.ast_ctx, block, usize::MAX)
+        {
             self.errors.push(err);
         }
     }

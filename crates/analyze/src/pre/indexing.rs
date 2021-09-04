@@ -1,6 +1,7 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use log::debug;
+use parking_lot::RwLock;
 
 use common::{
     error::{LangError, LangErrorKind},

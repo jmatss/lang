@@ -1,7 +1,6 @@
-use std::{
-    hash::Hash,
-    sync::{Arc, RwLock},
-};
+use std::{hash::Hash, sync::Arc};
+
+use parking_lot::RwLock;
 
 use crate::{file::FilePosition, path::LangPath};
 

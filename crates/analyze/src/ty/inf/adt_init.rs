@@ -20,16 +20,14 @@ pub(crate) fn infer_adt_init(adt_init: &mut AdtInit, ctx: &mut TraverseCtx) -> L
         .module
         .clone_push(&adt_init.name, None, adt_init.file_pos);
 
-    let full_path_without_gens = ctx.ast_ctx.calculate_adt_full_path(
-        &ctx.ty_env.lock().unwrap(),
-        &partial_path,
-        ctx.block_id,
-    )?;
+    let full_path_without_gens =
+        ctx.ast_ctx
+            .calculate_adt_full_path(&ctx.ty_env.lock(), &partial_path, ctx.block_id)?;
 
     let adt = ctx
         .ast_ctx
-        .get_adt(&ctx.ty_env.lock().unwrap(), &full_path_without_gens)?;
-    let adt = adt.read().unwrap();
+        .get_adt(&ctx.ty_env.lock(), &full_path_without_gens)?;
+    let adt = adt.read();
 
     adt_init.kind = adt.kind.clone();
 
@@ -57,8 +55,8 @@ pub(crate) fn infer_adt_init(adt_init: &mut AdtInit, ctx: &mut TraverseCtx) -> L
             }
         } else {
             for gen_name in gens_decl.iter_names() {
-                let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-                let gen_type_id = ctx.ty_env.lock().unwrap().id(&Ty::GenericInstance(
+                let unique_id = ctx.ty_env.lock().new_unique_id();
+                let gen_type_id = ctx.ty_env.lock().id(&Ty::GenericInstance(
                     gen_name.clone(),
                     unique_id,
                     TypeInfo::None,
@@ -78,7 +76,7 @@ pub(crate) fn infer_adt_init(adt_init: &mut AdtInit, ctx: &mut TraverseCtx) -> L
 
     let adt_ty = adt_init
         .adt_type_id
-        .map(|id| ctx.ty_env.lock().unwrap().ty_clone(id));
+        .map(|id| ctx.ty_env.lock().ty_clone(id));
     match adt_ty {
         Some(Ok(Ty::CompoundType(..))) => {
             // If the type already is set to a compound, use that
@@ -86,7 +84,7 @@ pub(crate) fn infer_adt_init(adt_init: &mut AdtInit, ctx: &mut TraverseCtx) -> L
         }
         Some(Err(err)) => return Err(err),
         _ => {
-            let ret_type_id = ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
+            let ret_type_id = ctx.ty_env.lock().id(&Ty::CompoundType(
                 InnerTy::UnknownIdent(full_path_with_gens, ctx.block_id),
                 TypeInfo::Default(adt_init.file_pos.unwrap()),
             ))?;
@@ -127,7 +125,7 @@ fn infer_adt_init_struct(
     let adt_path_without_gens = adt.module.clone_push(&adt.name, None, Some(adt.file_pos));
 
     // TODO: Verify that all members are initialized.
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+    let mut ty_env_guard = ctx.ty_env.lock();
 
     for (i, arg) in adt_init.arguments.iter().enumerate() {
         // If a name is set, this is a named member init. Don't use the
@@ -148,7 +146,7 @@ fn infer_adt_init_struct(
         // Add constraints mapping the type of the ADT init argument
         // to the corresponding actual ADT member type.
         if let Some(member) = adt.members.get(index) {
-            let member = member.read().unwrap();
+            let member = member.read();
 
             // Get the "actual" type of the member. If it contains a generic,
             // it needs to get the actual unknown generic type from the `gens`.
@@ -232,7 +230,7 @@ fn infer_adt_init_union(
         )));
     };
 
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+    let mut ty_env_guard = ctx.ty_env.lock();
 
     // TODO: Does the generics need to be set? Shouldn't be necessary since the
     //       ADT in the look-up shouldn't contain any generics.
@@ -247,7 +245,7 @@ fn infer_adt_init_union(
 
     // Make a copy of the type to allow for multiple
     // struct inits with different types for the generics.
-    let new_member = member.read().unwrap().clone();
+    let new_member = member.read().clone();
 
     let member_type_id = if let Some(type_id) = &new_member.ty {
         if let Some(gens) = &gens {
@@ -261,7 +259,7 @@ fn infer_adt_init_union(
     } else {
         return Err(ctx.ast_ctx.err(format!(
             "Member \"{:?}\" in union \"{:?}\" doesn't have a type set.",
-            member.read().unwrap(),
+            member.read(),
             &adt.name
         )));
     };

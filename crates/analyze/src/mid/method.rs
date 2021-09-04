@@ -97,7 +97,7 @@ impl Visitor for MethodAnalyzer {
                 let last_part = adt_path.last().unwrap();
                 let path = module.clone_push(&last_part.0, None, adt_path.file_pos);
 
-                let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock().unwrap(), &path) {
+                let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock(), &path) {
                     Ok(adt) => adt,
                     Err(err) => {
                         self.errors.push(err);
@@ -105,12 +105,12 @@ impl Visitor for MethodAnalyzer {
                     }
                 };
 
-                let adt = adt.read().unwrap();
+                let adt = adt.read();
                 (path, adt.generics.clone())
             }
 
             BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
-                let adt = adt.read().unwrap();
+                let adt = adt.read();
                 let path = adt.module.clone_push(&adt.name, None, Some(adt.file_pos));
 
                 (path, adt.generics.clone())
@@ -129,11 +129,11 @@ impl Visitor for MethodAnalyzer {
             ..
         } = block
         {
-            self.fn_generics = func.as_ref().read().unwrap().generics.clone();
+            self.fn_generics = func.read().generics.clone();
 
             // This isn't a method, reset the variable for any impl block
             // because we have left the impl block.
-            if func.as_ref().read().unwrap().method_adt.is_none() {
+            if func.read().method_adt.is_none() {
                 self.adt_path = None;
                 self.adt_gens = None;
             }
@@ -148,11 +148,11 @@ impl Visitor for MethodAnalyzer {
         if fn_call.module.count() > 0 {
             let potential_adt_path = &fn_call.module;
             let full_path_opt = if let Ok(adt) = ctx.ast_ctx.get_adt_partial(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 &potential_adt_path.without_gens(),
                 ctx.block_id,
             ) {
-                let adt = adt.as_ref().read().unwrap();
+                let adt = adt.read();
                 let fn_call_gens = fn_call.module.last().unwrap().1.as_ref();
                 Some(
                     adt.module
@@ -163,7 +163,7 @@ impl Visitor for MethodAnalyzer {
             };
 
             if let Some(full_path) = full_path_opt {
-                let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
+                let type_id = match ctx.ty_env.lock().id(&Ty::CompoundType(
                     InnerTy::UnknownIdent(full_path, ctx.block_id),
                     TypeInfo::Default(ctx.file_pos()),
                 )) {
@@ -209,7 +209,7 @@ impl Visitor for MethodAnalyzer {
                         };
 
                     let adt_path_with_gens = adt_path.with_gens_opt(new_gens);
-                    let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
+                    let type_id = match ctx.ty_env.lock().id(&Ty::CompoundType(
                         InnerTy::UnknownIdent(adt_path_with_gens, ctx.block_id),
                         TypeInfo::None,
                     )) {
@@ -229,8 +229,8 @@ impl Visitor for MethodAnalyzer {
 
             if let Some(fn_gens) = &self.fn_generics {
                 if fn_gens.contains(possible_gen_or_this) {
-                    let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-                    let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::Generic(
+                    let unique_id = ctx.ty_env.lock().new_unique_id();
+                    let type_id = match ctx.ty_env.lock().id(&Ty::Generic(
                         possible_gen_or_this.into(),
                         unique_id,
                         TypeInfo::Default(ctx.file_pos()),
@@ -251,8 +251,8 @@ impl Visitor for MethodAnalyzer {
 
             if let Some(impl_gens) = &self.adt_gens {
                 if impl_gens.contains(possible_gen_or_this) {
-                    let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-                    let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::Generic(
+                    let unique_id = ctx.ty_env.lock().new_unique_id();
+                    let type_id = match ctx.ty_env.lock().id(&Ty::Generic(
                         possible_gen_or_this.into(),
                         unique_id,
                         TypeInfo::Default(ctx.file_pos()),

@@ -27,7 +27,7 @@ pub(crate) fn infer_lit(expr: &mut Expr, ctx: &mut TraverseCtx) -> LangResult<()
         return Ok(());
     }
 
-    let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+    let mut ty_env_guard = ctx.ty_env.lock();
 
     let inner_ty = match lit {
         Lit::String(_, string_type) => match string_type {

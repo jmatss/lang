@@ -1,7 +1,6 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
+use std::{collections::HashMap, sync::Arc};
+
+use parking_lot::RwLock;
 
 use super::{
     ast::AstToken,
@@ -155,7 +154,7 @@ impl Adt {
     /// Returns the index of the member with name `member_name` of this ADT.
     pub fn member_index(&self, member_name: &str) -> Option<usize> {
         for (idx, member) in self.members.iter().enumerate() {
-            if member.as_ref().read().unwrap().name == member_name {
+            if member.read().name == member_name {
                 return Some(idx);
             }
         }
@@ -290,7 +289,7 @@ impl AdtBuilder {
     }
 
     pub fn insert_method(&mut self, method: &Arc<RwLock<Fn>>) -> &mut Self {
-        let method_name = method.read().unwrap().name.clone();
+        let method_name = method.read().name.clone();
         self.methods.insert(method_name, Arc::clone(method));
         self
     }
@@ -462,8 +461,8 @@ impl Fn {
                     .zip(trait_params)
                     .enumerate()
                 {
-                    let first_id = self_param.as_ref().read().unwrap().ty.unwrap();
-                    let second_id = other_param.as_ref().read().unwrap().ty.unwrap();
+                    let first_id = self_param.read().ty.unwrap();
+                    let second_id = other_param.read().ty.unwrap();
                     if !is_compatible(ty_env, first_id, second_id).unwrap() {
                         errors.push(TraitCompareError::ParamTypeDiff(idx, true));
                     }
@@ -484,8 +483,8 @@ impl Fn {
                 for (idx, (self_param, other_param)) in
                     self_params.iter().zip(trait_params).enumerate()
                 {
-                    let first_id = self_param.as_ref().read().unwrap().ty.unwrap();
-                    let second_id = other_param.as_ref().read().unwrap().ty.unwrap();
+                    let first_id = self_param.read().ty.unwrap();
+                    let second_id = other_param.read().ty.unwrap();
                     if !is_compatible(ty_env, first_id, second_id).unwrap() {
                         errors.push(TraitCompareError::ParamTypeDiff(idx, false));
                     }

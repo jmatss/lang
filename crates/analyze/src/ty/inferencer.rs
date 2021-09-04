@@ -1,6 +1,7 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use log::{debug, log_enabled, Level};
+use parking_lot::RwLock;
 
 use common::{
     error::LangError,
@@ -62,7 +63,7 @@ impl TypeInferencer {
     /// in `self.errors()`. Use this function do it in a single line func call
     /// instead of having to check for errors every time.
     fn insert_constraint(&mut self, ctx: &mut TraverseCtx, type_id_a: TypeId, type_id_b: TypeId) {
-        if let Err(err) = insert_constraint(&mut ctx.ty_env.lock().unwrap(), type_id_a, type_id_b) {
+        if let Err(err) = insert_constraint(&mut ctx.ty_env.lock(), type_id_a, type_id_b) {
             self.errors.push(err);
         }
     }
@@ -82,7 +83,6 @@ impl Visitor for TypeInferencer {
             let mut all_type_ids = ctx
                 .ty_env
                 .lock()
-                .unwrap()
                 .interner
                 .all_types()
                 .into_iter()
@@ -94,16 +94,16 @@ impl Visitor for TypeInferencer {
                 all_types_string.push_str(&format!(
                     "\ntype_id: {} - {:?}",
                     type_id,
-                    to_string_type_id(&ctx.ty_env.lock().unwrap(), type_id)
+                    to_string_type_id(&ctx.ty_env.lock(), type_id)
                 ));
             }
 
             debug!(
                 "Type inference done.\nforwards: {:#?}\nall types: {}\nsubs:",
-                ctx.ty_env.lock().unwrap().forwards(),
+                ctx.ty_env.lock().forwards(),
                 all_types_string
             );
-            sub_sets_debug_print(&ctx.ty_env.lock().unwrap());
+            sub_sets_debug_print(&ctx.ty_env.lock());
         }
     }
 
@@ -185,7 +185,7 @@ impl Visitor for TypeInferencer {
 
     fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::VariableDecl(var, ..) = stmt {
-            if let Err(err) = infer_var_decl(&mut var.write().unwrap(), ctx) {
+            if let Err(err) = infer_var_decl(&mut var.write(), ctx) {
                 self.errors.push(err);
             }
         }
@@ -196,8 +196,8 @@ impl Visitor for TypeInferencer {
     fn visit_return(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::Return(expr_opt, ..) = stmt {
             if let Some(func) = &self.cur_func {
-                let func_name = func.read().unwrap().name.clone();
-                let func_ret_type_id = func.read().unwrap().ret_type;
+                let func_name = func.read().name.clone();
+                let func_ret_type_id = func.read().ret_type;
 
                 let expr_type_id = if let Some(expr) = expr_opt {
                     match expr.get_expr_type() {
@@ -229,7 +229,7 @@ impl Visitor for TypeInferencer {
                             "The function \"{}\" have a return type ({}), but a return \
                             statement in the function have an empty return value.",
                             func_name,
-                            to_string_type_id(&ctx.ty_env.lock().unwrap(), ret_type_id).unwrap()
+                            to_string_type_id(&ctx.ty_env.lock(), ret_type_id).unwrap()
                         )));
                     }
 

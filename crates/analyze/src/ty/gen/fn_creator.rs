@@ -58,11 +58,7 @@ impl GenericFnCreator {
     ) -> Result<(), Vec<LangError>> {
         let mut generic_methods_opt = self
             .generic_methods
-            .get(
-                &ctx.ty_env.lock().unwrap(),
-                DerefType::Deep,
-                adt_path_without_gens,
-            )
+            .get(&ctx.ty_env.lock(), DerefType::Deep, adt_path_without_gens)
             .map_err(|err| vec![err])?
             .cloned();
 
@@ -90,7 +86,7 @@ impl GenericFnCreator {
             };
 
             let (method_name, has_gens) = {
-                let method = method.read().unwrap();
+                let method = method.read();
                 (
                     method.name.clone(),
                     method
@@ -116,7 +112,6 @@ impl GenericFnCreator {
                         let inf_type_id = ctx
                             .ty_env
                             .lock()
-                            .unwrap()
                             .inferred_type(*gen_type_id)
                             .map_err(|e| vec![e])?;
 
@@ -134,7 +129,7 @@ impl GenericFnCreator {
                         ..
                     }) = &new_method
                     {
-                        func.as_ref().write().unwrap().generics = Some(method_generics.clone());
+                        func.write().generics = Some(method_generics.clone());
                         Arc::clone(func)
                     } else {
                         unreachable!()
@@ -142,7 +137,7 @@ impl GenericFnCreator {
 
                     // Insert the method into the ADT.
                     ctx.ast_ctx
-                        .insert_method(&ctx.ty_env.lock().unwrap(), adt_path_without_gens, func)
+                        .insert_method(&ctx.ty_env.lock(), adt_path_without_gens, func)
                         .map_err(|err| vec![err])?;
 
                     // Insert the method into the AST.
@@ -156,11 +151,7 @@ impl GenericFnCreator {
                 // impls, it should be removed.
                 // Remove it from both the structure and the AST.
                 ctx.ast_ctx
-                    .remove_method(
-                        &ctx.ty_env.lock().unwrap(),
-                        adt_path_without_gens,
-                        &method_name,
-                    )
+                    .remove_method(&ctx.ty_env.lock(), adt_path_without_gens, &method_name)
                     .map_err(|err| vec![err])?;
 
                 body.remove(idx);
@@ -169,11 +160,7 @@ impl GenericFnCreator {
                 // map, it means that it is a method that isn't used anywhere
                 // in the code base; remove it.
                 ctx.ast_ctx
-                    .remove_method(
-                        &ctx.ty_env.lock().unwrap(),
-                        adt_path_without_gens,
-                        &method_name,
-                    )
+                    .remove_method(&ctx.ty_env.lock(), adt_path_without_gens, &method_name)
                     .map_err(|err| vec![err])?;
 
                 body.remove(idx);
@@ -206,30 +193,24 @@ impl GenericFnCreator {
             }) = child_token
             {
                 let contains_gens_decl = method
-                    .as_ref()
                     .read()
-                    .unwrap()
                     .generics
                     .as_ref()
                     .map(|gens| !gens.is_empty())
                     .unwrap_or(false);
                 let contains_gens_impl = self
                     .generic_methods
-                    .get(
-                        &ctx.ty_env.lock().unwrap(),
-                        DerefType::Deep,
-                        &adt_path_without_gens,
-                    )
+                    .get(&ctx.ty_env.lock(), DerefType::Deep, &adt_path_without_gens)
                     .ok()
                     .flatten()
-                    .map(|impls| impls.contains_key(&method.as_ref().read().unwrap().name))
+                    .map(|impls| impls.contains_key(&method.read().name))
                     .unwrap_or(false);
 
                 if contains_gens_decl && !contains_gens_impl {
                     ctx.ast_ctx.remove_method(
-                        &ctx.ty_env.lock().unwrap(),
+                        &ctx.ty_env.lock(),
                         &adt_path_without_gens,
-                        &method.as_ref().read().unwrap().name,
+                        &method.read().name,
                     )?;
                     body.remove(idx);
 
@@ -271,18 +252,14 @@ impl GenericFnCreator {
         };
 
         let fn_path_without_gens = {
-            let func = func.read().unwrap();
+            let func = func.read();
             func.module
                 .clone_push(&func.name, None, Some(func.file_pos))
         };
 
         let mut generic_fns_opt = self
             .generic_fns
-            .get(
-                &ctx.ty_env.lock().unwrap(),
-                DerefType::Deep,
-                &fn_path_without_gens,
-            )
+            .get(&ctx.ty_env.lock(), DerefType::Deep, &fn_path_without_gens)
             .map_err(|err| vec![err])?
             .cloned();
 
@@ -304,7 +281,6 @@ impl GenericFnCreator {
                 let inf_type_id = ctx
                     .ty_env
                     .lock()
-                    .unwrap()
                     .inferred_type(*gen_type_id)
                     .map_err(|e| vec![e])?;
 
@@ -322,14 +298,14 @@ impl GenericFnCreator {
                 ..
             }) = &new_fn
             {
-                func.as_ref().write().unwrap().generics = Some(gens.clone());
+                func.write().generics = Some(gens.clone());
                 Arc::clone(func)
             } else {
                 unreachable!()
             };
 
             let fn_path_with_gens = {
-                let func = func.read().unwrap();
+                let func = func.read();
                 func.module
                     .clone_push(&func.name, func.generics.as_ref(), Some(func.file_pos))
             };
@@ -338,7 +314,7 @@ impl GenericFnCreator {
             ctx.ast_ctx
                 .fns
                 .insert(
-                    &ctx.ty_env.lock().unwrap(),
+                    &ctx.ty_env.lock(),
                     DerefType::Deep,
                     (fn_path_with_gens, block_id),
                     func,
@@ -356,7 +332,7 @@ impl GenericFnCreator {
         ctx.ast_ctx
             .fns
             .remove(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 DerefType::None,
                 &(fn_path_without_gens, block_id),
             )
@@ -391,7 +367,7 @@ impl GenericFnCreator {
         } else {
             unreachable!();
         };
-        let func = func.read().unwrap();
+        let func = func.read();
 
         let fn_path_without_gens = func
             .module
@@ -404,18 +380,14 @@ impl GenericFnCreator {
             .unwrap_or(false);
         let contains_gens_impl = self
             .generic_fns
-            .get(
-                &ctx.ty_env.lock().unwrap(),
-                DerefType::None,
-                &fn_path_without_gens,
-            )?
+            .get(&ctx.ty_env.lock(), DerefType::None, &fn_path_without_gens)?
             .is_some();
 
         std::mem::drop(func);
 
         if contains_gens_decl && !contains_gens_impl {
             ctx.ast_ctx.fns.remove(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 DerefType::None,
                 &(fn_path_without_gens, block_id),
             )?;
@@ -460,7 +432,7 @@ impl Visitor for GenericFnCreator {
                 let path_without_gens = match header {
                     BlockHeader::Implement(adt_path, ..) => adt_path.clone(),
                     BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
-                        let adt = adt.read().unwrap();
+                        let adt = adt.read();
                         adt.module.clone_push(&adt.name, None, Some(adt.file_pos))
                     }
                     _ => continue,

@@ -1,7 +1,6 @@
-use std::{
-    collections::HashSet,
-    sync::{Arc, RwLock},
-};
+use std::{collections::HashSet, sync::Arc};
+
+use parking_lot::RwLock;
 
 use common::{
     error::{LangError, LangResult},
@@ -83,7 +82,7 @@ impl<'a> GenericsReplacer<'a> {
     }
 
     fn replace_type_id(&self, type_id: &mut TypeId, ctx: &mut TraverseCtx) -> LangResult<()> {
-        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = ctx.ty_env.lock();
 
         if let Some(new_type_id) = replace_gen_impls(
             &mut ty_env_guard,
@@ -136,10 +135,10 @@ impl<'a> Visitor for GenericsReplacer<'a> {
     /// this function will store the newly copied/created variables.
     fn visit_var_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
         if let Stmt::VariableDecl(var, ..) = stmt {
-            let old_key = (var.as_ref().read().unwrap().name.clone(), ctx.block_id);
+            let old_key = (var.read().name.clone(), ctx.block_id);
             self.modified_variables.insert(old_key);
 
-            let new_key = (var.as_ref().read().unwrap().full_name(), ctx.block_id);
+            let new_key = (var.read().full_name(), ctx.block_id);
             ctx.ast_ctx.variables.insert(new_key, Arc::clone(var));
         }
     }
@@ -163,7 +162,7 @@ impl<'a> Visitor for GenericsReplacer<'a> {
         };
 
         let new_adt_path = {
-            let new_adt = new_adt.as_ref().read().unwrap();
+            let new_adt = new_adt.read();
             module.clone_push(
                 &new_adt.name,
                 Some(self.generics_impl),
@@ -176,26 +175,22 @@ impl<'a> Visitor for GenericsReplacer<'a> {
             ..
         } = block
         {
-            func.as_ref().write().unwrap().method_adt = self.new_type_id;
+            func.write().method_adt = self.new_type_id;
 
             // Insert a reference from the "new" ADT to this new method.
             // The name set will be the "half name" containing the generics
             // for the function.
-            new_adt.as_ref().write().unwrap().methods.insert(
-                func.as_ref()
-                    .read()
-                    .unwrap()
-                    .half_name(&ctx.ty_env.lock().unwrap()),
-                Arc::clone(&func),
-            );
+            new_adt
+                .write()
+                .methods
+                .insert(func.read().half_name(&ctx.ty_env.lock()), Arc::clone(&func));
 
             // Inserts a reference to this new method into the `analyze_context`
             // look-up table.
-            if let Err(err) = ctx.ast_ctx.insert_method(
-                &ctx.ty_env.lock().unwrap(),
-                &new_adt_path,
-                Arc::clone(&func),
-            ) {
+            if let Err(err) =
+                ctx.ast_ctx
+                    .insert_method(&ctx.ty_env.lock(), &new_adt_path, Arc::clone(&func))
+            {
                 self.errors.push(err);
             }
         }

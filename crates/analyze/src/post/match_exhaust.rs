@@ -44,16 +44,12 @@ impl MatchExhaustAnalyzer {
         match_cases: &[AstToken],
     ) -> LangResult<()> {
         // Gather all names of the members for the enum into a hash set.
-        let enum_ = ctx
-            .ast_ctx
-            .get_adt(&ctx.ty_env.lock().unwrap(), full_path)?;
+        let enum_ = ctx.ast_ctx.get_adt(&ctx.ty_env.lock(), full_path)?;
         let mut member_names = enum_
-            .as_ref()
             .read()
-            .unwrap()
             .members
             .iter()
-            .map(|x| x.as_ref().read().unwrap().name.clone())
+            .map(|x| x.read().name.clone())
             .collect::<HashSet<_>>();
 
         // Go through all case expressions and remove any enum members with the
@@ -100,7 +96,7 @@ impl MatchExhaustAnalyzer {
         } else {
             Err(ctx.ast_ctx.err(format!(
                 "\"match\" on enum \"{}\" at position:\n{:#?}\ndoes NOT cover all enum members. Missing members:\n{:#?}",
-                &enum_.as_ref().read().unwrap().name, ctx.file_pos(), member_names
+                &enum_.read().name, ctx.file_pos(), member_names
             )))
         }
     }
@@ -143,7 +139,7 @@ impl Visitor for MatchExhaustAnalyzer {
                 }
             };
 
-            let match_case_ty = match ctx.ty_env.lock().unwrap().ty(type_id) {
+            let match_case_ty = match ctx.ty_env.lock().ty(type_id) {
                 Ok(ty) => ty.clone(),
                 Err(err) => {
                     self.errors.push(err);
@@ -154,7 +150,7 @@ impl Visitor for MatchExhaustAnalyzer {
             match match_case_ty {
                 Ty::CompoundType(InnerTy::Enum(partial_path), ..) => {
                     let full_path = match ctx.ast_ctx.calculate_adt_full_path(
-                        &ctx.ty_env.lock().unwrap(),
+                        &ctx.ty_env.lock(),
                         &partial_path,
                         ctx.block_id,
                     ) {
