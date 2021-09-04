@@ -19,6 +19,7 @@ use common::{
         ast::AstToken,
         block::{Adt, Block, BlockHeader},
         expr::Var,
+        stmt::{ExternalDecl, Stmt},
     },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
     ty::{
@@ -437,6 +438,27 @@ impl Visitor for ReferenceCollector {
                 &ctx.ty_env.lock().unwrap(),
                 &adt_path,
                 &adt.as_ref().borrow().read().unwrap().members,
+            ) {
+                self.errors.push(err);
+            }
+        }
+    }
+
+    fn visit_extern_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
+        if let Stmt::ExternalDecl(ExternalDecl::Struct(struct_), ..) = stmt {
+            let adt_path = match self.adt_path(ctx.ast_ctx, struct_, ctx.block_id) {
+                Ok(adt_path) => adt_path,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            if let Err(err) = self.references.insert(
+                &ctx.ty_env.lock().unwrap(),
+                DerefType::Deep,
+                adt_path,
+                TyEnvHashSet::default(),
             ) {
                 self.errors.push(err);
             }
