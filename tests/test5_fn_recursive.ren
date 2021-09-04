@@ -1,15 +1,8 @@
 ext fn printf(format: {u8}, ...) -> i32
-ext fn malloc(size: u32) -> {u8}
-ext fn free(ptr: {u8})
 
 fn fac(n: i32) -> i32 {
-    var res: i32
     if n <= 1 {
-        if (n == 1) {
-            return 1
-        } else {
-            return 1
-        }
+        return 1
     } else {
         return n * fac(n - 1)
     }
@@ -18,9 +11,5 @@ fn fac(n: i32) -> i32 {
 fn main() -> i32 {   
     var n: i32 = 7
     printf(c"n: %d, result: %d", n, fac(n))
-
-    var buf: {u8} = malloc(20)
-
-    free(buf)
     return 0
 }

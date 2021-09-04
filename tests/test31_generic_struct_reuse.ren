@@ -12,8 +12,8 @@ fn main() -> i32 {
 
     var test_struct_u64 = TestStruct { i }
     var test_struct_f32 = TestStruct { f }
-    
-    test_struct_u64.&.test_func()
+
+    test_struct_u64.test_func()
 
     return 0
 }

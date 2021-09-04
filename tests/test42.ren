@@ -1,6 +1,6 @@
-use std::mem::Allocator
-use std::mem::Ptr
-use std::types::Disposable
+use std::Allocator
+use std::Ptr
+use std::Disposable
 
 ext fn printf(format: {u8}, ...) -> i32
 
@@ -20,9 +20,9 @@ struct Error {
 
 impl Error: Disposable {
     fn {this} deinit() {
-        if this.*.msg_needs_deinit {
-            Allocator::deinit<u8>(this.*.msg)
-            this.*.msg_needs_deinit = false
+        if this.msg_needs_deinit {
+            Allocator::deinit<u8>(this.msg)
+            this.msg_needs_deinit = false
         }
     }
 }
@@ -40,14 +40,14 @@ fn main() -> i32 {
 
     kind = ErrorKind::SECOND
     msg_or_error = Allocator::clone<u8>(c"A heap allocated error message.", 32)
-    msg = msg_or_error.&.get_success()
+    msg = msg_or_error.get_success()
     needs_deinit = true
     var heap_err = Error { kind, msg, needs_deinit }
 
     printf(c"Stack: %s", stack_err.msg)
     printf(c"\nHeap: %s", heap_err.msg)
-    
-    heap_err.&.deinit()
+
+    heap_err.deinit()
 
     return 0
 }

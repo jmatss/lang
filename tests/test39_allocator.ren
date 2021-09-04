@@ -1,0 +1,37 @@
+use std::mem::Allocator
+
+struct TestStruct {
+    var inner_a: i8
+    var inner_b: u8
+}
+
+fn main() -> i32 {
+    var i_u64: u64 = 123
+    var a_or_error = Allocator::init(i_u64)
+    var a = a_or_error.get_success()
+    defer Allocator::deinit<u64>(a)
+
+
+    var b_or_error = Allocator::init_size<f32>(4)
+    var b = b_or_error.get_success()
+    b.* = 678.0
+    Allocator::deinit(b)
+
+
+    var c_or_error = Allocator::init<TestStruct>()
+    var c = c_or_error.get_success()
+    var d_or_error = Allocator::init<u64>(456)
+    var d = d_or_error.get_success()
+    Allocator::deinit(d)
+    Allocator::deinit(c)
+
+
+    var e_or_error = Allocator::init(123 as u64)
+    var e = e_or_error.get_success()
+    var f_or_empty = Allocator::reinit(e, 128)
+    var f = f_or_empty.get()
+    Allocator::deinit(f)
+
+
+    return 0
+}

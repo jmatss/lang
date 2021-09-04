@@ -6,9 +6,9 @@ struct TestStruct {
     var c: i32
 
     fn {this} add(input: i32) -> i32 {
-        this.*.a = 20
-        this.*.b.* = 2.0
-        return this.*.a + this.*.c + input
+        this.a = 20
+        this.b.* = 2.0
+        return this.a + this.c + input
     }
 }
 
@@ -16,7 +16,7 @@ fn main() -> i32 {
     var b = 1.0
     var test_struct = TestStruct { 10, b.&, 2 }
 
-    var actual_result = test_struct.&.add(8)
+    var actual_result = test_struct.add(8)
 
     printf(c"\ntest_struct.a: %d, test_struct.b.*: %f, test_struct.c: %d", test_struct.a, test_struct.b.* as f64, test_struct.c)
     printf(c"\nactual_result: %d", actual_result)

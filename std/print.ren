@@ -6,7 +6,8 @@ use std::StringView
 
 ext fn printf(format: {u8}, ...) -> i32
 ext fn _write(fd: i32, data: {u8}, len: u32) -> i32
-ext fn fflush(fd: i32) -> i32
+ext fn fflush(file: {FILE}) -> i32
+ext struct FILE
 
 pub fn print_fd(
     view: StringView,
@@ -17,7 +18,7 @@ pub fn print_fd(
     if _write(fd, view.ptr, view.len()) == -1 {
         return Result::error("Error when writing to fd")
     }
-    
+
     if line_break {
         // TODO: Make static variable containing value instead.
         var ascii = 10  // \n
@@ -25,8 +26,8 @@ pub fn print_fd(
             return Result::error("Error when writing line break to fd")
         }
     }
-    
-    if flush and fflush(fd) == -1 {
+
+    if flush and fflush(@null()) == -1 {
         return Result::error("Error when flushing to fd")
     }
 

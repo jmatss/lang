@@ -49,7 +49,7 @@ fn main() -> i32
     printf(c"\nres2: %d", res2 as i32);
     std::assert(expected == res2)
 
-    var res3 = ts.&.func3()
+    var res3 = ts.func3()
     printf(c"\nres3: %d", res3 as i32);
     std::assert(expected == res3)
 

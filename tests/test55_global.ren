@@ -11,19 +11,14 @@ fn main() -> i32 {
         "global_var: {}, global_var_init: {}, global_var_init_u8: {}",
         global_var, global_var_init, global_var_init_u8
     )
-    defer str.&.deinit()
-    printf(c"%s", str.to_c_string().&.get_success())
+    defer str.deinit()
+    printf(c"%s", str.to_c_string().get_success())
 
     std::assert(global_var == 0)
     std::assert(global_var_init == 1)
     std::assert(global_var_init_u8 == 2)
 
     global_var = 123
-    // TODO:
-    /*
-    var buf = [0, 0, 0, 0]
-    std::print(I8::to_string_view(global_var, buf.&))
-    */
     std::assert(global_var == 123)
 
     return 0

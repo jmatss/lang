@@ -5,6 +5,7 @@ fn main() -> i32 {
 
     second_file::double(i.&)
     printf(c"i: %d", i)
+    std::assert(i == 6)
 
     return 0
 }

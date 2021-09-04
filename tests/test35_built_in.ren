@@ -55,7 +55,7 @@ fn main() -> i32 {
 
     std::print("\nfilename: ", line_break = false)
     std::print(filename, line_break = false)
-    std::assert(filename == "test35.ren")
+    std::assert(filename == "test35_built_in.ren")
 
 
     var null_i: i64 = @null()
