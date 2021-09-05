@@ -10,7 +10,7 @@ if "%~1" == "" (
 )
 if "%~2" == "" (
     if "%~1" == "" (
-        set RANGE_END=64
+        set RANGE_END=65
     ) else (
         set RANGE_END=%1
     )

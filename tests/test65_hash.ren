@@ -1,0 +1,26 @@
+use std::Hash
+use std::primitive::hash
+
+pub struct TestStruct {
+    var x: u32
+}
+
+impl TestStruct: Hash {
+    pub fn this hash() -> u32 {
+        return hash(this.x)
+    }
+}
+
+fn main() -> i32 {
+    var x: u8  = 1
+    var y: u32 = 2
+    var z: i64 = 3
+
+    var x_hash = x.hash()
+    var y_hash = y.hash()
+    var z_hash = z.hash()
+
+    printf(c"x_hash: %d, y_hash: %d, z_hash: %d", x_hash, y_hash, z_hash)
+
+    return 0
+}
