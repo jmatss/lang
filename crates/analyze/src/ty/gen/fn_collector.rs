@@ -15,7 +15,7 @@ use common::{
     },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
     ty::{
-        contains::contains_generic_with_name, generics::Generics, get::get_ident,
+        contains::contains_generic_shallow, generics::Generics, get::get_ident,
         replace::replace_gen_impls, to_string::to_string_path, ty_env::TyEnv, type_id::TypeId,
     },
 };
@@ -99,13 +99,9 @@ impl<'a> GenericFnCollector<'a> {
 
             // Skip any methods that don't have their generic declarations
             // "implemented", only store method calls that have had the generics
-            // "implemented" in `self.generic_methods`. OBS! This is only for
-            // generics declared on the function, generic declarations on the ADT
-            // is allowed at this point. This is because the ADT generics will
-            // be resolved at a later time, so it is not a problem here.
+            // "implemented" in `self.generic_methods`.
             for gen_type_id in method_call_gens.iter_types() {
-                if contains_generic_with_name(&ctx.ty_env.lock(), *gen_type_id, &method_gen_names)?
-                {
+                if contains_generic_shallow(&ctx.ty_env.lock(), *gen_type_id)? {
                     return Ok(());
                 }
             }
@@ -210,7 +206,7 @@ impl<'a> GenericFnCollector<'a> {
             // implemented, only save function calls that have had the generics
             // implemented in with "real" types.
             for gen_type_id in fn_call_gens.iter_types() {
-                if contains_generic_with_name(&ctx.ty_env.lock(), *gen_type_id, &fn_gen_names)? {
+                if contains_generic_shallow(&ctx.ty_env.lock(), *gen_type_id)? {
                     return Ok(());
                 }
             }
