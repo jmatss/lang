@@ -1,5 +1,9 @@
+use std::collections::HashMap;
+
 use common::{
+    ctx::ast_ctx::AstCtx,
     error::{LangError, LangResult},
+    path::LangPath,
     token::{
         block::{Block, BlockHeader},
         expr::{AdtInit, FnCall},
@@ -9,6 +13,7 @@ use common::{
         get::{get_inner, get_inner_mut},
         to_string::to_string_path,
         ty::Ty,
+        ty_env::TyEnv,
         type_id::TypeId,
     },
     BlockId,
@@ -111,6 +116,24 @@ impl PathResolver {
             Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => (),
         }
 
+        Ok(())
+    }
+
+    fn resolve_impls(
+        ty_env: &TyEnv,
+        ast_ctx: &AstCtx,
+        impls: &mut HashMap<String, Vec<LangPath>>,
+        block_id: BlockId,
+    ) -> LangResult<()> {
+        for trait_paths in impls.values_mut() {
+            for trait_path in trait_paths {
+                if let Ok(full_path) =
+                    ast_ctx.calculate_trait_full_path(ty_env, &trait_path.without_gens(), block_id)
+                {
+                    *trait_path = full_path.with_gens_opt(trait_path.gens().cloned())
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -255,6 +278,30 @@ impl Visitor for PathResolver {
                 Ok(Some(module)) => func.write().module = module,
                 Ok(None) => (),
                 Err(err) => {
+                    self.errors.push(err);
+                }
+            }
+
+            if let Some(impls) = &mut func.write().implements {
+                if let Err(err) =
+                    Self::resolve_impls(&ctx.ty_env.lock(), &ctx.ast_ctx, impls, ctx.block_id)
+                {
+                    self.errors.push(err);
+                }
+            }
+        }
+    }
+
+    fn visit_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Struct(adt) | BlockHeader::Union(adt),
+            ..
+        } = block
+        {
+            if let Some(impls) = &mut adt.write().implements {
+                if let Err(err) =
+                    Self::resolve_impls(&ctx.ty_env.lock(), &ctx.ast_ctx, impls, ctx.block_id)
+                {
                     self.errors.push(err);
                 }
             }
