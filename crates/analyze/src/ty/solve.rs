@@ -942,7 +942,7 @@ fn solve_adt_type(
 
     let is_generic_res = is_generic(&ty_env, inf_adt_type_id)?;
     let check_inf = true;
-    let solve_cond = SolveCond::new().excl_unknown();
+    let solve_cond = SolveCond::new().excl_unknown().excl_any();
     let is_solved_res = is_solved(&ty_env, inf_adt_type_id, check_inf, solve_cond)?;
 
     if is_generic_res && adt_type_id != inf_adt_type_id {
@@ -986,7 +986,8 @@ fn solve_adt_type(
                     inner_ty
                 } else {
                     unreachable!(
-                        "ADT type not pointer to compound, inf_adt_type_id: {}",
+                        "ADT type not pointer to compound, inf_adt_type:: {} ({})",
+                        to_string_type_id(ty_env, inf_adt_type_id)?,
                         inf_adt_type_id
                     );
                 }

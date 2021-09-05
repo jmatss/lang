@@ -97,7 +97,7 @@ pub fn is_solved(
 
         Ty::GenericInstance(..) => solve_cond.can_solve_gen_inst(),
         Ty::Generic(..) => solve_cond.can_solve_gen(),
-        Ty::Any(..) => true,
+        Ty::Any(..) => solve_cond.can_solve_any(),
 
         Ty::UnknownAdtMember(type_id_i, ..)
         | Ty::UnknownFnArgument(type_id_i, ..)
@@ -126,7 +126,7 @@ pub fn is_solved(
     };
 
     let inf_type_id = ty_env.inferred_type(type_id)?;
-    if !check_inf || is_solved_bool || type_id == inf_type_id {
+    if !check_inf || type_id == inf_type_id {
         Ok(is_solved_bool)
     } else {
         is_solved(ty_env, inf_type_id, true, solve_cond)

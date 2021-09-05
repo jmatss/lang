@@ -292,6 +292,7 @@ pub struct SolveCond {
     generic: bool,
     generic_instance: bool,
     unknown: bool,
+    any: bool,
 }
 
 impl Default for SolveCond {
@@ -301,6 +302,7 @@ impl Default for SolveCond {
             generic: true,
             generic_instance: true,
             unknown: true,
+            any: true,
         }
     }
 }
@@ -330,6 +332,11 @@ impl SolveCond {
         self
     }
 
+    pub fn excl_any(mut self) -> Self {
+        self.any = false;
+        self
+    }
+
     pub fn can_solve_default(self) -> bool {
         self.default
     }
@@ -344,5 +351,9 @@ impl SolveCond {
 
     pub fn can_solve_unknown(self) -> bool {
         self.unknown
+    }
+
+    pub fn can_solve_any(self) -> bool {
+        self.any
     }
 }
