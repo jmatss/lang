@@ -64,18 +64,18 @@ The batch file `scripts/run_tests.bat` can be used to compile and run the system
 ### String
 There are three different string types that are used in the language. 
 
-#### std::String
-A `std::String` is a mutable heap allocated string. The struct contains a pointer to the heap allocation, the size of the heap allocation and the length of the string in bytes. After use the string needs to be deallocated with a call to its `deinit` function.
+#### std::string::String
+A `std::string::String` is a mutable heap allocated string. The struct contains a pointer to the heap allocation, the size of the heap allocation and the length of the string in bytes. After use the string needs to be deallocated with a call to its `deinit` function.
 ```
-var str: std::String = s"A heap allocated string"
+var str: std::string::String = s"A heap allocated string"
 str.&.deinit()
 ```
 
-#### std::StringView
-Represents a immutable "view" of a string. The struct contains a pointer and the length of the string in bytes. Since the `std::StringView` isn't in charge of the underlying memory of the string(/pointer), one needs to be careful to not use the `std::StringView` longer than the lifetime of the underlying string(/pointer).
-This should be the preferred string representation in most situation. Creating a "normal" string literal will give back a `std::StringView` to access/view the static string literal.
+#### std::string::StringView
+Represents a immutable "view" of a string. The struct contains a pointer and the length of the string in bytes. Since the `StringView` isn't in charge of the underlying memory of the string(/pointer), one needs to be careful to not use the `StringView` longer than the lifetime of the underlying string(/pointer).
+This should be the preferred string representation in most situation. Creating a "normal" string literal will give back a `StringView` to access/view the static string literal.
 ```
-var view: std::StringView = "A static string literal that is accessable through the StringView"
+var view: std::string::StringView = "A static string literal that is accessable through the StringView"
 ```
 
 ### C-string
@@ -596,7 +596,7 @@ Gets the size of the specified type `T`.
 ### `@type(expr: T)`
 Gets the type of the expression `expr`. The type will be solved during type inference and can be used anywhere a normal type would be used.
 
-### `@name(var: T) -> std::StringView`
+### `@name(var: T) -> std::string::StringView`
 Gets the name of the given variable `var`. The given expression `var` must be a reference to an already declared variable. It can be a local, global, ADT member or parameter.
 
 ### `@null() -> any`
@@ -614,15 +614,15 @@ Adds the value of the second parameter `amount` times the size of the type `T` t
 ### `@ptr_sub(ptr: {T}, amount: u32) -> {T}`
 Subtracts the value of the second parameter `amount` times the size of the type `T` to the pointer `ptr`.
 
-### `@format(format: std::StringView, ...) -> std::String`
-The first argument of the `format` call is a `std::StringView` and the rest of the arguments (variadic) are the arguments to the given format string literal. Currently the rest of the arguments must either be `std::StringView`s or primitives. In the future it would make sense to allow anything that can be turned into a `std::StringView` or `std::String` (probably enforces through a trait).
+### `@format(format: std::string::StringView, ...) -> std::string::String`
+The first argument of the `format` call is a `StringView` and the rest of the arguments (variadic) are the arguments to the given format string literal. Currently the rest of the arguments must either be `StringView`s or primitives. In the future it would make sense to allow anything that can be turned into a `StringView` or `String` (probably enforces through a trait).
 All `{}` found in the `format` string literal will be replace with the arguments to the function in sequential order.
 
 For example:
 ```
 @format("abc{}def{}", 123, 456)
 ```
-would result in a `std::String` containing the string "abc123def456".
+would result in a `std::string::String` containing the string "abc123def456".
 
 ### `@array(init_value: T, dimension: u32) -> [T: _]`
 Creates a instance of an array with the specified length `dimension` and all values initialized to the value `init_value`.
@@ -633,7 +633,7 @@ Gets the amount of CLI arguments used when running the program (`argc`). If no `
 ### `@argv() -> {{u8}}`
 Gets the CLI arguments used when running the program (`argv`). If no `main` function is found in this module, this value will be set to 0. The returned value is of type `{{u8}}` (pointer to array of C strings).
 
-### `@file() -> std::StringView`
+### `@file() -> std::string::StringView`
 Gets the filename of the file that this built-in call is in.
 
 ### `@line() -> u32`
