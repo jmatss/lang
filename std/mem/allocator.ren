@@ -1,8 +1,8 @@
-mod std
+mod std::mem
 
 use std::Optional
 use std::Result
-use std::StringView
+use std::string::StringView
 
 ext fn malloc(size: u32) -> {u8}
 ext fn free(ptr: {u8})

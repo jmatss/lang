@@ -1,7 +1,7 @@
-mod std
+mod std::string
 
-use std::AsView
 use std::Eq
+use std::string::AsView
 
 ext fn strlen(str: {u8}) -> u32
 

@@ -3,8 +3,8 @@
  * TODO: f32 & f64
  */
 use std::Result
-use std::String
-use std::StringView
+use std::string::String
+use std::string::StringView
 
 /// Converts a `digit` to ascii.
 /// The given `digit` is expected to be a single digit (0-9).

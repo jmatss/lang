@@ -1,10 +1,10 @@
-mod std
+mod std::collection
 
-use std::Allocator
-use std::Disposable
 use std::Optional
 use std::Result
-use std::StringView
+use std::mem::Allocator
+use std::mem::Disposable
+use std::string::StringView
 
 pub struct List<T> {
     var ptr: {T}

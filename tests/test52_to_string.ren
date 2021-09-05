@@ -1,4 +1,4 @@
-use std::String
+use std::string::String
 
 ext fn printf(format: {u8}, ...) -> i32
 

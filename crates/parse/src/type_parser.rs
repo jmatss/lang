@@ -115,11 +115,11 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                                 self.iter.current_block_id(),
                             );
 
-                            // Set the gens of the inner_ty after it has been
-                            // created since currently no clean way to do the
-                            // parsing of the inner_ty and gens at the same time.
-                            if let Some(ident) = inner_ty.get_ident_mut() {
-                                *ident = ident.with_gens_opt(gens_opt);
+                            if let Some(path) = inner_ty.get_ident_mut() {
+                                *path = path.with_gens_opt(gens_opt);
+                                if let Some(path_file_pos) = path.file_pos_mut() {
+                                    *path_file_pos = self.iter.file_pos();
+                                }
                             }
 
                             Ok((

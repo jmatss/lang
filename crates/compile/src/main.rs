@@ -32,46 +32,30 @@ extern crate log;
 //       from static memory to mutable memory which isn't optimal. See if possible
 //       in the future to not require the content to be mutable in `TokenIter`.
 
-/// Macro hack to count amount of items in a given macro "repetition".
-macro_rules! count {
-    ($_t:tt $sub:expr) => {
-        $sub
+macro_rules! std_file {
+    ($path:literal) => {
+        ($path, Some(include_bytes!($path)))
     };
 }
 
-/// Macro to include the specified std files into the compiled program.
-macro_rules! std_files {
-    ($($filename:literal,)*) => {
-        struct StdFile(&'static str, &'static [u8]);
-        const STD_FILES_LEN: usize = <[()]>::len(&[$(count!(($filename) ())),*]);
-        const STD_FILES : [StdFile; STD_FILES_LEN] = [
-            $(
-                StdFile(
-                    $filename,
-                    include_bytes!(concat!("..\\..\\..\\std\\", $filename)),
-                )
-            ),*
-        ];
-    };
-}
-
-// TODO: Add "print.ren" as default?
-std_files!(
-    "as_view.ren",
-    "assert.ren",
-    "cmp.ren",
-    "disposable.ren",
-    "either.ren",
-    "eq.ren",
-    "list.ren",
-    "mem.ren",
-    "optional.ren",
-    "primitives.ren",
-    "print.ren",
-    "result.ren",
-    "string.ren",
-    "string_view.ren",
-);
+/// Array of files (and their content) that are included in the compiler. These
+/// are `std` files containing ADTs/functions used extensively in the language.
+const STD_FILES: [(&str, Option<&[u8]>); 14] = [
+    std_file!("..\\..\\..\\std\\assert.ren"),
+    std_file!("..\\..\\..\\std\\cmp.ren"),
+    std_file!("..\\..\\..\\std\\either.ren"),
+    std_file!("..\\..\\..\\std\\eq.ren"),
+    std_file!("..\\..\\..\\std\\optional.ren"),
+    std_file!("..\\..\\..\\std\\result.ren"),
+    std_file!("..\\..\\..\\std\\collection\\list.ren"),
+    std_file!("..\\..\\..\\std\\io\\print.ren"),
+    std_file!("..\\..\\..\\std\\mem\\allocator.ren"),
+    std_file!("..\\..\\..\\std\\mem\\disposable.ren"),
+    std_file!("..\\..\\..\\std\\primitive\\primitives.ren"),
+    std_file!("..\\..\\..\\std\\string\\as_view.ren"),
+    std_file!("..\\..\\..\\std\\string\\string.ren"),
+    std_file!("..\\..\\..\\std\\string\\string_view.ren"),
+];
 
 fn main() -> LangResult<()> {
     env_logger::init();
@@ -131,68 +115,34 @@ fn main() -> LangResult<()> {
     // Keep track of the files that are being parsed. This information will be
     // used when debugging and giving good error messages.
     let mut file_nr: FileId = 0;
-    let mut file_info: HashMap<FileId, FileInfo> = HashMap::default();
+    let mut file_infos: HashMap<FileId, FileInfo> = HashMap::default();
 
     // All parsed files will be included in the same LLVM module.
     let mut parser = ParseTokenIter::new(&TY_ENV);
 
-    // Loop through and lex/parse the specified `std` files.
-    for std_file in &STD_FILES {
-        let filename = std_file.0.into();
-        let static_content = std_file.1;
-        // TODO: Fix ugly mut hack, see comment at top of this file.
-        let mut mut_content = static_content.to_vec();
+    let input_paths = &opts
+        .input_files
+        .iter()
+        .map(|path| (&**path, None))
+        .collect::<Vec<(_, Option<&[u8]>)>>();
 
+    // Iterates through both the `std` included files and the files specified at
+    // the command line.
+    for (input_path, content) in STD_FILES.iter().chain(input_paths) {
         file_nr += 1;
-        let file = FileInfo {
-            directory: Path::new("").into(),
-            filename,
-        };
+        let file_info = parse_path(input_path)?;
+        file_infos.insert(file_nr, file_info.clone());
+
+        // TODO: Fix ugly mut hack, see comment at top of this file.
+        let mut vec_content = content.map(|content| content.to_vec());
 
         lex_and_parse(
             &mut parser,
             file_nr,
-            file,
-            Some(&mut mut_content),
+            file_info,
+            vec_content.as_deref_mut(),
             opts.quiet,
         );
-    }
-
-    // Loop through and lex/parse the "regular" input files.
-    for input_file in &opts.input_files {
-        let path = std::path::Path::new(input_file);
-        let filename = path
-            .file_name()
-            .map(|os| os.to_str())
-            .flatten()
-            .ok_or_else(|| {
-                LangError::new(
-                    format!("Unable to get filename: {}", input_file),
-                    LangErrorKind::GeneralError,
-                    None,
-                )
-            })?
-            .into();
-        let directory = path
-            .parent()
-            .ok_or_else(|| {
-                LangError::new(
-                    format!("Unable to get directory: {}", input_file),
-                    LangErrorKind::GeneralError,
-                    None,
-                )
-            })?
-            .into();
-
-        file_nr += 1;
-        let file = FileInfo {
-            directory,
-            filename,
-        };
-
-        file_info.insert(file_nr, file.clone());
-
-        lex_and_parse(&mut parser, file_nr, file, None, opts.quiet);
     }
 
     let mut ast_root = parser.take_root_block();
@@ -201,7 +151,7 @@ fn main() -> LangResult<()> {
     }
 
     let analyze_timer = Instant::now();
-    let mut analyze_ctx = match analyze(&mut ast_root, &TY_ENV, file_info, opts.quiet) {
+    let mut analyze_ctx = match analyze(&mut ast_root, &TY_ENV, file_infos, opts.quiet) {
         Ok(analyze_ctx) => analyze_ctx,
         Err(errs) => {
             eprintln!();
@@ -320,6 +270,39 @@ fn lex_and_parse(
             parse_timer.elapsed()
         );
     }
+}
+
+/// Parses the given string `input_path` into a `FileInfo`.
+/// The given path should contain a filename plus an optional absolute or
+/// relative path.
+fn parse_path(input_path: &str) -> LangResult<FileInfo> {
+    let path = std::path::Path::new(input_path);
+    let filename = path
+        .file_name()
+        .map(|os| os.to_str())
+        .flatten()
+        .ok_or_else(|| {
+            LangError::new(
+                format!("Unable to get filename: {}", input_path),
+                LangErrorKind::GeneralError,
+                None,
+            )
+        })?
+        .into();
+    let directory = path
+        .parent()
+        .ok_or_else(|| {
+            LangError::new(
+                format!("Unable to get directory: {}", input_path),
+                LangErrorKind::GeneralError,
+                None,
+            )
+        })?
+        .into();
+    Ok(FileInfo {
+        directory,
+        filename,
+    })
 }
 
 struct Options {

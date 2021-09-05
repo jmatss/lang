@@ -105,6 +105,10 @@ impl<'a> ParseTokenIter<'a> {
         }
     }
 
+    pub fn file_pos(&self) -> FilePosition {
+        self.file_pos
+    }
+
     /// Called when all files have been parsed and one wants to get the new whole
     /// AST. When this function is called, a EOF is added to the end of the AST.
     pub fn take_root_block(&mut self) -> AstToken {

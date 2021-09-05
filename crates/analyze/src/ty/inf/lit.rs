@@ -32,13 +32,14 @@ pub(crate) fn infer_lit(expr: &mut Expr, ctx: &mut TraverseCtx) -> LangResult<()
     let inner_ty = match lit {
         Lit::String(_, string_type) => match string_type {
             StringType::Regular => InnerTy::Struct(LangPath::new(
-                vec!["std".into(), "StringView".into()],
+                vec!["std".into(), "string".into(), "StringView".into()],
                 file_pos,
             )),
 
-            StringType::S | StringType::F => {
-                InnerTy::Struct(LangPath::new(vec!["std".into(), "String".into()], file_pos))
-            }
+            StringType::S | StringType::F => InnerTy::Struct(LangPath::new(
+                vec!["std".into(), "string".into(), "String".into()],
+                file_pos,
+            )),
 
             // A C string requires special logic since it should be a pointer,
             // it should be a compound type like all the other variants

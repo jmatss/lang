@@ -358,11 +358,11 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         Ok(new_ptr.into())
     }
 
-    /// This function creates a `std::types::String` variable and appends all
+    /// This function creates a `std::string::String` variable and appends all
     /// the given format arguments to it.
     ///
     /// The arguments to the `@format()` call are expected to be of types
-    /// `std::types::StringView`. If they aren't, this function will try to create
+    /// `std::string::StringView`. If they aren't, this function will try to create
     /// StringView's from the values if possible. Currently this is only done for
     /// a subset of  primitive types.
     fn compile_format(
@@ -679,7 +679,7 @@ pub fn type_id_u32(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangRe
 }
 
 pub fn type_id_string(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangResult<TypeId> {
-    let string_path = ["std".into(), "String".into()].into();
+    let string_path = ["std".into(), "string".into(), "String".into()].into();
     ty_env.id(&Ty::CompoundType(
         InnerTy::Struct(string_path),
         TypeInfo::DefaultOpt(file_pos),
@@ -698,7 +698,7 @@ pub fn type_id_string_view(
     ty_env: &mut TyEnv,
     file_pos: Option<FilePosition>,
 ) -> LangResult<TypeId> {
-    let view_path = ["std".into(), "StringView".into()].into();
+    let view_path = ["std".into(), "string".into(), "StringView".into()].into();
     ty_env.id(&Ty::CompoundType(
         InnerTy::Struct(view_path),
         TypeInfo::DefaultOpt(file_pos),

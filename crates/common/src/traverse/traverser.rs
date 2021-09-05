@@ -128,9 +128,10 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
             AstToken::Block(block) => {
                 self.traverse_block(block);
                 if let AstToken::Block(block) = ast_token {
+                    self.ctx.block_id = block.id;
                     for body_token in &mut block.body {
-                        self.ctx.block_id = block.id;
                         self.traverse_token(body_token);
+                        self.ctx.block_id = block.id;
                     }
                 }
             }
@@ -500,6 +501,7 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
         }
 
         *self.ctx.file_pos_mut() = old_pos;
+        self.ctx.block_id = block.id;
     }
 
     fn traverse_expr(&mut self, expr: &mut Expr) {

@@ -157,8 +157,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             .const_int(str_lit.len() as u64, false);
 
         let struct_path = match string_type {
-            StringType::Regular => ["std".into(), "StringView".into()].into(),
-            StringType::F | StringType::S => ["std".into(), "String".into()].into(),
+            StringType::Regular => ["std".into(), "string".into(), "StringView".into()].into(),
+            StringType::F | StringType::S => {
+                ["std".into(), "string".into(), "String".into()].into()
+            }
             StringType::C => unreachable!(),
         };
         let struct_name = to_string_path(&self.analyze_ctx.ty_env.lock(), &struct_path);

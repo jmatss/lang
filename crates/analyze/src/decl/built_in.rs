@@ -23,11 +23,11 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let bool_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::Boolean, TypeInfo::BuiltIn))?;
     let void_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::Void, TypeInfo::BuiltIn))?;
     let string_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::Struct(["std".into(), "String".into()].into()),
+        InnerTy::Struct(["std".into(), "string".into(), "String".into()].into()),
         TypeInfo::BuiltIn,
     ))?;
     let string_view_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::Struct(["std".into(), "StringView".into()].into()),
+        InnerTy::Struct(["std".into(), "string".into(), "StringView".into()].into()),
         TypeInfo::BuiltIn,
     ))?;
 

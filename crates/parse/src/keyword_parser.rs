@@ -851,6 +851,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
         let mut builder = AdtBuilder::new_struct();
+        let block_id = self.iter.reserve_block_id();
 
         self.parse_adt_header(&mut builder, &mut file_pos)?;
         let body = self.parse_adt_body(&mut builder, &mut file_pos)?;
@@ -864,7 +865,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         Ok(AstToken::Block(Block {
             header: BlockHeader::Struct(Arc::new(RwLock::new(struct_))),
             body,
-            id: self.iter.reserve_block_id(),
+            id: block_id,
             file_pos,
         }))
     }
@@ -878,6 +879,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
         let mut builder = AdtBuilder::new_union();
+        let block_id = self.iter.reserve_block_id();
 
         self.parse_adt_header(&mut builder, &mut file_pos)?;
         let body = self.parse_adt_body(&mut builder, &mut file_pos)?;
@@ -891,7 +893,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         Ok(AstToken::Block(Block {
             header: BlockHeader::Union(Arc::new(RwLock::new(union))),
             body,
-            id: self.iter.reserve_block_id(),
+            id: block_id,
             file_pos,
         }))
     }
@@ -906,6 +908,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
+        let block_id = self.iter.reserve_block_id();
         let full_path = self
             .iter
             .parse_path(&mut file_pos, GenericsKind::Decl, false)?;
@@ -1025,7 +1028,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         Ok(AstToken::Block(Block {
             header: BlockHeader::Enum(Arc::new(RwLock::new(enum_))),
             body: Vec::with_capacity(0),
-            id: self.iter.reserve_block_id(),
+            id: block_id,
             file_pos,
         }))
     }
@@ -1039,6 +1042,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         modifiers: Vec<Modifier>,
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
+        let block_id = self.iter.reserve_block_id();
         let mut module = self
             .iter
             .parse_path(&mut file_pos, GenericsKind::Decl, true)?;
@@ -1135,7 +1139,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         Ok(AstToken::Block(Block {
             header: BlockHeader::Trait(Arc::new(RwLock::new(trait_))),
             body: Vec::with_capacity(0),
-            id: self.iter.reserve_block_id(),
+            id: block_id,
             file_pos,
         }))
     }

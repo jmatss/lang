@@ -1,14 +1,15 @@
 mod std
 
-use std::StringView
+use std::io::print
+use std::string::StringView
 
 ext fn exit(exit_code: i32)
 
 fn assert(expr: bool, msg: StringView = @null()) {
     if not expr {
-        std::print("\nASSERT FAILED")
+        print("\nASSERT FAILED")
         if @is_not_null(msg.ptr) {
-            std::print(msg)
+            print(msg)
         }
         exit(1)
     }

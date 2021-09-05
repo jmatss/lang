@@ -1,7 +1,7 @@
-mod std
+mod std::io
 
 use std::Result
-use std::String
+use std::string::String
 
 ext fn _read(fd: i32, buf: {u8}, len: u32) -> i32
 

@@ -1,6 +1,5 @@
-use std::Allocator
-use std::Ptr
-use std::Disposable
+use std::mem::Allocator
+use std::mem::Disposable
 
 ext fn printf(format: {u8}, ...) -> i32
 

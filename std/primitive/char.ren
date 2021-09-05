@@ -1,0 +1,13 @@
+use std::Hash
+
+pub struct char
+
+impl char: Hash {
+    pub fn this hash() -> u32 {
+        if this {
+            return 1
+        } else {
+            return 0
+        }
+    }
+}

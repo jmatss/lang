@@ -1,7 +1,7 @@
 import os
 
 CURRENT_FILE_DIR = os.path.dirname(__file__)
-PRIMITIVES_PATH = os.path.join(CURRENT_FILE_DIR, '..', 'std', 'primitives.ren')
+PRIMITIVES_PATH = os.path.join(CURRENT_FILE_DIR, '..', 'std', 'primitive', 'primitives.ren')
 
 def heading(file):
     output = '''/*
@@ -9,8 +9,8 @@ def heading(file):
  * TODO: f32 & f64
  */
 use std::Result
-use std::String
-use std::StringView
+use std::string::String
+use std::string::StringView
 
 '''
     file.write(output)

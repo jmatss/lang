@@ -1,8 +1,8 @@
-mod std
+mod std::io
 
-use std::AsView
 use std::Result
-use std::StringView
+use std::string::AsView
+use std::string::StringView
 
 ext fn printf(format: {u8}, ...) -> i32
 ext fn _write(fd: i32, data: {u8}, len: u32) -> i32

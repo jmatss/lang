@@ -217,7 +217,7 @@ impl BlockAnalyzer {
 
         // OBS! The "module" and "uses" set at this point might not be the
         //      final values. The module might not be set at this point (ex.
-        //      if this is the first block being traversed in a new fule) and
+        //      if this is the first block being traversed in a new file) and
         //      the uses that is fetched with the `get_uses` only contains
         //      the "use"s that have been seen/traversed.
         //      These values might be updated when statements in this block
@@ -319,6 +319,7 @@ impl BlockAnalyzer {
                 AstToken::EOF => {
                     self.module = None;
                     self.is_first_stmt = true;
+                    self.uses.remove(&BlockCtx::DEFAULT_BLOCK_ID);
                     is_eof = true;
                 }
 
@@ -364,10 +365,6 @@ impl Visitor for BlockAnalyzer {
         {
             self.errors.push(err);
         }
-    }
-
-    fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
-        self.is_first_stmt = true;
     }
 
     fn visit_end(&mut self, ctx: &mut TraverseCtx) {

@@ -1,13 +1,13 @@
-mod std
+mod std::string
 
-use std::Allocator
-use std::AsView
-use std::Disposable
 use std::Eq
-use std::List
 use std::Optional
 use std::Result
-use std::StringView
+use std::collection::List
+use std::mem::Allocator
+use std::mem::Disposable
+use std::string::AsView
+use std::string::StringView
 
 ext fn strlen(str: {u8}) -> u32
 
