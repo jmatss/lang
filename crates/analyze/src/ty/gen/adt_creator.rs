@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use log::debug;
+use log::{debug, log_enabled, Level};
 use parking_lot::RwLock;
 
 use common::{
@@ -404,31 +404,33 @@ impl Visitor for GenericAdtCreator {
     }
 
     fn visit_end(&mut self, ctx: &mut TraverseCtx) {
-        let mut all_type_ids = ctx
-            .ty_env
-            .lock()
-            .interner
-            .all_types()
-            .into_iter()
-            .collect::<Vec<_>>();
-        all_type_ids.sort_unstable();
+        if log_enabled!(Level::Debug) {
+            let mut all_type_ids = ctx
+                .ty_env
+                .lock()
+                .interner
+                .all_types()
+                .into_iter()
+                .collect::<Vec<_>>();
+            all_type_ids.sort_unstable();
 
-        let mut all_types_string = String::new();
-        for type_id in all_type_ids {
-            all_types_string.push_str(&format!(
-                "\ntype_id: {} - {:?}",
-                type_id,
-                to_string_type_id(&ctx.ty_env.lock(), type_id)
-            ));
+            let mut all_types_string = String::new();
+            for type_id in all_type_ids {
+                all_types_string.push_str(&format!(
+                    "\ntype_id: {} - {:?}",
+                    type_id,
+                    to_string_type_id(&ctx.ty_env.lock(), type_id)
+                ));
+            }
+
+            let ty_env_guard = ctx.ty_env.lock();
+            debug!(
+                "Generics creating done.\nforwards: {:#?}\nall types: {}\nsubs: {}",
+                ty_env_guard.forwards(),
+                all_types_string,
+                sub_sets_debug_print(&ty_env_guard)
+            );
         }
-
-        debug!(
-            "Generics creating done.\nforwards: {:#?}\nall types: {}\nsubs:",
-            ctx.ty_env.lock().forwards(),
-            all_types_string
-        );
-
-        sub_sets_debug_print(&ctx.ty_env.lock());
     }
 
     // TODO: Currently the assumption is that all ADTs are stored in the

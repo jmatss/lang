@@ -98,12 +98,13 @@ impl Visitor for TypeInferencer {
                 ));
             }
 
+            let ty_env_guard = ctx.ty_env.lock();
             debug!(
-                "Type inference done.\nforwards: {:#?}\nall types: {}\nsubs:",
-                ctx.ty_env.lock().forwards(),
-                all_types_string
+                "Type inference done.\nforwards: {:#?}\nall types: {}\nsubs: {}",
+                ty_env_guard.forwards(),
+                all_types_string,
+                sub_sets_debug_print(&ty_env_guard)
             );
-            sub_sets_debug_print(&ctx.ty_env.lock());
         }
     }
 
