@@ -40,18 +40,28 @@ macro_rules! std_file {
 
 /// Array of files (and their content) that are included in the compiler. These
 /// are `std` files containing ADTs/functions used extensively in the language.
-const STD_FILES: [(&str, Option<&[u8]>); 14] = [
+const STD_FILES: [(&str, Option<&[u8]>); 24] = [
     std_file!("..\\..\\..\\std\\assert.ren"),
     std_file!("..\\..\\..\\std\\cmp.ren"),
     std_file!("..\\..\\..\\std\\either.ren"),
     std_file!("..\\..\\..\\std\\eq.ren"),
+    std_file!("..\\..\\..\\std\\hash.ren"),
     std_file!("..\\..\\..\\std\\optional.ren"),
     std_file!("..\\..\\..\\std\\result.ren"),
     std_file!("..\\..\\..\\std\\collection\\list.ren"),
+    std_file!("..\\..\\..\\std\\collection\\map.ren"),
     std_file!("..\\..\\..\\std\\io\\print.ren"),
     std_file!("..\\..\\..\\std\\mem\\allocator.ren"),
     std_file!("..\\..\\..\\std\\mem\\disposable.ren"),
-    std_file!("..\\..\\..\\std\\primitive\\primitives.ren"),
+    std_file!("..\\..\\..\\std\\primitive\\common.ren"),
+    std_file!("..\\..\\..\\std\\primitive\\u8.ren"),
+    std_file!("..\\..\\..\\std\\primitive\\i8.ren"),
+    std_file!("..\\..\\..\\std\\primitive\\u16.ren"),
+    std_file!("..\\..\\..\\std\\primitive\\i16.ren"),
+    std_file!("..\\..\\..\\std\\primitive\\u32.ren"),
+    std_file!("..\\..\\..\\std\\primitive\\i32.ren"),
+    std_file!("..\\..\\..\\std\\primitive\\u64.ren"),
+    std_file!("..\\..\\..\\std\\primitive\\i64.ren"),
     std_file!("..\\..\\..\\std\\string\\as_view.ren"),
     std_file!("..\\..\\..\\std\\string\\string.ren"),
     std_file!("..\\..\\..\\std\\string\\string_view.ren"),

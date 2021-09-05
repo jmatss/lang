@@ -1,29 +1,18 @@
 import os
 
 CURRENT_FILE_DIR = os.path.dirname(__file__)
-PRIMITIVES_PATH = os.path.join(CURRENT_FILE_DIR, '..', 'std', 'primitive', 'primitives.ren')
+STD_PRIMITIVE_PATH = os.path.join(CURRENT_FILE_DIR, '..', 'std', 'primitive')
 
 def heading(file):
     output = '''/*
  * Auto generated with `generate_primitives.py`, do not edit manually.
- * TODO: f32 & f64
  */
+use std::Hash
 use std::Result
+use std::primitive::digit_to_ascii
+use std::primitive::hash
 use std::string::String
 use std::string::StringView
-
-'''
-    file.write(output)
-    
-def digit_to_ascii(file):
-    output = '''/// Converts a `digit` to ascii.
-/// The given `digit` is expected to be a single digit (0-9).
-fn digit_to_ascii(digit: u8) -> u8 {
-    if digit >= 10 {
-        @unreachable()
-    }
-    return digit + 48 // 48 == '0'
-}
 
 '''
     file.write(output)
@@ -157,19 +146,45 @@ def prim_struct(file, name, str_byte_size, min, max, name_unsigned=None):
 '''.format(name, str_byte_size, abs_output, min, max)
     file.write(output)
 
+def hash(file, name):
+    output = '''impl {0}: Hash {{
+    pub fn this hash() -> u32 {{
+        return hash(this as u32)
+    }}
+}}
+'''.format(name)
+    file.write(output)
+
 if __name__ == '__main__':
-    with open(PRIMITIVES_PATH, 'w') as file:
+    with open(os.path.join(STD_PRIMITIVE_PATH, "u8.ren"), 'w') as file:
         heading(file)
-        digit_to_ascii(file)
         prim_struct(file, 'u8', 3, 0, 255)
+        hash(file, 'u8')
+    with open(os.path.join(STD_PRIMITIVE_PATH, "i8.ren"), 'w') as file:
+        heading(file)
         prim_struct(file, 'i8', 4, -128, 127, 'u8')
+        hash(file, 'i8')
+    with open(os.path.join(STD_PRIMITIVE_PATH, "u16.ren"), 'w') as file:
+        heading(file)
         prim_struct(file, 'u16', 5, 0, 65535)
+        hash(file, 'u16')
+    with open(os.path.join(STD_PRIMITIVE_PATH, "i16.ren"), 'w') as file:
+        heading(file)
         prim_struct(file, 'i16', 6, -32768, 32767, 'u16')
+        hash(file, 'i16')
+    with open(os.path.join(STD_PRIMITIVE_PATH, "u32.ren"), 'w') as file:
+        heading(file)
         prim_struct(file, 'u32', 10, 0, 4294967295)
+        hash(file, 'u32')
+    with open(os.path.join(STD_PRIMITIVE_PATH, "i32.ren"), 'w') as file:
+        heading(file)
         prim_struct(file, 'i32', 11, -2147483648, 2147483647, 'u32')
+        hash(file, 'i32')
+    with open(os.path.join(STD_PRIMITIVE_PATH, "u64.ren"), 'w') as file:
+        heading(file)
         prim_struct(file, 'u64', 19, 0, 18446744073709551615)
+        hash(file, 'u64')
+    with open(os.path.join(STD_PRIMITIVE_PATH, "i64.ren"), 'w') as file:
+        heading(file)
         prim_struct(file, 'i64', 20, -9223372036854775808, 9223372036854775807, 'u64')
-        
-        # TODO: Enable for 128 bit? Need to link to external symbol "__divti3" in that case.
-        #prim_struct(file, 'u128', 39, 0, 340282366920938463463374607431768211455)
-        #prim_struct(file, 'i128', 40, -170141183460469231731687303715884105728, 170141183460469231731687303715884105727, 'u128')
+        hash(file, 'i64')

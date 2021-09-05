@@ -1,5 +1,7 @@
 use std::Hash
 use std::string::AsView
+use std::string::String
+use std::string::StringView
 
 pub struct bool {
     pub fn this to_string() -> Result<String, StringView> {

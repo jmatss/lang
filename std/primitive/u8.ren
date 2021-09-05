@@ -1,0 +1,121 @@
+/*
+ * Auto generated with `generate_primitives.py`, do not edit manually.
+ */
+use std::Hash
+use std::Result
+use std::primitive::digit_to_ascii
+use std::primitive::hash
+use std::string::String
+use std::string::StringView
+
+pub struct u8 {
+    pub fn this to_string() -> Result<String, StringView> {
+        var is_negative = this < 0
+        var num_abs = this.abs()
+
+        var buf: [u8: 3]
+        var buf_idx = 0
+
+        while true {
+            var digit = num_abs % 10
+            var ascii = digit_to_ascii(digit as u8)
+            buf.[buf_idx] = ascii
+            buf_idx.++
+
+            num_abs /= 10
+            if num_abs == 0 {
+                break
+            }
+        }
+
+        var str_len
+        if is_negative {
+            str_len = buf_idx + 1
+        } else {
+            str_len = buf_idx
+        }
+
+        var str_or_error = String::init(str_len)
+        if err is str_or_error.error {
+            return Result::error(err)
+        }
+        var str = str_or_error.get_success()
+
+        if is_negative {
+            str.append_ascii(45) // 45 == '-'
+        }
+
+        var idx = buf_idx - 1
+        while true {
+            var ascii = buf.[idx]
+            str.append_ascii(ascii)
+
+            if idx == 0 {
+                break
+            }
+
+            idx.--
+        }
+
+        return Result::success(str)
+    }
+
+    pub fn this to_string_view(data: {[u8: 3]}) -> StringView {
+        var is_negative = this < 0
+        var num_abs = this.abs()
+
+        var buf: [u8: 3]
+        var buf_idx = 0
+
+        while true {
+            var digit = num_abs % 10
+            var ascii = digit_to_ascii(digit as u8)
+            buf.[buf_idx] = ascii
+            buf_idx.++
+
+            num_abs /= 10
+            if num_abs == 0 {
+                break
+            }
+        }
+
+        var data_idx = 0
+        if is_negative {
+            data.*.[data_idx] = 45 // 45 == '-'
+            data_idx.++
+        }
+
+        buf_idx.--
+        while true {
+            var ascii = buf.[buf_idx]
+            data.*.[data_idx] = ascii
+            data_idx.++
+
+            if buf_idx == 0 {
+                break
+            }
+
+            buf_idx.--
+        }
+
+        return StringView::new(data as {u8}, 0, data_idx)
+    }
+
+    pub fn this abs() -> u8 {
+        return this
+    }
+
+    pub fn min() -> u8 {
+        return 0
+    }
+
+    pub fn max() -> u8 {
+        return 255
+    }
+}
+
+impl u8: Hash {
+    pub fn this hash() -> u32 {
+        return hash(this as u32)
+    }
+}
