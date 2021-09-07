@@ -115,7 +115,7 @@ impl TraitGenericsAnalyzer {
             for trait_path in trait_paths {
                 let trait_ = ctx
                     .ast_ctx
-                    .get_trait(&ty_env_guard, &trait_path)
+                    .get_trait(&ty_env_guard, &trait_path.without_gens())
                     .map_err(|e| vec![e])?;
                 let trait_ = trait_.read();
                 let trait_methods = &trait_.methods;
@@ -138,19 +138,46 @@ impl TraitGenericsAnalyzer {
             }
 
             for trait_path in trait_paths {
-                if !impl_adt
-                    .implemented_traits
-                    .contains(&ty_env_guard, DerefType::Deep, trait_path)
-                    .map_err(|err| vec![err])?
-                {
+                // TODO: Fix this textual comparison.
+                // Need Textual comparison since they might come from different
+                // type environments.
+                let trait_path_str = to_string_path(&ty_env_guard, trait_path);
+                let mut required_trait_found = false;
+
+                for impl_trait_path in impl_adt.implemented_traits.values() {
+                    let impl_trait_path_str = to_string_path(&ty_env_guard, impl_trait_path);
+                    if trait_path_str == impl_trait_path_str {
+                        required_trait_found = true;
+                        break;
+                    }
+                }
+
+                if !required_trait_found {
+                    let impl_traits = impl_adt
+                        .implemented_traits
+                        .values()
+                        .map(|path| to_string_path(&ty_env_guard, path))
+                        .collect::<Vec<_>>();
+
+                    let impl_trait_str = if !impl_traits.is_empty() {
+                        format!(
+                            "\nList of traits that \"{}\" implements:\n - {}",
+                            to_string_path(&ty_env_guard, &impl_path),
+                            impl_traits.join("\n - "),
+                        )
+                    } else {
+                        "".into()
+                    };
+
                     errors.push(ctx.ast_ctx.err(format!(
                         "ADT \"{0}\" requires that its generic type \"{1}\" implements \
                         the trait \"{2}\". The type \"{3}\" is used as generic \"{1}\", \
-                        but it does NOT implement the required \"{2}\" trait.",
+                        but it does NOT implement the required \"{2}\" trait.{4}",
                         to_string_path(&ty_env_guard, &adt_path),
                         gen_name,
                         to_string_path(&ty_env_guard, &trait_path),
                         to_string_path(&ty_env_guard, &impl_path),
+                        impl_trait_str
                     )));
                 }
             }

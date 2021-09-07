@@ -222,44 +222,49 @@ impl Visitor for PathResolver {
         {
             let ty_env_guard = ctx.ty_env.lock();
 
-            if let Ok(full_path) = ctx.ast_ctx.calculate_adt_full_path(
+            let adt_path_without_gens = adt_path.without_gens();
+            let adt_full_path = if let Ok(full_path) = ctx.ast_ctx.calculate_adt_full_path(
                 &ty_env_guard,
-                &adt_path.without_gens(),
+                &adt_path_without_gens,
                 ctx.block_id,
             ) {
-                *adt_path = full_path.with_gens_opt(adt_path.gens().cloned());
+                full_path.with_gens_opt(adt_path.gens().cloned())
             } else {
-                let mut err = ctx.ast_ctx.err_adt(
+                let err = ctx.ast_ctx.err_adt(
                     &ty_env_guard,
                     format!(
                         "Unable to find full path for ADT defined in impl block: {}",
-                        to_string_path(&ty_env_guard, &adt_path)
+                        to_string_path(&ty_env_guard, &adt_path_without_gens)
                     ),
                     adt_path,
                 );
-                err = ctx.ast_ctx.err_adt(&ty_env_guard, err.msg, adt_path);
 
                 if !self.errors.contains(&err) {
                     self.errors.push(err);
                 }
-            }
+                return;
+            };
 
+            *adt_path = adt_full_path.clone();
+
+            let trait_path_without_gens = trait_path.without_gens();
             if let Ok(full_path) = ctx.ast_ctx.calculate_trait_full_path(
                 &ty_env_guard,
-                &trait_path.without_gens(),
+                &trait_path_without_gens,
                 ctx.block_id,
             ) {
                 *trait_path = full_path.with_gens_opt(trait_path.gens().cloned())
             } else {
-                let mut err = ctx.ast_ctx.err_trait(
+                let err = ctx.ast_ctx.err_trait(
                     &ty_env_guard,
                     format!(
-                        "Unable to find full path for trait defined in impl block: {}",
-                        to_string_path(&ty_env_guard, &trait_path)
+                        "Unable to find trait defined in impl block for ADT \"{}\". \
+                        Trait that can't be found: \"{}\"",
+                        to_string_path(&ty_env_guard, &adt_full_path),
+                        to_string_path(&ty_env_guard, &trait_path_without_gens)
                     ),
                     trait_path,
                 );
-                err = ctx.ast_ctx.err_trait(&ty_env_guard, err.msg, trait_path);
 
                 if !self.errors.contains(&err) {
                     self.errors.push(err);
