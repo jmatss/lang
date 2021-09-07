@@ -368,56 +368,75 @@ impl<'a> ParseTokenIter<'a> {
         TypeParser::parse(self, generics, path_builder)
     }
 
-    // TODO: Currently doesn't handle FilePosition. How should this be done?
-    //       The returned value will just contain a None file_pos.
-    /// Parses a variable, including type and default value. If `parse_type` is
-    /// set, a potential type will be parsed following the given variable.
-    /// If `parse_value` is set, a potential value will be parsed following the
+    /// Parses a variable declaration.
+    ///
+    /// This function will parse a potential type and init value  following the
     /// given variable.
-    pub fn parse_var(
+    ///
+    /// The symbol after the variable decl must be a linebreak or semicolon.
+    /// Since this function parses variables in parameter lists aswell, the
+    /// variable can end with a comma or end parenthesis.
+    pub fn parse_var_decl(
         &mut self,
         ident: &str,
-        parse_type: bool,
-        parse_value: bool,
         is_const: bool,
         generics: Option<&Generics>,
         mut file_pos: FilePosition,
     ) -> LangResult<Var> {
         // TODO: Handle file_pos.
         let (ty, ty_file_pos) = if let Some(next_token) = self.peek_skip_space() {
-            match next_token.kind {
-                LexTokenKind::Sym(Sym::Colon) if parse_type => {
-                    self.next_skip_space(); // Skip the colon.
-                    let (type_id, ty_file_pos) = self.parse_type(generics)?;
+            if let LexTokenKind::Sym(Sym::Colon) = next_token.kind {
+                self.next_skip_space(); // Skip the colon.
+                let (type_id, ty_file_pos) = self.parse_type(generics)?;
 
-                    file_pos.set_end(&ty_file_pos)?;
-                    (Some(type_id), Some(ty_file_pos))
-                }
-                _ => (None, None),
+                file_pos.set_end(&ty_file_pos)?;
+                (Some(type_id), Some(ty_file_pos))
+            } else {
+                (None, None)
             }
         } else {
             (None, None)
         };
 
         let value = if let Some(next_token) = self.peek_skip_space() {
-            match next_token.kind {
-                LexTokenKind::Sym(Sym::Equals) if parse_value => {
-                    self.next_skip_space(); // Skip the Equals.
-                    let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
+            if let LexTokenKind::Sym(Sym::Equals) = next_token.kind {
+                self.next_skip_space(); // Skip the Equals.
+                let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
 
-                    if let Some(file_pos_last) = expr.file_pos() {
-                        file_pos.set_end(file_pos_last)?;
-                    } else {
-                        unreachable!("Value for var doesn't have a file_pos: {:#?}", expr);
-                    }
-
-                    Some(Box::new(expr))
+                if let Some(file_pos_last) = expr.file_pos() {
+                    file_pos.set_end(file_pos_last)?;
+                } else {
+                    unreachable!("Value for var doesn't have a file_pos: {:#?}", expr);
                 }
-                _ => None,
+
+                Some(Box::new(expr))
+            } else {
+                None
             }
         } else {
             None
         };
+
+        let is_valid_end_symbol = if let Some(next_token) = self.peek_skip_space() {
+            next_token.is_break_symbol()
+                || matches!(
+                    next_token.kind,
+                    LexTokenKind::Sym(Sym::ParenthesisEnd | Sym::Comma)
+                )
+        } else {
+            true
+        };
+
+        if !is_valid_end_symbol {
+            return Err(self.err(
+                format!(
+                    "Declaration of variable \"{}\" does not end with a valid symbol. \
+                    Must end with: linebreak, semicolon, comma or end parenthesis.",
+                    ident
+                ),
+                Some(file_pos),
+            ));
+        }
 
         Ok(Var::new(
             ident.into(),
@@ -641,17 +660,9 @@ impl<'a> ParseTokenIter<'a> {
                 // "TripleDot" which is the indicator for a variadic function.
                 match lex_token.kind {
                     LexTokenKind::Ident(ident) => {
-                        let parse_type = true;
-                        let parse_value = true;
                         let is_const = false;
-                        let parameter = self.parse_var(
-                            &ident,
-                            parse_type,
-                            parse_value,
-                            is_const,
-                            generics,
-                            lex_token.file_pos,
-                        )?;
+                        let parameter =
+                            self.parse_var_decl(&ident, is_const, generics, lex_token.file_pos)?;
 
                         parameters.push(parameter);
                     }

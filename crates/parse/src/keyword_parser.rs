@@ -313,22 +313,17 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// The "for" keyword has already been consumed when this function is called.
     fn parse_for(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
         let lex_token = self.iter.next_skip_space_line();
-        let ident =
-            if let Some(LexTokenKind::Ident(ident)) = lex_token.as_ref().map(|token| &token.kind) {
-                ident.clone()
-            } else {
-                return Err(self.iter.err(
-                    format!("Not ident when parsing \"for\" variable: {:?}", lex_token),
-                    lex_token.map(|t| t.file_pos),
-                ));
-            };
-
-        let parse_type = true;
-        let parse_value = false;
-        let is_const = false;
-        let var = self
-            .iter
-            .parse_var(&ident, parse_type, parse_value, is_const, None, file_pos)?;
+        let var = if let Some((LexTokenKind::Ident(ident), token_file_pos)) = lex_token
+            .as_ref()
+            .map(|token| (&token.kind, token.file_pos))
+        {
+            Var::new_use(ident.clone(), token_file_pos)
+        } else {
+            return Err(self.iter.err(
+                format!("Not ident when parsing \"for\" variable: {:?}", lex_token),
+                lex_token.map(|t| t.file_pos),
+            ));
+        };
 
         if let Some(var_file_pos) = &var.file_pos {
             file_pos.set_end(var_file_pos)?;
@@ -627,12 +622,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         file_pos.set_end(&var_file_pos)?;
 
-        let parse_type = true;
-        let parse_value = true;
-        let var = Arc::new(RwLock::new(self.iter.parse_var(
+        let var = Arc::new(RwLock::new(self.iter.parse_var_decl(
             &ident,
-            parse_type,
-            parse_value,
             is_const,
             None,
             var_file_pos,

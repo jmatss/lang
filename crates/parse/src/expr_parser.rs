@@ -7,7 +7,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{AdtKind, BlockHeader},
-        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, FnPtr},
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, FnPtr, Var},
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
     ty::{
@@ -777,19 +777,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         Ok(Expr::Op(Op::UnOp(un_op)))
                     } else {
                         // Otherwise this is just a regular variable name.
-                        let parse_type = true;
-                        let parse_value = false;
-                        let is_const = false;
-                        let var = self.iter.parse_var(
-                            ident,
-                            parse_type,
-                            parse_value,
-                            is_const,
-                            gens_opt.as_ref(),
-                            file_pos,
-                        )?;
-
-                        Ok(Expr::Var(var))
+                        Ok(Expr::Var(Var::new_use(ident.into(), file_pos)))
                     }
                 }
             }

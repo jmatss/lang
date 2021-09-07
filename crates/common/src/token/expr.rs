@@ -401,6 +401,12 @@ impl Var {
         }
     }
 
+    /// Constructor for creating variable for var "use"s. These will contain
+    /// a lot less information, so only requires name and filepos.
+    pub fn new_use(name: String, file_pos: FilePosition) -> Self {
+        Var::new(name, None, None, None, Some(file_pos), None, false)
+    }
+
     pub fn set_copy_nr(&mut self, copy_nr: usize) {
         self.copy_nr = Some(copy_nr);
     }
