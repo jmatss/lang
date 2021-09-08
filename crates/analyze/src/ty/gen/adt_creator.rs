@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use log::{debug, log_enabled, Level};
-use parking_lot::RwLock;
 
 use common::{
     ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx},
@@ -17,12 +16,8 @@ use common::{
     },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse_with_deep_copy, visitor::Visitor},
     ty::{
-        get::get_gens,
-        replace::{replace_gen_impls, replace_self},
-        substitution_sets::sub_sets_debug_print,
-        to_string::to_string_type_id,
-        ty_env::TyEnv,
-        type_id::TypeId,
+        get::get_gens, substitution_sets::sub_sets_debug_print, to_string::to_string_type_id,
+        ty_env::TyEnv, type_id::TypeId,
     },
     BlockId,
 };
@@ -98,22 +93,9 @@ impl GenericAdtCreator {
             };
 
             for (new_idx, gen_adt_type_id) in generic_adt_tys.iter().enumerate() {
-                let mut ty_env_guard = ctx.ty_env.lock();
+                set_generic_names(&mut ctx.ty_env.lock(), &ctx.ast_ctx, *gen_adt_type_id)?;
 
-                set_generic_names(&mut ty_env_guard, &ctx.ast_ctx, *gen_adt_type_id)?;
-
-                // Create a new instance of the ADT. This new instance will
-                // replace all generic "placeholders" with the actual generics
-                // implementations/instances.
-                let mut new_adt = adt.read().clone();
-
-                // The methods are RCs inside the "Adt" struct which means that
-                // they are still tied to the "old" ADT. Empty the methods
-                // map, it will be filled in later with the same methods that
-                // then have had their generics replaced/implemented.
-                new_adt.methods.clear();
-
-                let mut gens = if let Some(gens) = get_gens(&ty_env_guard, *gen_adt_type_id)? {
+                let mut gens = if let Some(gens) = get_gens(&ctx.ty_env.lock(), *gen_adt_type_id)? {
                     gens.clone()
                 } else {
                     return Err(ctx.ast_ctx.err(format!(
@@ -125,121 +107,42 @@ impl GenericAdtCreator {
                 // Before creating the new ADT, make sure that the generics are
                 // fully inferred.
                 for gen_type_id in gens.iter_types_mut() {
-                    let inf_type_id = ty_env_guard.inferred_type(*gen_type_id)?;
+                    let inf_type_id = ctx.ty_env.lock().inferred_type(*gen_type_id)?;
                     if *gen_type_id != inf_type_id {
                         *gen_type_id = inf_type_id;
                     }
                 }
 
-                let new_path = adt_path_without_gens.with_gens(gens.clone());
-
-                // TODO: Can this be done with a visitor/traverser? The current
-                //       default traverser takes a AstToken, so would need to create
-                //       a wrapper type around the ADT in that case.
-                // For every member of the ADT, replace any generic types with
-                // the type of the adt_init generics. Also replace any reference
-                // to the old name with the new full name (containing generics).
-                for member in &mut new_adt.members {
-                    let mut new_member = member.read().clone();
-
-                    if let Some(type_id) = &mut new_member.ty {
-                        match replace_gen_impls(&mut ty_env_guard, &ctx.ast_ctx, *type_id, &gens) {
-                            Ok(Some(new_type_id)) => *type_id = new_type_id,
-                            Ok(None) => (),
-                            Err(err) => self.errors.push(err),
-                        }
-
-                        match replace_self(
-                            &mut ty_env_guard,
-                            *type_id,
-                            &adt_path_without_gens,
-                            *gen_adt_type_id,
-                        ) {
-                            Ok(Some(new_type_id)) => *type_id = new_type_id,
-                            Ok(None) => (),
-                            Err(err) => self.errors.push(err),
-                        }
-                    }
-
-                    *member = Arc::new(RwLock::new(new_member));
-                }
-
-                new_adt.generics = Some(gens.clone());
-
-                // Insert the new ADT variants that have replaced the generic
-                // parameters with an actual real type. These new ADTs will be
-                // inserted both into the AST and into the ADT lookup table
-                // (in AnalyzeContext).
-                debug!(
-                    "Creating new generic ADT in block id {}, new_path: {:?} -- {:#?}",
-                    parent_id, new_path, new_adt
-                );
-
-                let new_adt_rc = Arc::new(RwLock::new(new_adt));
-
-                // Insert the new ADT into the lookup table.
-                let key = (new_path, parent_id);
-                ctx.ast_ctx.adts.insert(
-                    &ty_env_guard,
-                    DerefType::Deep,
-                    key,
-                    Arc::clone(&new_adt_rc),
-                )?;
-
-                // Create a new AST token that will be inserted
-                // into the AST.
-                let header = match adt.read().kind {
-                    AdtKind::Struct => BlockHeader::Struct(Arc::clone(&new_adt_rc)),
-                    AdtKind::Union => BlockHeader::Union(Arc::clone(&new_adt_rc)),
+                let adt_kind = adt.read().kind;
+                let header = match adt_kind {
+                    AdtKind::Struct => BlockHeader::Struct(Arc::clone(&adt)),
+                    AdtKind::Union => BlockHeader::Union(Arc::clone(&adt)),
                     AdtKind::Enum | AdtKind::Unknown => {
                         panic!("Bad adt kind: {:?}", adt.read().kind)
                     }
                 };
 
-                let mut generics_replacer = GenericsReplacer::new_adt(
-                    Arc::clone(&new_adt_rc),
-                    &gens,
-                    adt_path_without_gens,
-                    *gen_adt_type_id,
-                );
+                let mut adt_block = AstToken::Block(Block {
+                    header,
+                    body: adt_body.clone(),
+                    id: old_id,
+                    file_pos: file_pos.to_owned(),
+                });
 
-                std::mem::drop(ty_env_guard);
+                let mut generics_replacer =
+                    GenericsReplacer::new_adt(&gens, adt_path_without_gens, *gen_adt_type_id);
 
-                // For every method of the ADT, replace any generic types with
-                // the type of the generics instances. Also replace any reference
-                // to the old name with the new full name (containing generics).
-                //
-                // This will be done for parameters, return types and bodies.
-                // New instances will be created for all shared references (see
-                // `set_deep_copy(true)` in `AstTraverser`).
-                let mut new_adt_body = adt_body.clone();
-                for method in &mut new_adt_body {
-                    if let AstToken::Block(Block {
-                        header: BlockHeader::Fn(..),
-                        ..
-                    }) = method
-                    {
-                        if let Err(mut errs) =
-                            traverse_with_deep_copy(ctx, &mut generics_replacer, method, new_idx)
-                        {
-                            self.errors.append(&mut errs);
-                            continue;
-                        }
-                    }
+                if let Err(mut errs) =
+                    traverse_with_deep_copy(ctx, &mut generics_replacer, &mut adt_block, new_idx)
+                {
+                    self.errors.append(&mut errs);
+                    continue;
                 }
 
                 // Slower to shift all the ast tokens to the right, but ensures that
                 // the tokens are inserted next to the old ADT and doesn't ex. get
                 // added after the EOF token.
-                default_body.insert(
-                    old_idx + 1,
-                    AstToken::Block(Block {
-                        header,
-                        body: new_adt_body,
-                        id: old_id,
-                        file_pos: file_pos.to_owned(),
-                    }),
-                );
+                default_body.insert(old_idx + 1, adt_block);
             }
 
             // Remove the old, now unused, ADT.
@@ -339,12 +242,9 @@ impl GenericAdtCreator {
                     Arc::clone(&adt)
                 };
 
-                let mut generics_replacer = GenericsReplacer::new_adt(
-                    Arc::clone(&new_adt),
-                    &gens,
-                    adt_path_without_gens,
-                    *gen_adt_type_id,
-                );
+                let mut generics_replacer =
+                    GenericsReplacer::new_adt(&gens, adt_path_without_gens, *gen_adt_type_id);
+                generics_replacer.new_adt = Some(Arc::clone(&new_adt));
 
                 // For every method of the impl, replace any generic types with
                 // the type of the generics instances. Also replace any reference

@@ -3,7 +3,9 @@ use std::{collections::HashSet, sync::Arc};
 use parking_lot::RwLock;
 
 use common::{
+    ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx},
     error::{LangError, LangResult},
+    hash::DerefType,
     path::LangPath,
     token::{
         block::{Adt, Block, BlockHeader},
@@ -17,6 +19,7 @@ use common::{
         replace::{replace_gen_impls, replace_self},
         to_string::to_string_type_id,
         ty::SolveCond,
+        ty_env::TyEnv,
         type_id::TypeId,
     },
     BlockId,
@@ -44,7 +47,11 @@ pub struct GenericsReplacer<'a> {
 
     generics_impl: &'a Generics,
 
-    new_adt: Option<Arc<RwLock<Adt>>>,
+    /// If a new ADT is created/replaced, it will be stored in this variable
+    /// when it has been traversed. This ADT will then be populated with all
+    /// its new methods with replaced generics.
+    pub new_adt: Option<Arc<RwLock<Adt>>>,
+
     old_path: Option<&'a LangPath>,
     new_type_id: Option<TypeId>,
 
@@ -54,7 +61,6 @@ pub struct GenericsReplacer<'a> {
 impl<'a> GenericsReplacer<'a> {
     /// Used when one wants to create new generic ADTs.
     pub fn new_adt(
-        new_adt: Arc<RwLock<Adt>>,
         generics_impl: &'a Generics,
         old_path: &'a LangPath,
         new_type_id: TypeId,
@@ -62,7 +68,7 @@ impl<'a> GenericsReplacer<'a> {
         Self {
             modified_variables: HashSet::default(),
             generics_impl,
-            new_adt: Some(new_adt),
+            new_adt: None,
             old_path: Some(old_path),
             new_type_id: Some(new_type_id),
             errors: Vec::default(),
@@ -114,6 +120,36 @@ impl<'a> GenericsReplacer<'a> {
             )))
         }
     }
+
+    /// The traverser will have created a new copy of the ADT. The given `new_adt`
+    /// is the new ADT that will have all its generics replaced.
+    fn store_new_adt(
+        &mut self,
+        ty_env: &TyEnv,
+        ast_ctx: &mut AstCtx,
+        new_adt: &Arc<RwLock<Adt>>,
+    ) -> LangResult<()> {
+        self.new_adt = Some(Arc::clone(new_adt));
+
+        // Insert the new ADT into the lookup table. This needs to be done
+        // before running the `visit_fn()` in this analyzer since it will
+        // insert the methods into this ADT.
+        let new_path = self.old_path.unwrap().with_gens(self.generics_impl.clone());
+        let parent_id = BlockCtx::DEFAULT_BLOCK_ID;
+        let key = (new_path, parent_id);
+        ast_ctx
+            .adts
+            .insert(ty_env, DerefType::Deep, key, Arc::clone(&new_adt))?;
+
+        // The methods are RCs inside the "ADT" which means that they are
+        // still tied to the "old" ADT. Empty the methods map, it will be
+        // filled in later with the same methods that then have had their
+        // generics replaced/implemented.
+        new_adt.write().methods.clear();
+        new_adt.write().generics = Some(self.generics_impl.clone());
+
+        Ok(())
+    }
 }
 
 impl<'a> Visitor for GenericsReplacer<'a> {
@@ -140,6 +176,30 @@ impl<'a> Visitor for GenericsReplacer<'a> {
 
             let new_key = (var.read().full_name(), ctx.block_id);
             ctx.ast_ctx.variables.insert(new_key, Arc::clone(var));
+        }
+    }
+
+    fn visit_struct(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Struct(new_adt),
+            ..
+        } = block
+        {
+            if let Err(err) = self.store_new_adt(&ctx.ty_env.lock(), ctx.ast_ctx, new_adt) {
+                self.errors.push(err);
+            }
+        }
+    }
+
+    fn visit_union(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Union(new_adt),
+            ..
+        } = block
+        {
+            if let Err(err) = self.store_new_adt(&ctx.ty_env.lock(), ctx.ast_ctx, new_adt) {
+                self.errors.push(err);
+            }
         }
     }
 
