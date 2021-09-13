@@ -171,8 +171,8 @@ pub fn insert_constraint(
             ty_env.ty(type_id_b)?,
         );
 
-        let is_any_a = is_any(&ty_env, type_id_a)?;
-        let is_any_b = is_any(&ty_env, type_id_b)?;
+        let is_any_a = is_any(ty_env, type_id_a)?;
+        let is_any_b = is_any(ty_env, type_id_b)?;
 
         (type_id_a, is_any_a, type_id_b, is_any_b)
     };
@@ -332,7 +332,7 @@ fn solve_type_id_priv(
         .excl_unknown()
         .excl_gen()
         .excl_gen_inst();
-    let is_solved_res = is_solved(&ty_env, fwd_type_id, check_inf, solve_cond)?;
+    let is_solved_res = is_solved(ty_env, fwd_type_id, check_inf, solve_cond)?;
     if is_solved_res {
         let root_type_id = promote(ty_env, fwd_type_id)?;
         insert_constraint(ty_env, fwd_type_id, inf_type_id)?;
@@ -347,7 +347,7 @@ fn solve_type_id_priv(
         .excl_unknown()
         .excl_gen()
         .excl_gen_inst();
-    let is_solved_res = is_solved(&ty_env, solved_type_id, check_inf, solve_cond)?;
+    let is_solved_res = is_solved(ty_env, solved_type_id, check_inf, solve_cond)?;
     if is_solved_res {
         return Ok(solved_type_id);
     }
@@ -360,7 +360,7 @@ fn solve_type_id_priv(
         .excl_unknown()
         .excl_gen()
         .excl_gen_inst();
-    let is_solved_res = is_solved(&ty_env, inf_type_id, check_inf, solve_cond)?;
+    let is_solved_res = is_solved(ty_env, inf_type_id, check_inf, solve_cond)?;
     if is_solved_res {
         insert_constraint(ty_env, fwd_type_id, inf_type_id)?;
         return Ok(inf_type_id);
@@ -644,7 +644,7 @@ fn solve_unknown_adt_member(
     let mut new_type_id = {
         let file_pos = get_file_pos(ty_env, *adt_type_id).cloned();
         ast_ctx
-            .get_adt_member(ty_env, &adt_path.without_gens(), &member_name, file_pos)?
+            .get_adt_member(ty_env, &adt_path.without_gens(), member_name, file_pos)?
             .read()
             .ty
             .unwrap()
@@ -710,7 +710,7 @@ fn solve_unknown_adt_method(
         unreachable!("{:#?}", ty_clone);
     };
 
-    let method = ast_ctx.get_method(&ty_env, &adt_path.without_gens(), &method_name)?;
+    let method = ast_ctx.get_method(ty_env, &adt_path.without_gens(), &method_name)?;
     let method = method.read();
     let fn_gens = method.generics.clone().unwrap_or_else(Generics::empty);
 
@@ -728,7 +728,7 @@ fn solve_unknown_adt_method(
         // At this point, it is the first time that we have solved the ADT of the
         // `UnknownAdtMethod` and we have been able to see that the method have
         // generics declared and that the call-site didn't specify any generics.
-        infer_gens_from_args(ty_env, ast_ctx, &method, &method_arg_tys, Some(type_id))?
+        infer_gens_from_args(ty_env, ast_ctx, &method, method_arg_tys, Some(type_id))?
     };
 
     if let Some(last_part) = method_path.last_mut() {
@@ -811,21 +811,21 @@ fn solve_unknown_method_argument(
     let actual_idx = match name_or_idx {
         Either::Left(idx) => *idx,
         Either::Right(arg_name) => ast_ctx.get_method_param_idx(
-            &ty_env,
+            ty_env,
             &adt_path.without_gens(),
             &method_name,
-            &arg_name,
+            arg_name,
         )?,
     };
 
     let mut new_type_id = ast_ctx.get_method_param_type(
-        &ty_env,
+        ty_env,
         &adt_path.without_gens(),
         &method_name,
         actual_idx,
     )?;
 
-    let method = ast_ctx.get_method(&ty_env, &adt_path.without_gens(), &method_name)?;
+    let method = ast_ctx.get_method(ty_env, &adt_path.without_gens(), &method_name)?;
     let method = method.read();
     let fn_gens = method.generics.clone().unwrap_or_else(Generics::empty);
 
@@ -932,10 +932,10 @@ fn solve_adt_type(
     solve_type_id_priv(ty_env, ast_ctx, adt_type_id, seen_type_ids)?;
     let inf_adt_type_id = ty_env.inferred_type(adt_type_id)?;
 
-    let is_generic_res = is_generic(&ty_env, inf_adt_type_id)?;
+    let is_generic_res = is_generic(ty_env, inf_adt_type_id)?;
     let check_inf = true;
     let solve_cond = SolveCond::new().excl_unknown().excl_any();
-    let is_solved_res = is_solved(&ty_env, inf_adt_type_id, check_inf, solve_cond)?;
+    let is_solved_res = is_solved(ty_env, inf_adt_type_id, check_inf, solve_cond)?;
 
     if is_generic_res && adt_type_id != inf_adt_type_id {
         Ok(AdtSolveStatus::GenericInstance(inf_adt_type_id))
@@ -961,7 +961,7 @@ fn solve_adt_type(
                 solve_type_id_priv(ty_env, ast_ctx, type_id_i, seen_type_ids)?;
                 let inf_type_id_i = ty_env.inferred_type(type_id_i)?;
 
-                let is_generic_res = is_generic(&ty_env, inf_type_id_i)?;
+                let is_generic_res = is_generic(ty_env, inf_type_id_i)?;
                 if is_generic_res && adt_type_id != inf_adt_type_id {
                     let new_type_id = ty_env.id(&Ty::Pointer(inf_type_id_i, type_info))?;
                     return Ok(AdtSolveStatus::GenericInstance(new_type_id));

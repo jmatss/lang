@@ -142,7 +142,7 @@ pub(super) fn infer_fn_call_fn_ptr(fn_call: &FnCall, ctx: &mut TraverseCtx) -> L
         }
 
         if let Some(new_type_id) =
-            replace_gen_impls(&mut ty_env_guard, &ctx.ast_ctx, fn_ret_type_id, &gen_impls)?
+            replace_gen_impls(&mut ty_env_guard, ctx.ast_ctx, fn_ret_type_id, &gen_impls)?
         {
             fn_ret_type_id = new_type_id;
         }
@@ -209,7 +209,7 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
                 method_gen_names.as_ref(),
                 method_call.generics.as_ref(),
                 &method_path,
-                Some(&adt_path),
+                Some(adt_path),
             )? {
                 method_call.generics = Some(new_fn_gens);
             }
@@ -359,7 +359,7 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
             // in the function call.
             let actual_idx = if let Some(arg_name) = &arg.name {
                 ctx.ast_ctx
-                    .get_fn_param_idx(&ty_env_guard, &fn_full_path, &arg_name)?
+                    .get_fn_param_idx(&ty_env_guard, &fn_full_path, arg_name)?
             } else {
                 idx
             };
@@ -379,7 +379,7 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
                 if let Some(new_gens) = &new_gens {
                     if let Some(new_type_id) = replace_gen_impls(
                         &mut ty_env_guard,
-                        &ctx.ast_ctx,
+                        ctx.ast_ctx,
                         new_param_type_id,
                         new_gens,
                     )? {
@@ -403,7 +403,7 @@ fn infer_fn_call_fn(fn_call: &mut FnCall, ctx: &mut TraverseCtx) -> LangResult<T
         // the `new_gens` (either real type or `GenericInstance`).
         if let Some(new_gens) = &new_gens {
             if let Some(new_ret_type_id) =
-                replace_gen_impls(&mut ctx.ty_env.lock(), ctx.ast_ctx, ret_type_id, &new_gens)?
+                replace_gen_impls(&mut ctx.ty_env.lock(), ctx.ast_ctx, ret_type_id, new_gens)?
             {
                 return Ok(new_ret_type_id);
             }

@@ -584,7 +584,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let tag_idx = self.analyze_ctx.ast_ctx.get_adt_member_index(
             &self.analyze_ctx.ty_env.lock(),
             &full_path,
-            &arg.name.as_ref().unwrap(),
+            arg.name.as_ref().unwrap(),
         )?;
         let tag = self.context.i8_type().const_int(tag_idx, false);
 

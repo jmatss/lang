@@ -724,7 +724,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                     }
 
                     LexTokenKind::Kw(lex_kw) => {
-                        if let Some(modifier) = crate::token::get_modifier_token(&lex_kw) {
+                        if let Some(modifier) = crate::token::get_modifier_token(lex_kw) {
                             modifiers.push(modifier);
                         } else {
                             return Err(self.iter.err(

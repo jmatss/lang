@@ -57,7 +57,7 @@ pub fn combine_generics(
     // "GenericInstance" types that will be used to create the generics.
     if let Some(gen_impls) = gen_impls {
         if gen_names.len() != gen_impls.len_types() {
-            let fn_name = to_string_path(&ctx.ty_env.lock(), &fn_call_path);
+            let fn_name = to_string_path(&ctx.ty_env.lock(), fn_call_path);
             let err_names = if let Some(adt_path) = adt_path {
                 format!("Adt name: {:?}, method name: {}", &adt_path, &fn_name)
             } else {

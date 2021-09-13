@@ -255,11 +255,11 @@ impl Visitor for CallArgs {
 
         // Reorder the arguments of the function call according to the parameter
         // names used for the arguments.
-        self.reorder(&ctx.ast_ctx, &mut fn_call.arguments, params);
+        self.reorder(ctx.ast_ctx, &mut fn_call.arguments, params);
 
         // Assign any default value for arguments that are missing a value in
         // the function call.
-        if let Err(err) = self.default_args(&ctx.ast_ctx, fn_call, params, func.is_var_arg) {
+        if let Err(err) = self.default_args(ctx.ast_ctx, fn_call, params, func.is_var_arg) {
             self.errors.push(err);
             return;
         }
@@ -286,7 +286,7 @@ impl Visitor for CallArgs {
             }
         };
 
-        self.reorder(&ctx.ast_ctx, &mut adt_init.arguments, &adt.read().members);
+        self.reorder(ctx.ast_ctx, &mut adt_init.arguments, &adt.read().members);
 
         // TODO: Should there be default values for structs (?). Arrange that
         //       here in that case.

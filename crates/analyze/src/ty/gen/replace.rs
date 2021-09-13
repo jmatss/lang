@@ -90,12 +90,9 @@ impl<'a> GenericsReplacer<'a> {
     fn replace_type_id(&self, type_id: &mut TypeId, ctx: &mut TraverseCtx) -> LangResult<()> {
         let mut ty_env_guard = ctx.ty_env.lock();
 
-        if let Some(new_type_id) = replace_gen_impls(
-            &mut ty_env_guard,
-            &ctx.ast_ctx,
-            *type_id,
-            &self.generics_impl,
-        )? {
+        if let Some(new_type_id) =
+            replace_gen_impls(&mut ty_env_guard, ctx.ast_ctx, *type_id, self.generics_impl)?
+        {
             *type_id = new_type_id
         }
 
@@ -139,7 +136,7 @@ impl<'a> GenericsReplacer<'a> {
         let key = (new_path, parent_id);
         ast_ctx
             .adts
-            .insert(ty_env, DerefType::Deep, key, Arc::clone(&new_adt))?;
+            .insert(ty_env, DerefType::Deep, key, Arc::clone(new_adt))?;
 
         // The methods are RCs inside the "ADT" which means that they are
         // still tied to the "old" ADT. Empty the methods map, it will be
@@ -243,13 +240,13 @@ impl<'a> Visitor for GenericsReplacer<'a> {
             new_adt
                 .write()
                 .methods
-                .insert(func.read().half_name(&ctx.ty_env.lock()), Arc::clone(&func));
+                .insert(func.read().half_name(&ctx.ty_env.lock()), Arc::clone(func));
 
             // Inserts a reference to this new method into the `analyze_context`
             // look-up table.
             if let Err(err) =
                 ctx.ast_ctx
-                    .insert_method(&ctx.ty_env.lock(), &new_adt_path, Arc::clone(&func))
+                    .insert_method(&ctx.ty_env.lock(), &new_adt_path, Arc::clone(func))
             {
                 self.errors.push(err);
             }

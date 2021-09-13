@@ -289,7 +289,7 @@ impl Visitor for PathResolver {
 
             if let Some(impls) = &mut func.write().implements {
                 if let Err(err) =
-                    Self::resolve_impls(&ctx.ty_env.lock(), &ctx.ast_ctx, impls, ctx.block_id)
+                    Self::resolve_impls(&ctx.ty_env.lock(), ctx.ast_ctx, impls, ctx.block_id)
                 {
                     self.errors.push(err);
                 }
@@ -305,7 +305,7 @@ impl Visitor for PathResolver {
         {
             if let Some(impls) = &mut adt.write().implements {
                 if let Err(err) =
-                    Self::resolve_impls(&ctx.ty_env.lock(), &ctx.ast_ctx, impls, ctx.block_id)
+                    Self::resolve_impls(&ctx.ty_env.lock(), ctx.ast_ctx, impls, ctx.block_id)
                 {
                     self.errors.push(err);
                 }

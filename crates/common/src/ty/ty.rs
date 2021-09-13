@@ -109,7 +109,7 @@ impl TyEnvHash for Ty {
                 2.hash(state);
                 type_id.hash_with_state(ty_env, deref_type, state)?;
                 if let Some(expr) = expr_opt {
-                    if let Some(dim) = arr_dim_hash(&expr)? {
+                    if let Some(dim) = arr_dim_hash(expr)? {
                         dim.hash(state);
                     }
                 }

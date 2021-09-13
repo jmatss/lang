@@ -65,7 +65,7 @@ impl GenericsAnalyzer {
 
         // Replaces any generics declared on the ADT/Trait.
         if let Some(adt_gens) = adt_gens {
-            let mut adt_replacer = FuncGenericsReplacer::new(&adt_gens);
+            let mut adt_replacer = FuncGenericsReplacer::new(adt_gens);
             if let Err(mut errs) = traverse(ctx, &mut adt_replacer, fn_token) {
                 self.errors.append(&mut errs);
                 return;

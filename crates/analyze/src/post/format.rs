@@ -166,11 +166,11 @@ impl FormatParser {
             }
 
             let type_id = arg.value.get_expr_type()?;
-            if !get_ident(&ty_env, type_id)?
+            if !get_ident(ty_env, type_id)?
                 .map(|path| path.last().map(|part| part.0 == "StringView"))
                 .flatten()
                 .unwrap_or(false)
-                && !is_primitive(&ty_env, type_id)?
+                && !is_primitive(ty_env, type_id)?
             {
                 // Error because the argument type is neither StringView or primitive.
                 LangError::new(
@@ -237,7 +237,7 @@ impl Visitor for FormatParser {
                 }
             }
 
-            if let Err(err) = self.verify_arg_types(&ctx.ty_env.lock(), &built_in_call) {
+            if let Err(err) = self.verify_arg_types(&ctx.ty_env.lock(), built_in_call) {
                 self.errors.push(err);
             }
         }

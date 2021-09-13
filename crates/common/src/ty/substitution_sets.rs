@@ -88,6 +88,9 @@ impl SubstitutionSets {
     }
 }
 
+// Warning incorrectly triggered in the `new_root_id` if-block. Can be removed
+// once CLippy fixes the problem.
+#[allow(clippy::branches_sharing_code)]
 /// Creates a union of the two sets containing the types `type_id_a` and `type_id_b`.
 /// If any of the given types doesn't exist, they will be created and inserted
 /// into the sets.
@@ -100,7 +103,7 @@ impl SubstitutionSets {
 /// Returns the type of the new root node of the unioned sets. This will be
 /// the type with the highest precedence in the set.
 pub fn union(ty_env: &mut TyEnv, type_id_a: TypeId, type_id_b: TypeId) -> LangResult<TypeId> {
-    compatible(&ty_env, type_id_a, type_id_b)?;
+    compatible(ty_env, type_id_a, type_id_b)?;
 
     let id_a = if let Some(id) = ty_env.sub_sets.ty_to_id.get(&type_id_a) {
         *id
@@ -151,7 +154,7 @@ pub fn union(ty_env: &mut TyEnv, type_id_a: TypeId, type_id_b: TypeId) -> LangRe
 pub fn promote(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<TypeId> {
     let check_inf = true;
     let solve_cond = SolveCond::new().excl_unknown();
-    let is_solved = is_solved(&ty_env, type_id, check_inf, solve_cond).unwrap_or(false);
+    let is_solved = is_solved(ty_env, type_id, check_inf, solve_cond).unwrap_or(false);
     let is_in_ty_env = ty_env.sub_sets.ty_to_id.contains_key(&type_id);
 
     if is_solved && is_in_ty_env {
@@ -244,7 +247,7 @@ fn compatible_with_start(
     start_type_id_a: TypeId,
     start_type_id_b: TypeId,
 ) -> LangResult<()> {
-    if is_compatible(&ty_env, type_id_a, type_id_b)? {
+    if is_compatible(ty_env, type_id_a, type_id_b)? {
         Ok(())
     } else {
         let mut msg = format!(
@@ -252,10 +255,10 @@ fn compatible_with_start(
             1. {} ({} -- {:?})\n  2. {} ({} -- {:?})",
             to_string_type_id(ty_env, type_id_a)?,
             type_id_a,
-            get_file_pos(&ty_env, type_id_a),
+            get_file_pos(ty_env, type_id_a),
             to_string_type_id(ty_env, type_id_b)?,
             type_id_b,
-            get_file_pos(&ty_env, type_id_b),
+            get_file_pos(ty_env, type_id_b),
         );
 
         if type_id_a != start_type_id_a {
@@ -263,7 +266,7 @@ fn compatible_with_start(
                 "\nThe first type (1) was inferred from the type: {} ({} -- {:?})",
                 to_string_type_id(ty_env, start_type_id_a)?,
                 start_type_id_a,
-                get_file_pos(&ty_env, start_type_id_a),
+                get_file_pos(ty_env, start_type_id_a),
             ));
         }
 
@@ -272,7 +275,7 @@ fn compatible_with_start(
                 "\nThe second type (2) was inferred from the type: {} ({} -- {:?})",
                 to_string_type_id(ty_env, start_type_id_b)?,
                 start_type_id_b,
-                get_file_pos(&ty_env, start_type_id_b),
+                get_file_pos(ty_env, start_type_id_b),
             ));
         }
 

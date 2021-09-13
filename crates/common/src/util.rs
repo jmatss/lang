@@ -15,9 +15,9 @@ pub fn to_method_name(
     method_name: &str,
     method_generics: Option<&Generics>,
 ) -> String {
-    let adt_name_with_gens = to_string_path(ty_env, &adt_path);
+    let adt_name_with_gens = to_string_path(ty_env, adt_path);
     let method_name_with_gens = if let Some(method_generics) = method_generics {
-        to_generic_name(ty_env, &method_name, method_generics)
+        to_generic_name(ty_env, method_name, method_generics)
     } else {
         method_name.into()
     };

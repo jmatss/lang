@@ -91,13 +91,13 @@ impl DeclFnAnalyzer {
     ) {
         let inner_ty = if ctx
             .ast_ctx
-            .is_trait(&ctx.ty_env.lock(), &adt_path_without_gens)
+            .is_trait(&ctx.ty_env.lock(), adt_path_without_gens)
         {
             InnerTy::Trait(adt_path_without_gens.clone())
         } else {
             match ctx
                 .ast_ctx
-                .get_adt(&ctx.ty_env.lock(), &adt_path_without_gens)
+                .get_adt(&ctx.ty_env.lock(), adt_path_without_gens)
             {
                 Ok(adt) => match adt.read().kind {
                     AdtKind::Struct => {
@@ -154,7 +154,7 @@ impl DeclFnAnalyzer {
                 let err = ctx.ast_ctx.err(format!(
                     "Non static function did not contain \"this\" or \"this ptr\" reference. \
                     ADT name: {}, func: {:#?}.",
-                    to_string_path(&ctx.ty_env.lock(), &adt_path_without_gens),
+                    to_string_path(&ctx.ty_env.lock(), adt_path_without_gens),
                     func
                 ));
                 self.errors.push(err);

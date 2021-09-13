@@ -229,7 +229,7 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     let expr = self.iter.parse_expr(&stop_conds)?;
 
                     if let Some(file_pos_last) = expr.file_pos() {
-                        file_pos.set_end(&file_pos_last)?;
+                        file_pos.set_end(file_pos_last)?;
                     } else {
                         unreachable!("file_pos not set for expr: {:#?}", expr);
                     }

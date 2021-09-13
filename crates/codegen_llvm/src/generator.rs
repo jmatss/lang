@@ -104,7 +104,7 @@ pub fn generate<'a, 'b, 'ctx>(
                 .analyze_ctx
                 .ast_ctx
                 .block_ctxs
-                .get(&block_id)
+                .get(block_id)
                 .ok_or_else(|| {
                     LangError::new(
                         format!("Unable to find block info for block with id {}", block_id),

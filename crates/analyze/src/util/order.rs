@@ -109,9 +109,9 @@ pub fn order_step2(
 
         for prev_ident in &order {
             let prev_references_cur =
-                contains(ty_env, cur_ident, prev_ident, &references).map_err(Either::Left)?;
+                contains(ty_env, cur_ident, prev_ident, references).map_err(Either::Left)?;
             let cur_references_prev =
-                contains(ty_env, prev_ident, cur_ident, &references).map_err(Either::Left)?;
+                contains(ty_env, prev_ident, cur_ident, references).map_err(Either::Left)?;
 
             if prev_references_cur && cur_references_prev {
                 return Err(Either::Right(CyclicDependencyError(
@@ -159,8 +159,8 @@ pub fn order_step2_strings(
         let mut idx = 0;
 
         for prev_ident in &order {
-            let prev_references_cur = contains_strings(cur_ident, prev_ident, &references);
-            let cur_references_prev = contains_strings(prev_ident, cur_ident, &references);
+            let prev_references_cur = contains_strings(cur_ident, prev_ident, references);
+            let cur_references_prev = contains_strings(prev_ident, cur_ident, references);
 
             if prev_references_cur && cur_references_prev {
                 return Err(CyclicDependencyError(
@@ -326,7 +326,7 @@ impl ReferenceCollector {
         for member in members {
             if let Some(type_id) = &member.as_ref().borrow().read().ty {
                 let adt_and_trait_paths =
-                    get_adt_and_trait_paths(&ty_env, *type_id, self.full_paths)?;
+                    get_adt_and_trait_paths(ty_env, *type_id, self.full_paths)?;
 
                 for path in adt_and_trait_paths.values() {
                     if !path_eq(ty_env, path, adt_path, DerefType::Deep)? {
@@ -498,7 +498,7 @@ impl Visitor for ReferenceCollector {
                 let ty_env_guard = &ctx.ty_env.lock();
 
                 let mut references =
-                    match get_adt_and_trait_paths(&ty_env_guard, *type_id, self.full_paths) {
+                    match get_adt_and_trait_paths(ty_env_guard, *type_id, self.full_paths) {
                         Ok(paths) => paths,
                         Err(err) => {
                             self.errors.push(err);
@@ -507,7 +507,7 @@ impl Visitor for ReferenceCollector {
                     };
 
                 // Do not add references to itself.
-                if let Err(err) = references.remove(&ty_env_guard, DerefType::Deep, cur_adt_path) {
+                if let Err(err) = references.remove(ty_env_guard, DerefType::Deep, cur_adt_path) {
                     self.errors.push(err);
                     return;
                 }
@@ -515,7 +515,7 @@ impl Visitor for ReferenceCollector {
                 let contains_key =
                     match self
                         .references
-                        .contains_key(&ty_env_guard, DerefType::Deep, cur_adt_path)
+                        .contains_key(ty_env_guard, DerefType::Deep, cur_adt_path)
                     {
                         Ok(contains_key) => contains_key,
                         Err(err) => {
@@ -527,16 +527,16 @@ impl Visitor for ReferenceCollector {
                 if contains_key {
                     let self_references = self
                         .references
-                        .get_mut(&ty_env_guard, DerefType::Deep, cur_adt_path)
+                        .get_mut(ty_env_guard, DerefType::Deep, cur_adt_path)
                         .unwrap()
                         .unwrap();
                     if let Err(err) =
-                        self_references.extend(&ty_env_guard, DerefType::Deep, &references)
+                        self_references.extend(ty_env_guard, DerefType::Deep, &references)
                     {
                         self.errors.push(err);
                     }
                 } else if let Err(err) = self.references.insert(
-                    &ty_env_guard,
+                    ty_env_guard,
                     DerefType::Deep,
                     cur_adt_path.clone(),
                     references,

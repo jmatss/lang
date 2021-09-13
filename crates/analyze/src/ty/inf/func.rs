@@ -66,7 +66,7 @@ pub(crate) fn infer_fn_ptr(fn_ptr: &mut FnPtr, ctx: &mut TraverseCtx) -> LangRes
     for fn_param_type_id in &mut fn_param_tys {
         if let Some(new_type_id) = replace_gen_impls(
             &mut ty_env_guard,
-            &ctx.ast_ctx,
+            ctx.ast_ctx,
             *fn_param_type_id,
             &gens_impl,
         )? {
@@ -76,7 +76,7 @@ pub(crate) fn infer_fn_ptr(fn_ptr: &mut FnPtr, ctx: &mut TraverseCtx) -> LangRes
 
     if let Some(ret_type_id) = &mut fn_ret_ty {
         if let Some(new_type_id) =
-            replace_gen_impls(&mut ty_env_guard, &ctx.ast_ctx, *ret_type_id, &gens_impl)?
+            replace_gen_impls(&mut ty_env_guard, ctx.ast_ctx, *ret_type_id, &gens_impl)?
         {
             *ret_type_id = new_type_id
         }

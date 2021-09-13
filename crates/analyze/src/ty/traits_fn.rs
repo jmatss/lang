@@ -171,7 +171,7 @@ impl Visitor for TraitsFnAnalyzer {
         };
 
         let adt = adt.read();
-        if let Err(err) = self.store_adt_trait_method_names(&ctx, &adt) {
+        if let Err(err) = self.store_adt_trait_method_names(ctx, &adt) {
             self.errors.push(err);
         }
     }
@@ -180,7 +180,7 @@ impl Visitor for TraitsFnAnalyzer {
         let Block { header, .. } = block;
         if let BlockHeader::Fn(func) = header {
             let func = func.read();
-            if let Err(err) = self.store_fn_trait_method_names(&ctx, &func) {
+            if let Err(err) = self.store_fn_trait_method_names(ctx, &func) {
                 self.errors.push(err);
             }
         }

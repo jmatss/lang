@@ -29,7 +29,7 @@ pub(crate) fn infer_adt_init(adt_init: &mut AdtInit, ctx: &mut TraverseCtx) -> L
         .get_adt(&ctx.ty_env.lock(), &full_path_without_gens)?;
     let adt = adt.read();
 
-    adt_init.kind = adt.kind.clone();
+    adt_init.kind = adt.kind;
 
     // Gets a map if the generics that maps the ident of the generic
     // (ex. "T", "U" etc.) to a new unknown generic type. This is needed
@@ -154,12 +154,9 @@ fn infer_adt_init_struct(
             let member_type_id = if let Some(member_type_id) = member.ty {
                 let mut new_member_type_id = member_type_id;
                 if let Some(gens) = &gens {
-                    if let Some(new_type_id) = replace_gen_impls(
-                        &mut ty_env_guard,
-                        &ctx.ast_ctx,
-                        new_member_type_id,
-                        gens,
-                    )? {
+                    if let Some(new_type_id) =
+                        replace_gen_impls(&mut ty_env_guard, ctx.ast_ctx, new_member_type_id, gens)?
+                    {
                         new_member_type_id = new_type_id
                     }
                 }
@@ -249,7 +246,7 @@ fn infer_adt_init_union(
 
     let member_type_id = if let Some(type_id) = &new_member.ty {
         if let Some(gens) = &gens {
-            match replace_gen_impls(&mut ty_env_guard, &ctx.ast_ctx, *type_id, gens)? {
+            match replace_gen_impls(&mut ty_env_guard, ctx.ast_ctx, *type_id, gens)? {
                 Some(new_type_id) => new_type_id,
                 None => *type_id,
             }

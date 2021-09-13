@@ -544,7 +544,7 @@ impl<'a> ParseTokenIter<'a> {
 
                 if let Some(name_file_pos) = &mut name_file_pos {
                     if let Some(expr_file_pos) = expr.file_pos() {
-                        name_file_pos.set_end(&expr_file_pos)?;
+                        name_file_pos.set_end(expr_file_pos)?;
                     }
                 }
                 let arg = Argument::new(name, name_file_pos, expr);

@@ -41,7 +41,7 @@ impl DeclTypeAnalyzer {
         let adt_name = adt.read().name.clone();
 
         let adt_full_path = if InnerTy::ident_to_type(&adt_name, 0).is_primitive() {
-            let adt_kind = adt.read().kind.clone();
+            let adt_kind = adt.read().kind;
             if !matches!(adt_kind, AdtKind::Struct) {
                 return Err(ctx.ast_ctx.err(format!(
                     "Tried to create non-struct ADT with primitive name: {}",

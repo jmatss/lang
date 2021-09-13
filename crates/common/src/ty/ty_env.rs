@@ -109,7 +109,7 @@ impl TyEnv {
     /// that type is returned. If `ty` is a new type that haven't been "seen"
     /// before, a new TypeId will be assigned to it and returned.
     pub fn id(&mut self, ty: &Ty) -> LangResult<TypeId> {
-        if let Some(type_id) = self.interner.ty_to_id.get(self, DerefType::Shallow, &ty)? {
+        if let Some(type_id) = self.interner.ty_to_id.get(self, DerefType::Shallow, ty)? {
             Ok(*type_id)
         } else {
             self.new_ty(ty.clone())
@@ -120,7 +120,7 @@ impl TyEnv {
     /// If `ty` is a type that doesn't exists in this type environment, a error
     /// is returned.
     pub fn id_try(&self, ty: &Ty) -> LangResult<TypeId> {
-        if let Some(type_id) = self.interner.ty_to_id.get(self, DerefType::Shallow, &ty)? {
+        if let Some(type_id) = self.interner.ty_to_id.get(self, DerefType::Shallow, ty)? {
             Ok(*type_id)
         } else {
             Err(LangError::new(

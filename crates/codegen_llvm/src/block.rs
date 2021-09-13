@@ -301,7 +301,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 let adt_path = inner_ty.get_ident().unwrap();
                 let adt_path_without_module = &adt_path.last().cloned().unwrap().into();
                 (
-                    util::to_method_name(&ty_env_guard, &adt_path_without_module, &func.name, None),
+                    util::to_method_name(&ty_env_guard, adt_path_without_module, &func.name, None),
                     inner_ty.is_primitive(),
                 )
             } else {
@@ -404,7 +404,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 let adt_path = inner_ty.get_ident().unwrap();
                 let adt_path_without_module = &adt_path.last().cloned().unwrap().into();
                 (
-                    util::to_method_name(&ty_env_guard, &adt_path_without_module, &func.name, None),
+                    util::to_method_name(&ty_env_guard, adt_path_without_module, &func.name, None),
                     inner_ty.is_primitive(),
                 )
             } else {

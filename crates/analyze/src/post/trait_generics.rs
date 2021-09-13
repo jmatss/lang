@@ -65,7 +65,7 @@ impl TraitGenericsAnalyzer {
 
         let adt = ctx
             .ast_ctx
-            .get_adt(&ty_env_guard, &adt_path)
+            .get_adt(&ty_env_guard, adt_path)
             .map_err(|e| vec![e])?;
         let adt = adt.read();
 
@@ -98,7 +98,7 @@ impl TraitGenericsAnalyzer {
                 errors.push(ctx.ast_ctx.err(format!(
                     "ADT \"{0}\" has \"where\" clause for type \"{1}\" which isn't a ADT. \
                     The type \"{1}\" can therefore not implement the required traits:{2}.",
-                    to_string_path(&ty_env_guard, &adt_path),
+                    to_string_path(&ty_env_guard, adt_path),
                     gen_type_id.to_string(),
                     trait_names,
                 )));
@@ -127,9 +127,9 @@ impl TraitGenericsAnalyzer {
                             "Struct \"{0}\" requires that its generic type \"{1}\" implements \
                             the trait \"{2}\". The type \"{3}\" is used as generic \"{1}\", \
                             but it does NOT implement the function \"{4}\" from the trait \"{2}\".",
-                            to_string_path(&ty_env_guard, &adt_path),
+                            to_string_path(&ty_env_guard, adt_path),
                             gen_name,
-                            to_string_path(&ty_env_guard, &trait_path),
+                            to_string_path(&ty_env_guard, trait_path),
                             to_string_path(&ty_env_guard, &impl_path),
                             method_name
                         )));
@@ -173,9 +173,9 @@ impl TraitGenericsAnalyzer {
                         "ADT \"{0}\" requires that its generic type \"{1}\" implements \
                         the trait \"{2}\". The type \"{3}\" is used as generic \"{1}\", \
                         but it does NOT implement the required \"{2}\" trait.{4}",
-                        to_string_path(&ty_env_guard, &adt_path),
+                        to_string_path(&ty_env_guard, adt_path),
                         gen_name,
-                        to_string_path(&ty_env_guard, &trait_path),
+                        to_string_path(&ty_env_guard, trait_path),
                         to_string_path(&ty_env_guard, &impl_path),
                         impl_trait_str
                     )));
@@ -265,7 +265,7 @@ impl TraitGenericsAnalyzer {
                     err_msg.push_str(&format!(
                         "Method \"{}\" in ADT \"{}\"",
                         &func.name,
-                        to_string_path(&ty_env_guard, &adt_path)
+                        to_string_path(&ty_env_guard, adt_path)
                     ));
                 } else {
                     let fn_path = func
@@ -305,7 +305,7 @@ impl TraitGenericsAnalyzer {
                         err_msg.push_str(&format!(
                             "Method \"{}\" in ADT \"{}\"",
                             &func.name,
-                            to_string_path(&ty_env_guard, &adt_path)
+                            to_string_path(&ty_env_guard, adt_path)
                         ));
                     } else {
                         let fn_path = func
@@ -323,7 +323,7 @@ impl TraitGenericsAnalyzer {
                         the required \"{2}\" trait.",
                         err_msg,
                         gen_name,
-                        to_string_path(&ty_env_guard, &trait_path),
+                        to_string_path(&ty_env_guard, trait_path),
                         to_string_path(&ty_env_guard, &impl_adt_path),
                     )));
                 }

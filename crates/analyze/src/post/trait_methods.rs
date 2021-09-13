@@ -214,8 +214,8 @@ impl TraitMethodsAnalyzer {
             let mut errs = Vec::with_capacity(cmp_errors.len());
             let err_msg_start = format!(
                 "ADT \"{}\"s impl of trait \"{}\"s method \"{}\" is incorrect.\n",
-                to_string_path(ty_env, &adt_path),
-                to_string_path(ty_env, &trait_path),
+                to_string_path(ty_env, adt_path),
+                to_string_path(ty_env, trait_path),
                 trait_method.name,
             );
 

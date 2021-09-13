@@ -658,7 +658,7 @@ impl AdtInit {
     /// Returns the "full name" which is the name containing possible generics
     /// as well.
     pub fn full_name(&mut self, ty_env: &TyEnv) -> LangResult<String> {
-        let gens = self.generics(&ty_env);
+        let gens = self.generics(ty_env);
         let adt_path = self
             .module
             .clone_push(&self.name, gens.as_ref(), self.file_pos);
