@@ -40,7 +40,7 @@ macro_rules! std_file {
 
 /// Array of files (and their content) that are included in the compiler. These
 /// are `std` files containing ADTs/functions used extensively in the language.
-const STD_FILES: [(&str, Option<&[u8]>); 24] = [
+const STD_FILES: [(&str, Option<&[u8]>); 25] = [
     std_file!("..\\..\\..\\std\\assert.ren"),
     std_file!("..\\..\\..\\std\\cmp.ren"),
     std_file!("..\\..\\..\\std\\either.ren"),
@@ -53,6 +53,7 @@ const STD_FILES: [(&str, Option<&[u8]>); 24] = [
     std_file!("..\\..\\..\\std\\io\\print.ren"),
     std_file!("..\\..\\..\\std\\mem\\allocator.ren"),
     std_file!("..\\..\\..\\std\\mem\\disposable.ren"),
+    std_file!("..\\..\\..\\std\\primitive\\bool.ren"),
     std_file!("..\\..\\..\\std\\primitive\\common.ren"),
     std_file!("..\\..\\..\\std\\primitive\\u8.ren"),
     std_file!("..\\..\\..\\std\\primitive\\i8.ren"),

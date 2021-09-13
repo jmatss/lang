@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, sync::Arc};
+use std::sync::Arc;
 
 use inkwell::{values::AnyValueEnum, AddressSpace, IntPredicate};
 use parking_lot::RwLock;
@@ -15,8 +15,8 @@ use common::{
         stmt::Stmt,
     },
     ty::{
-        generics::Generics, get::get_inner, inner_ty::InnerTy, is::is_primitive, ty::Ty,
-        ty_env::TyEnv, type_id::TypeId, type_info::TypeInfo,
+        generics::Generics, get::get_inner, inner_ty::InnerTy, is::is_primitive,
+        to_string::to_string_type_id, ty::Ty, ty_env::TyEnv, type_id::TypeId, type_info::TypeInfo,
     },
     ARGC_GLOBAL_VAR_NAME, ARGV_GLOBAL_VAR_NAME,
 };
@@ -364,7 +364,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     /// The arguments to the `@format()` call are expected to be of types
     /// `std::string::StringView`. If they aren't, this function will try to create
     /// StringView's from the values if possible. Currently this is only done for
-    /// a subset of  primitive types.
+    /// a subset of primitive types.
     fn compile_format(
         &mut self,
         built_in_call: &mut BuiltInCall,
@@ -460,12 +460,12 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             None,
             false,
         )));
-        let mut string_var_expr = Expr::Var(string_var.as_ref().borrow().read().clone());
+        let mut string_var_expr = Expr::Var(string_var.read().clone());
 
         let mut string_var_decl = Stmt::VariableDecl(Arc::clone(&string_var), None);
         let mut string_var_assign = Stmt::Assignment(
             AssignOperator::Assignment,
-            Expr::Var(string_var.as_ref().borrow().read().clone()),
+            Expr::Var(string_var.read().clone()),
             Expr::FnCall(string_get_success_call),
             file_pos,
         );
@@ -571,13 +571,41 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let file_pos = primitive_expr.file_pos().cloned();
         let type_id = primitive_expr.get_expr_type()?;
 
+        // A variable name that will be used to create temporary allocations
+        // if needed. The name should be unique.
+        let tmp_var_name = format!("{}_idx_{}", var_name, arg_idx);
+
+        let inner_ty = get_inner(&self.analyze_ctx.ty_env.lock(), type_id)?.clone();
+        if inner_ty.is_int() {
+            self.int_to_string_view(primitive_expr, file_pos, &inner_ty, tmp_var_name)
+        } else if inner_ty.is_bool() {
+            self.bool_to_string_view(primitive_expr, file_pos, &inner_ty, tmp_var_name)
+        } else if inner_ty.is_char() {
+            panic!("TODO: format arg for char");
+        } else {
+            Err(self.err(
+                format!(
+                    "Tried to format un-supported type. Given type: {} ({})",
+                    to_string_type_id(&self.analyze_ctx.ty_env.lock(), type_id)?,
+                    type_id
+                ),
+                file_pos,
+            ))
+        }
+    }
+
+    fn int_to_string_view(
+        &mut self,
+        int_expr: &Expr,
+        file_pos: Option<FilePosition>,
+        inner_ty: &InnerTy,
+        buf_var_name: String,
+    ) -> LangResult<Expr> {
         let mut ty_env_guard = self.analyze_ctx.ty_env.lock();
 
         // TODO: What buffer size should floats have? What is their max char size?
         // `buf_size` is the max amount of bytes that a given primitive type
         // value can occupy in string form.
-
-        let inner_ty = get_inner(&ty_env_guard, type_id)?;
         let primitive_ident = inner_ty.get_primitive_ident();
         let buf_size = match inner_ty {
             InnerTy::I8 => 4,
@@ -592,7 +620,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             InnerTy::F64 => 0,
             InnerTy::I128 => 40,
             InnerTy::U128 => 39,
-            _ => panic!("bad format variadic arg type: {:#?}", primitive_expr),
+            _ => unreachable!("bad type in int_to_string_view: {:#?}", int_expr),
         };
 
         let primitive_type_id = ty_env_guard.id(&Ty::CompoundType(
@@ -614,7 +642,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let arr_ptr_type_id =
             ty_env_guard.id(&Ty::Pointer(arr_type_id, TypeInfo::DefaultOpt(file_pos)))?;
 
-        let buf_var_name = format!("{}_idx_{}", var_name, arg_idx);
         let buf_var = Arc::new(RwLock::new(Var::new(
             buf_var_name.clone(),
             Some(arr_type_id),
@@ -636,31 +663,108 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         self.compile_stmt(&mut buf_var_decl)?;
 
+        let mut ty_env_guard = self.analyze_ctx.ty_env.lock();
+
         let mut buf_var_address = UnOp::new(
             UnOperator::Address,
-            Box::new(Expr::Var(buf_var.as_ref().borrow().read().clone())),
+            Box::new(Expr::Var(buf_var.read().clone())),
             None,
         );
         buf_var_address.ret_type = Some(arr_ptr_type_id);
 
-        let mut primitive_to_string_view_call = FnCall::new(
+        let mut int_to_string_view_call = FnCall::new(
             "to_string_view".into(),
             "".into(),
             vec![
-                Argument::new(None, None, primitive_expr.clone()),
+                Argument::new(None, None, int_expr.clone()),
                 Argument::new(None, None, Expr::Op(Op::UnOp(buf_var_address))),
             ],
             None,
             None,
         );
-        primitive_to_string_view_call.is_method = true;
-        primitive_to_string_view_call.method_adt = Some(primitive_type_id);
-        primitive_to_string_view_call.ret_type = Some(type_id_string_view(
-            &mut self.analyze_ctx.ty_env.lock(),
-            file_pos,
-        )?);
+        int_to_string_view_call.is_method = true;
+        int_to_string_view_call.method_adt = Some(primitive_type_id);
+        int_to_string_view_call.ret_type = Some(type_id_string_view(&mut ty_env_guard, file_pos)?);
 
-        Ok(Expr::FnCall(primitive_to_string_view_call))
+        Ok(Expr::FnCall(int_to_string_view_call))
+    }
+
+    /// The given `inner_ty` MUST be a boolean type.
+    fn bool_to_string_view(
+        &mut self,
+        bool_expr: &Expr,
+        file_pos: Option<FilePosition>,
+        inner_ty: &InnerTy,
+        var_name: String,
+    ) -> LangResult<Expr> {
+        let mut ty_env_guard = self.analyze_ctx.ty_env.lock();
+
+        if !inner_ty.is_bool() {
+            unreachable!("bad type in int_to_string_view: {:#?}", bool_expr);
+        }
+
+        let bool_type_id = ty_env_guard.id(&Ty::CompoundType(
+            InnerTy::Boolean,
+            TypeInfo::DefaultOpt(file_pos),
+        ))?;
+        let bool_ptr_type_id =
+            ty_env_guard.id(&Ty::Pointer(bool_type_id, TypeInfo::DefaultOpt(file_pos)))?;
+
+        let bool_adt_type_id = ty_env_guard.id(&Ty::CompoundType(
+            InnerTy::Struct(inner_ty.get_primitive_ident().into()),
+            TypeInfo::DefaultOpt(file_pos),
+        ))?;
+
+        // TODO: Fix this ugly hack.
+        // Since `AsView` takes a pointer to the value that it converts to a view,
+        // we need to temporarily allocate the bool in a variable so that we can
+        // get a pointer to it.
+        let var = Arc::new(RwLock::new(Var::new(
+            var_name.clone(),
+            Some(bool_type_id),
+            None,
+            Some(Box::new(bool_expr.clone())),
+            None,
+            None,
+            false,
+        )));
+        let mut var_decl = Stmt::VariableDecl(Arc::clone(&var), None);
+
+        let var_key = (var_name, self.cur_block_id);
+        self.analyze_ctx
+            .ast_ctx
+            .variables
+            .insert(var_key, Arc::clone(&var));
+
+        std::mem::drop(ty_env_guard);
+
+        self.compile_stmt(&mut var_decl)?;
+
+        let mut ty_env_guard = self.analyze_ctx.ty_env.lock();
+
+        let mut var_address = UnOp::new(
+            UnOperator::Address,
+            Box::new(Expr::Var(var.read().clone())),
+            None,
+        );
+        var_address.ret_type = Some(bool_ptr_type_id);
+
+        let mut bool_to_string_view_call = FnCall::new(
+            "as_view".into(),
+            "".into(),
+            vec![Argument::new(
+                Some("this".into()),
+                None,
+                Expr::Op(Op::UnOp(var_address)),
+            )],
+            None,
+            None,
+        );
+        bool_to_string_view_call.is_method = true;
+        bool_to_string_view_call.method_adt = Some(bool_adt_type_id);
+        bool_to_string_view_call.ret_type = Some(type_id_string_view(&mut ty_env_guard, file_pos)?);
+
+        Ok(Expr::FnCall(bool_to_string_view_call))
     }
 }
 
