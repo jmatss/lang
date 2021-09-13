@@ -1,7 +1,6 @@
 use std::Eq
 use std::Hash
 use std::collection::Map
-use std::primitive::hash
 
 pub struct TestStruct {
     var x: u32
@@ -9,7 +8,7 @@ pub struct TestStruct {
 
 impl TestStruct: Hash {
     pub fn this hash() -> u32 {
-        return hash(this.x)
+        return this.x.hash()
     }
 }
 
