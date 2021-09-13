@@ -142,7 +142,7 @@ pub struct Adt {
     pub enum_ty: Option<TypeId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AdtKind {
     Struct,
     Union,

@@ -6,7 +6,11 @@ use common::{
     },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
     ty::{
-        generics::Generics, inner_ty::InnerTy, to_string::to_string_path, ty::Ty, ty_env::TyEnv,
+        generics::Generics,
+        get::{get_gens, get_ident},
+        to_string::to_string_path,
+        ty::Ty,
+        ty_env::TyEnv,
         type_id::TypeId,
     },
 };
@@ -298,23 +302,26 @@ impl<'a> Visitor for FuncGenericsReplacer<'a> {
 /// inside a "CompoundType" into "Generic"s.
 fn replace_gens(ty_env: &mut TyEnv, id: TypeId, generics: &Generics) -> LangResult<()> {
     match ty_env.ty(id)?.clone() {
-        Ty::CompoundType(InnerTy::UnknownIdent(path, ..), type_info) => {
-            if let Some(gens) = path.gens() {
+        Ty::CompoundType(inner_ty, type_info) => {
+            if let Some(gens) = get_gens(ty_env, id)?.cloned() {
                 for gen_type_id in gens.iter_types() {
                     replace_gens(ty_env, *gen_type_id, generics)?;
                 }
             }
 
-            if path.count() == 1 {
-                let possible_gen_name = path.first().unwrap().name();
-                for gen_name in generics.iter_names() {
-                    if gen_name == possible_gen_name {
-                        let new_ty = Ty::Generic(
-                            possible_gen_name.into(),
-                            ty_env.new_unique_id(),
-                            type_info.clone(),
-                        );
-                        ty_env.update(id, new_ty)?;
+            if inner_ty.is_unknown_ident() {
+                let path = get_ident(ty_env, id)?.unwrap();
+                if path.count() == 1 {
+                    let possible_gen_name = path.first().unwrap().name();
+                    for gen_name in generics.iter_names() {
+                        if gen_name == possible_gen_name {
+                            let new_ty = Ty::Generic(
+                                possible_gen_name.into(),
+                                ty_env.new_unique_id(),
+                                type_info.clone(),
+                            );
+                            ty_env.update(id, new_ty)?;
+                        }
                     }
                 }
             }

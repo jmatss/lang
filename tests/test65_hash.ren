@@ -1,4 +1,6 @@
+use std::Eq
 use std::Hash
+use std::collection::Map
 use std::primitive::hash
 
 pub struct TestStruct {
@@ -11,16 +13,83 @@ impl TestStruct: Hash {
     }
 }
 
+impl TestStruct: Eq<TestStruct> {
+    pub fn this eq(other: TestStruct) -> bool {
+        return this.x == other.x
+    }
+}
+
+fn is_power_of_two(n: u32) -> bool {
+    return n != 0 and (n & (n - 1)) == 0
+}
+
 fn main() -> i32 {
-    var x: u8  = 1
-    var y: u32 = 2
-    var z: i64 = 3
+    const x: u8  = 1
+    const y: u32 = 2
+    const z: i64 = 3
 
-    var x_hash = x.hash()
-    var y_hash = y.hash()
-    var z_hash = z.hash()
+    const x_hash = x.hash()
+    const y_hash = y.hash()
+    const z_hash = z.hash()
 
-    printf(c"x_hash: %d, y_hash: %d, z_hash: %d", x_hash, y_hash, z_hash)
+    // TODO: Make `std::io::print` take a generic that implements `AsView`.
+    std::io::print(@format("x_hash: {}, y_hash: {}, z_hash: {}", x_hash, y_hash, z_hash).as_view())
+
+
+    var map_or_error = Map::init(2)
+    std::assert(map_or_error.is_success())
+    var map = map_or_error.get_success()
+
+    const key1 = TestStruct { 1 }
+    const value1 = "VALUE_1"
+    const key2 = TestStruct { 2 }
+    const value2 = "VALUE_2"
+
+    var insert1_or_error = map.insert(key1, value1)
+    std::assert(insert1_or_error.is_success())
+
+    var insert2_or_error = map.insert(key2, value2)
+    std::assert(insert2_or_error.is_success())
+
+    std::io::print(@format("map.len(): {}, map.cap(): {}", map.len(), map.cap()).as_view())
+    std::assert(map.len() == 2 and map.cap() == 2)
+
+
+    var value1_or_empty = map.get(key1)
+    std::assert(value1_or_empty.has_value())
+    std::assert(value1_or_empty.get() == value1)
+
+    var value2_or_empty = map.get(key2)
+    std::assert(value2_or_empty.has_value())
+    std::assert(value2_or_empty.get() == value2)
+
+
+    // len should not increase if an item is replaced.
+    var insert1_again_or_error = map.insert(key1, value2)
+    std::assert(insert1_again_or_error.is_success())
+    std::assert(map.len() == 2)
+
+    var value1_new_or_empty = map.get(key1)
+    std::assert(value1_new_or_empty.has_value())
+    std::assert(value1_new_or_empty.get() == value2)
+
+
+    const key3 = TestStruct { 3 }
+    const value3 = "VALUE_3"
+
+    var insert3_or_error = map.insert(key3, value3)
+    std::assert(insert3_or_error.is_success())
+
+    std::io::print(@format("map.len(): {}, map.cap(): {}", map.len(), map.cap()).as_view())
+    std::assert(map.len() == 3 and is_power_of_two(map.cap()))
+
+
+    var value3_or_empty = map.remove(key3)
+    std::assert(value3_or_empty.has_value())
+    std::assert(value3_or_empty.get() == value3)
+
+    std::io::print(@format("map.len(): {}, map.len_removed: {}", map.len(), map.len_removed).as_view())
+    std::assert(map.len() == 2 and map.len_removed == 1)
 
     return 0
 }

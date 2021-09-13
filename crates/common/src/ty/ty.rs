@@ -129,12 +129,14 @@ impl TyEnvHash for Ty {
                 4.hash(state);
                 unique_id.hash(state);
             }
-            Ty::Generic(_, unique_id, _) => {
+            Ty::Generic(ident, unique_id, _) => {
                 5.hash(state);
+                ident.hash(state);
                 unique_id.hash(state);
             }
-            Ty::GenericInstance(_, unique_id, _) => {
+            Ty::GenericInstance(ident, unique_id, _) => {
                 6.hash(state);
+                ident.hash(state);
                 unique_id.hash(state);
             }
             Ty::Expr(expr, _) => {

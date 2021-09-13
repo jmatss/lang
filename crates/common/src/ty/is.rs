@@ -126,10 +126,12 @@ pub fn is_solved(
     };
 
     let inf_type_id = ty_env.inferred_type(type_id)?;
-    if !check_inf || type_id == inf_type_id {
-        Ok(is_solved_bool)
-    } else {
+    if is_solved_bool {
+        Ok(true)
+    } else if check_inf && type_id != inf_type_id {
         is_solved(ty_env, inf_type_id, true, solve_cond)
+    } else {
+        Ok(false)
     }
 }
 

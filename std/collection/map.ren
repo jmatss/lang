@@ -8,17 +8,25 @@ use std::mem::Allocator
 use std::mem::Disposable
 use std::string::StringView
 
+ext fn printf(f: {u8}, ...)
+
 /// Represents a hash map.
 ///
 /// Uses quadratic probing to handle collisions. The size of the underlying
-/// array will always be a power of 2. This property allows us to the triangular
+/// array will always be a power of 2. This property allows us to use triangular
 /// numbers to be able to hit all entries in the map when probing for a
 /// free spot (not limitied to 0.5 load factor).
 pub struct Map<K: Hash Eq<K>, V> {
+    /// A pointer to the allocated memory.
     var ptr: {Entry<K, V>}
+    /// The amount of entries currently "alive" inside the map.
     var len: u32
+    /// The amount of entries removed from the current map.
+    /// These take up slots in the map, but new items can take their place.
     var len_removed: u32
+    /// The amount of maximum entries that can fit in the current memory allocation.
     var cap: u32
+    /// The load factor at which the map should be resized.
     var load_factor: f64
 
     /// Allocates a new Map with a initial capacity of `cap` items.
@@ -28,17 +36,17 @@ pub struct Map<K: Hash Eq<K>, V> {
     /// the first use of the map. The capacity will be set to 16.
     pub fn init(cap: u32 = 0) -> Result<Map<K, V>, StringView> {
         const load_factor = 0.75
-        const map = Map { @null(), 0, 0, 0, load_factor }
+        var map = Map { @null(), 0, 0, 0, load_factor }
 
         if cap == 0 {
             return Result::success(map)
         }
 
-        if not this::is_power_of_two(cap) {
+        if not is_power_of_two(cap) {
             return Result::error("Given Map capacity not power of two")
         }
 
-        const ptr_or_error = map.resize_and_move(cap)
+        var ptr_or_error = map.resize_and_move(cap)
         if error is ptr_or_error.error {
             return Result::error(error)
         } else {
@@ -52,9 +60,19 @@ pub struct Map<K: Hash Eq<K>, V> {
     /// an error will be returned.
     pub fn {this} insert(key: K, value: V) -> Result<u32, StringView> {
         const new_entry = Entry { key, value, key.hash(), EntryState::TAKEN }
-        return this.insert_entry(new_entry)
+
+        // If an item with the key `key` already exists, replace that item.
+        var idx_or_empty = this.find_taken(key)
+        if idx is idx_or_empty.value {
+            var old_entry_ptr = @ptr_add(this.ptr, idx)
+            old_entry_ptr.* = new_entry
+            return Result::success(0)
+        } else {
+            return this.insert_entry(new_entry)
+        }
     }
 
+    /// Inserts a new entry into the map and resizes the map if needed.
     fn {this} insert_entry(new_entry: Entry<K, V>) -> Result<u32, StringView> {
         var cur_factor
         if this.cap() == 0 {
@@ -72,7 +90,7 @@ pub struct Map<K: Hash Eq<K>, V> {
         }
 
         const idx = this.find_to_insert(new_entry.key)
-        const old_entry_ptr = @ptr_add(this.ptr, idx)
+        var old_entry_ptr = @ptr_add(this.ptr, idx)
         old_entry_ptr.* = new_entry
 
         this.len.++
@@ -86,9 +104,9 @@ pub struct Map<K: Hash Eq<K>, V> {
             return Optional::empty()
         }
 
-        const idx_or_empty = this.find_taken(key)
+        var idx_or_empty = this.find_taken(key)
         if idx is idx_or_empty.value {
-            const entry_ptr = @ptr_add(this.ptr, idx)
+            var entry_ptr = @ptr_add(this.ptr, idx)
             entry_ptr.state = EntryState::REMOVED
 
             this.len.--
@@ -107,9 +125,9 @@ pub struct Map<K: Hash Eq<K>, V> {
             return Optional::empty()
         }
 
-        const idx_or_empty = this.find_taken(key)
+        var idx_or_empty = this.find_taken(key)
         if idx is idx_or_empty.value {
-            const entry_ptr = @ptr_add(this.ptr, idx)
+            var entry_ptr = @ptr_add(this.ptr, idx)
             return Optional::value(entry_ptr.value)
         } else {
             return Optional::empty()
@@ -128,17 +146,17 @@ pub struct Map<K: Hash Eq<K>, V> {
     ///
     /// If unable to find an entry with that key, Optional::empty() is returned.
     fn {this} find_taken(key: K) -> Optional<u32> {
-        const len = this.len()
-        var idx = key.hash() % this.cap
+        const cap = this.cap()
+        var idx = key.hash() % cap
         var entry_found = false
         var step_size = 0
 
-        while step_size < len {
+        while step_size < cap {
             idx += step_size
-            idx %= len
+            idx %= cap
             step_size.++
 
-            const entry = @ptr_add(this.ptr, idx).*
+            var entry = @ptr_add(this.ptr, idx).*
             match entry.state {
                 EntryState::EMPTY {
                     break
@@ -150,8 +168,6 @@ pub struct Map<K: Hash Eq<K>, V> {
                     if entry.key == key {
                         entry_found = true
                         break
-                    } else {
-                        continue
                     }
                 }
             }
@@ -169,16 +185,16 @@ pub struct Map<K: Hash Eq<K>, V> {
     /// Before calling this function, the underlying array should have been resized
     /// so that it contains atleast one free spot.
     fn {this} find_to_insert(key: K) -> u32 {
-        const len = this.len()
-        var idx = key.hash() % this.cap
+        const cap = this.cap()
+        var idx = key.hash() % cap
         var step_size = 0
 
-        while true {
+        while true {       
             idx += step_size
-            idx %= len
+            idx %= cap
             step_size.++
 
-            const entry = @ptr_add(this.ptr, idx).*
+            var entry = @ptr_add(this.ptr, idx).*
             if entry.state == EntryState::EMPTY or
                entry.state == EntryState::REMOVED or
                (entry.state == EntryState::TAKEN and entry.key == key)
@@ -193,7 +209,7 @@ pub struct Map<K: Hash Eq<K>, V> {
             //     map if it is full.
             // We should therefore always exit out of this loop before this
             // condition is broken.
-            std::assert(step_size <= len)
+            std::assert(step_size <= cap)
         }
 
         return idx
@@ -212,7 +228,7 @@ pub struct Map<K: Hash Eq<K>, V> {
             new_cap = 16
         }
 
-        std::assert(this::is_power_of_two(new_cap))
+        std::assert(is_power_of_two(new_cap))
 
         const size = new_cap * @size<Entry<K, V>>()
         var new_ptr_or_error = Allocator::init_size(size)
@@ -220,10 +236,10 @@ pub struct Map<K: Hash Eq<K>, V> {
             return Result::error(err)
         }
 
-        const new_ptr = new_ptr_or_error.get_success()
+        var new_ptr = new_ptr_or_error.get_success()
         Allocator::zero(new_ptr, size)
 
-        const old_ptr = this.ptr
+        var old_ptr = this.ptr
         const old_len = this.len
         const old_cap = this.cap
 
@@ -235,7 +251,7 @@ pub struct Map<K: Hash Eq<K>, V> {
         var moved_count = 0
         var idx = 0
         while idx < old_cap and moved_count < old_len {
-            const entry = @ptr_add(old_ptr, idx).*
+            var entry = @ptr_add(old_ptr, idx).*
             if entry.state == EntryState::TAKEN {
                 this.insert_entry(entry)
                 moved_count.++
@@ -246,10 +262,10 @@ pub struct Map<K: Hash Eq<K>, V> {
         Allocator::deinit(old_ptr)
         return Result::success(0)
     }
+}
 
-    fn is_power_of_two(n: u32) -> bool {
-        return n != 0 and (n & (n - 1)) == 0
-    }
+fn is_power_of_two(n: u32) -> bool {
+    return n != 0 and (n & (n - 1)) == 0
 }
 
 impl Map: Disposable {
@@ -262,23 +278,23 @@ impl Map: Disposable {
 }
 
 /// Represents an entry in this map.
-struct Entry<K, V> {
+pub struct Entry<K, V> {
     var key: K
     var value: V
     var hash: u32
     var state: EntryState
 }
 
-enum EntryState {
+pub enum EntryState {
     /// Indicates that the entry is empty/null.
     /// The map will zero-initialize all the underlying memory on allocation,
     /// so this will be the default state of all entries in the map.
     EMPTY
 
-    /// Indicates that a entry is in use.
+    /// Indicates that the entry is in use.
     TAKEN
 
-    /// Indicates that a entry has been removed. Any values it contains should
+    /// Indicates that the entry has been removed. Any values it contains should
     /// be ignored and this entry can be overwritten with a new value.
     REMOVED
 }

@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
-use parking_lot::Mutex;
-
 use log::debug;
+use parking_lot::Mutex;
 
 use common::{
     ctx::block_ctx::BlockCtx,

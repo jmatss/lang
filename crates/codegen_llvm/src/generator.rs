@@ -352,12 +352,24 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         if let Some(var_ptr) = self.variables.get(&key) {
             Ok(*var_ptr)
+        } else if self.constants.get(&key).is_some() {
+            Err(self.err(
+                format!(
+                    "Tried to get pointer to the constant with name \"{}\" in decl block ID {}. \
+                    Currently this is not allowed and the constant needs to be changed to \
+                    a variable (use the `var` keyword instead of `const`) in the code. \
+                    In the future, support for this will be implemented.",
+                    &var.full_name(),
+                    decl_block_id,
+                ),
+                var.file_pos.to_owned(),
+            ))
         } else {
             Err(self.err(
                 format!(
                     "Unable to find ptr for variable \"{}\" in decl block ID {}.",
                     &var.full_name(),
-                    decl_block_id
+                    decl_block_id,
                 ),
                 var.file_pos.to_owned(),
             ))

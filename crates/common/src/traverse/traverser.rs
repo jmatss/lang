@@ -189,7 +189,6 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                     *func = Arc::new(RwLock::new(new_func));
                 }
 
-                // TODO: Iterate through the `generics`.
                 if let Some(params) = &mut func.write().parameters {
                     for param in params {
                         if let Some(type_id) = &mut param.write().ty {
@@ -216,6 +215,19 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                 if let Some(generic_impls) = &mut func.write().generics {
                     for ty in generic_impls.iter_types_mut() {
                         self.traverse_type(ty);
+                    }
+                }
+
+                // Traverse the potential types declared on the traits.
+                if let Some(impls) = &mut func.write().implements {
+                    for trait_paths in impls.values_mut() {
+                        for trait_path in trait_paths {
+                            if let Some(gens) = trait_path.gens_mut() {
+                                for type_id in gens.iter_types_mut() {
+                                    self.traverse_type(type_id);
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -247,14 +259,7 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                     *struct_ = Arc::new(RwLock::new(new_struct));
                 }
 
-                // TODO: Visit `implements`?
                 for member in struct_.write().members.iter_mut() {
-                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                        let mut new_member = member.read().clone();
-                        new_member.set_copy_nr(deep_copy_nr);
-                        *member = Arc::new(RwLock::new(new_member));
-                    }
-
                     if let Some(ty) = &mut member.write().ty {
                         self.traverse_type(ty);
                     }
@@ -269,16 +274,12 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                     }
                 }
 
+                // Traverse the potential types declared on the traits.
                 if let Some(impls) = &mut struct_.write().implements {
-                    for paths in impls.values_mut() {
-                        for path in paths {
-                            if let Some(gens) =
-                                path.last_mut().map(|part| part.1.as_mut()).flatten()
-                            {
+                    for trait_paths in impls.values_mut() {
+                        for trait_path in trait_paths {
+                            if let Some(gens) = trait_path.gens_mut() {
                                 for type_id in gens.iter_types_mut() {
-                                    if self.ctx.stop {
-                                        return;
-                                    }
                                     self.traverse_type(type_id);
                                 }
                             }
@@ -334,12 +335,6 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                 }
 
                 for member in union.write().members.iter_mut() {
-                    if let Some(deep_copy_nr) = self.ctx.copy_nr {
-                        let mut new_member = member.read().clone();
-                        new_member.set_copy_nr(deep_copy_nr);
-                        *member = Arc::new(RwLock::new(new_member));
-                    }
-
                     if let Some(ty) = &mut member.write().ty {
                         self.traverse_type(ty);
                     }
@@ -354,16 +349,12 @@ impl<'a, 'ctx, V: Visitor> AstTraverser<'a, 'ctx, V> {
                     }
                 }
 
+                // Traverse the potential types declared on the traits.
                 if let Some(impls) = &mut union.write().implements {
-                    for paths in impls.values_mut() {
-                        for path in paths {
-                            if let Some(gens) =
-                                path.last_mut().map(|part| part.1.as_mut()).flatten()
-                            {
+                    for trait_paths in impls.values_mut() {
+                        for trait_path in trait_paths {
+                            if let Some(gens) = trait_path.gens_mut() {
                                 for type_id in gens.iter_types_mut() {
-                                    if self.ctx.stop {
-                                        return;
-                                    }
                                     self.traverse_type(type_id);
                                 }
                             }

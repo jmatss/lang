@@ -212,12 +212,13 @@ impl Visitor for DeclFnAnalyzer {
             _ => return,
         };
 
-        let inner_ty = {
+        let (file_pos, inner_ty) = {
             if let Ok(full_path) =
                 ctx.ast_ctx
                     .calculate_adt_full_path(&ty_env_guard, &path_without_gens, ctx.block_id)
             {
-                if ctx.ast_ctx.is_struct(&ty_env_guard, &full_path) {
+                let file_pos = full_path.file_pos;
+                let inner_ty = if ctx.ast_ctx.is_struct(&ty_env_guard, &full_path) {
                     InnerTy::Struct(full_path)
                 } else if ctx.ast_ctx.is_enum(&ty_env_guard, &full_path) {
                     InnerTy::Enum(full_path)
@@ -225,13 +226,14 @@ impl Visitor for DeclFnAnalyzer {
                     InnerTy::Union(full_path)
                 } else {
                     unreachable!("full_path: {:#?}", full_path);
-                }
+                };
+                (file_pos, inner_ty)
             } else if let Ok(full_path) = ctx.ast_ctx.calculate_trait_full_path(
                 &ty_env_guard,
                 &path_without_gens,
                 ctx.block_id,
             ) {
-                InnerTy::Trait(full_path)
+                (full_path.file_pos, InnerTy::Trait(full_path))
             } else {
                 let err = ctx.ast_ctx.err_adt(
                     &ty_env_guard,
@@ -246,13 +248,14 @@ impl Visitor for DeclFnAnalyzer {
             }
         };
 
-        let adt_type_id = match ty_env_guard.id(&Ty::CompoundType(inner_ty, TypeInfo::None)) {
-            Ok(adt_type_id) => adt_type_id,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
+        let adt_type_id =
+            match ty_env_guard.id(&Ty::CompoundType(inner_ty, TypeInfo::DefaultOpt(file_pos))) {
+                Ok(adt_type_id) => adt_type_id,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
 
         for body_token in body {
             if body_token.is_skippable() {

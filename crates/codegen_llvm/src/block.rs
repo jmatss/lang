@@ -1062,6 +1062,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         self.builder.build_unconditional_branch(while_branch_block);
 
         // If expression is NOT set, treat this as a infinite while loop.
+        self.cur_basic_block = Some(while_branch_block);
         self.builder.position_at_end(while_branch_block);
         if let Some(ref mut expr) = expr_opt {
             let value = self.compile_expr(expr, ExprTy::RValue)?;

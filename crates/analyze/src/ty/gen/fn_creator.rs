@@ -200,7 +200,7 @@ impl GenericFnCreator {
                     .unwrap_or(false);
                 let contains_gens_impl = self
                     .generic_methods
-                    .get(&ctx.ty_env.lock(), DerefType::Deep, &adt_path_without_gens)
+                    .get(&ctx.ty_env.lock(), DerefType::Deep, adt_path_without_gens)
                     .ok()
                     .flatten()
                     .map(|impls| impls.contains_key(&method.read().name))
@@ -209,7 +209,7 @@ impl GenericFnCreator {
                 if contains_gens_decl && !contains_gens_impl {
                     ctx.ast_ctx.remove_method(
                         &ctx.ty_env.lock(),
-                        &adt_path_without_gens,
+                        adt_path_without_gens,
                         &method.read().name,
                     )?;
                     body.remove(idx);

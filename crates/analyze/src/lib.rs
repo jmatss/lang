@@ -44,10 +44,10 @@ use crate::{
     pre::signed_literals::SignedLiteralsAnalyzer,
     ty::{
         gen::{
-            adt_collector::GenericAdtCollector, adt_creator::GenericAdtCreator,
-            fn_collector::GenericFnCollector, fn_creator::GenericFnCreator,
-            method_check::MethodGensCheck, method_gens::MethodGensInferencer,
-            tys_solved::GenericTysSolvedChecker,
+            adt_creator::GenericAdtCreator, collector::GenericCollector,
+            fn_creator::GenericFnCreator, method_check::MethodGensCheck,
+            method_gens::MethodGensInferencer, nested_collector::GenericNestedCollector,
+            nested_converter::GenericNestedConverter, tys_solved::GenericTysSolvedChecker,
         },
         inf::primitive_to_adt::PrimitiveToAdtAnalyzer,
         solve::solve_type_system,
@@ -155,30 +155,40 @@ pub fn analyze<'a>(
     let mut dep_order_rev = dependency_order_from_ctx(&mut ctx, ast_root, incl_impls, full_paths)?;
     dep_order_rev.reverse();
 
-    let fn_collector = traverse!(
-        &mut ctx,
-        ast_root,
-        quiet,
-        GenericFnCollector::new(&dep_order_rev)
+    let gen_collector = traverse!(&mut ctx, ast_root, quiet, GenericCollector::new());
+    let nested_gen_collector = traverse!(&mut ctx, ast_root, quiet, GenericNestedCollector::new());
+
+    let nested_generic_adts = nested_gen_collector.nested_generic_adts;
+    let nested_generic_fns = nested_gen_collector.nested_generic_fns;
+    let mut generic_adts = gen_collector.generic_adts;
+    let mut generic_methods = gen_collector.generic_methods;
+    let mut generic_fns = gen_collector.generic_fns;
+
+    let mut nested_gen_converter = GenericNestedConverter::new(
+        &dep_order_rev,
+        &mut generic_adts,
+        &mut generic_methods,
+        &mut generic_fns,
     );
+    nested_gen_converter
+        .convert_nested_fns(&mut ctx, &nested_generic_fns)
+        .map_err(|err| vec![err])?;
+    nested_gen_converter
+        .convert_nested_adts(&mut ctx, &nested_generic_adts)
+        .map_err(|err| vec![err])?;
+
     traverse!(
         &mut ctx,
         ast_root,
         quiet,
-        GenericFnCreator::new(fn_collector.generic_methods, fn_collector.generic_fns)
+        GenericFnCreator::new(generic_methods, generic_fns)
     );
 
-    let adt_collector = traverse!(
-        &mut ctx,
-        ast_root,
-        quiet,
-        GenericAdtCollector::new(&dep_order_rev)
-    );
     traverse!(
         &mut ctx,
         ast_root,
         quiet,
-        GenericAdtCreator::new(adt_collector.generic_adts)
+        GenericAdtCreator::new(generic_adts)
     );
 
     traverse!(&mut ctx, ast_root, quiet, GenericTysSolvedChecker::new());

@@ -74,12 +74,6 @@ fn solve_types_ids(ctx: &mut TraverseCtx, all_type_ids: HashSet<TypeId>) -> Lang
         unsolved.push_back(*type_id);
     }
 
-    // A set used for fast-lookups to see if a specific type ID is solved or not.
-    //
-    // The items in this set should be an exact copy of the items in the
-    // `unsolved` queue.
-    let mut unsolved_lookup = all_type_ids;
-
     // Keeps a count of how many types have been traversed without solving a
     // single one. If this counts up to `unsolved.len()`, we have traversed the
     // whole list without solving any.
@@ -115,14 +109,12 @@ fn solve_types_ids(ctx: &mut TraverseCtx, all_type_ids: HashSet<TypeId>) -> Lang
             // inserted into the `new_type_ids`. They might have to be solved.
             for new_type_id in ty_env_guard.new_type_ids.drain() {
                 unsolved.push_back(new_type_id);
-                unsolved_lookup.insert(new_type_id);
             }
 
             let check_inf = true;
             if is_solved(&ty_env_guard, inf_type_id, check_inf, solve_cond)?
                 && nested_is_solved(&ty_env_guard, type_id, check_inf, solve_cond)?
             {
-                unsolved_lookup.remove(&type_id);
                 iter_count = 0;
             } else {
                 unsolved.push_back(type_id);
@@ -1192,9 +1184,7 @@ fn collect_gen_type_id(
 /// If the given type `ty` contains generics that don't have their "names"
 /// set, this function will fetch the structure and set the names if possible.
 pub fn set_generic_names(ty_env: &mut TyEnv, ast_ctx: &AstCtx, type_id: TypeId) -> LangResult<()> {
-    let ty_clone = ty_env.ty_clone(type_id)?;
-
-    let inner_ty = match ty_clone {
+    let inner_ty = match ty_env.ty_clone(type_id)? {
         Ty::CompoundType(inner_ty, ..) => inner_ty,
         Ty::Pointer(type_id_i, ..) | Ty::Array(type_id_i, ..) => {
             return set_generic_names(ty_env, ast_ctx, type_id_i);

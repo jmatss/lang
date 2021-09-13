@@ -1082,18 +1082,18 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // TODO: Const.
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
-                if let Some(cur_basic_block) = self.cur_basic_block {
+                if let Some(start_basic_block) = self.cur_basic_block {
                     // The eval block is to evaluate the rhs only if the lhs
                     // evaluates to true to allow for short circuit.
                     let eval_block = self
                         .context
-                        .insert_basic_block_after(cur_basic_block, "bool.and.rhs");
+                        .insert_basic_block_after(start_basic_block, "bool.and.rhs");
                     let phi_block = self
                         .context
                         .insert_basic_block_after(eval_block, "bool.and.merge");
 
                     // The old `cur_basic_block` will be used as a branch block.
-                    self.builder.position_at_end(cur_basic_block);
+                    self.builder.position_at_end(start_basic_block);
                     self.builder.build_conditional_branch(
                         left.into_int_value(),
                         eval_block,
@@ -1103,6 +1103,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     // TODO: Must be a better way to do this branch. Currently
                     //       this eval block only exists to compile the expr and
                     //       then jump into a phi-block.
+                    self.cur_basic_block = Some(eval_block);
                     self.builder.position_at_end(eval_block);
                     let right = self.compile_expr(right_expr, ExprTy::RValue)?;
                     self.builder.build_unconditional_branch(phi_block);
@@ -1113,8 +1114,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     self.builder.position_at_end(phi_block);
                     let phi_val = self.builder.build_phi(bool_type, "bool.and.phi");
                     phi_val.add_incoming(&[
-                        (&false_val, cur_basic_block),
-                        (&right.into_int_value(), eval_block),
+                        (&false_val, start_basic_block),
+                        (&right.into_int_value(), self.cur_basic_block.unwrap()),
                     ]);
 
                     self.cur_basic_block = Some(phi_block);
@@ -1150,18 +1151,18 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // TODO: Const.
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
-                if let Some(cur_basic_block) = self.cur_basic_block {
+                if let Some(start_basic_block) = self.cur_basic_block {
                     // The eval block is to evaluate the rhs only if the lhs
                     // evaluates to false to allow for short circuit.
                     let eval_block = self
                         .context
-                        .insert_basic_block_after(cur_basic_block, "bool.or.rhs");
+                        .insert_basic_block_after(start_basic_block, "bool.or.rhs");
                     let phi_block = self
                         .context
                         .insert_basic_block_after(eval_block, "bool.or.merge");
 
                     // The old "if.case" will be used as a branch block.
-                    self.builder.position_at_end(cur_basic_block);
+                    self.builder.position_at_end(start_basic_block);
                     self.builder.build_conditional_branch(
                         left.into_int_value(),
                         phi_block,
@@ -1171,6 +1172,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     // TODO: Must be a better way to do this branch. Currently
                     //       this eval block only exists to compile the expr and
                     //       then jump into a phi-block.
+                    self.cur_basic_block = Some(eval_block);
                     self.builder.position_at_end(eval_block);
                     let right = self.compile_expr(right_expr, ExprTy::RValue)?;
                     self.builder.build_unconditional_branch(phi_block);
@@ -1181,8 +1183,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     self.builder.position_at_end(phi_block);
                     let phi_val = self.builder.build_phi(bool_type, "bool.or.phi");
                     phi_val.add_incoming(&[
-                        (&true_val, cur_basic_block),
-                        (&right.into_int_value(), eval_block),
+                        (&true_val, start_basic_block),
+                        (&right.into_int_value(), self.cur_basic_block.unwrap()),
                     ]);
 
                     self.cur_basic_block = Some(phi_block);
@@ -1217,17 +1219,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         un_op.is_const = CodeGen::is_const(&[any_value]);
 
         if any_value.is_pointer_value() {
-            // TODO: Find better way to do this.
-            // Edge case if this is a pointer value containing a struct value.
-            // Struct values should ALWAYS be wrapped in a pointer, otherwise
-            // the members can't be accessed. Prevent deref of the pointer if
-            // this is the case.
             let ptr = any_value.into_pointer_value();
-            if let AnyTypeEnum::StructType(_) = ptr.get_type().get_element_type() {
-                Ok(any_value)
-            } else {
-                Ok(self.builder.build_load(ptr, "deref").into())
-            }
+            Ok(self.builder.build_load(ptr, "deref").into())
         } else {
             Err(self.err(
                 format!("Tried to deref non pointer type expr: {:?}", un_op),
@@ -1320,11 +1313,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let sign_extend = false;
         let zero = self.context.i32_type().const_int(0, sign_extend);
 
-        let tmp = Ok(unsafe {
+        Ok(unsafe {
             self.builder
                 .build_gep(ptr, &[zero, compiled_dim.into_int_value()], "array.gep")
-        });
-        tmp
+        })
     }
 
     /// This function accessed the member at index `idx_opt` for the ADT in

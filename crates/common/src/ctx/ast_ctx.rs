@@ -349,11 +349,10 @@ impl AstCtx {
             Ok(Arc::clone(item))
         } else {
             Err(self.err(format!(
-                "Unable to find decl with name \"{}\" ({:#?}) in block ID {}.\nMap keys:\n{:#?}",
+                "Unable to find decl with name \"{}\" ({:#?}) in block ID {}.",
                 to_string_path(ty_env, path),
                 path,
                 decl_block_id,
-                map.keys(),
             )))
         }
     }
@@ -753,6 +752,7 @@ impl AstCtx {
                 .collect::<Vec<_>>()
                 .join("\n - ");
             err_msg.push_str(&suggestions);
+            err_msg.push_str("\nHave you forgotten a `use` statement?");
         }
 
         self.err(err_msg)
@@ -783,6 +783,7 @@ impl AstCtx {
                 .collect::<Vec<_>>()
                 .join("\n - ");
             err_msg.push_str(&suggestions);
+            err_msg.push_str("\nHave you forgotten a `use` statement?");
         }
 
         self.err(err_msg)
@@ -813,6 +814,7 @@ impl AstCtx {
                 .collect::<Vec<_>>()
                 .join("\n - ");
             err_msg.push_str(&suggestions);
+            err_msg.push_str("\nHave you forgotten a `use` statement?");
         }
 
         self.err(err_msg)

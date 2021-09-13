@@ -31,8 +31,10 @@ impl Visitor for ExtStructInit {
     }
 
     fn visit_adt_init(&mut self, adt_init: &mut AdtInit, ctx: &mut TraverseCtx) {
+        let ty_env_guard = ctx.ty_env.lock();
+
         let adt_type_id = adt_init.adt_type_id.unwrap();
-        let adt_path = match get_ident(&ctx.ty_env.lock(), adt_type_id) {
+        let adt_path = match get_ident(&ty_env_guard, adt_type_id) {
             Ok(adt_path_opt) => adt_path_opt.unwrap(),
             Err(err) => {
                 self.errors.push(err);
@@ -40,14 +42,14 @@ impl Visitor for ExtStructInit {
             }
         };
 
-        let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock(), &adt_path) {
+        let adt = match ctx.ast_ctx.get_adt(&ty_env_guard, &adt_path) {
             Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);
                 return;
             }
         };
-        let adt = adt.as_ref().read();
+        let adt = adt.read();
 
         if !adt.has_definition {
             self.errors.push(LangError::new(
@@ -56,7 +58,7 @@ impl Visitor for ExtStructInit {
                     adt.name
                 ),
                 LangErrorKind::AnalyzeError,
-                Some(adt.file_pos),
+                adt_init.file_pos,
             ));
         }
     }

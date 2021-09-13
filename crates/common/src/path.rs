@@ -99,6 +99,10 @@ impl LangPath {
         self.last().map(|part| part.generics().as_ref()).flatten()
     }
 
+    pub fn gens_mut(&mut self) -> Option<&mut Generics> {
+        self.last_mut().map(|part| part.1.as_mut()).flatten()
+    }
+
     /// Creates a new LangPath by appending `other` to the end of the `self` path.
     /// The new path will be set to `resolved`.
     pub fn join(&self, other: &LangPath, file_pos: Option<FilePosition>) -> LangPath {
@@ -139,6 +143,21 @@ impl<const N: usize> From<[LangPathPart; N]> for LangPath {
 }
 
 impl TyEnvHash for LangPath {
+    fn hash_with_state<H: std::hash::Hasher>(
+        &self,
+        ty_env: &TyEnv,
+        deref_type: DerefType,
+        state: &mut H,
+    ) -> LangResult<()> {
+        for (i, part) in self.parts.iter().enumerate() {
+            i.hash(state);
+            part.hash_with_state(ty_env, deref_type, state)?;
+        }
+        Ok(())
+    }
+}
+
+impl TyEnvHash for &LangPath {
     fn hash_with_state<H: std::hash::Hasher>(
         &self,
         ty_env: &TyEnv,

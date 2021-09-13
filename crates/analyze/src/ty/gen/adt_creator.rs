@@ -93,7 +93,7 @@ impl GenericAdtCreator {
             };
 
             for (new_idx, gen_adt_type_id) in generic_adt_tys.iter().enumerate() {
-                set_generic_names(&mut ctx.ty_env.lock(), &ctx.ast_ctx, *gen_adt_type_id)?;
+                set_generic_names(&mut ctx.ty_env.lock(), ctx.ast_ctx, *gen_adt_type_id)?;
 
                 let mut gens = if let Some(gens) = get_gens(&ctx.ty_env.lock(), *gen_adt_type_id)? {
                     gens.clone()
@@ -200,7 +200,7 @@ impl GenericAdtCreator {
 
         if let Some(generic_adt_tys) = generic_adt_tys_res {
             for (new_idx, gen_adt_type_id) in generic_adt_tys.iter().enumerate() {
-                set_generic_names(&mut ctx.ty_env.lock(), &ctx.ast_ctx, *gen_adt_type_id)?;
+                set_generic_names(&mut ctx.ty_env.lock(), ctx.ast_ctx, *gen_adt_type_id)?;
 
                 let mut gens = if let Some(gens) = get_gens(&ctx.ty_env.lock(), *gen_adt_type_id)? {
                     gens.clone()
@@ -388,7 +388,7 @@ impl Visitor for GenericAdtCreator {
                     &adt_path_without_gens,
                     default_body,
                     child_body,
-                    &child_file_pos,
+                    child_file_pos,
                     i,
                     *child_id,
                     BlockCtx::DEFAULT_BLOCK_ID,
