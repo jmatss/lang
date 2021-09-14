@@ -8,8 +8,6 @@ use std::mem::Allocator
 use std::mem::Disposable
 use std::string::StringView
 
-ext fn printf(f: {u8}, ...)
-
 /// Represents a hash map.
 ///
 /// Uses quadratic probing to handle collisions. The size of the underlying
