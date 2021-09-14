@@ -163,8 +163,9 @@ impl Visitor for PathResolver {
             .calculate_fn_full_path(&ty_env_guard, &half_path, ctx.block_id)
         {
             Ok(mut full_path) => {
-                full_path.pop();
+                let name_part = full_path.pop().unwrap();
                 fn_call.module = full_path;
+                fn_call.name = name_part.name().into();
             }
             Err(_) => {
                 let err = ctx.ast_ctx.err_fn(
@@ -194,8 +195,9 @@ impl Visitor for PathResolver {
             .calculate_adt_full_path(&ty_env_guard, &half_path, ctx.block_id)
         {
             Ok(mut full_path) => {
-                full_path.pop();
+                let name_part = full_path.pop().unwrap();
                 adt_init.module = full_path;
+                adt_init.name = name_part.name().into();
             }
             Err(_) => {
                 let err = ctx.ast_ctx.err_adt(

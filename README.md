@@ -486,12 +486,16 @@ struct TestStruct;
 ```
 If one wants to access the `TestStruct` in the example above from a file with another `mod` module, it would have to be accessed with the path `std::name_space::TestStruct`. Any file with the same module would be able to access it as `TestStruct`.
 
-### use `<PATH>`
-Includes the path/namespace/module `PATH` into the current file. The path can represent either a partial path, ADT or function.
+### use `<PATH>` [as `<IDENT>`]
+Includes the path/namespace/module `PATH` into the current file. The path can represent either a partial path, ADT or function. The `as` keywork can be used to give the path a "short-hand" name.
 ```
 use std::assert
 use std::mem
 use std::mem::Allocator
+
+use std::Optional as Opt
+use std::assert as assert_fn
+use std as longer_std
 
 // Doesn't use any `use` statement, full path specified.
 std::assert(true == true)
@@ -504,6 +508,10 @@ std::mem::Allocator::init("msg on heap")
 mem::Allocator::init("msg on heap")
 // Uses the `use std::mem::Allocator` to find the correct path.
 Allocator::init("msg on heap")
+
+Opt::empty()                // => std::Optional::empty()
+assert_fn(true)             // => std::assert(true)
+longer_std::assert(false)   // => std::assert(false)
 ```
 
 ### `return [<EXPRESSION>]`

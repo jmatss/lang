@@ -1,6 +1,6 @@
 use crate::{
-    file::FilePosition, hash::DerefType, hash_set::TyEnvHashSet, path::LangPath, ty::ty_env::TyEnv,
-    BlockId,
+    file::FilePosition, hash::DerefType, hash_map::TyEnvHashMap, hash_set::TyEnvHashSet,
+    path::LangPath, ty::ty_env::TyEnv, BlockId,
 };
 
 #[derive(Debug)]
@@ -56,6 +56,12 @@ pub struct BlockCtx {
     /// whole block, even if the "use" is declared below a statement that uses it,
     /// order doesn't matter. This might change in the future.
     pub uses: TyEnvHashSet<LangPath>,
+
+    /// Same as `uses` but these are the uses that have a `as` to "rename" the
+    /// use. The key of the map is the new `as` ident, the LangPath only consists
+    /// of the single ident but are stored as a LangPath for easier look-up.
+    /// The values of the map are the actual `use` path.
+    pub uses_as: TyEnvHashMap<LangPath, LangPath>,
 }
 
 impl BlockCtx {
@@ -69,6 +75,7 @@ impl BlockCtx {
         is_branchable_block: bool,
         module: Option<LangPath>,
         uses: TyEnvHashSet<LangPath>,
+        uses_as: TyEnvHashMap<LangPath, LangPath>,
     ) -> Self {
         Self {
             block_id,
@@ -84,15 +91,20 @@ impl BlockCtx {
             is_branchable_block,
             module,
             uses,
+            uses_as,
         }
     }
 
-    pub fn add_use(&mut self, ty_env: &TyEnv, path: LangPath) {
-        if let Err(err) = self
-            .uses
-            .insert(ty_env, DerefType::None, path.without_gens())
-        {
-            panic!("add_use -- {:#?}", err)
+    pub fn add_use(&mut self, ty_env: &TyEnv, path: LangPath, ident: Option<String>) {
+        if let Some(ident) = ident {
+            let ident_path = LangPath::new(vec![ident.into()], path.file_pos);
+            self.uses_as
+                .insert(ty_env, DerefType::None, ident_path, path.without_gens())
+                .unwrap();
+        } else {
+            self.uses
+                .insert(ty_env, DerefType::None, path.without_gens())
+                .unwrap();
         }
     }
 }

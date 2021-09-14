@@ -18,7 +18,8 @@ pub enum Stmt {
     Break(Option<FilePosition>),
     Continue(Option<FilePosition>),
 
-    Use(LangPath),
+    /// The optinal string is the ident used in a `use <path> as <ident>`.
+    Use(LangPath, Option<String>),
     Module(LangPath), // Module ~= Package
 
     /// Defer -> Run this expression at the end of the current block scope.
@@ -69,7 +70,7 @@ impl Stmt {
             | Stmt::VariableDecl(.., file_pos)
             | Stmt::ExternalDecl(_, file_pos) => file_pos.as_ref(),
 
-            Stmt::Use(path) | Stmt::Module(path) => path.file_pos(),
+            Stmt::Use(path, ..) | Stmt::Module(path) => path.file_pos(),
 
             Stmt::DeferExec(_) => None,
         }

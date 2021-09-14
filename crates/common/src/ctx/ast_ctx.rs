@@ -134,6 +134,18 @@ impl AstCtx {
         }
     }
 
+    /// Given a block ID `id`, returns the "use-as" statements for the block.
+    pub fn get_uses_as(&self, id: BlockId) -> LangResult<&TyEnvHashMap<LangPath, LangPath>> {
+        if let Some(block_info) = self.block_ctxs.get(&id) {
+            Ok(&block_info.uses_as)
+        } else {
+            Err(self.err(format!(
+                "Unable to find block info for block with id \"{}\" when looking for uses-as.",
+                id
+            )))
+        }
+    }
+
     /// Given a name of a path `path` and a block scope `id`; tries to find a
     /// valid path that corresponds to a key in the given `map`.
     ///
@@ -142,6 +154,8 @@ impl AstCtx {
     ///  2. Prepending the `path` with the "module" for the block with ID `id`.
     ///     This corresponds to accessing a item declared in the same module.
     ///  3. Prepending the `path` with "use" statements declared for the block
+    ///     with ID `id`.
+    ///  4. Prepending the `path` with "use-as" statements declared for the block
     ///     with ID `id`.
     fn calculate_full_path<T>(
         &self,
@@ -178,7 +192,7 @@ impl AstCtx {
         let use_paths = self.get_uses(id)?;
         for use_path in use_paths.values() {
             if use_path.last().unwrap().name() == path.first().unwrap().name() {
-                let mut potential_use_path = use_path.to_owned().clone();
+                let mut potential_use_path = use_path.clone();
                 potential_use_path.pop();
 
                 let combined_path = potential_use_path.join(path, path.file_pos().cloned());
@@ -189,9 +203,30 @@ impl AstCtx {
             }
         }
 
+        let use_as_paths = self.get_uses_as(id)?;
+        for (as_path, use_path) in use_as_paths.iter() {
+            if as_path.last().unwrap().name() == path.first().unwrap().name() {
+                // If this is a func or ADT, need to keep potential generics.
+                let mut old_path = path.clone();
+                let old_first_part = old_path.parts.remove(0);
+                let potential_use_path = use_path
+                    .clone()
+                    .with_gens_opt(old_first_part.generics().clone());
+
+                let combined_path =
+                    potential_use_path.join(&old_path, old_path.file_pos().cloned());
+                match self.get_decl_scope(ty_env, &combined_path, id, map) {
+                    Ok(_) => return Ok(combined_path),
+                    Err(_) => continue,
+                }
+            }
+        }
+
         if log_enabled!(Level::Debug) {
-            err.msg
-                .push_str(&format!("\nTried with the uses: {:#?}", use_paths));
+            err.msg.push_str(&format!(
+                "\nTried with the uses: {:#?} and uses-as: {:#?}",
+                use_paths, use_as_paths
+            ));
         }
         Err(err)
     }

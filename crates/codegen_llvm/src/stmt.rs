@@ -22,7 +22,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             Stmt::Yield(expr, file_pos) => self.compile_yield(expr, file_pos),
             Stmt::Break(file_pos) => self.compile_break(file_pos),
             Stmt::Continue(file_pos) => self.compile_continue(file_pos),
-            Stmt::Use(path) => self.compile_use(path),
+            Stmt::Use(path, ident) => self.compile_use(path, ident),
             Stmt::Module(path) => self.compile_module(path),
 
             // Only the "DeferExecution" are compiled into code, the "Defer" is
@@ -111,7 +111,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     }
 
     #[allow(clippy::unnecessary_wraps)]
-    fn compile_use(&mut self, _path: &LangPath) -> LangResult<()> {
+    fn compile_use(&mut self, _path: &LangPath, _ident: &Option<String>) -> LangResult<()> {
         // Do nothing, "use"s are done during lexing/parsing for now.
         Ok(())
     }

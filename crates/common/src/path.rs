@@ -185,6 +185,19 @@ impl TyEnvHash for (LangPath, BlockId) {
     }
 }
 
+impl TyEnvHash for (LangPath, Option<String>) {
+    fn hash_with_state<H: std::hash::Hasher>(
+        &self,
+        ty_env: &TyEnv,
+        deref_type: DerefType,
+        state: &mut H,
+    ) -> LangResult<()> {
+        self.0.hash_with_state(ty_env, deref_type, state)?;
+        self.1.hash(state);
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LangPathPart(pub String, pub Option<Generics>);
 
@@ -200,6 +213,12 @@ impl LangPathPart {
 
 impl From<&str> for LangPathPart {
     fn from(name: &str) -> Self {
+        LangPathPart(name.into(), None)
+    }
+}
+
+impl From<&String> for LangPathPart {
+    fn from(name: &String) -> Self {
         LangPathPart(name.into(), None)
     }
 }

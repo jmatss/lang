@@ -1,0 +1,23 @@
+// With this use-as statement, only `Opt` is usable, `Optional` shouldn't work.
+use std::Optional as Opt
+
+// Change function name.
+use std::assert as assert_fn
+
+// Change name of path.
+use std as longer_std
+
+fn main() -> i32 {
+    std::Optional<i8>::empty()
+    Opt<u64>::empty()
+    // This should not work since `std::Optional` "renamed" to `Opt`:
+    //Optional<u8>::empty()
+
+    assert_fn(true)
+    //assert(true)
+
+    longer_std::Optional<f32>::empty()
+    longer_std::assert(true)
+
+    return 0
+}

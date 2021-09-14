@@ -7,6 +7,7 @@ use common::{
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
     hash::DerefType,
+    hash_map::TyEnvHashMap,
     hash_set::TyEnvHashSet,
     path::LangPath,
     token::{
@@ -29,7 +30,7 @@ pub struct BlockAnalyzer {
 
     /// Contains all "use" statements found in the blocks with ID `BlockId` that
     /// have been traversed so far.
-    uses: HashMap<BlockId, TyEnvHashSet<LangPath>>,
+    uses: HashMap<BlockId, TyEnvHashSet<(LangPath, Option<String>)>>,
 
     /// Will be set to true every time a new file is started to be analyzed.
     /// A "mod" statement must be the first statement in a file, it is not allowed
@@ -77,7 +78,7 @@ impl BlockAnalyzer {
         ty_env: &TyEnv,
         ast_ctx: &mut AstCtx,
         id: BlockId,
-    ) -> LangResult<TyEnvHashSet<LangPath>> {
+    ) -> LangResult<TyEnvHashSet<(LangPath, Option<String>)>> {
         let mut uses = TyEnvHashSet::default();
 
         let mut cur_id = id;
@@ -141,19 +142,19 @@ impl BlockAnalyzer {
 
             // Add the use to the current block. Also add it to the `self.uses`
             // so that it can be found from the child blocks as well.
-            Stmt::Use(path) => {
+            Stmt::Use(path, ident) => {
+                let entry = (path.clone(), ident.clone());
                 match self.uses.entry(block_ctx.block_id) {
                     Entry::Occupied(mut o) => {
-                        o.get_mut().insert(ty_env, DerefType::None, path.clone())?;
+                        o.get_mut().insert(ty_env, DerefType::None, entry)?;
                     }
                     Entry::Vacant(v) => {
                         let mut set = TyEnvHashSet::default();
-                        set.insert(ty_env, DerefType::None, path.clone())?;
+                        set.insert(ty_env, DerefType::None, entry)?;
                         v.insert(set);
                     }
                 }
-
-                block_ctx.add_use(ty_env, path.clone());
+                block_ctx.add_use(ty_env, path.clone(), ident.clone());
             }
 
             // Module statements are only allowed in the default block (top
@@ -215,6 +216,17 @@ impl BlockAnalyzer {
         let is_root_block = self.is_root(&block.header);
         let is_branchable_block = self.is_branchable(&block.header);
 
+        let mut uses = TyEnvHashSet::default();
+        let mut uses_as = TyEnvHashMap::default();
+        for (use_path, ident) in self.get_uses(ty_env, ast_ctx, parent_id)?.values() {
+            if let Some(ident) = ident {
+                let ident_path = LangPath::new(vec![ident.into()], use_path.file_pos);
+                uses_as.insert(ty_env, DerefType::None, ident_path, use_path.clone())?;
+            } else {
+                uses.insert(ty_env, DerefType::None, use_path.clone())?;
+            }
+        }
+
         // OBS! The "module" and "uses" set at this point might not be the
         //      final values. The module might not be set at this point (ex.
         //      if this is the first block being traversed in a new file) and
@@ -228,7 +240,8 @@ impl BlockAnalyzer {
             is_root_block,
             is_branchable_block,
             self.module.clone(),
-            self.get_uses(ty_env, ast_ctx, parent_id)?,
+            uses,
+            uses_as,
         );
 
         if block.id != BlockCtx::DEFAULT_BLOCK_ID {

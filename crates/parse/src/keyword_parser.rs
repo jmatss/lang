@@ -478,17 +478,38 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// # Examples
     ///
     /// ```no_run
-    /// use <path>
+    /// use <path> [as <ident>]
     /// ```
     /// (where path is a double colon separated list of idents)
     ///
     /// The "use" keyword has already been consumed when this function is called.
     fn parse_use(&mut self, mut file_pos: FilePosition) -> LangResult<AstToken> {
-        Ok(AstToken::Stmt(Stmt::Use(self.iter.parse_path(
-            &mut file_pos,
-            GenericsKind::Empty,
-            false,
-        )?)))
+        let path = self
+            .iter
+            .parse_path(&mut file_pos, GenericsKind::Empty, false)?;
+
+        let ident = if let Some(LexTokenKind::Sym(Sym::As)) =
+            self.iter.peek_skip_space_line().map(|t| t.kind)
+        {
+            self.iter.next_skip_space_line();
+
+            let ident_token = self.iter.next_skip_space_line();
+            if let Some(LexTokenKind::Ident(ident)) = ident_token.as_ref().map(|t| &t.kind) {
+                Some(ident.clone())
+            } else {
+                return Err(self.iter.err(
+                    format!(
+                        "Expected ident after `use <PATH> as ...`, found: {:#?}",
+                        ident_token
+                    ),
+                    ident_token.map(|t| t.file_pos),
+                ));
+            }
+        } else {
+            None
+        };
+
+        Ok(AstToken::Stmt(Stmt::Use(path, ident)))
     }
 
     /// Parses a `mod` statement.
