@@ -314,7 +314,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 Ok(any_value)
             }
 
-            UnOperator::Negative => self.compile_un_op_negative(ret_type, un_op),
+            UnOperator::Negative => unreachable!("`Negative` rewritten/removed in analyze stage."),
             UnOperator::Increment => self.compile_un_op_inc(un_op),
             UnOperator::Decrement => self.compile_un_op_dec(un_op),
             UnOperator::BitComplement => panic!("TODO: Bit complement"),
@@ -1383,7 +1383,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         self.compile_struct_access(any_value, expr_ty, un_op.is_const, idx)
     }
 
-    fn compile_struct_access(
+    pub fn compile_struct_access(
         &mut self,
         mut any_value: AnyValueEnum<'ctx>,
         expr_ty: ExprTy,
@@ -1729,47 +1729,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         self.builder.build_store(ptr, new_value);
         Ok(self.builder.build_load(ptr, "dec.res").into())
-    }
-
-    fn compile_un_op_negative(
-        &mut self,
-        ret_type: AnyTypeEnum<'ctx>,
-        un_op: &mut UnOp,
-    ) -> LangResult<AnyValueEnum<'ctx>> {
-        let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
-        un_op.is_const = CodeGen::is_const(&[any_value]);
-
-        Ok(match ret_type {
-            AnyTypeEnum::FloatType(_) => {
-                if un_op.is_const {
-                    any_value.into_float_value().const_neg().into()
-                } else {
-                    self.builder
-                        .build_float_neg(any_value.into_float_value(), "neg.float")
-                        .into()
-                }
-            }
-            AnyTypeEnum::IntType(_) => {
-                if un_op.is_const {
-                    any_value.into_int_value().const_neg().into()
-                } else {
-                    self.builder
-                        .build_int_neg(any_value.into_int_value(), "neg.int")
-                        .into()
-                }
-            }
-            AnyTypeEnum::ArrayType(_)
-            | AnyTypeEnum::FunctionType(_)
-            | AnyTypeEnum::PointerType(_)
-            | AnyTypeEnum::StructType(_)
-            | AnyTypeEnum::VectorType(_)
-            | AnyTypeEnum::VoidType(_) => {
-                return Err(self.err(
-                    format!("Invalid type for UnaryOperator::Negative: {:?}", ret_type),
-                    None,
-                ))
-            }
-        })
     }
 
     fn compile_un_op_bool_not(
