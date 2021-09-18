@@ -31,13 +31,14 @@ impl BinOp {
         operator: BinOperator,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
+        is_const: bool,
         file_pos: Option<FilePosition>,
     ) -> Self {
         BinOp {
             operator,
             ret_type: None,
             file_pos,
-            is_const: false,
+            is_const,
             lhs,
             rhs,
         }
@@ -54,12 +55,17 @@ pub struct UnOp {
 }
 
 impl UnOp {
-    pub fn new(operator: UnOperator, value: Box<Expr>, file_pos: Option<FilePosition>) -> Self {
+    pub fn new(
+        operator: UnOperator,
+        value: Box<Expr>,
+        is_const: bool,
+        file_pos: Option<FilePosition>,
+    ) -> Self {
         UnOp {
             operator,
             ret_type: None,
             file_pos,
-            is_const: false,
+            is_const,
             value,
         }
     }

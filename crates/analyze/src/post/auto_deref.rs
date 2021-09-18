@@ -62,10 +62,12 @@ impl AutoDerefAnalyzer {
             .get_method(&ty_env_guard, &adt_path, &fn_name_with_gens)?;
         let method = method.read();
 
+        let is_const = false;
         if method.is_this_by_ref() && !is_pointer(&ty_env_guard, arg_type_id)? {
             let mut un_op = UnOp::new(
                 UnOperator::Address,
                 Box::new(first_arg.value.clone()),
+                is_const,
                 first_arg.value.file_pos().cloned(),
             );
             let type_info = get_type_info(&ty_env_guard, adt_type_id).unwrap().clone();
@@ -79,6 +81,7 @@ impl AutoDerefAnalyzer {
                 let mut un_op = UnOp::new(
                     UnOperator::Deref,
                     Box::new(first_arg.value.clone()),
+                    is_const,
                     first_arg.value.file_pos().cloned(),
                 );
                 un_op.ret_type = Some(adt_type_id);
@@ -156,9 +159,11 @@ impl Visitor for AutoDerefAnalyzer {
                 _ => unreachable!(),
             };
 
+            let is_const = false;
             let mut new_un_op = UnOp::new(
                 UnOperator::Deref,
                 un_op.value.clone(),
+                is_const,
                 un_op.value.file_pos().cloned(),
             );
             new_un_op.ret_type = Some(nested_type_id);

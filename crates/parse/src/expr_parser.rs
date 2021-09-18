@@ -539,7 +539,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         let expr_file_pos = expr.file_pos().cloned();
                         prev_file_pos = expr_file_pos.to_owned();
 
-                        let op = UnOp::new(un_op, Box::new(expr), expr_file_pos);
+                        let is_const = expr.is_const();
+                        let op = UnOp::new(un_op, Box::new(expr), is_const, expr_file_pos);
                         expr_stack.push(Expr::Op(Op::UnOp(op)));
                     } else {
                         return Err(self.iter.err(
@@ -569,10 +570,12 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
                             prev_file_pos = Some(bin_op_file_pos.to_owned());
 
+                            let is_const = left.is_const() && right.is_const();
                             let op = BinOp::new(
                                 bin_op,
                                 Box::new(left),
                                 Box::new(right),
+                                is_const,
                                 Some(bin_op_file_pos),
                             );
                             expr_stack.push(Expr::Op(Op::BinOp(op)));
@@ -766,11 +769,13 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                             InnerTy::Enum(adt_path),
                             TypeInfo::Default(file_pos.to_owned()),
                         ))?;
+
                         let enum_access =
                             UnOperator::EnumAccess(ident.into(), self.iter.current_block_id());
                         let un_op = UnOp::new(
                             enum_access,
                             Box::new(Expr::Type(enum_type_id, Some(file_pos.to_owned()))),
+                            true,
                             Some(file_pos.to_owned()),
                         );
 

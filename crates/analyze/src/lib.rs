@@ -38,8 +38,8 @@ use crate::{
     mid::trait_impl::TraitImplAnalyzer,
     post::{
         cmp::CmpAnalyzer, eq::EqAnalyzer, ext_struct_init::ExtStructInit,
-        fn_return::FnReturnAnalyzer, format::FormatParser, trait_methods::TraitMethodsAnalyzer,
-        void::VoidAnalyzer,
+        fn_return::FnReturnAnalyzer, format::FormatParser, match_const::MatchConstAnalyzer,
+        trait_methods::TraitMethodsAnalyzer, void::VoidAnalyzer,
     },
     pre::signed_literals::SignedLiteralsAnalyzer,
     ty::{
@@ -203,6 +203,7 @@ pub fn analyze<'a>(
     traverse!(&mut ctx, ast_root, quiet, EqAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, CallArgs::new());
     traverse!(&mut ctx, ast_root, quiet, FormatParser::new());
+    traverse!(&mut ctx, ast_root, quiet, MatchConstAnalyzer::new());
     traverse!(&mut ctx, ast_root, quiet, MatchExhaustAnalyzer::new());
 
     clean_up(&mut ast_ctx);

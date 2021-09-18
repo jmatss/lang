@@ -120,9 +120,11 @@ impl EqAnalyzer {
 
         let mut new_expr = Expr::FnCall(fn_call);
         if let BinOperator::Neq = oper {
+            let is_const = new_expr.is_const();
             let mut un_op = UnOp::new(
                 UnOperator::BoolNot,
                 Box::new(new_expr),
+                is_const,
                 expr.file_pos().cloned(),
             );
             un_op.ret_type = Some(bool_type_id);

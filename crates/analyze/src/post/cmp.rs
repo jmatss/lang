@@ -118,6 +118,7 @@ impl CmpAnalyzer {
         let mut order_lt = UnOp::new(
             UnOperator::EnumAccess("Lt".into(), ctx.block_id),
             Box::new(Expr::Type(order_type_id, expr.file_pos().cloned())),
+            true,
             expr.file_pos().cloned(),
         );
         order_lt.ret_type = Some(order_type_id);
@@ -125,6 +126,7 @@ impl CmpAnalyzer {
         let mut order_eq = UnOp::new(
             UnOperator::EnumAccess("Eq".into(), ctx.block_id),
             Box::new(Expr::Type(order_type_id, expr.file_pos().cloned())),
+            true,
             expr.file_pos().cloned(),
         );
         order_eq.ret_type = Some(order_type_id);
@@ -132,6 +134,7 @@ impl CmpAnalyzer {
         let mut order_gt = UnOp::new(
             UnOperator::EnumAccess("Gt".into(), ctx.block_id),
             Box::new(Expr::Type(order_type_id, expr.file_pos().cloned())),
+            true,
             expr.file_pos().cloned(),
         );
         order_gt.ret_type = Some(order_type_id);
@@ -160,6 +163,7 @@ impl CmpAnalyzer {
                     BinOperator::Eq,
                     Box::new(fn_call_expr),
                     Box::new(Expr::Op(Op::UnOp(order_lt))),
+                    false,
                     expr.file_pos().cloned(),
                 );
                 cmp_lt_op.ret_type = Some(bool_type_id);
@@ -172,6 +176,7 @@ impl CmpAnalyzer {
                     BinOperator::Eq,
                     Box::new(fn_call_expr),
                     Box::new(Expr::Op(Op::UnOp(order_gt))),
+                    false,
                     expr.file_pos().cloned(),
                 );
                 cmp_gt_op.ret_type = Some(bool_type_id);
@@ -184,6 +189,7 @@ impl CmpAnalyzer {
                     BinOperator::Eq,
                     Box::new(fn_call_expr.clone()),
                     Box::new(Expr::Op(Op::UnOp(order_lt))),
+                    false,
                     expr.file_pos().cloned(),
                 );
                 cmp_lt_op.ret_type = Some(bool_type_id);
@@ -192,6 +198,7 @@ impl CmpAnalyzer {
                     BinOperator::Eq,
                     Box::new(fn_call_expr),
                     Box::new(Expr::Op(Op::UnOp(order_eq))),
+                    false,
                     expr.file_pos().cloned(),
                 );
                 cmp_eq_op.ret_type = Some(bool_type_id);
@@ -200,6 +207,7 @@ impl CmpAnalyzer {
                     BinOperator::BoolOr,
                     Box::new(Expr::Op(Op::BinOp(cmp_lt_op))),
                     Box::new(Expr::Op(Op::BinOp(cmp_eq_op))),
+                    false,
                     expr.file_pos().cloned(),
                 );
                 cmp_lt_eq_op.ret_type = Some(bool_type_id);
@@ -212,6 +220,7 @@ impl CmpAnalyzer {
                     BinOperator::Eq,
                     Box::new(fn_call_expr.clone()),
                     Box::new(Expr::Op(Op::UnOp(order_gt))),
+                    false,
                     expr.file_pos().cloned(),
                 );
                 cmp_gt_op.ret_type = Some(bool_type_id);
@@ -220,6 +229,7 @@ impl CmpAnalyzer {
                     BinOperator::Eq,
                     Box::new(fn_call_expr),
                     Box::new(Expr::Op(Op::UnOp(order_eq))),
+                    false,
                     expr.file_pos().cloned(),
                 );
                 cmp_eq_op.ret_type = Some(bool_type_id);
@@ -228,6 +238,7 @@ impl CmpAnalyzer {
                     BinOperator::BoolOr,
                     Box::new(Expr::Op(Op::BinOp(cmp_gt_op))),
                     Box::new(Expr::Op(Op::BinOp(cmp_eq_op))),
+                    false,
                     expr.file_pos().cloned(),
                 );
                 cmp_gt_eq_op.ret_type = Some(bool_type_id);

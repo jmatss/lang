@@ -300,6 +300,39 @@ impl Expr {
         false
     }
 
+    pub fn is_const(&self) -> bool {
+        match self {
+            Expr::Lit(..) | Expr::Type(..) => true,
+            // These might come to be possible const in the future.
+            Expr::FnCall(..) | Expr::FnPtr(..) | Expr::BuiltInCall(..) | Expr::Block(..) => false,
+
+            Expr::Var(var) => var.is_const,
+
+            Expr::AdtInit(adt_init) => {
+                let mut all_is_const = true;
+                for arg in &adt_init.arguments {
+                    if !arg.value.is_const() {
+                        all_is_const = false;
+                    }
+                }
+                all_is_const
+            }
+
+            Expr::ArrayInit(array_init) => {
+                let mut all_is_const = true;
+                for arg in &array_init.arguments {
+                    if !arg.value.is_const() {
+                        all_is_const = false;
+                    }
+                }
+                all_is_const
+            }
+
+            Expr::Op(Op::BinOp(bin_op)) => bin_op.is_const,
+            Expr::Op(Op::UnOp(un_op)) => un_op.is_const,
+        }
+    }
+
     /// If this is a Dot operation, this function will return the variable from
     /// the rhs.
     pub fn eval_to_var(&mut self) -> Option<&Var> {

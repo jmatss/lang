@@ -72,8 +72,14 @@ impl Visitor for IndexingAnalyzer {
                         bin_op.lhs, &var
                     );
 
+                    let is_const = bin_op.lhs.is_const();
                     let adt_access = UnOperator::AdtAccess(var.name.clone(), None);
-                    let un_op = UnOp::new(adt_access, bin_op.lhs.clone(), expr.file_pos().cloned());
+                    let un_op = UnOp::new(
+                        adt_access,
+                        bin_op.lhs.clone(),
+                        is_const,
+                        expr.file_pos().cloned(),
+                    );
                     *expr = Expr::Op(Op::UnOp(un_op));
                 }
 
@@ -105,8 +111,14 @@ impl Visitor for IndexingAnalyzer {
                         var.file_pos,
                     ));
 
+                    let is_const = bin_op.rhs.is_const();
                     let union_is = UnOperator::UnionIs(member_name, var_decl);
-                    let un_op = UnOp::new(union_is, bin_op.rhs.clone(), expr.file_pos().cloned());
+                    let un_op = UnOp::new(
+                        union_is,
+                        bin_op.rhs.clone(),
+                        is_const,
+                        expr.file_pos().cloned(),
+                    );
                     *expr = Expr::Op(Op::UnOp(un_op));
                 }
 

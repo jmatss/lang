@@ -6,6 +6,7 @@ pub(super) mod eq;
 pub(super) mod ext_struct_init;
 pub(super) mod fn_return;
 pub(super) mod format;
+pub(super) mod match_const;
 pub(super) mod match_exhaust;
 pub(super) mod trait_generics;
 pub(super) mod trait_methods;

@@ -413,6 +413,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let mut un_op_address = UnOp::new(
             UnOperator::Address,
             Box::new(Expr::FnCall(string_init_call)),
+            false,
             file_pos,
         );
         un_op_address.ret_type = Some(type_id_string_ptr(
@@ -484,6 +485,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let mut string_var_address = UnOp::new(
             UnOperator::Address,
             Box::new(string_var_expr.clone()),
+            false,
             file_pos,
         );
         string_var_address.ret_type = Some(type_id_string_ptr(
@@ -668,6 +670,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let mut buf_var_address = UnOp::new(
             UnOperator::Address,
             Box::new(Expr::Var(buf_var.read().clone())),
+            false,
             None,
         );
         buf_var_address.ret_type = Some(arr_ptr_type_id);
@@ -745,6 +748,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let mut var_address = UnOp::new(
             UnOperator::Address,
             Box::new(Expr::Var(var.read().clone())),
+            false,
             None,
         );
         var_address.ret_type = Some(bool_ptr_type_id);
