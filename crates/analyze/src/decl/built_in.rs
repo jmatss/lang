@@ -194,6 +194,17 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         BuiltIn::new(name, parameters, generics, any_type_id, false),
     );
 
+    // The parameters and generics are variadic/varargs. The amount of params
+    // and generics should be the same. The generic at index 0 represents the
+    // type of the parameter at index 0 and so on.
+    let name = "tuple";
+    let parameters = Vec::with_capacity(0);
+    let generics = None;
+    built_ins.insert(
+        name,
+        BuiltIn::new(name, parameters, generics, any_type_id, true),
+    );
+
     // TODO: Is it possible to make this StringView in some scenarios? Ex.
     //       if the arguments are constants and the whole string result can be
     //       calculated at compile time?

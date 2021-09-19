@@ -255,9 +255,9 @@ fn infer_fn_call_method(method_call: &mut FnCall, ctx: &mut TraverseCtx) -> Lang
         // to the new "UnknownMethodArgument" to try and figure out the
         // position of the argument through it. Otherwise use the index.
         let position = if let Some(arg_name) = &arg.name {
-            Either::Right(arg_name.into())
+            Either::Left(arg_name.into())
         } else {
-            Either::Left(idx)
+            Either::Right(idx)
         };
 
         let unique_id = ty_env_guard.new_unique_id();

@@ -10,5 +10,7 @@ pub(super) mod match_const;
 pub(super) mod match_exhaust;
 pub(super) mod trait_generics;
 pub(super) mod trait_methods;
+pub(super) mod tuple_collector;
+pub(super) mod tuple_creator;
 pub(super) mod union_init_arg;
 pub(super) mod void;

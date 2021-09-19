@@ -34,7 +34,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             let adt = adt.read();
 
             match adt.kind {
-                AdtKind::Struct => {
+                AdtKind::Struct | AdtKind::Tuple => {
                     self.compile_struct_decl(&adt)?;
                 }
                 AdtKind::Enum => {
@@ -43,7 +43,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 AdtKind::Union => {
                     self.compile_union_decl(&adt)?;
                 }
-                AdtKind::Unknown => unreachable!("Tried to compile AdtKind::Unknown"),
+                AdtKind::Unknown => {
+                    unreachable!("Tried to compile {:#?}", adt.kind)
+                }
             }
         }
 

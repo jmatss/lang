@@ -1,5 +1,8 @@
-use super::{expr::Expr, stmt::Stmt};
+use either::Either;
+
 use crate::{file::FilePosition, BlockId, TypeId};
+
+use super::{expr::Expr, stmt::Stmt};
 
 #[derive(Debug, Clone)]
 pub enum Op {
@@ -132,13 +135,16 @@ pub enum UnOperator {
     ArrayAccess(Box<Expr>),
 
     /// Will represent a re-written "is" bin op for a union member. The String is
-    /// the name of the member that is being accessed. The statement represents
-    /// the lhs variable declaration.
-    UnionIs(String, Box<Stmt>),
+    /// the name of the member that is being accessed. The usize is the index of
+    /// the member being accessed. The statement represents the lhs variable
+    /// declaration.
+    UnionIs(Either<String, usize>, Box<Stmt>),
 
-    /// The string is the name of the member. The u64 is the index of the ADT
-    /// member being accessed.
-    AdtAccess(String, Option<u64>),
+    /// The string is the name of the member. The usize is the index of the member
+    /// being accessed. At the end of the analyzing step, all `AdtAccess` operation
+    /// should be rewritten to contain the index (Either::Right variant) which
+    /// is what will be used during code-generation.
+    AdtAccess(Either<String, usize>),
 
     /// The string is the name of the member. The BlockId is the block ID in
     /// which this enum access was done. This is needed to find the enum ADT

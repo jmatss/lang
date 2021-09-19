@@ -46,7 +46,7 @@ impl PathResolver {
             _ => return Ok(()),
         };
 
-        if inner_ty.is_adt() {
+        if inner_ty.is_adt() && !inner_ty.is_tuple() {
             let path = inner_ty.get_ident().unwrap();
             let full_path = ctx
                 .ast_ctx

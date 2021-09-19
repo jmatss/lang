@@ -1,3 +1,5 @@
+use either::Either;
+
 use common::{
     error::LangError,
     token::op::UnOperator,
@@ -86,7 +88,12 @@ impl Visitor for TypeUpdater {
 
         // Edge case logic for ADT access. Need to figure out the index of the
         // member that is being accessed.
-        if let UnOperator::AdtAccess(member_name, member_idx) = &mut un_op.operator {
+        if let UnOperator::AdtAccess(member) = &mut un_op.operator {
+            let member_name = match member {
+                Either::Left(member_name) => member_name,
+                Either::Right(_) => return,
+            };
+
             let ty_env_guard = ctx.ty_env.lock();
 
             let type_id = match un_op.value.get_expr_type() {
@@ -151,7 +158,7 @@ impl Visitor for TypeUpdater {
                 }
             };
 
-            *member_idx = Some(idx as u64);
+            *member = Either::Right(idx);
         }
     }
 }

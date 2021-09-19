@@ -311,7 +311,7 @@ impl AstCtx {
         if self.variables.get(&(ident.into(), id)).is_some() {
             Ok(id)
         } else if id == BlockCtx::DEFAULT_BLOCK_ID {
-            let mut err_msg = format!("Unable to find decl for \"{}\".", ident);
+            let mut err_msg = format!("Unable to find decl for variable \"{}\".", ident);
             if log_enabled!(Level::Debug) {
                 err_msg.push_str(&format!("\nvariables: {:#?}", self.variables))
             }
@@ -422,6 +422,15 @@ impl AstCtx {
     /// Checks if there exists a union with name `path`.
     pub fn is_trait(&self, ty_env: &TyEnv, path: &LangPath) -> bool {
         self.get_trait(ty_env, path).is_ok()
+    }
+
+    /// Checks if there exists a tuple (struct) with name `path.
+    pub fn is_tuple(&self, ty_env: &TyEnv, path: &LangPath) -> bool {
+        if let Ok(adt) = self.get_adt(ty_env, path) {
+            matches!(adt.read().kind, AdtKind::Tuple)
+        } else {
+            false
+        }
     }
 
     // TODO: Merge with `get()`.
@@ -616,6 +625,33 @@ impl AstCtx {
         }
     }
 
+    /// Finds the ADT with the name `adt_name` and returns the member with the
+    /// index `idx`.
+    pub fn get_adt_member_with_index(
+        &self,
+        ty_env: &TyEnv,
+        adt_name: &LangPath,
+        idx: usize,
+        file_pos: Option<FilePosition>,
+    ) -> LangResult<Arc<RwLock<Var>>> {
+        let adt = self.get_adt(ty_env, adt_name)?;
+        let adt = adt.read();
+
+        if let Some(member) = adt.members.get(idx) {
+            Ok(Arc::clone(member))
+        } else {
+            Err(LangError::new(
+                format!(
+                    "Unable to find member with index \"{}\" in ADT \"{}\".",
+                    &idx,
+                    to_string_path(ty_env, adt_name),
+                ),
+                LangErrorKind::GeneralError,
+                file_pos,
+            ))
+        }
+    }
+
     /// Finds the ADT with the name `adt_name` and returns the index of the member
     /// with name `member_name`.
     pub fn get_adt_member_index(
@@ -623,13 +659,13 @@ impl AstCtx {
         ty_env: &TyEnv,
         adt_name: &LangPath,
         member_name: &str,
-    ) -> LangResult<u64> {
+    ) -> LangResult<usize> {
         if let Some(idx) = self
             .get_adt(ty_env, adt_name)?
             .read()
             .member_index(member_name)
         {
-            Ok(idx as u64)
+            Ok(idx)
         } else {
             Err(self.err(format!(
                 "Unable to find member with name \"{}\" in ADT \"{}\".",

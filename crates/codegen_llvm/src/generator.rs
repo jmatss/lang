@@ -497,7 +497,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
             Ty::CompoundType(inner_ty, ..) => {
                 match inner_ty {
-                    InnerTy::Struct(full_path) | InnerTy::Union(full_path) => {
+                    InnerTy::Struct(full_path)
+                    | InnerTy::Union(full_path)
+                    | InnerTy::Tuple(full_path) => {
                         let struct_type_opt = self.module.get_struct_type(&to_string_path(
                             &self.analyze_ctx.ty_env.lock(),
                             &full_path,

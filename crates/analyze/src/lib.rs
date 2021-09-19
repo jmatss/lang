@@ -39,7 +39,8 @@ use crate::{
     post::{
         cmp::CmpAnalyzer, eq::EqAnalyzer, ext_struct_init::ExtStructInit,
         fn_return::FnReturnAnalyzer, format::FormatParser, match_const::MatchConstAnalyzer,
-        trait_methods::TraitMethodsAnalyzer, void::VoidAnalyzer,
+        trait_methods::TraitMethodsAnalyzer, tuple_collector::TupleCollector,
+        tuple_creator::TupleCreator, void::VoidAnalyzer,
     },
     pre::signed_literals::SignedLiteralsAnalyzer,
     ty::{
@@ -143,6 +144,14 @@ pub fn analyze<'a>(
     traverse!(&mut ctx, ast_root, quiet, TypeInferencer::new());
 
     run_solve_type_system(&mut ctx, quiet)?;
+
+    let tuple_collector = traverse!(&mut ctx, ast_root, quiet, TupleCollector::new());
+    traverse!(
+        &mut ctx,
+        ast_root,
+        quiet,
+        TupleCreator::new(tuple_collector.tuple_types)
+    );
 
     traverse!(&mut ctx, ast_root, quiet, MethodGensInferencer::new());
     traverse!(&mut ctx, ast_root, quiet, TypeUpdater::new());

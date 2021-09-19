@@ -1,7 +1,7 @@
 use common::{
     error::LangResult,
     file::FilePosition,
-    path::LangPathBuilder,
+    path::{LangPathBuilder, LangPathPart},
     token::expr::Expr,
     ty::{
         generics::{Generics, GenericsKind},
@@ -48,6 +48,9 @@ impl<'a, 'b> TypeParser<'a, 'b> {
     ///   [X]          // Array of type X with unknown size (slice).
     ///   [X: 3]       // Array of type X with size 3.
     ///   [X: _]       // Array of type X with infered size.
+    ///   ()           // Tuple containing nothing.
+    ///   (X)          // Tuple containing one value of type X.
+    ///   (X, Y)       // Tuple containing two values of type X and Y.
     ///   @f<G>(T)     // Built in func with name f, generic G and arg type T.
     ///   fn(T) -> R   // Function ptr with arg type T and return type R.
     ///
@@ -148,6 +151,16 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                     self.iter.rewind_skip_space()?; // Rewind the SquareBracketBegin.
 
                     let (type_id, ty_file_pos) = self.parse_type_array()?;
+                    file_pos.set_end(&ty_file_pos)?;
+
+                    Ok((type_id, file_pos))
+                }
+
+                // Tuple.
+                LexTokenKind::Sym(Sym::ParenthesisBegin) => {
+                    self.iter.rewind_skip_space()?; // Rewind the ParenthesisBegin.
+
+                    let (type_id, ty_file_pos) = self.parse_type_tuple()?;
                     file_pos.set_end(&ty_file_pos)?;
 
                     Ok((type_id, file_pos))
@@ -584,5 +597,27 @@ impl<'a, 'b> TypeParser<'a, 'b> {
                 Some(file_pos),
             ))
         }
+    }
+
+    /// Parses a tuple type.
+    ///   (X)          // Tuple containing one value of type X.
+    ///   (X, Y)       // Tuple containing two values of type X and Y.
+    fn parse_type_tuple(&mut self) -> LangResult<(TypeId, FilePosition)> {
+        let mut file_pos = self.iter.peek_file_pos()?;
+
+        let start_symbol = Sym::ParenthesisBegin;
+        let end_symbol = Sym::ParenthesisEnd;
+        let (params, params_file_pos) = self.parse_type_list(start_symbol, end_symbol)?;
+
+        let path_part = LangPathPart("Tuple".into(), Some(params.as_slice().into()));
+
+        file_pos.set_end(&params_file_pos)?;
+        Ok((
+            self.iter.ty_env.lock().id(&Ty::CompoundType(
+                InnerTy::Tuple(path_part.into()),
+                TypeInfo::Default(file_pos),
+            ))?,
+            file_pos,
+        ))
     }
 }

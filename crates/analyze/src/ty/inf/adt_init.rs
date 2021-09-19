@@ -1,3 +1,5 @@
+use either::Either;
+
 use common::{
     error::{LangError, LangErrorKind, LangResult},
     token::{
@@ -131,7 +133,7 @@ fn infer_adt_init_struct(
         // If a name is set, this is a named member init. Don't use the
         // iterator index, get the correct index of the struct field with
         // the name `arg.name`.
-        let index: usize = if let Some(arg_name) = &arg.name {
+        let idx: usize = if let Some(arg_name) = &arg.name {
             ctx.ast_ctx
                 .get_adt_member_index(&ty_env_guard, &adt_path_without_gens, arg_name)?
                 as usize
@@ -145,7 +147,7 @@ fn infer_adt_init_struct(
 
         // Add constraints mapping the type of the ADT init argument
         // to the corresponding actual ADT member type.
-        if let Some(member) = adt.members.get(index) {
+        if let Some(member) = adt.members.get(idx) {
             let member = member.read();
 
             // Get the "actual" type of the member. If it contains a generic,
@@ -164,7 +166,7 @@ fn infer_adt_init_struct(
             } else {
                 return Err(ctx.ast_ctx.err(format!(
                     "Member \"{:?}\" in struct \"{:?}\" doesn't have a type set.",
-                    adt.members.get(index),
+                    adt.members.get(idx),
                     &adt.name
                 )));
             };
@@ -178,7 +180,7 @@ fn infer_adt_init_struct(
             let type_info = TypeInfo::DefaultOpt(get_file_pos(&ty_env_guard, arg_type_id).cloned());
             let unknown_type_id = ty_env_guard.id(&Ty::UnknownAdtMember(
                 adt_init.adt_type_id.unwrap(),
-                member.name.clone(),
+                Either::Right(idx),
                 unique_id,
                 type_info,
             ))?;
@@ -187,7 +189,7 @@ fn infer_adt_init_struct(
         } else {
             return Err(ctx.ast_ctx.err(format!(
                 "Unable to get member at index {} in struct \"{:?}\".",
-                index, &adt.name
+                idx, &adt.name
             )));
         }
     }
@@ -269,7 +271,7 @@ fn infer_adt_init_union(
     let type_info = TypeInfo::DefaultOpt(get_file_pos(&ty_env_guard, arg_type_id).cloned());
     let unknown_type_id = ty_env_guard.id(&Ty::UnknownAdtMember(
         adt_init.adt_type_id.unwrap(),
-        new_member.name,
+        Either::Left(new_member.name),
         unique_id,
         type_info,
     ))?;

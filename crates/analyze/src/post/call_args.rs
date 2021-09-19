@@ -269,7 +269,9 @@ impl Visitor for CallArgs {
         match adt_init.kind {
             AdtKind::Struct => (),
             AdtKind::Union => return,
-            AdtKind::Enum | AdtKind::Unknown => unreachable!("{:#?}", adt_init.kind),
+            AdtKind::Enum | AdtKind::Tuple | AdtKind::Unknown => {
+                unreachable!("{:#?}", adt_init.kind)
+            }
         }
 
         let adt_path = adt_init.module.clone_push(

@@ -102,12 +102,15 @@ pub fn to_string_type_id(ty_env: &TyEnv, type_id: TypeId) -> LangResult<String> 
         // TODO: Can these be solved in a better way? Currently only print
         //       the type ID for the ADT because otherwise it can cause a
         //       infinite loop.
-        Ty::UnknownAdtMember(adt_type_id, ref member_name, ..) => {
+        Ty::UnknownAdtMember(adt_type_id, ref member, ..) => {
             result.push_str("adtMember(");
             //result.push_str(&self.to_string_type_id(ty_ctx, *adt_type_id)?);
             result.push_str(&format!("typeId({})", adt_type_id));
             result.push('.');
-            result.push_str(member_name);
+            match member {
+                Either::Left(name) => result.push_str(name),
+                Either::Right(idx) => result.push_str(&idx.to_string()),
+            }
             result.push(')');
         }
         Ty::UnknownAdtMethod(adt_type_id, ref method_path, ..) => {
@@ -125,8 +128,8 @@ pub fn to_string_type_id(ty_env: &TyEnv, type_id: TypeId) -> LangResult<String> 
             result.push_str(&to_string_path(ty_env, method_path));
             result.push('.');
             match name_or_idx {
-                Either::Left(idx) => result.push_str(&idx.to_string()),
-                Either::Right(ref name) => result.push_str(name),
+                Either::Left(name) => result.push_str(&name),
+                Either::Right(idx) => result.push_str(&idx.to_string()),
             }
             result.push(')');
         }
@@ -162,7 +165,8 @@ pub fn to_string_inner_ty(ty_env: &TyEnv, inner_ty: &InnerTy) -> String {
         InnerTy::Struct(path)
         | InnerTy::Enum(path)
         | InnerTy::Union(path)
-        | InnerTy::Trait(path) => to_string_path(ty_env, path),
+        | InnerTy::Trait(path)
+        | InnerTy::Tuple(path) => to_string_path(ty_env, path),
 
         InnerTy::Unknown(_) => "unknown".into(),
         InnerTy::UnknownInt(_, _) => "unknown_int".into(),

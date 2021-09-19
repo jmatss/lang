@@ -116,6 +116,7 @@ pub enum Sym {
     Deref,           // .*
     Address,         // .&
     ArrayIndexBegin, // .[
+    TupleIndexBegin, // .(
     Increment,       // .++
     Decrement,       // .--
     DoubleQuoteC,    // c"
@@ -346,6 +347,7 @@ impl LexToken {
                     (".*", Sym::Deref),
                     (".&", Sym::Address),
                     (".[", Sym::ArrayIndexBegin),
+                    (".(", Sym::TupleIndexBegin),
                     (".++", Sym::Increment),
                     (".--", Sym::Decrement),
                     ("..=", Sym::RangeInclusive),

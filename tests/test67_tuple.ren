@@ -1,0 +1,40 @@
+struct TestStruct {
+    var x: i64
+}
+
+struct TestStructGen<T> {
+    var x: T
+}
+
+fn as_param(x: (TestStruct, f64)) -> f64 {
+    return x.(1)
+}
+
+fn as_ret() -> (i32, u8) {
+    return @tuple(1, 2)
+}
+
+fn main() -> i32 {
+    var tuple_a = @tuple(1)
+    var expected_val_a: i8 = 1
+    std::assert(tuple_a.(0) == expected_val_a)
+
+    var tuple_b: (TestStruct, f64) = @tuple(TestStruct { 2 }, 2.0)
+    var res_b = as_param(tuple_b)
+    std::assert(res_b == 2.0)
+
+    var res_c = as_ret()
+    std::assert(res_c.(0) == 1 and res_c.(1) == 2)
+
+    var tuple_d = @tuple(TestStructGen<i16> { 3 })
+    var res_d = 3 + tuple_d.(0).x
+    std::assert(res_d == 6)
+
+    var tuple_e = @tuple(TestStruct { 3 })
+    var res_e: i64 = 3 + tuple_e.(0).x
+    std::assert(res_e == 6)
+
+    var tuple_empty: () = @tuple()
+
+    return 0
+}

@@ -110,6 +110,7 @@ impl DeclFnAnalyzer {
                     }
                     AdtKind::Union => InnerTy::Union(adt_path_without_gens.clone()),
                     AdtKind::Enum => InnerTy::Enum(adt_path_without_gens.clone()),
+                    AdtKind::Tuple => unreachable!("AdtKind::Tuple"),
                     AdtKind::Unknown => unreachable!("AdtKind::Unknown"),
                 },
                 Err(err) => {
@@ -224,6 +225,8 @@ impl Visitor for DeclFnAnalyzer {
                     InnerTy::Enum(full_path)
                 } else if ctx.ast_ctx.is_union(&ty_env_guard, &full_path) {
                     InnerTy::Union(full_path)
+                } else if ctx.ast_ctx.is_tuple(&ty_env_guard, &full_path) {
+                    InnerTy::Tuple(full_path)
                 } else {
                     unreachable!("full_path: {:#?}", full_path);
                 };

@@ -1,3 +1,4 @@
+use either::Either;
 use log::debug;
 
 use common::{
@@ -8,6 +9,7 @@ use common::{
         ast::AstToken,
         block::{AdtKind, BlockHeader},
         expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, FnPtr, Var},
+        lit::Lit,
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
     ty::{
@@ -253,6 +255,55 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     };
 
                     self.shunt_operand(built_in_expr)?;
+                }
+
+                // Tuple access.
+                LexTokenKind::Sym(Sym::TupleIndexBegin) => {
+                    let stop_conds = [Sym::ParenthesisEnd];
+
+                    let expr = if let Some(expr) = ExprParser::parse(self.iter, &stop_conds)? {
+                        expr
+                    } else {
+                        return Err(self.iter.err(
+                            "Found no expression in tuple indexing.".into(),
+                            Some(lex_token.file_pos),
+                        ));
+                    };
+
+                    let idx = if let Expr::Lit(Lit::Integer(lit, radix), ..) = &expr {
+                        match usize::from_str_radix(lit, *radix) {
+                            Ok(idx) => idx,
+                            Err(_) => {
+                                return Err(self.iter.err(
+                                    format!(
+                                        "Unable to parse tuple access expression as int literal. \
+                                        Literal value: {}, radix: {}",
+                                        lit, radix
+                                    ),
+                                    expr.file_pos().cloned(),
+                                ))
+                            }
+                        }
+                    } else {
+                        return Err(self.iter.err(
+                            format!(
+                                "Expression to access tuple must be integer literal. \
+                                Found non integer literal used: {:#?}",
+                                expr
+                            ),
+                            expr.file_pos().cloned(),
+                        ));
+                    };
+
+                    // Consume the "ParenthesisEnd".
+                    if let Some(end_token) = self.iter.next_skip_space() {
+                        file_pos.set_end(&end_token.file_pos)?;
+                    } else {
+                        unreachable!();
+                    }
+
+                    let op = Operator::UnaryOperator(UnOperator::AdtAccess(Either::Right(idx)));
+                    self.shunt_operator(op)?;
                 }
 
                 // Array access.

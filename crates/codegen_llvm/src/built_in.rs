@@ -8,15 +8,23 @@ use common::{
     file::FilePosition,
     path::LangPath,
     token::{
+        block::AdtKind,
         expr::Var,
-        expr::{Argument, ArrayInit, BuiltInCall, Expr, FnCall, FormatPart},
+        expr::{AdtInit, Argument, ArrayInit, BuiltInCall, Expr, FnCall, FormatPart},
         lit::{Lit, StringType},
         op::{AssignOperator, Op, UnOp, UnOperator},
         stmt::Stmt,
     },
     ty::{
-        generics::Generics, get::get_inner, inner_ty::InnerTy, is::is_primitive,
-        to_string::to_string_type_id, ty::Ty, ty_env::TyEnv, type_id::TypeId, type_info::TypeInfo,
+        generics::Generics,
+        get::{get_gens, get_inner},
+        inner_ty::InnerTy,
+        is::is_primitive,
+        to_string::to_string_type_id,
+        ty::Ty,
+        ty_env::TyEnv,
+        type_id::TypeId,
+        type_info::TypeInfo,
     },
     ARGC_GLOBAL_VAR_NAME, ARGV_GLOBAL_VAR_NAME,
 };
@@ -218,6 +226,28 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
                 let mut array_init = ArrayInit::new(args, built_in_call.file_pos);
                 self.compile_array_init(&mut array_init)
+            }
+
+            // Creates a instance of a tuple with the specified args and their
+            // types.
+            "tuple" => {
+                let type_id = if let Some(type_id) = built_in_call.ret_type {
+                    type_id
+                } else {
+                    unreachable!("built-in call type id None: {:#?}", built_in_call);
+                };
+
+                let mut struct_init = AdtInit::new(
+                    "Tuple".into(),
+                    LangPath::empty(),
+                    built_in_call.arguments.clone(),
+                    get_gens(&self.analyze_ctx.ty_env.lock(), type_id)?.cloned(),
+                    Some(built_in_call.file_pos),
+                    AdtKind::Tuple,
+                );
+                struct_init.adt_type_id = Some(type_id);
+
+                self.compile_struct_init(&mut struct_init)
             }
 
             // Gets the amount of CLI arguments used when running the program (`argc`).

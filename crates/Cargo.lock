@@ -362,6 +362,7 @@ name = "parse"
 version = "0.1.0"
 dependencies = [
  "common",
+ "either",
  "lex",
  "log",
  "parking_lot",

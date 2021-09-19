@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use either::Either;
 use inkwell::{
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
     values::{AggregateValue, AnyValueEnum, BasicValueEnum, IntValue, PointerValue},
@@ -276,22 +277,18 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 };
 
                 // The tag that this UnionIs is expected to match against.
-                let expected_tag = if let UnOperator::AdtAccess(_, tag_opt) = &inner_un_op.operator
-                {
-                    if let Some(tag) = tag_opt {
-                        self.context.i8_type().const_int(*tag, false)
+                let expected_tag =
+                    if let UnOperator::AdtAccess(Either::Right(tag)) = &inner_un_op.operator {
+                        self.context.i8_type().const_int(*tag as u64, false)
                     } else {
-                        unreachable!("Index not set for AdtAccess in UnionIs: {:#?}", inner_un_op);
-                    }
-                } else {
-                    return Err(self.err(
-                        format!(
-                            "Rhs value of UnionIs wasn't AdtAccess. un_op value: {:#?}",
-                            &inner_un_op
-                        ),
-                        inner_un_op.file_pos.to_owned(),
-                    ));
-                };
+                        return Err(self.err(
+                            format!(
+                                "Rhs value of UnionIs wasn't valid AdtAccess. un_op value: {:#?}",
+                                &inner_un_op
+                            ),
+                            inner_un_op.file_pos.to_owned(),
+                        ));
+                    };
 
                 // The actual tag of the current instance of the enum in the code.
                 let actual_tag = self.compile_union_tag_access(inner_un_op, expr_ty)?;
@@ -1327,8 +1324,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         un_op: &mut UnOp,
         expr_ty: ExprTy,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let idx = if let UnOperator::AdtAccess(_, idx) = &un_op.operator {
-            idx.unwrap()
+        let idx = if let UnOperator::AdtAccess(Either::Right(idx)) = &un_op.operator {
+            *idx
         } else {
             unreachable!();
         };
@@ -1351,17 +1348,22 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             )));
         };
 
-        if self
+        let is_struct = self
             .analyze_ctx
             .ast_ctx
-            .is_struct(&self.analyze_ctx.ty_env.lock(), &full_path)
-        {
+            .is_struct(&self.analyze_ctx.ty_env.lock(), &full_path);
+        let is_tuple = self
+            .analyze_ctx
+            .ast_ctx
+            .is_tuple(&self.analyze_ctx.ty_env.lock(), &full_path);
+        let is_union = self
+            .analyze_ctx
+            .ast_ctx
+            .is_union(&self.analyze_ctx.ty_env.lock(), &full_path);
+
+        if is_struct || is_tuple {
             self.compile_un_op_struct_access(un_op, expr_ty, idx as u32)
-        } else if self
-            .analyze_ctx
-            .ast_ctx
-            .is_union(&self.analyze_ctx.ty_env.lock(), &full_path)
-        {
+        } else if is_union {
             let union_ = self
                 .analyze_ctx
                 .ast_ctx

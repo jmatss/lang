@@ -1,3 +1,5 @@
+use either::Either;
+
 use common::{
     error::LangResult,
     token::{
@@ -156,7 +158,7 @@ pub(crate) fn infer_un_op(un_op: &mut UnOp, ctx: &mut TraverseCtx) -> LangResult
                 ty_env_guard.id(&Ty::UnknownArrayMember(val_type_id, unique_id, type_info))?;
             insert_constraint(&mut ty_env_guard, ret_type_id, unknown_type_id)?;
         }
-        UnOperator::UnionIs(member_name, var_decl) => {
+        UnOperator::UnionIs(member, var_decl) => {
             let var_decl_type_id = if let Stmt::VariableDecl(var, ..) = var_decl.as_ref() {
                 *var.read().ty.as_ref().unwrap()
             } else {
@@ -180,7 +182,7 @@ pub(crate) fn infer_un_op(un_op: &mut UnOp, ctx: &mut TraverseCtx) -> LangResult
             let unique_id = ty_env_guard.new_unique_id();
             let unknown_type_id = ty_env_guard.id(&Ty::UnknownAdtMember(
                 union_ty,
-                member_name.clone(),
+                member.clone(),
                 unique_id,
                 type_info.clone(),
             ))?;
@@ -190,11 +192,21 @@ pub(crate) fn infer_un_op(un_op: &mut UnOp, ctx: &mut TraverseCtx) -> LangResult
             insert_constraint(&mut ty_env_guard, var_decl_type_id, unknown_type_id)?;
             insert_constraint(&mut ty_env_guard, ret_type_id, bool_type_id)?;
         }
-        UnOperator::AdtAccess(member_name, ..) | UnOperator::EnumAccess(member_name, ..) => {
+        UnOperator::EnumAccess(member_name, ..) => {
             let unique_id = ty_env_guard.new_unique_id();
             let unknown_type_id = ty_env_guard.id(&Ty::UnknownAdtMember(
                 val_type_id,
-                member_name.clone(),
+                Either::Left(member_name.clone()),
+                unique_id,
+                type_info,
+            ))?;
+            insert_constraint(&mut ty_env_guard, ret_type_id, unknown_type_id)?;
+        }
+        UnOperator::AdtAccess(member, ..) => {
+            let unique_id = ty_env_guard.new_unique_id();
+            let unknown_type_id = ty_env_guard.id(&Ty::UnknownAdtMember(
+                val_type_id,
+                member.clone(),
                 unique_id,
                 type_info,
             ))?;

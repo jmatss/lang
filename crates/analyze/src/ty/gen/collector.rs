@@ -9,7 +9,7 @@ use common::{
     token::expr::FnCall,
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{
-        contains::contains_generic_shallow, generics::Generics, get::get_ident,
+        contains::contains_generic_shallow, generics::Generics, get::get_ident, is::is_tuple,
         to_string::to_string_path, ty::Ty, type_id::TypeId,
     },
 };
@@ -325,8 +325,18 @@ impl Visitor for GenericCollector {
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
-        if let Err(err) = self.collect_generic_adt(ctx, *type_id) {
-            self.errors.push(err);
+        let is_tuple = match is_tuple(&ctx.ty_env.lock(), *type_id) {
+            Ok(is_tuple) => is_tuple,
+            Err(err) => {
+                self.errors.push(err);
+                return;
+            }
+        };
+
+        if !is_tuple {
+            if let Err(err) = self.collect_generic_adt(ctx, *type_id) {
+                self.errors.push(err);
+            }
         }
     }
 

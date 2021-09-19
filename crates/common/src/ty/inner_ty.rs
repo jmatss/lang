@@ -15,6 +15,7 @@ pub enum InnerTy {
     Enum(LangPath),
     Union(LangPath),
     Trait(LangPath),
+    Tuple(LangPath),
 
     Void,
     Character,
@@ -68,6 +69,7 @@ impl InnerTy {
             | InnerTy::Enum(ident)
             | InnerTy::Union(ident)
             | InnerTy::Trait(ident)
+            | InnerTy::Tuple(ident)
             | InnerTy::UnknownIdent(ident, ..) => Some(ident.clone()),
             _ => None,
         }
@@ -79,6 +81,7 @@ impl InnerTy {
             | InnerTy::Enum(ident)
             | InnerTy::Union(ident)
             | InnerTy::Trait(ident)
+            | InnerTy::Tuple(ident)
             | InnerTy::UnknownIdent(ident, ..) => Some(ident),
             _ => None,
         }
@@ -90,6 +93,7 @@ impl InnerTy {
             | InnerTy::Enum(ident)
             | InnerTy::Union(ident)
             | InnerTy::Trait(ident)
+            | InnerTy::Tuple(ident)
             | InnerTy::UnknownIdent(ident, ..) => Some(ident),
             _ => None,
         }
@@ -261,7 +265,7 @@ impl InnerTy {
     pub fn is_adt(&self) -> bool {
         matches!(
             self,
-            InnerTy::Struct(_) | InnerTy::Enum(_) | InnerTy::Union(_)
+            InnerTy::Struct(_) | InnerTy::Enum(_) | InnerTy::Union(_) | InnerTy::Tuple(_)
         )
     }
 
@@ -271,6 +275,10 @@ impl InnerTy {
 
     pub fn is_trait(&self) -> bool {
         matches!(self, InnerTy::Trait(..))
+    }
+
+    pub fn is_tuple(&self) -> bool {
+        matches!(self, InnerTy::Tuple(_))
     }
 
     pub fn is_unknown(&self) -> bool {
@@ -318,6 +326,7 @@ impl InnerTy {
             | (InnerTy::Enum(_), InnerTy::Enum(_))
             | (InnerTy::Union(_), InnerTy::Union(_))
             | (InnerTy::Trait(_), InnerTy::Trait(_))
+            | (InnerTy::Tuple(_), InnerTy::Tuple(_))
             | (InnerTy::Void, InnerTy::Void)
             | (InnerTy::Character, InnerTy::Character)
             | (InnerTy::String, InnerTy::String)
@@ -367,37 +376,41 @@ impl TyEnvHash for InnerTy {
                 3.hash(state);
                 path.hash_with_state(ty_env, deref_type, state)?;
             }
-            InnerTy::Void => 4.hash(state),
-            InnerTy::Character => 5.hash(state),
-            InnerTy::String => 6.hash(state),
-            InnerTy::Boolean => 7.hash(state),
-            InnerTy::I8 => 8.hash(state),
-            InnerTy::U8 => 9.hash(state),
-            InnerTy::I16 => 10.hash(state),
-            InnerTy::U16 => 11.hash(state),
-            InnerTy::I32 => 12.hash(state),
-            InnerTy::U32 => 13.hash(state),
-            InnerTy::F32 => 14.hash(state),
-            InnerTy::I64 => 15.hash(state),
-            InnerTy::U64 => 16.hash(state),
-            InnerTy::F64 => 17.hash(state),
-            InnerTy::I128 => 18.hash(state),
-            InnerTy::U128 => 19.hash(state),
+            InnerTy::Tuple(path) => {
+                4.hash(state);
+                path.hash_with_state(ty_env, deref_type, state)?;
+            }
+            InnerTy::Void => 5.hash(state),
+            InnerTy::Character => 6.hash(state),
+            InnerTy::String => 7.hash(state),
+            InnerTy::Boolean => 8.hash(state),
+            InnerTy::I8 => 9.hash(state),
+            InnerTy::U8 => 10.hash(state),
+            InnerTy::I16 => 11.hash(state),
+            InnerTy::U16 => 12.hash(state),
+            InnerTy::I32 => 13.hash(state),
+            InnerTy::U32 => 14.hash(state),
+            InnerTy::F32 => 15.hash(state),
+            InnerTy::I64 => 16.hash(state),
+            InnerTy::U64 => 17.hash(state),
+            InnerTy::F64 => 18.hash(state),
+            InnerTy::I128 => 19.hash(state),
+            InnerTy::U128 => 20.hash(state),
             InnerTy::Unknown(unique_id) => {
-                20.hash(state);
+                21.hash(state);
                 unique_id.hash(state);
             }
             InnerTy::UnknownIdent(path, block_id) => {
-                21.hash(state);
+                22.hash(state);
                 path.hash_with_state(ty_env, deref_type, state)?;
                 block_id.hash(state);
             }
             InnerTy::UnknownInt(unique_id, _) => {
-                22.hash(state);
+                23.hash(state);
                 unique_id.hash(state);
             }
             InnerTy::UnknownFloat(unique_id) => {
-                20.hash(state);
+                24.hash(state);
                 unique_id.hash(state);
             }
         }

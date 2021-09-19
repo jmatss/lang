@@ -144,6 +144,16 @@ impl Generics {
     }
 }
 
+impl From<&[TypeId]> for Generics {
+    fn from(type_ids: &[TypeId]) -> Self {
+        let mut gens = Generics::new();
+        for type_id_i in type_ids {
+            gens.insert_type(*type_id_i);
+        }
+        gens
+    }
+}
+
 impl TyEnvHash for Generics {
     fn hash_with_state<H: std::hash::Hasher>(
         &self,

@@ -147,6 +147,12 @@ pub fn is_enum(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
         .unwrap_or(false))
 }
 
+pub fn is_tuple(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
+    Ok(get_inner(ty_env, id)
+        .map(|inner_ty| inner_ty.is_tuple())
+        .unwrap_or(false))
+}
+
 pub fn is_int(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
     Ok(get_inner(ty_env, id)
         .map(|inner_ty| inner_ty.is_int())
@@ -460,7 +466,10 @@ pub fn is_compatible_inner_ty(
         | (InnerTy::UnknownIdent(path_a, ..), InnerTy::Union(path_b, ..))
         | (InnerTy::Trait(path_a), InnerTy::Trait(path_b))
         | (InnerTy::Trait(path_a), InnerTy::UnknownIdent(path_b, ..))
-        | (InnerTy::UnknownIdent(path_a, ..), InnerTy::Trait(path_b, ..)) => {
+        | (InnerTy::UnknownIdent(path_a, ..), InnerTy::Trait(path_b, ..))
+        | (InnerTy::Tuple(path_a), InnerTy::Tuple(path_b))
+        | (InnerTy::Tuple(path_a), InnerTy::UnknownIdent(path_b, ..))
+        | (InnerTy::UnknownIdent(path_a, ..), InnerTy::Tuple(path_b, ..)) => {
             is_compatible_path(ty_env, path_a, path_b)
         }
 

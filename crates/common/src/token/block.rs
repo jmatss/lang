@@ -147,6 +147,7 @@ pub enum AdtKind {
     Struct,
     Union,
     Enum,
+    Tuple,
     Unknown,
 }
 

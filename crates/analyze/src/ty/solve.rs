@@ -15,7 +15,7 @@ use common::{
         generics::Generics,
         get::{get_file_pos, get_generics, get_unsolvable},
         inner_ty::InnerTy,
-        is::{is_any, is_generic, is_solved},
+        is::{is_any, is_generic, is_solved, is_tuple},
         replace::{convert_defaults, replace_gen_impls, replace_gens_with_gen_instances},
         substitution_sets::{promote, union},
         to_string::{to_string_path, to_string_type_id},
@@ -485,6 +485,8 @@ fn solve_compound(
                 Some(InnerTy::Union(full_path_with_gens))
             } else if ast_ctx.is_trait(ty_env, &full_path) {
                 Some(InnerTy::Trait(full_path_with_gens))
+            } else if ast_ctx.is_tuple(ty_env, &full_path) {
+                Some(InnerTy::Tuple(full_path_with_gens))
             } else {
                 None
             };
@@ -621,9 +623,9 @@ fn solve_unknown_adt_member(
         type_id, seen_type_ids, ty_clone
     );
 
-    let (adt_type_id, member_name) =
-        if let Ty::UnknownAdtMember(adt_type_id, member_name, ..) = &mut ty_clone {
-            (adt_type_id, member_name)
+    let (adt_type_id, name_or_idx) =
+        if let Ty::UnknownAdtMember(adt_type_id, name_or_idx, ..) = &mut ty_clone {
+            (adt_type_id, name_or_idx)
         } else {
             unreachable!()
         };
@@ -643,11 +645,29 @@ fn solve_unknown_adt_member(
 
     let mut new_type_id = {
         let file_pos = get_file_pos(ty_env, *adt_type_id).cloned();
-        ast_ctx
-            .get_adt_member(ty_env, &adt_path.without_gens(), member_name, file_pos)?
-            .read()
-            .ty
-            .unwrap()
+        match name_or_idx {
+            Either::Left(member_name) => ast_ctx
+                .get_adt_member(ty_env, &adt_path.without_gens(), member_name, file_pos)?
+                .read()
+                .ty
+                .unwrap(),
+            Either::Right(idx) => {
+                if adt_path.count() == 1 && adt_path.last().unwrap().name() == "Tuple" {
+                    *adt_path.gens().unwrap().types.get(*idx).unwrap()
+                } else {
+                    ast_ctx
+                        .get_adt_member_with_index(
+                            ty_env,
+                            &adt_path.without_gens(),
+                            *idx,
+                            file_pos,
+                        )?
+                        .read()
+                        .ty
+                        .unwrap()
+                }
+            }
+        }
     };
 
     // TODO: Is this needed? Does this do anything atm?
@@ -809,13 +829,13 @@ fn solve_unknown_method_argument(
     };
 
     let actual_idx = match name_or_idx {
-        Either::Left(idx) => *idx,
-        Either::Right(arg_name) => ast_ctx.get_method_param_idx(
+        Either::Left(arg_name) => ast_ctx.get_method_param_idx(
             ty_env,
             &adt_path.without_gens(),
             &method_name,
             arg_name,
         )?,
+        Either::Right(idx) => *idx,
     };
 
     let mut new_type_id = ast_ctx.get_method_param_type(
@@ -1184,6 +1204,10 @@ fn collect_gen_type_id(
 /// If the given type `ty` contains generics that don't have their "names"
 /// set, this function will fetch the structure and set the names if possible.
 pub fn set_generic_names(ty_env: &mut TyEnv, ast_ctx: &AstCtx, type_id: TypeId) -> LangResult<()> {
+    if is_tuple(ty_env, type_id)? {
+        return Ok(());
+    }
+
     let inner_ty = match ty_env.ty_clone(type_id)? {
         Ty::CompoundType(inner_ty, ..) => inner_ty,
         Ty::Pointer(type_id_i, ..) | Ty::Array(type_id_i, ..) => {

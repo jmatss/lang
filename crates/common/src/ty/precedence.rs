@@ -29,7 +29,7 @@ use super::{inner_ty::InnerTy, ty_env::TyEnv};
 ///
 /// General ordering list (most preferred at the top, least at bottom):
 ///  1.  Primitive
-///  2.  ADT/Trait
+///  2.  ADT/Trait/Tuple
 ///  3.  Fn
 ///      Array
 ///      Pointer
@@ -342,6 +342,7 @@ fn prec_inner_ty(
         | (InnerTy::Enum(_), InnerTy::Enum(_))
         | (InnerTy::Union(_), InnerTy::Union(_))
         | (InnerTy::Trait(_), InnerTy::Trait(_))
+        | (InnerTy::Tuple(_), InnerTy::Tuple(_))
         | (InnerTy::Void, InnerTy::Void)
         | (InnerTy::Character, InnerTy::Character)
         | (InnerTy::String, InnerTy::String)
@@ -362,8 +363,8 @@ fn prec_inner_ty(
         _ => {
             return Err(LangError::new(
                 format!(
-                    "Tried to map incompatible inner types. First: {:?}, second: {:?}.\n\
-                        First type found at position: {:#?}.\nSecond found at position: {:#?}",
+                    "Tried to map incompatible inner types. First: {:#?}, second: {:#?}.\n\
+                    First type found at position: {:#?}.\nSecond found at position: {:#?}",
                     first_inner_ty, second_inner_ty, first_file_pos, second_file_pos
                 ),
                 LangErrorKind::AnalyzeError,

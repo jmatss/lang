@@ -174,6 +174,33 @@ var y: i32 = x + x_ptr.*
 ```
 
 
+## Tuple Type
+A `tuple` is a group of zero or more values. Internally a tuple is compiled into a struct containing the values as its fields/members.
+The syntax for a tuple type is a comma separated list of types wrapped inside a pair of parenthesis.
+```
+([<TYPE> [,]]...)
+
+// Example of variable containing a tuple with no value (empty type).
+var tuple_a: ()
+// Example of variable containing a tuple with one value of type `i32`.
+var tuple_b: (i32)
+// Example of variable containing a tuple with two values of type `TestStruct` and `f32`.
+var tuple_c: (TestStruct, f32)
+```
+where `TYPE` can be any type.
+
+Creating a tuple is done with the built-in function `@tuple(...)` which creates a new struct with `<X>` arguments (where `<X>` is the amount of arguments given to the built-in function call).
+Internally this will create a struct called `Tuple` with the types of the arguments as generics.
+Accessing a specific value in the tuple is done with the `.(` syntax: 
+```
+var tuple_a: (i32) = @tuple(123)
+var x: i32 = tuple_a.(0)
+
+var tuple_b: (TestStruct, f64) = @tuple(TestStruct {}, 3.5)
+var ts: TestStruct = tuple_b.(0)
+var f: f64 = tuple_b.(1)
+```
+
 ## Modifiers
 Modifiers can be specified on ADT's and function declarations. The Modifiers should precede the declaration.
 

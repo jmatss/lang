@@ -117,7 +117,7 @@ impl GenericAdtCreator {
                 let header = match adt_kind {
                     AdtKind::Struct => BlockHeader::Struct(Arc::clone(&adt)),
                     AdtKind::Union => BlockHeader::Union(Arc::clone(&adt)),
-                    AdtKind::Enum | AdtKind::Unknown => {
+                    AdtKind::Enum | AdtKind::Tuple | AdtKind::Unknown => {
                         panic!("Bad adt kind: {:?}", adt.read().kind)
                     }
                 };
@@ -373,7 +373,9 @@ impl Visitor for GenericAdtCreator {
             }) = &mut body_token
             {
                 let adt_path_without_gens = match header {
-                    BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
+                    BlockHeader::Struct(adt) | BlockHeader::Union(adt)
+                        if adt.read().name != "Tuple" =>
+                    {
                         let adt = adt.read();
                         adt.module.clone_push(&adt.name, None, Some(adt.file_pos))
                     }

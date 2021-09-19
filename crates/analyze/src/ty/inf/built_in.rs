@@ -1,8 +1,9 @@
 use common::{
     error::LangResult,
+    path::LangPathPart,
     token::expr::BuiltInCall,
     traverse::traverse_ctx::TraverseCtx,
-    ty::{replace::replace_unique_ids, ty::Ty, type_info::TypeInfo},
+    ty::{inner_ty::InnerTy, replace::replace_unique_ids, ty::Ty, type_info::TypeInfo},
 };
 
 use crate::ty::solve::insert_constraint;
@@ -109,19 +110,14 @@ pub(crate) fn infer_built_in(
     }
 
     if &built_in_call.name == "type" {
-        // TODO: Temporary ugly hack to make `@type` work. Should do this in
-        //       a different way and somewhere else.
         let type_id = ty_env_guard.id(&Ty::Expr(
             Box::new(built_in_call.arguments.first().unwrap().value.clone()),
             TypeInfo::BuiltInCall(built_in_call.file_pos),
         ))?;
-
         built_in_call.ret_type = Some(type_id);
     } else if &built_in_call.name == "ptr_add" || &built_in_call.name == "ptr_sub" {
-        // TODO: "Temporary" hack to make the use of `@ptr_add`/`@ptr_sub` "better".
-        //        Currently there are no direct link between the type of the ptr
-        //        argument and the return type (which should have the same type).
-        //        Add that link here.
+        // There are no direct link between the type of the ptr argument and the
+        // return type (which should have the same type). Add that link here.
         let arg_type = built_in_call
             .arguments
             .first()
@@ -131,9 +127,8 @@ pub(crate) fn infer_built_in(
         let ret_type = built_in_call.ret_type.unwrap();
         insert_constraint(&mut ty_env_guard, arg_type, ret_type)?;
     } else if &built_in_call.name == "array" {
-        // TODO: The return type of the @array call should return a type
-        //       tied to its arguments. Should be done somewhere else in
-        //       the future.
+        // The return type of the @array call should return a type tied to its
+        // arguments.
         let init_val = built_in_call.arguments.get(0).unwrap().value.clone();
         let init_val_type_id = init_val.get_expr_type()?;
         let arr_dim = built_in_call.arguments.get(1).unwrap().value.clone();
@@ -143,8 +138,24 @@ pub(crate) fn infer_built_in(
             Some(Box::new(arr_dim)),
             TypeInfo::BuiltInCall(built_in_call.file_pos),
         ))?;
-
         built_in_call.ret_type = Some(arr_type_id);
+    } else if &built_in_call.name == "tuple" {
+        // Since there are no parameters or generics declared on the `tuple`
+        // built-in, no constraints have been created in the logic above.
+        // Link all arguments and their types to the return type of the
+        // built-in call.
+        let mut type_ids = Vec::with_capacity(built_in_call.arguments.len());
+        for arg in &built_in_call.arguments {
+            let arg_type_id = arg.value.get_expr_type()?;
+            type_ids.push(arg_type_id);
+        }
+
+        let path_part = LangPathPart("Tuple".into(), Some(type_ids.as_slice().into()));
+        let tuple_type_id = ty_env_guard.id(&Ty::CompoundType(
+            InnerTy::Tuple(path_part.into()),
+            TypeInfo::BuiltInCall(built_in_call.file_pos),
+        ))?;
+        built_in_call.ret_type = Some(tuple_type_id);
     }
 
     Ok(())

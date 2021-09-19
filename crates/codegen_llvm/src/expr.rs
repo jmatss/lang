@@ -517,7 +517,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         if is_const {
             Ok(struct_type.const_named_struct(&args).into())
         } else {
-            // TODO: Can this be done in a better way? The stack storring/loading
+            // TODO: Can this be done in a better way? The stack storing/loading
             //       isn't really needed.
             let struct_ptr = self.builder.build_alloca(struct_type, "struct.init");
 
@@ -586,7 +586,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             &full_path,
             arg.name.as_ref().unwrap(),
         )?;
-        let tag = self.context.i8_type().const_int(tag_idx, false);
+        let tag = self.context.i8_type().const_int(tag_idx as u64, false);
 
         let val_ptr = self
             .builder

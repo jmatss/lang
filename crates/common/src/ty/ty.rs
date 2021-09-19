@@ -69,9 +69,9 @@ pub enum Ty {
     /// where `@type(i)` would return the type of expression `i` which is `i64`.
     Expr(Box<Expr>, TypeInfo),
 
-    /// Unknown member of the struct/enum/trait of the first TypeId. The first
-    /// String is the name of the member.
-    UnknownAdtMember(TypeId, String, UniqueId, TypeInfo),
+    /// Unknown member of the struct/enum/trait of the first TypeId.
+    /// The "Either<String, usize>" is either the index or the name of the member
+    UnknownAdtMember(TypeId, Either<String, usize>, UniqueId, TypeInfo),
 
     /// Unknown method of the struct/enum/trait type "TypeId".
     /// The "Langpath" is the name of the method + potential generics.
@@ -81,9 +81,9 @@ pub enum Ty {
 
     /// Unknown argument for a method on the ADT "TypeId".
     /// The "Langpath" is the module+name of the fn/method and the
-    /// "Either<usize, String>" is either the index or the name of the argument
+    /// "Either<String, usize>" is either the index or the name of the argument
     /// in the fn call.
-    UnknownFnArgument(TypeId, LangPath, Either<usize, String>, UniqueId, TypeInfo),
+    UnknownFnArgument(TypeId, LangPath, Either<String, usize>, UniqueId, TypeInfo),
 
     /// Unknown type of array member of array with type "TypeId".
     UnknownArrayMember(TypeId, UniqueId, TypeInfo),
