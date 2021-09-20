@@ -14,7 +14,7 @@ pub fn print_fd(
     fd: i32,
     line_break: bool = true,
     flush: bool = false
-) -> Result<u32, StringView> {
+) -> Result<(), StringView> {
     if _write(fd, view.ptr, view.len()) == -1 {
         return Result::error("Error when writing to fd")
     }
@@ -31,15 +31,15 @@ pub fn print_fd(
         return Result::error("Error when flushing to fd")
     }
 
-    return Result::success(0)
+    return Result::success(@tuple())
 }
 
-pub fn print(view: StringView, line_break: bool = true, flush: bool = false) -> Result<u32, StringView> {
+pub fn print(view: StringView, line_break: bool = true, flush: bool = false) -> Result<(), StringView> {
     var stdout_fd = 1
     return print_fd(view, stdout_fd, line_break, flush)
 }
 
-pub fn eprint(view: StringView, line_break: bool = true, flush: bool = false) -> Result<u32, StringView> {
+pub fn eprint(view: StringView, line_break: bool = true, flush: bool = false) -> Result<(), StringView> {
     var stderr_fd = 2
     return print_fd(view, stderr_fd, line_break, flush)
 }

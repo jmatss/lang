@@ -34,7 +34,7 @@ pub struct List<T> {
     }
 
     /// Pushes the `item` into the end of the list.
-    pub fn {this} push(item: T) -> Result<u32, StringView> {
+    pub fn {this} push(item: T) -> Result<(), StringView> {
         if this.len() >= this.cap() {
             var resize_or_error = this.resize(1)
             if err is resize_or_error.error {
@@ -46,7 +46,7 @@ pub struct List<T> {
         item_pos_ptr.* = item
 
         this.len.++
-        return Result::success(0)
+        return Result::success(@tuple())
     }
 
     /// Pops and returns the item at the end of this list.

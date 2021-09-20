@@ -56,7 +56,7 @@ pub struct Map<K: Hash Eq<K>, V> {
     ///
     /// If required to increase the size of the map but unable to do so,
     /// an error will be returned.
-    pub fn {this} insert(key: K, value: V) -> Result<u32, StringView> {
+    pub fn {this} insert(key: K, value: V) -> Result<(), StringView> {
         const new_entry = Entry { key, value, key.hash(), EntryState::TAKEN }
 
         // If an item with the key `key` already exists, replace that item.
@@ -64,14 +64,14 @@ pub struct Map<K: Hash Eq<K>, V> {
         if idx is idx_or_empty.value {
             var old_entry_ptr = @ptr_add(this.ptr, idx)
             old_entry_ptr.* = new_entry
-            return Result::success(0)
+            return Result::success(@tuple())
         } else {
             return this.insert_entry(new_entry)
         }
     }
 
     /// Inserts a new entry into the map and resizes the map if needed.
-    fn {this} insert_entry(new_entry: Entry<K, V>) -> Result<u32, StringView> {
+    fn {this} insert_entry(new_entry: Entry<K, V>) -> Result<(), StringView> {
         var cur_factor
         if this.cap() == 0 {
             cur_factor = 1.0
@@ -92,7 +92,7 @@ pub struct Map<K: Hash Eq<K>, V> {
         old_entry_ptr.* = new_entry
 
         this.len.++
-        return Result::success(0)
+        return Result::success(@tuple())
     }
 
     /// Removes and returns the value with key `key`.
@@ -219,9 +219,7 @@ pub struct Map<K: Hash Eq<K>, V> {
     /// with a default capacity of 16. If an allocation already exists, a new allocation will
     /// be made with double the size (to preserve power of 2). The entries will then be moved
     /// to the new allocation and the old memory will be de-allocated.
-    ///
-    /// The returned `u32` doesn't matter, we are only intereseted of the possible error.
-    fn {this} resize_and_move(new_cap: u32) -> Result<u32, StringView> {
+    fn {this} resize_and_move(new_cap: u32) -> Result<(), StringView> {
         if new_cap == 0 {
             new_cap = 16
         }
@@ -258,7 +256,7 @@ pub struct Map<K: Hash Eq<K>, V> {
         }
 
         Allocator::deinit(old_ptr)
-        return Result::success(0)
+        return Result::success(@tuple())
     }
 }
 

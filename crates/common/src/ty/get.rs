@@ -339,20 +339,13 @@ pub fn get_adt_and_trait_paths(
                 }
             }
 
-            match inner_ty {
-                InnerTy::Struct(path)
-                | InnerTy::Enum(path)
-                | InnerTy::Union(path)
-                | InnerTy::Trait(path)
-                | InnerTy::UnknownIdent(path, ..) => {
-                    let path_clone = if full_paths {
-                        path.clone()
-                    } else {
-                        path.without_gens()
-                    };
-                    paths.insert(ty_env, deref_type, path_clone)?;
-                }
-                _ => (),
+            if let Some(path) = get_ident(ty_env, id)? {
+                let path_clone = if full_paths {
+                    path
+                } else {
+                    path.without_gens()
+                };
+                paths.insert(ty_env, deref_type, path_clone)?;
             }
         }
 
