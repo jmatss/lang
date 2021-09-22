@@ -83,8 +83,6 @@ pub struct String {
         return this.buf.ptr
     }
 
-    // TODO: What should it return in the success case?
-    //       The value doesn't matter in that case.
     /// Appends a string literal to this string.
     ///
     /// The given string literal will be copied into this strings heap allocated memory.
@@ -93,7 +91,7 @@ pub struct String {
     /// If no `start_idx` argument is given, it will be set to the default value 0.
     /// If no `len` arguments is given, this function will assume that the given
     /// `str_lit` is null-terminated and calculate the length with `strlen()`.
-    pub fn {this} append_lit(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<i32, StringView> {
+    pub fn {this} append_lit(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<(), StringView> {
         if start_idx != 0 {
             str_lit = @ptr_add(str_lit, start_idx)
         }
@@ -112,16 +110,16 @@ pub struct String {
             i.++
         }
 
-        return Result::success(0)
+        return Result::success(@tuple())
     }
 
     /// Appends the contents of a StringView to this String.
-    pub fn {this} append_view(str_view: StringView) -> Result<i32, StringView> {
+    pub fn {this} append_view(str_view: StringView) -> Result<(), StringView> {
         return this.append_lit(str_view.ptr, 0, str_view.len())
     }
 
     /// Appends the given ascii character to this String.
-    pub fn {this} append_ascii(ascii: u8) -> Result<i32, StringView> {
+    pub fn {this} append_ascii(ascii: u8) -> Result<(), StringView> {
         return this.append_lit(ascii.&, 0, 1)
     }
 
