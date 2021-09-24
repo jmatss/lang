@@ -1,7 +1,7 @@
 use either::Either;
 use inkwell::{
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
-    values::{AnyValueEnum, FloatValue, IntValue},
+    values::{AnyValueEnum, FloatValue, IntValue, PointerValue},
     AddressSpace,
 };
 use log::debug;
@@ -12,7 +12,7 @@ use common::{
     token::{
         block::AdtKind,
         expr::{AdtInit, ArrayInit, Expr, FnCall},
-        lit::Lit,
+        lit::{Lit, StringType},
     },
     ty::{get::get_inner, inner_ty::InnerTy, to_string::to_string_path, type_id::TypeId},
 };
@@ -101,33 +101,16 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         file_pos: Option<FilePosition>,
     ) -> LangResult<AnyValueEnum<'ctx>> {
         match lit {
-            Lit::String(str_lit) => {
-                // Returns a pointer to the newly created string literal.
-                // The string literal will be an array of u8(/i8(?)) with a
-                // null terminator.
-                // TODO: Probably best to let string literals be a pointer to
-                //       an array so one can get the size. But for now it is
-                //       casted to a pointer to u8 to be compatible with C code.
-                // See: https://github.com/TheDan64/inkwell/issues/32
-                let lit_ptr = unsafe {
-                    self.builder
-                        .build_global_string(str_lit, "str.lit")
-                        .as_pointer_value()
-                };
-                let address_space = AddressSpace::Generic;
-                let i8_ptr_type = self.context.i8_type().ptr_type(address_space);
-                Ok(lit_ptr.const_cast(i8_ptr_type).into())
+            Lit::String(str_lit, string_type) => {
+                self.compile_lit_string(str_lit, string_type, file_pos)
             }
 
             Lit::Char(char_lit) => {
                 if char_lit.chars().count() == 1 {
-                    if let Some(ch) = char_lit.chars().next() {
-                        Ok(AnyValueEnum::IntValue(
-                            self.context.i32_type().const_int(ch as u64, false),
-                        ))
-                    } else {
-                        Err(self.err("Unable to get char literal.".into(), file_pos))
-                    }
+                    let ch = char_lit.chars().next().unwrap();
+                    Ok(AnyValueEnum::IntValue(
+                        self.context.i32_type().const_int(ch as u64, false),
+                    ))
                 } else {
                     Err(self.err("Char literal isn't a single character.".into(), file_pos))
                 }
@@ -155,6 +138,93 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         }
     }
 
+    fn compile_lit_string(
+        &mut self,
+        str_lit: &str,
+        string_type: &StringType,
+        file_pos: Option<FilePosition>,
+    ) -> LangResult<AnyValueEnum<'ctx>> {
+        // Early return if this is a null-terminated C string. No need to fetch
+        // structs and calculate len.
+        if matches!(string_type, StringType::C) {
+            return Ok(self.compile_lit_string_global(str_lit, true).into());
+        }
+
+        let ptr_arg = self.compile_lit_string_global(str_lit, false);
+        let len_arg = self
+            .context
+            .i32_type()
+            .const_int(str_lit.len() as u64, false);
+
+        let struct_path = match string_type {
+            StringType::Regular => ["std".into(), "string".into(), "StringView".into()].into(),
+            StringType::F | StringType::S => {
+                ["std".into(), "string".into(), "String".into()].into()
+            }
+            StringType::C => unreachable!(),
+        };
+        let struct_name = to_string_path(&self.analyze_ctx.ty_env.lock(), &struct_path);
+
+        let struct_type = if let Some(struct_type) = self.module.get_struct_type(&struct_name) {
+            struct_type
+        } else {
+            return Err(self.err(
+                format!(
+                    "Unable to get struct \"{}\" when compiling lit string.",
+                    struct_name
+                ),
+                file_pos,
+            ));
+        };
+
+        Ok(struct_type
+            .const_named_struct(&[ptr_arg.into(), len_arg.into()])
+            .into())
+    }
+
+    /// Compiles the given string literal into an u8 array and adds its as
+    /// a new LLVM global. The function returns a pointer to this global.
+    ///
+    /// If `null_terminated` is set to true, the size of the array will be
+    /// `lit.len() + 1` and the last item in the array will be set to zero.
+    fn compile_lit_string_global(
+        &mut self,
+        lit: &str,
+        null_terminated: bool,
+    ) -> PointerValue<'ctx> {
+        // Use a random name. This name will never be used, but just need to
+        // make sure that there aren't multiple globals with the same name.
+        let name = format!("str.lit.{}", rand::random::<u32>());
+        let i8_type = self.context.i8_type();
+
+        let len = if null_terminated {
+            lit.len() + 1
+        } else {
+            lit.len()
+        };
+
+        let mut bytes = Vec::with_capacity(len);
+        for byte in lit.as_bytes() {
+            bytes.push(i8_type.const_int(*byte as u64, false));
+        }
+
+        if null_terminated {
+            bytes.push(i8_type.const_zero());
+        }
+
+        let arr_val = i8_type.const_array(&bytes);
+        let arr_type = arr_val.get_type();
+
+        let global_val = self
+            .module
+            .add_global(arr_type, Some(AddressSpace::Const), &name);
+        global_val.set_initializer(&arr_val);
+
+        global_val
+            .as_pointer_value()
+            .const_address_space_cast(i8_type.ptr_type(AddressSpace::Generic))
+    }
+
     // TODO: Better conversion of the integer literal.
     // TODO: i32 as default.
     fn compile_lit_int(
@@ -166,12 +236,22 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     ) -> LangResult<IntValue<'ctx>> {
         // TODO: Where should the integer literal conversion be made?
         let inner_ty = if let Some(type_id) = type_id_opt {
-            let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+            let ty_env_guard = self.analyze_ctx.ty_env.lock();
             let fwd_type_id = ty_env_guard.forwarded(*type_id);
             get_inner(&ty_env_guard, fwd_type_id)?.clone()
         } else {
             InnerTy::default_int()
         };
+
+        if !inner_ty.is_signed() && lit.starts_with('-') {
+            return Err(self.err(
+                format!(
+                    "Tried to assign negative value to unsigned integer. Type: {:?}, value: {}",
+                    inner_ty, lit
+                ),
+                file_pos,
+            ));
+        }
 
         Ok(match inner_ty {
             InnerTy::I8 => {
@@ -234,7 +314,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         file_pos: Option<FilePosition>,
     ) -> LangResult<FloatValue<'ctx>> {
         let inner_ty = if let Some(type_id) = type_id_opt {
-            let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+            let ty_env_guard = self.analyze_ctx.ty_env.lock();
             let fwd_type_id = ty_env_guard.forwarded(*type_id);
             get_inner(&ty_env_guard, fwd_type_id)?.clone()
         } else {
@@ -266,6 +346,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         }
 
         // TODO: Implement check for `is_fn_ptr_call`s arg/param count as well.
+        let ty_env_guard = self.analyze_ctx.ty_env.lock();
 
         let fn_ptr = if fn_call.is_fn_ptr_call {
             let var_name = &fn_call.name;
@@ -297,9 +378,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     ));
                 }
             }
-        } else if let Some(fn_value) = self
-            .module
-            .get_function(&fn_call.full_name(&self.analyze_ctx.ty_env.lock().unwrap())?)
+        } else if let Some(fn_value) = self.module.get_function(&fn_call.full_name(&ty_env_guard)?)
         {
             // Checks to see if the arguments are fewer that parameters. The
             // arguments are allowed to be greater than parameters since variadic
@@ -308,7 +387,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Wrong amount of args given when calling func \"{}\". Expected: {}, got: {}",
-                        &fn_call.full_name(&self.analyze_ctx.ty_env.lock().unwrap())?,
+                        &fn_call.full_name(&ty_env_guard)?,
                         fn_value.count_params(),
                         fn_call.arguments.len()
                     ),
@@ -318,11 +397,26 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
             Either::Left(fn_value)
         } else {
+            let mut fns = Vec::default();
+            if let Some(first_fn_val) = self.module.get_first_function() {
+                let fn_name = first_fn_val.get_name().to_str().unwrap();
+                fns.push(format!(" * {}", fn_name.to_string()));
+
+                let mut prev_fn_val = first_fn_val;
+                while let Some(fn_val) = prev_fn_val.get_next_function() {
+                    let fn_name = fn_val.get_name().to_str().unwrap();
+                    fns.push(format!(" * {}", fn_name.to_string()));
+                    prev_fn_val = fn_val;
+                }
+            }
+
             return Err(self.err(
                 format!(
-                    "Unable to find function with name \"{}\" to call (full name: {:#?}).",
+                    "Unable to find function with name \"{}\" to call (full name: {:#?}). \
+                    List of all declared functions: {}",
                     &fn_call.name,
-                    &fn_call.full_name(&self.analyze_ctx.ty_env.lock().unwrap())
+                    &fn_call.full_name(&ty_env_guard),
+                    fns.join("\n"),
                 ),
                 fn_call.file_pos,
             ));
@@ -353,22 +447,22 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 .module
                 .clone_push(&fn_ptr.name, fn_ptr.generics.as_ref(), fn_ptr.file_pos);
         let full_path = self.analyze_ctx.ast_ctx.calculate_fn_full_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
+            &self.analyze_ctx.ty_env.lock(),
             &partial_path,
             self.cur_block_id,
         )?;
 
-        if let Some(fn_value) = self.module.get_function(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        )) {
+        if let Some(fn_value) = self
+            .module
+            .get_function(&to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path))
+        {
             let fn_ptr = fn_value.as_global_value().as_pointer_value();
             Ok(fn_ptr.into())
         } else {
             Err(self.err(
                 format!(
                     "Unable to find function with full name {} (compiling fn pointer).",
-                    to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
+                    to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path)
                 ),
                 fn_ptr.file_pos.to_owned(),
             ))
@@ -380,7 +474,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         &mut self,
         struct_init: &mut AdtInit,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let full_name = struct_init.full_name(&self.analyze_ctx.ty_env.lock().unwrap())?;
+        let full_name = struct_init.full_name(&self.analyze_ctx.ty_env.lock())?;
 
         let struct_type = if let Some(inner) = self.module.get_struct_type(&full_name) {
             inner
@@ -417,18 +511,13 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             args.push(basic_value);
         }
 
-        let is_const = CodeGen::is_const(
-            &args
-                .clone()
-                .iter()
-                .map(|x| x.clone().into())
-                .collect::<Vec<_>>(),
-        );
+        let is_const =
+            CodeGen::is_const(&args.clone().iter().map(|x| (*x).into()).collect::<Vec<_>>());
 
         if is_const {
             Ok(struct_type.const_named_struct(&args).into())
         } else {
-            // TODO: Can this be done in a better way? The stack storring/loading
+            // TODO: Can this be done in a better way? The stack storing/loading
             //       isn't really needed.
             let struct_ptr = self.builder.build_alloca(struct_type, "struct.init");
 
@@ -467,21 +556,21 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             union_init.file_pos,
         );
         let full_path = self.analyze_ctx.ast_ctx.calculate_adt_full_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
+            &self.analyze_ctx.ty_env.lock(),
             &partial_path,
             self.cur_block_id,
         )?;
 
-        let union_type = if let Some(inner) = self.module.get_struct_type(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        )) {
+        let union_type = if let Some(inner) = self
+            .module
+            .get_struct_type(&to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path))
+        {
             inner
         } else {
             return Err(self.err(
                 format!(
                     "Unable to get union with name \"{}\". Union init: {:#?}",
-                    to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
+                    to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path),
                     union_init
                 ),
                 union_init.file_pos,
@@ -493,11 +582,11 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let basic_value = CodeGen::any_into_basic_value(any_value)?;
 
         let tag_idx = self.analyze_ctx.ast_ctx.get_adt_member_index(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
+            &self.analyze_ctx.ty_env.lock(),
             &full_path,
-            &arg.name.as_ref().unwrap(),
+            arg.name.as_ref().unwrap(),
         )?;
-        let tag = self.context.i8_type().const_int(tag_idx, false);
+        let tag = self.context.i8_type().const_int(tag_idx as u64, false);
 
         let val_ptr = self
             .builder

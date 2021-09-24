@@ -1,7 +1,9 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
+
+use parking_lot::RwLock;
 
 use common::{
     ctx::ast_ctx::AstCtx,
@@ -14,15 +16,13 @@ use common::{
         expr::{AdtInit, Var},
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
-    ty::{inner_ty::InnerTy, ty::Ty},
+    ty::ty::Ty,
 };
 
 /// Iterates through all function and method calls and re-orders all named
 /// arguments so that they are put in the correct index position so that
 /// the codegen works correctly. It also assigns any default values found in the
 /// function parameters to the current function call (if expected).
-/// It also wraps "this" in a pointer if the modifier of the function that it is
-/// calling expects this as a pointer.
 pub struct CallArgs {
     errors: Vec<LangError>,
 }
@@ -87,7 +87,7 @@ impl CallArgs {
 
         let mut param_name_to_idx = HashMap::new();
         for (idx, param) in params.iter().enumerate() {
-            param_name_to_idx.insert(param.as_ref().read().unwrap().name.clone(), idx);
+            param_name_to_idx.insert(param.read().name.clone(), idx);
         }
 
         let mut arg_idx = 0;
@@ -137,7 +137,7 @@ impl CallArgs {
         if !is_variadic && fn_call.arguments.len() < params.len() {
             let start_idx = fn_call.arguments.len();
             for param in params[start_idx..].iter() {
-                let param = param.as_ref().read().unwrap();
+                let param = param.read();
 
                 if let Some(default_value) = &param.value {
                     let default_arg =
@@ -177,7 +177,7 @@ impl Visitor for CallArgs {
         // make sure to fetch it as a method since they are stored differently
         // compared to a regular function.
         let func_res = {
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
 
             if let Some(adt_type_id) = &fn_call.method_adt {
                 let adt_ty = match ty_env_guard.ty(*adt_type_id) {
@@ -188,37 +188,28 @@ impl Visitor for CallArgs {
                     }
                 };
 
-                let full_path = match adt_ty {
-                    Ty::CompoundType(inner_ty, gens, ..) => match inner_ty {
-                        InnerTy::Struct(path)
-                        | InnerTy::Enum(path)
-                        | InnerTy::Union(path)
-                        | InnerTy::Trait(path) => {
-                            // TODO: Is this needed? Just want to make sure that the
-                            //       generics are as up-to-date as possible.
-                            path.with_gens(gens)
-                        }
-                        _ => {
-                            let err = ctx.ast_ctx.err(format!(
-                                "Bad inner type for func call method_adt: {:#?}",
-                                fn_call
-                            ));
-                            self.errors.push(err);
-                            return;
-                        }
-                    },
-                    _ => {
-                        let err = ctx.ast_ctx.err(format!(
-                            "method_adt not valid type for func call: {:#?}",
-                            fn_call
-                        ));
-                        self.errors.push(err);
-                        return;
-                    }
+                let inner_ty = if let Ty::CompoundType(inner_ty, ..) = adt_ty {
+                    inner_ty
+                } else {
+                    self.errors.push(ctx.ast_ctx.err(format!(
+                        "method_adt not valid type for func call: {:#?}",
+                        fn_call
+                    )));
+                    return;
+                };
+
+                let adt_path = if let Some(adt_path) = inner_ty.get_ident() {
+                    adt_path
+                } else {
+                    self.errors.push(ctx.ast_ctx.err(format!(
+                        "Bad inner type for func call method_adt: {:#?}",
+                        fn_call
+                    )));
+                    return;
                 };
 
                 ctx.ast_ctx
-                    .get_method(&ty_env_guard, &full_path, &fn_call.half_name(&ty_env_guard))
+                    .get_method(&ty_env_guard, &adt_path, &fn_call.half_name(&ty_env_guard))
             } else {
                 let partial_path = fn_call.module.clone_push(
                     &fn_call.name,
@@ -250,7 +241,7 @@ impl Visitor for CallArgs {
             }
         };
 
-        let func = func.as_ref().read().unwrap();
+        let func = func.read();
 
         // Get the parameters for the function. This will be used to reorder
         // the arguments in the function call correctly.
@@ -264,11 +255,11 @@ impl Visitor for CallArgs {
 
         // Reorder the arguments of the function call according to the parameter
         // names used for the arguments.
-        self.reorder(&ctx.ast_ctx, &mut fn_call.arguments, params);
+        self.reorder(ctx.ast_ctx, &mut fn_call.arguments, params);
 
         // Assign any default value for arguments that are missing a value in
         // the function call.
-        if let Err(err) = self.default_args(&ctx.ast_ctx, fn_call, params, func.is_var_arg) {
+        if let Err(err) = self.default_args(ctx.ast_ctx, fn_call, params, func.is_var_arg) {
             self.errors.push(err);
             return;
         }
@@ -278,51 +269,18 @@ impl Visitor for CallArgs {
         match adt_init.kind {
             AdtKind::Struct => (),
             AdtKind::Union => return,
-            AdtKind::Enum | AdtKind::Unknown => unreachable!("{:#?}", adt_init.kind),
+            AdtKind::Enum | AdtKind::Tuple | AdtKind::Unknown => {
+                unreachable!("{:#?}", adt_init.kind)
+            }
         }
 
-        let ret_type_id = if let Some(ret_type_id) = &adt_init.ret_type {
-            *ret_type_id
-        } else {
-            unreachable!("Adt init type not compound: {:#?}", adt_init);
-        };
+        let adt_path = adt_init.module.clone_push(
+            &adt_init.name,
+            adt_init.generics.as_ref(),
+            adt_init.file_pos,
+        );
 
-        let ret_ty = match ctx.ty_env.lock().unwrap().ty(ret_type_id) {
-            Ok(ret_ty) => ret_ty.clone(),
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
-
-        let generics = if let Ty::CompoundType(_, generics, _) = ret_ty {
-            if generics.len_types() > 0 {
-                Some(generics)
-            } else {
-                None
-            }
-        } else {
-            unreachable!("Adt init type not compound: {:#?}", adt_init);
-        };
-
-        let partial_path =
-            adt_init
-                .module
-                .clone_push(&adt_init.name, generics.as_ref(), adt_init.file_pos);
-
-        let full_path = match ctx.ast_ctx.calculate_adt_full_path(
-            &ctx.ty_env.lock().unwrap(),
-            &partial_path,
-            ctx.block_id,
-        ) {
-            Ok(full_path) => full_path,
-            Err(err) => {
-                self.errors.push(err);
-                return;
-            }
-        };
-
-        let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock().unwrap(), &full_path) {
+        let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock(), &adt_path) {
             Ok(adt) => adt,
             Err(err) => {
                 self.errors.push(err);
@@ -330,11 +288,7 @@ impl Visitor for CallArgs {
             }
         };
 
-        self.reorder(
-            &ctx.ast_ctx,
-            &mut adt_init.arguments,
-            &adt.as_ref().read().unwrap().members,
-        );
+        self.reorder(ctx.ast_ctx, &mut adt_init.arguments, &adt.read().members);
 
         // TODO: Should there be default values for structs (?). Arrange that
         //       here in that case.

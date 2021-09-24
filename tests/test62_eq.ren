@@ -1,0 +1,35 @@
+use std::Eq
+
+pub struct TestStruct {
+    var member: u8
+}
+
+impl TestStruct: Eq<TestStruct> {
+    pub fn this eq(other: TestStruct) -> bool {
+        return this.member == other.member
+    }
+}
+
+fn main() -> i32 {
+    var ts1 = TestStruct { 1 }
+    var ts2 = TestStruct { 1 }
+    std::assert(ts1.eq(ts2))
+    std::assert(ts1 == ts2)
+
+    var ts3 = TestStruct { 3 }
+    var ts4 = TestStruct { 4 }
+    std::assert(not ts3.eq(ts4))
+    std::assert(ts3 != ts4)
+
+    var v1 = "abc123"
+    var v2 = "abc123"
+    std::assert(v1 == v1)
+    std::assert(v1 == v2)
+
+    var v3 = "123abc"
+    var v4 = "abc"
+    std::assert(v1 != v3)
+    std::assert(v1 != v4)
+
+    return 0
+}

@@ -27,11 +27,11 @@ pub enum DerefType {
     /// found `Ty`s or `TypeId`s.
     Deep,
 
-    /// A deep hash type will NOT use forwarded and inferred types when hashing
+    /// A shallow hash type will NOT use forwarded and inferred types when hashing
     /// any found `Ty`s or `TypeId`s.
     Shallow,
 
-    /// Used when it doesn't matter. This should only be used when it is known
-    /// that the "thing" doesn't contain any nested types.
+    /// Used when one should use any dereferencing. Any type IDs should be ignored.
+    /// `Generic`s inside paths will NOT be hashed.
     None,
 }

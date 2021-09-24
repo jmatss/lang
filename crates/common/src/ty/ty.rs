@@ -6,19 +6,19 @@ use crate::{
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
     hash::{DerefType, TyEnvHash},
+    path::LangPath,
     token::{expr::Expr, lit::Lit},
     UniqueId,
 };
 
-use super::{
-    generics::Generics, inner_ty::InnerTy, ty_env::TyEnv, type_id::TypeId, type_info::TypeInfo,
-};
+use super::{inner_ty::InnerTy, ty_env::TyEnv, type_id::TypeId, type_info::TypeInfo};
 
 #[derive(Debug, Clone)]
 pub enum Ty {
     /// A base type that can contain generic types. The first boxed type is
-    /// the actual type and the vector of types are the generic types.
-    CompoundType(InnerTy, Generics, TypeInfo),
+    /// the actual type. If this type contains generics, it will be stored inside
+    /// the ADT path of the `InnerTy`.
+    CompoundType(InnerTy, TypeInfo),
 
     /// A pointer to a type.
     Pointer(TypeId, TypeInfo),
@@ -69,32 +69,21 @@ pub enum Ty {
     /// where `@type(i)` would return the type of expression `i` which is `i64`.
     Expr(Box<Expr>, TypeInfo),
 
-    /// Unknown member of the struct/enum/trait of the first TypeId. The first
-    /// String is the name of the member.
-    UnknownAdtMember(TypeId, String, UniqueId, TypeInfo),
+    /// Unknown member of the struct/enum/trait of the first TypeId.
+    /// The "Either<String, usize>" is either the index or the name of the member
+    UnknownAdtMember(TypeId, Either<String, usize>, UniqueId, TypeInfo),
 
-    /// Unknown method of the struct/enum/trait type "Type" with the name of the
-    /// first "String". The vector are generics specified at the function call,
-    /// the usize is the index and the types are "UnknownMethodGeneric" types.
-    UnknownAdtMethod(TypeId, String, Vec<TypeId>, UniqueId, TypeInfo),
+    /// Unknown method of the struct/enum/trait type "TypeId".
+    /// The "Langpath" is the name of the method + potential generics.
+    /// The vector of type ids are the arguments of the method (will be used
+    /// to infer generics if needed).
+    UnknownAdtMethod(TypeId, LangPath, Vec<TypeId>, UniqueId, TypeInfo),
 
-    /// Unknown method argument of the struct/enum/trait type "TypeId" with
-    /// the name "String". The vector are generics specified at the function call,
-    /// and the "Either" is either the name of the argument or the index of the
-    /// argument in the method call if no argument name is set.
-    UnknownMethodArgument(
-        TypeId,
-        String,
-        Vec<TypeId>,
-        Either<String, usize>,
-        UniqueId,
-        TypeInfo,
-    ),
-
-    /// Unknown method generic argument of the struct/enum/trait type "TypeId"
-    /// with the name "String". The "Either<usize, String>" is either the index
-    /// or the name of the generic argument in the method call.
-    UnknownMethodGeneric(TypeId, String, Either<usize, String>, UniqueId, TypeInfo),
+    /// Unknown argument for a method on the ADT "TypeId".
+    /// The "Langpath" is the module+name of the fn/method and the
+    /// "Either<String, usize>" is either the index or the name of the argument
+    /// in the fn call.
+    UnknownFnArgument(TypeId, LangPath, Either<String, usize>, UniqueId, TypeInfo),
 
     /// Unknown type of array member of array with type "TypeId".
     UnknownArrayMember(TypeId, UniqueId, TypeInfo),
@@ -108,10 +97,9 @@ impl TyEnvHash for Ty {
         state: &mut H,
     ) -> LangResult<()> {
         match self {
-            Ty::CompoundType(inner_ty, gens, _) => {
+            Ty::CompoundType(inner_ty, ..) => {
                 0.hash(state);
                 inner_ty.hash_with_state(ty_env, deref_type, state)?;
-                gens.hash_with_state(ty_env, deref_type, state)?;
             }
             Ty::Pointer(type_id, _) => {
                 1.hash(state);
@@ -121,7 +109,7 @@ impl TyEnvHash for Ty {
                 2.hash(state);
                 type_id.hash_with_state(ty_env, deref_type, state)?;
                 if let Some(expr) = expr_opt {
-                    if let Some(dim) = arr_dim_hash(&expr)? {
+                    if let Some(dim) = arr_dim_hash(expr)? {
                         dim.hash(state);
                     }
                 }
@@ -141,12 +129,14 @@ impl TyEnvHash for Ty {
                 4.hash(state);
                 unique_id.hash(state);
             }
-            Ty::Generic(_, unique_id, _) => {
+            Ty::Generic(ident, unique_id, _) => {
                 5.hash(state);
+                ident.hash(state);
                 unique_id.hash(state);
             }
-            Ty::GenericInstance(_, unique_id, _) => {
+            Ty::GenericInstance(ident, unique_id, _) => {
                 6.hash(state);
+                ident.hash(state);
                 unique_id.hash(state);
             }
             Ty::Expr(expr, _) => {
@@ -174,16 +164,12 @@ impl TyEnvHash for Ty {
                 9.hash(state);
                 unique_id.hash(state);
             }
-            Ty::UnknownMethodArgument(.., unique_id, _) => {
+            Ty::UnknownFnArgument(.., unique_id, _) => {
                 10.hash(state);
                 unique_id.hash(state);
             }
-            Ty::UnknownMethodGeneric(.., unique_id, _) => {
-                11.hash(state);
-                unique_id.hash(state);
-            }
             Ty::UnknownArrayMember(_, unique_id, _) => {
-                12.hash(state);
+                11.hash(state);
                 unique_id.hash(state);
             }
         }
@@ -222,8 +208,7 @@ impl Ty {
             | Ty::Expr(.., type_info)
             | Ty::UnknownAdtMember(.., type_info)
             | Ty::UnknownAdtMethod(.., type_info)
-            | Ty::UnknownMethodArgument(.., type_info)
-            | Ty::UnknownMethodGeneric(.., type_info)
+            | Ty::UnknownFnArgument(.., type_info)
             | Ty::UnknownArrayMember(.., type_info) => type_info,
         }
     }
@@ -240,8 +225,7 @@ impl Ty {
             | Ty::Expr(.., type_info)
             | Ty::UnknownAdtMember(.., type_info)
             | Ty::UnknownAdtMethod(.., type_info)
-            | Ty::UnknownMethodArgument(.., type_info)
-            | Ty::UnknownMethodGeneric(.., type_info)
+            | Ty::UnknownFnArgument(.., type_info)
             | Ty::UnknownArrayMember(.., type_info) => type_info,
         }
     }
@@ -310,6 +294,7 @@ pub struct SolveCond {
     generic: bool,
     generic_instance: bool,
     unknown: bool,
+    any: bool,
 }
 
 impl Default for SolveCond {
@@ -319,6 +304,7 @@ impl Default for SolveCond {
             generic: true,
             generic_instance: true,
             unknown: true,
+            any: true,
         }
     }
 }
@@ -348,6 +334,11 @@ impl SolveCond {
         self
     }
 
+    pub fn excl_any(mut self) -> Self {
+        self.any = false;
+        self
+    }
+
     pub fn can_solve_default(self) -> bool {
         self.default
     }
@@ -362,5 +353,9 @@ impl SolveCond {
 
     pub fn can_solve_unknown(self) -> bool {
         self.unknown
+    }
+
+    pub fn can_solve_any(self) -> bool {
+        self.any
     }
 }

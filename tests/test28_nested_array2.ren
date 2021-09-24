@@ -1,0 +1,46 @@
+ext fn printf(format: {u8}, ...) -> i32
+
+struct TestStruct<T> {
+    var inner: T
+    var two: [T: 2]
+}
+
+struct OuterTestStruct<U> {
+    var inner_test_struct: U
+}
+
+fn main() -> i32 {
+    var x: u64 = 123
+    var y = [x, x]  // var y: [u64: 2] = [1, 2]
+    var test_struct = TestStruct { x, y }
+
+    test_struct.two.[0] = 1
+    test_struct.two.[1] = 2
+
+    printf(
+        c"test_struct.two.[0]: %lld, test_struct.two.[1]: %lld, test_struct.inner: %lld",
+        test_struct.two.[0], test_struct.two.[1], test_struct.inner
+    )
+    std::assert(test_struct.two.[0] == 1 and test_struct.two.[1] == 2 and test_struct.inner == 123)
+
+
+    var outer_test_struct = OuterTestStruct { test_struct }
+
+    outer_test_struct.inner_test_struct.two.[0] = 3
+    outer_test_struct.inner_test_struct.two.[1] = 4
+
+    printf(
+        c"\nouter_test_struct.inner_test_struct.two.[0]: %lld, outer_test_struct.inner_test_struct.two.[1]: %lld",
+        outer_test_struct.inner_test_struct.two.[0], outer_test_struct.inner_test_struct.two.[1]
+    )
+    std::assert(outer_test_struct.inner_test_struct.two.[0] == 3 and outer_test_struct.inner_test_struct.two.[1] == 4)
+
+    // Modifying the outer struct shouldn't modify the old inner `test_struct` since it is passed by value.
+    printf(
+        c"\ntest_struct.two.[0]: %lld, test_struct.two.[1]: %lld",
+        test_struct.two.[0], test_struct.two.[1]
+    )
+    std::assert(test_struct.two.[0] == 1 and test_struct.two.[1] == 2)
+
+    return 0
+}

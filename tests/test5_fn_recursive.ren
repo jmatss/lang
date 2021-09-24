@@ -1,0 +1,15 @@
+ext fn printf(format: {u8}, ...) -> i32
+
+fn fac(n: i32) -> i32 {
+    if n <= 1 {
+        return 1
+    } else {
+        return n * fac(n - 1)
+    }
+}
+
+fn main() -> i32 {   
+    var n: i32 = 7
+    printf(c"n: %d, result: %d", n, fac(n))
+    return 0
+}

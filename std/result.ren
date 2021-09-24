@@ -1,0 +1,46 @@
+mod std
+
+pub union Result<T, E> {
+    var success: T
+    var error: E
+
+    fn success(val: T = @null()) -> Result<T, E> {
+        return Result { success = val }
+    }
+
+    fn error(err: E = @null()) -> Result<T, E> {
+        return Result { error = err }
+    }
+
+    fn {this} is_success() -> bool {
+        if _ is this.success {
+            return true
+        } else {
+            return false
+        }
+    }
+
+    fn {this} is_error() -> bool {
+        return not this.is_success()
+    }
+
+    fn {this} get_success() -> T {
+        return this.success
+    }
+
+    fn {this} get_success_or(default: T) -> T {
+        if val is this.success {
+            return val
+        } else {
+            return default
+        }
+    }
+
+    fn {this} get_error() -> E {
+        return this.error
+    }
+
+    fn {this} set(val: T) {
+        this.success = val
+    }
+}

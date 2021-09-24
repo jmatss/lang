@@ -1,0 +1,23 @@
+// TODO: Should be possible to specify generics on functions.
+pub trait TestTrait<T1, T2> {
+    pub fn test_fn(x: i8)
+    pub fn test_fn_gen1(x: T1)
+    pub fn test_fn_gen2(y: T1, z: T2)
+    //pub fn test_fn_gen_method<F>(x: F)
+}
+
+pub struct TestStruct
+impl TestStruct: TestTrait<u32, i16> {
+    pub fn test_fn(x: i8) { }
+    pub fn test_fn_gen1(x: u32) { }
+    pub fn test_fn_gen2(y: u32, z: i16) { }
+    // Should be caught as errors:
+    // `T1` == `u32` != `u16`
+    // pub fn test_fn_gen1(x: i16) { }
+    // `T2` == `i16` != `{i16}`
+    // pub fn test_fn_gen2(y: u32, z: {i16}) { }
+}
+
+fn main() -> i32 {
+    return 0
+}

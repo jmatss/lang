@@ -1,0 +1,17 @@
+use std::StringView
+
+fn main() -> i32 {
+    var res
+    var view = "test output"
+
+    res = std::io::print(view)
+    std::assert(res.is_success())
+
+    res = std::io::print(view, line_break=false)
+    std::assert(res.is_success())
+
+    res = std::io::print(view, line_break=false, flush=true)
+    std::assert(res.is_success())
+
+    return 0
+}

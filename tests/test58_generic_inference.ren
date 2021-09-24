@@ -1,0 +1,49 @@
+struct TestStruct {
+    fn test_method<T>(x: T) { }
+}
+
+struct TestGenStruct<T> {
+    fn test_method(x: T) { }
+}
+
+struct TestDoubleGenStruct<T> {
+    var x: T
+    fn this test_method<F>(z: F) { }
+    fn this test_method_ret<R>() -> R { return 5 }
+}
+
+fn test_fn<T>(x: T) { }
+
+fn test_fn_ret<T>() -> T { return 7 }
+
+fn test_fn2<K, V>(k: K, v: V) { }
+
+fn main() -> i32 {
+    var one: u8 = 1
+    TestStruct::test_method(one)
+
+    var two: i64 = 2
+    TestGenStruct::test_method(two)
+
+    var three: f32 = 3.
+    var tdgs = TestDoubleGenStruct { three }
+
+    var four: u32 = 4
+    tdgs.test_method(four)
+
+    var five: u64
+    five = tdgs.test_method_ret()
+
+    var six: f64 = 6.
+    test_fn(six)
+
+    var seven: i8
+    seven = test_fn_ret()
+
+    var eight: i32 = 8
+    var nine: i8 = 9
+    test_fn2(eight, nine)
+    test_fn2(nine, eight)
+
+    return 0
+}

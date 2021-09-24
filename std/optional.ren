@@ -1,0 +1,42 @@
+mod std
+
+pub union Optional<T> {
+    var value: T
+    var empty: T
+
+    fn value(val: T = @null()) -> Optional<T> {
+        return Optional { value = val}
+    }
+
+    fn empty() -> Optional<T> {
+        return Optional { empty = @null() }
+    }
+
+    fn {this} has_value() -> bool {
+        if _ is this.value {
+            return true
+        } else {
+            return false
+        }
+    }
+
+    fn {this} is_empty() -> bool {
+        return not this.has_value()
+    }
+
+    fn {this} get() -> T {
+        return this.value
+    }
+
+    fn {this} get_or(default: T) -> T {
+        if val is this.value {
+            return val
+        } else {
+            return default
+        }
+    }
+
+    fn {this} set(val: T) {
+        this.value = val
+    }
+}

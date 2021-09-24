@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, sync::Mutex};
+use std::{collections::HashMap, hash::Hash};
 
 use crate::{
     error::LangResult,
@@ -6,10 +6,7 @@ use crate::{
     TypeId,
 };
 
-use super::{
-    contains::{contains_generic_shallow, contains_unknown_any_shallow},
-    ty_env::TyEnv,
-};
+use super::ty_env::TyEnv;
 
 /// Used to indicate what kind this "Generics" is.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -77,6 +74,10 @@ impl Generics {
         self.names.is_empty() && self.types.is_empty()
     }
 
+    pub fn is_empty_names(&self) -> bool {
+        self.names.is_empty()
+    }
+
     pub fn is_empty_types(&self) -> bool {
         self.types.is_empty()
     }
@@ -141,21 +142,15 @@ impl Generics {
     pub fn iter_types_mut(&mut self) -> std::slice::IterMut<TypeId> {
         self.types.iter_mut()
     }
+}
 
-    pub fn is_solved(&self, ty_env: &Mutex<TyEnv>) -> LangResult<bool> {
-        let mut solved = true;
-
-        for type_id in &self.types {
-            let ty_env_guard = ty_env.lock().unwrap();
-            if contains_unknown_any_shallow(&ty_env_guard, *type_id)?
-                || contains_generic_shallow(&ty_env_guard, *type_id)?
-            {
-                solved = false;
-                break;
-            }
+impl From<&[TypeId]> for Generics {
+    fn from(type_ids: &[TypeId]) -> Self {
+        let mut gens = Generics::new();
+        for type_id_i in type_ids {
+            gens.insert_type(*type_id_i);
         }
-
-        Ok(solved)
+        gens
     }
 }
 
@@ -166,12 +161,14 @@ impl TyEnvHash for Generics {
         deref_type: DerefType,
         state: &mut H,
     ) -> LangResult<()> {
-        if !self.types.is_empty() {
-            for gen_type_id in self.types.iter() {
-                gen_type_id.hash_with_state(ty_env, deref_type, state)?;
+        if !matches!(deref_type, DerefType::None) {
+            if !self.types.is_empty() {
+                for gen_type_id in self.types.iter() {
+                    gen_type_id.hash_with_state(ty_env, deref_type, state)?;
+                }
+            } else if !self.names.is_empty() {
+                self.names.hash(state);
             }
-        } else if !self.names.is_empty() {
-            self.names.hash(state);
         }
         Ok(())
     }

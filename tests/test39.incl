@@ -1,4 +1,1 @@
-test39.ren
-../std/mem.ren
-../std/types/optional.ren
-../std/types/result.ren
+test39_allocator.ren

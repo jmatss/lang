@@ -1,0 +1,40 @@
+pub trait TestOk<T1> {
+    pub fn this ok(x: T1) -> bool
+}
+
+pub struct TestStructU8
+impl TestStructU8: TestOk<u8> {
+    pub fn this ok(x: u8) -> bool { return true }
+}
+
+pub struct SecondTestStructU8
+impl SecondTestStructU8: TestOk<u8> {
+    pub fn this ok(x: u8) -> bool { return false }
+}
+
+pub struct TestStructI16
+impl TestStructI16: TestOk<i16> {
+    pub fn this ok(x: i16) -> bool { return false }
+}
+
+pub fn test_fn<T: TestOk<u8>>(ts: T, value: u8) -> bool {
+    return ts.ok(value)
+}
+
+fn main() -> i32 {
+    var ts_u8 = TestStructU8 {}
+    var ts_u8_res = test_fn(ts_u8, 1)
+    std::assert(ts_u8_res)
+    
+    var ts2_u8 = SecondTestStructU8 {}
+    var ts2_u8_res = test_fn(ts2_u8, 1)
+    std::assert(not ts2_u8_res)
+
+    // `TestStructI16` doesn't implement the required `TestOk<u8>`
+    // enforced on `T`, it implements `TestOk<i16>` (another generic).
+    // So shouldn't be possible to call `test_fn` with it.
+    //var ts_i16 = TestStructI16 {}
+    //test_fn(ts_i16, 2)
+
+    return 0
+}

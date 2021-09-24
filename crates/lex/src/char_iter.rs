@@ -5,22 +5,17 @@ use crate::validations::utf8_char_width;
 /// Wrapper around a `TokenIter<u8>` which allows one to iterate over UTF-8 chars.
 pub(crate) struct CharIter<'a> {
     iter: TokenIter<'a, u8>,
-
-    /// Temporary buffer used when looking at UTF-8 encoded characters. This
-    /// buffer will be used to store possible characters when trying to figure
-    /// out the correct "size" for the characters.
-    buf: [u8; 4],
 }
 
 impl<'a> CharIter<'a> {
     pub(crate) fn new(content: &'a mut [u8]) -> Self {
         Self {
             iter: TokenIter::new(content),
-            buf: [0; 4],
         }
     }
 
     /// Gets the next char from the iterator.
+    #[allow(clippy::needless_range_loop)]
     pub(crate) fn next_char(&mut self) -> Option<char> {
         let width = utf8_char_width(self.iter.peek()?);
         if width == 0 {
@@ -29,13 +24,14 @@ impl<'a> CharIter<'a> {
             unreachable!("`width` can't be greater than 4 (max size of UTF-8 char)");
         }
 
-        // Populate `self.buf` with the next `width` bytes from the iterator.
+        // Populate `buf` with the next `width` bytes from the iterator.
         // This will be the bytes representing the next UTF-8 character.
+        let mut buf = [0; 4];
         for i in 0..width {
-            self.buf[i] = self.iter.next()?;
+            buf[i] = self.iter.next()?;
         }
 
-        let utf_8_slice = &self.buf[0..width];
+        let utf_8_slice = &buf[0..width];
         std::str::from_utf8(utf_8_slice)
             .ok()
             .map(|s| s.chars().next())

@@ -1,0 +1,11 @@
+ext fn printf(format: {u8}, ...) -> i32
+
+fn main() -> i32 {
+    var i = 3
+
+    second_file::double(i.&)
+    printf(c"i: %d", i)
+    std::assert(i == 6)
+
+    return 0
+}

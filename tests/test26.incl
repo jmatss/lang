@@ -1,2 +1,1 @@
-test26.ren
-../std/assert.ren
+test26_fn_by_value_and_ref.ren

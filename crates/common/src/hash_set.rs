@@ -8,6 +8,7 @@ use crate::{
 
 /// A custom HashSet that looks up types in a `TyEnv` before performing the
 /// hash operations.
+#[derive(Clone)]
 pub struct TyEnvHashSet<V: TyEnvHash + Clone> {
     map: HashMap<u64, V>,
 }

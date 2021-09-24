@@ -35,14 +35,18 @@ pub fn is_solved(
     );
 
     let is_solved_bool = match ty_env.ty(type_id)? {
-        Ty::CompoundType(inner_ty, generics, ..) => {
+        Ty::CompoundType(inner_ty, ..) => {
             let inner_solved = inner_ty.is_solved(solve_cond);
+
             let mut gens_solved = true;
-            for type_id in generics.iter_types() {
-                if !is_solved(ty_env, *type_id, check_inf, solve_cond)? {
-                    gens_solved = false;
+            if let Some(gens) = inner_ty.gens() {
+                for type_id in gens.iter_types() {
+                    if !is_solved(ty_env, *type_id, check_inf, solve_cond)? {
+                        gens_solved = false;
+                    }
                 }
             }
+
             inner_solved && gens_solved
         }
 
@@ -93,42 +97,60 @@ pub fn is_solved(
 
         Ty::GenericInstance(..) => solve_cond.can_solve_gen_inst(),
         Ty::Generic(..) => solve_cond.can_solve_gen(),
-        Ty::Any(..) => true,
+        Ty::Any(..) => solve_cond.can_solve_any(),
 
         Ty::UnknownAdtMember(type_id_i, ..)
-        | Ty::UnknownMethodGeneric(type_id_i, ..)
+        | Ty::UnknownFnArgument(type_id_i, ..)
         | Ty::UnknownArrayMember(type_id_i, ..)
             if solve_cond.can_solve_unknown() =>
         {
             is_solved(ty_env, *type_id_i, true, solve_cond)?
         }
 
-        Ty::UnknownAdtMethod(type_id_i, _, gens, ..)
-        | Ty::UnknownMethodArgument(type_id_i, _, gens, ..)
-            if solve_cond.can_solve_unknown() =>
-        {
+        Ty::UnknownAdtMethod(type_id_i, method_path, ..) if solve_cond.can_solve_unknown() => {
             let mut is_solved_bool = is_solved(ty_env, *type_id_i, true, solve_cond)?;
-            for gen_type_id in gens {
-                if !is_solved(ty_env, *gen_type_id, true, solve_cond)? {
-                    is_solved_bool = false;
+            if let Some(gens) = method_path.last().map(|part| part.generics()).unwrap() {
+                for gen_type_id in gens.iter_types() {
+                    if !is_solved(ty_env, *gen_type_id, true, solve_cond)? {
+                        is_solved_bool = false;
+                    }
                 }
             }
             is_solved_bool
         }
 
         Ty::UnknownAdtMember(..)
-        | Ty::UnknownMethodGeneric(..)
+        | Ty::UnknownFnArgument(..)
         | Ty::UnknownArrayMember(..)
-        | Ty::UnknownAdtMethod(..)
-        | Ty::UnknownMethodArgument(..) => false,
+        | Ty::UnknownAdtMethod(..) => false,
     };
 
     let inf_type_id = ty_env.inferred_type(type_id)?;
-    if !check_inf || is_solved_bool || type_id == inf_type_id {
-        Ok(is_solved_bool)
-    } else {
+    if is_solved_bool {
+        Ok(true)
+    } else if check_inf && type_id != inf_type_id {
         is_solved(ty_env, inf_type_id, true, solve_cond)
+    } else {
+        Ok(false)
     }
+}
+
+pub fn is_adt(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
+    Ok(get_inner(ty_env, id)
+        .map(|inner_ty| inner_ty.is_adt())
+        .unwrap_or(false))
+}
+
+pub fn is_enum(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
+    Ok(get_inner(ty_env, id)
+        .map(|inner_ty| inner_ty.is_enum())
+        .unwrap_or(false))
+}
+
+pub fn is_tuple(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
+    Ok(get_inner(ty_env, id)
+        .map(|inner_ty| inner_ty.is_tuple())
+        .unwrap_or(false))
 }
 
 pub fn is_int(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
@@ -238,12 +260,7 @@ pub fn is_unknown_adt_method(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
 
 pub fn is_unknown_method_argument(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
     let ty = ty_env.ty(id)?;
-    Ok(matches!(ty, Ty::UnknownMethodArgument(..)))
-}
-
-pub fn is_unknown_method_generic(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
-    let ty = ty_env.ty(id)?;
-    Ok(matches!(ty, Ty::UnknownMethodGeneric(..)))
+    Ok(matches!(ty, Ty::UnknownFnArgument(..)))
 }
 
 pub fn is_unknown_array_member(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
@@ -256,8 +273,7 @@ pub fn is_unknown_any(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
     Ok(match ty {
         Ty::UnknownAdtMember(..)
         | Ty::UnknownAdtMethod(..)
-        | Ty::UnknownMethodArgument(..)
-        | Ty::UnknownMethodGeneric(..)
+        | Ty::UnknownFnArgument(..)
         | Ty::UnknownArrayMember(..) => true,
         Ty::CompoundType(inner_ty, ..) => {
             inner_ty.is_unknown()
@@ -273,13 +289,7 @@ pub fn is_unknown_any(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
 /// integer, returns false for every other type (includingn non-int types).
 pub fn is_signed(ty_env: &TyEnv, id: TypeId) -> LangResult<bool> {
     let ty = ty_env.ty(id)?;
-    Ok(match ty {
-        Ty::CompoundType(inner_ty, ..) => matches!(
-            inner_ty,
-            InnerTy::I8 | InnerTy::I16 | InnerTy::I32 | InnerTy::I64 | InnerTy::I128
-        ),
-        _ => false,
-    })
+    Ok(matches!(ty, Ty::CompoundType(inner_ty, ..) if inner_ty.is_signed()))
 }
 
 pub fn assert_compatible(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangResult<()> {
@@ -363,9 +373,8 @@ pub fn is_compatible(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> Lan
             is_compatible(ty_env, *inner_a, *inner_b)
         }
 
-        (Ty::CompoundType(comp_a, gens_a, ..), Ty::CompoundType(comp_b, gens_b, ..)) => {
-            Ok(is_compatible_inner_ty(ty_env, comp_a, comp_b)?
-                && is_compatible_gens(ty_env, gens_a, gens_b)?)
+        (Ty::CompoundType(comp_a, ..), Ty::CompoundType(comp_b, ..)) => {
+            is_compatible_inner_ty(ty_env, comp_a, comp_b)
         }
 
         (
@@ -457,7 +466,10 @@ pub fn is_compatible_inner_ty(
         | (InnerTy::UnknownIdent(path_a, ..), InnerTy::Union(path_b, ..))
         | (InnerTy::Trait(path_a), InnerTy::Trait(path_b))
         | (InnerTy::Trait(path_a), InnerTy::UnknownIdent(path_b, ..))
-        | (InnerTy::UnknownIdent(path_a, ..), InnerTy::Trait(path_b, ..)) => {
+        | (InnerTy::UnknownIdent(path_a, ..), InnerTy::Trait(path_b, ..))
+        | (InnerTy::Tuple(path_a), InnerTy::Tuple(path_b))
+        | (InnerTy::Tuple(path_a), InnerTy::UnknownIdent(path_b, ..))
+        | (InnerTy::UnknownIdent(path_a, ..), InnerTy::Tuple(path_b, ..)) => {
             is_compatible_path(ty_env, path_a, path_b)
         }
 

@@ -1,0 +1,71 @@
+ext fn printf(format: {u8}, ...) -> i32
+
+union TestUnion {
+    var var_a: f64
+    var another: i16
+}
+
+union TestGenericUnion<T> {
+    var a: i16
+    var b: T
+}
+
+fn main() -> i32 {
+    var correct
+
+    var abc = TestUnion { var_a = 123.456 }
+    var def = TestUnion { another = 789 }
+
+    if val is abc.var_a {
+        correct = true
+        printf(c"%f", val)
+    } else {
+        correct = false
+    }
+    std::assert(correct)
+
+    if val is abc.another {
+        correct = false
+    } else {
+        correct = true
+        printf(c"\nabc.another not a match")
+    }
+    std::assert(correct)
+
+    if val is def.var_a {
+        correct = false
+    } else {
+        correct = true
+        printf(c"\ndef.var_a not a match")
+    }
+    std::assert(correct)
+
+    if val is def.another {
+        correct = true
+        printf(c"\n%d", val as i32)
+    } else {
+        correct = false
+    }
+    std::assert(correct)
+
+
+    var ghi = TestGenericUnion<f32> { a = 12 }
+    var jkl = TestGenericUnion { b = 34.56 as f32 }
+
+    if val is ghi.a { correct = true } else { correct = false }
+    std::assert(correct)
+    if val is ghi.b { correct = false } else { correct = true }
+    std::assert(correct)
+    if val is jkl.a { correct = false } else { correct = true }
+    std::assert(correct)
+    if val is jkl.b { correct = true } else { correct = false }
+    std::assert(correct)
+
+    jkl.b = 78.90
+    std::assert(jkl.b == 78.90)
+
+    // Should result in a compile error since `T` isn't known.
+    //var mno = TestGenericUnion { a = 78 }
+
+    return 0
+}

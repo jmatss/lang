@@ -1,0 +1,296 @@
+mod std::collection
+
+use std::Eq
+use std::Hash
+use std::Optional
+use std::Result
+use std::mem::Allocator
+use std::mem::Disposable
+use std::string::StringView
+
+/// Represents a hash map.
+///
+/// Uses quadratic probing to handle collisions. The size of the underlying
+/// array will always be a power of 2. This property allows us to use triangular
+/// numbers to be able to hit all entries in the map when probing for a
+/// free spot (not limitied to 0.5 load factor).
+pub struct Map<K: Hash Eq<K>, V> {
+    /// A pointer to the allocated memory.
+    var ptr: {Entry<K, V>}
+    /// The amount of entries currently "alive" inside the map.
+    var len: u32
+    /// The amount of entries removed from the current map.
+    /// These take up slots in the map, but new items can take their place.
+    var len_removed: u32
+    /// The amount of maximum entries that can fit in the current memory allocation.
+    var cap: u32
+    /// The load factor at which the map should be resized.
+    var load_factor: f64
+
+    /// Allocates a new Map with a initial capacity of `cap` items.
+    /// The given `cap` must be a power of 2 or an error will be returned.
+    ///
+    /// If `cap` is set to 0, the heap allocation will be done lazily at
+    /// the first use of the map. The capacity will be set to 16.
+    pub fn init(cap: u32 = 0) -> Result<Map<K, V>, StringView> {
+        const load_factor = 0.75
+        var map = Map { @null(), 0, 0, 0, load_factor }
+
+        if cap == 0 {
+            return Result::success(map)
+        }
+
+        if not is_power_of_two(cap) {
+            return Result::error("Given Map capacity not power of two")
+        }
+
+        var ptr_or_error = map.resize_and_move(cap)
+        if error is ptr_or_error.error {
+            return Result::error(error)
+        } else {
+            return Result::success(map)
+        }
+    }
+
+    /// Inserts the `key`/`value` pair into the map.
+    ///
+    /// If required to increase the size of the map but unable to do so,
+    /// an error will be returned.
+    pub fn {this} insert(key: K, value: V) -> Result<(), StringView> {
+        const new_entry = Entry { key, value, key.hash(), EntryState::TAKEN }
+
+        // If an item with the key `key` already exists, replace that item.
+        var idx_or_empty = this.find_taken(key)
+        if idx is idx_or_empty.value {
+            var old_entry_ptr = @ptr_add(this.ptr, idx)
+            old_entry_ptr.* = new_entry
+            return Result::success(@tuple())
+        } else {
+            return this.insert_entry(new_entry)
+        }
+    }
+
+    /// Inserts a new entry into the map and resizes the map if needed.
+    fn {this} insert_entry(new_entry: Entry<K, V>) -> Result<(), StringView> {
+        var cur_factor
+        if this.cap() == 0 {
+            cur_factor = 1.0
+        } else {
+            const len = this.len() + this.len_removed
+            cur_factor = len as f64 / this.cap() as f64
+        }
+
+        if cur_factor >= this.load_factor {
+            var resize_or_error = this.resize_and_move(this.cap() * 2)
+            if err is resize_or_error.error {
+                return Result::error(err)
+            }
+        }
+
+        const idx = this.find_to_insert(new_entry.key)
+        var old_entry_ptr = @ptr_add(this.ptr, idx)
+        old_entry_ptr.* = new_entry
+
+        this.len.++
+        return Result::success(@tuple())
+    }
+
+    /// Removes and returns the value with key `key`.
+    /// If no entry exists with the given `key`, `Optional::empty` is returned.
+    pub fn {this} remove(key: K) -> Optional<V> {
+        if this.len() == 0 {
+            return Optional::empty()
+        }
+
+        var idx_or_empty = this.find_taken(key)
+        if idx is idx_or_empty.value {
+            var entry_ptr = @ptr_add(this.ptr, idx)
+            entry_ptr.state = EntryState::REMOVED
+
+            this.len.--
+            this.len_removed.++
+            return Optional::value(entry_ptr.value)
+        } else {
+            return Optional::empty()
+        }
+    }
+
+    /// Gets the value with the key `key`.
+    ///
+    /// If the given `key` doesn't exist in the map, `Optional::empty` is returned.
+    pub fn {this} get(key: K) -> Optional<V> {
+        if this.len() == 0 {
+            return Optional::empty()
+        }
+
+        var idx_or_empty = this.find_taken(key)
+        if idx is idx_or_empty.value {
+            var entry_ptr = @ptr_add(this.ptr, idx)
+            return Optional::value(entry_ptr.value)
+        } else {
+            return Optional::empty()
+        }
+    }
+
+    pub fn this len() -> u32 {
+        return this.len
+    }
+
+    pub fn this cap() -> u32 {
+        return this.cap
+    }
+
+    /// Finds the entry with key `key` and returns its entry index.
+    ///
+    /// If unable to find an entry with that key, Optional::empty() is returned.
+    fn {this} find_taken(key: K) -> Optional<u32> {
+        const cap = this.cap()
+        var idx = key.hash() % cap
+        var entry_found = false
+        var step_size = 0
+
+        while step_size < cap {
+            idx += step_size
+            idx %= cap
+            step_size.++
+
+            var entry = @ptr_add(this.ptr, idx).*
+            match entry.state {
+                EntryState::EMPTY {
+                    break
+                }
+                EntryState::REMOVED {
+                    continue
+                }
+                EntryState::TAKEN {
+                    if entry.key == key {
+                        entry_found = true
+                        break
+                    }
+                }
+            }
+        }
+
+        if entry_found {
+            return Optional::value(idx)
+        } else {
+            return Optional::empty()
+        }
+    }
+
+    /// Finds the index at which an entry with `key` should be inserted.
+    ///
+    /// Before calling this function, the underlying array should have been resized
+    /// so that it contains atleast one free spot.
+    fn {this} find_to_insert(key: K) -> u32 {
+        const cap = this.cap()
+        var idx = key.hash() % cap
+        var step_size = 0
+
+        while true {       
+            idx += step_size
+            idx %= cap
+            step_size.++
+
+            var entry = @ptr_add(this.ptr, idx).*
+            if entry.state == EntryState::EMPTY or
+               entry.state == EntryState::REMOVED or
+               (entry.state == EntryState::TAKEN and entry.key == key)
+            {
+                break
+            }
+
+            // This assertion should never fail because:
+            //  1. The probing strategy used allows us to check all entries in
+            //     the map for a spot to insert a new entry.
+            //  2. Before this function is called, we increase the size of this
+            //     map if it is full.
+            // We should therefore always exit out of this loop before this
+            // condition is broken.
+            std::assert(step_size <= cap)
+        }
+
+        return idx
+    }
+
+    /// Resizes the underlying heap allocation and moves all entries to the new allocation.
+    ///
+    /// This function CAN be called with an uninitialized map. A new allocation will be done
+    /// with a default capacity of 16. If an allocation already exists, a new allocation will
+    /// be made with double the size (to preserve power of 2). The entries will then be moved
+    /// to the new allocation and the old memory will be de-allocated.
+    fn {this} resize_and_move(new_cap: u32) -> Result<(), StringView> {
+        if new_cap == 0 {
+            new_cap = 16
+        }
+
+        std::assert(is_power_of_two(new_cap))
+
+        const size = new_cap * @size<Entry<K, V>>()
+        var new_ptr_or_error = Allocator::init_size(size)
+        if err is new_ptr_or_error.error {
+            return Result::error(err)
+        }
+
+        var new_ptr = new_ptr_or_error.get_success()
+        Allocator::zero(new_ptr, size)
+
+        var old_ptr = this.ptr
+        const old_len = this.len
+        const old_cap = this.cap
+
+        this.ptr = new_ptr
+        this.len = 0
+        this.len_removed = 0
+        this.cap = new_cap
+
+        var moved_count = 0
+        var idx = 0
+        while idx < old_cap and moved_count < old_len {
+            var entry = @ptr_add(old_ptr, idx).*
+            if entry.state == EntryState::TAKEN {
+                this.insert_entry(entry)
+                moved_count.++
+            }
+            idx.++
+        }
+
+        Allocator::deinit(old_ptr)
+        return Result::success(@tuple())
+    }
+}
+
+fn is_power_of_two(n: u32) -> bool {
+    return n != 0 and (n & (n - 1)) == 0
+}
+
+impl Map: Disposable {
+    pub fn {this} deinit() {
+        if @is_not_null(this.ptr) {
+            Allocator::deinit(this.ptr as {u8})
+            this.ptr = @null()
+        }
+    }
+}
+
+/// Represents an entry in this map.
+pub struct Entry<K, V> {
+    var key: K
+    var value: V
+    var hash: u32
+    var state: EntryState
+}
+
+pub enum EntryState {
+    /// Indicates that the entry is empty/null.
+    /// The map will zero-initialize all the underlying memory on allocation,
+    /// so this will be the default state of all entries in the map.
+    EMPTY
+
+    /// Indicates that the entry is in use.
+    TAKEN
+
+    /// Indicates that the entry has been removed. Any values it contains should
+    /// be ignored and this entry can be overwritten with a new value.
+    REMOVED
+}

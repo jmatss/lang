@@ -72,8 +72,8 @@ impl Expr {
                     unreachable!("Value already verified to be Some.");
                 }
             }
-            Expr::AdtInit(adt_init) if adt_init.ret_type.is_some() => {
-                if let Some(type_id) = &adt_init.ret_type {
+            Expr::AdtInit(adt_init) if adt_init.adt_type_id.is_some() => {
+                if let Some(type_id) = &adt_init.adt_type_id {
                     *type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -147,8 +147,8 @@ impl Expr {
                     unreachable!("Value already verified to be Some.");
                 }
             }
-            Expr::AdtInit(adt_init) if adt_init.ret_type.is_some() => {
-                if let Some(type_id) = &mut adt_init.ret_type {
+            Expr::AdtInit(adt_init) if adt_init.adt_type_id.is_some() => {
+                if let Some(type_id) = &mut adt_init.adt_type_id {
                     type_id
                 } else {
                     unreachable!("Value already verified to be Some.");
@@ -300,6 +300,39 @@ impl Expr {
         false
     }
 
+    pub fn is_const(&self) -> bool {
+        match self {
+            Expr::Lit(..) | Expr::Type(..) => true,
+            // These might come to be possible const in the future.
+            Expr::FnCall(..) | Expr::FnPtr(..) | Expr::BuiltInCall(..) | Expr::Block(..) => false,
+
+            Expr::Var(var) => var.is_const,
+
+            Expr::AdtInit(adt_init) => {
+                let mut all_is_const = true;
+                for arg in &adt_init.arguments {
+                    if !arg.value.is_const() {
+                        all_is_const = false;
+                    }
+                }
+                all_is_const
+            }
+
+            Expr::ArrayInit(array_init) => {
+                let mut all_is_const = true;
+                for arg in &array_init.arguments {
+                    if !arg.value.is_const() {
+                        all_is_const = false;
+                    }
+                }
+                all_is_const
+            }
+
+            Expr::Op(Op::BinOp(bin_op)) => bin_op.is_const,
+            Expr::Op(Op::UnOp(un_op)) => un_op.is_const,
+        }
+    }
+
     /// If this is a Dot operation, this function will return the variable from
     /// the rhs.
     pub fn eval_to_var(&mut self) -> Option<&Var> {
@@ -401,6 +434,12 @@ impl Var {
         }
     }
 
+    /// Constructor for creating variable for var "use"s. These will contain
+    /// a lot less information, so only requires name and filepos.
+    pub fn new_use(name: String, file_pos: FilePosition) -> Self {
+        Var::new(name, None, None, None, Some(file_pos), None, false)
+    }
+
     pub fn set_copy_nr(&mut self, copy_nr: usize) {
         self.copy_nr = Some(copy_nr);
     }
@@ -472,30 +511,27 @@ impl FnCall {
     pub fn full_name(&self, ty_env: &TyEnv) -> LangResult<String> {
         if let Some(adt_type_id) = &self.method_adt {
             let adt_ty = ty_env.ty(*adt_type_id)?;
-            let (adt_path, adt_generics) =
-                if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
-                    if inner_ty.is_adt() {
-                        let adt_path = inner_ty.get_ident().unwrap();
-                        (adt_path, Some(adt_generics))
-                    } else {
-                        return Err(LangError::new(
-                            format!("Method call on non ADT type: {:#?}", self),
-                            LangErrorKind::GeneralError,
-                            self.file_pos.to_owned(),
-                        ));
-                    }
+            let adt_path = if let Ty::CompoundType(inner_ty, ..) = adt_ty {
+                if inner_ty.is_adt() {
+                    inner_ty.get_ident().unwrap()
                 } else {
                     return Err(LangError::new(
-                        format!("Unable to get full name for method call: {:#?}", self),
+                        format!("Method call on non ADT type: {:#?}", self),
                         LangErrorKind::GeneralError,
                         self.file_pos.to_owned(),
                     ));
-                };
+                }
+            } else {
+                return Err(LangError::new(
+                    format!("Unable to get full name for method call: {:#?}", self),
+                    LangErrorKind::GeneralError,
+                    self.file_pos.to_owned(),
+                ));
+            };
 
             Ok(util::to_method_name(
                 ty_env,
                 &adt_path,
-                adt_generics,
                 &self.name,
                 self.generics.as_ref(),
             ))
@@ -598,7 +634,7 @@ pub struct AdtInit {
     pub name: String,
     pub module: LangPath,
     pub arguments: Vec<Argument>,
-    pub ret_type: Option<TypeId>,
+    pub adt_type_id: Option<TypeId>,
     pub generics: Option<Generics>,
     pub kind: AdtKind,
     pub file_pos: Option<FilePosition>,
@@ -617,74 +653,49 @@ impl AdtInit {
             name,
             module,
             arguments,
-            ret_type: None,
+            adt_type_id: None,
             generics,
             kind,
             file_pos,
         }
     }
 
+    // TODO: Is this logic needed? Should probably remove this logic, unnecessary
+    //       and bad to always fetch the names. This is done every time this
+    //       function is called and the names are overwritten if they already are
+    //       set.
     /// Returns the generics. If generics was set at the struct init call, this
     /// function will replace the types of the types parsed during type inference
     /// with type specified at the init call.
     pub fn generics(&mut self, ty_env: &TyEnv) -> Option<Generics> {
-        let ret_ty = ty_env.ty(self.ret_type.unwrap()).ok()?;
-        let ty_generics = if let Ty::CompoundType(_, ty_generics, _) = ret_ty {
-            ty_generics
+        let adt_ty = ty_env.ty(self.adt_type_id.unwrap()).ok()?;
+        let adt_gens = if let Ty::CompoundType(inner_ty, ..) = adt_ty {
+            inner_ty.gens()
         } else {
             panic!("Struct init type not ADT.");
         };
 
-        if let Some(generics) = &mut self.generics {
-            // TODO: This is done every time this function is called and the names
-            //       are overwritten if they already are set. Better way to do this?
-            for (idx, name) in ty_generics.iter_names().enumerate() {
-                generics.insert_lookup(name.clone(), idx);
+        if let Some(gens) = &mut self.generics {
+            if let Some(adt_gens) = adt_gens {
+                for (idx, name) in adt_gens.iter_names().enumerate() {
+                    gens.insert_lookup(name.clone(), idx);
+                }
             }
-            Some(generics.clone())
+
+            Some(gens.clone())
         } else {
-            Some(ty_generics.clone())
+            adt_gens.cloned()
         }
     }
 
     /// Returns the "full name" which is the name containing possible generics
     /// as well.
     pub fn full_name(&mut self, ty_env: &TyEnv) -> LangResult<String> {
-        let adt_init_generics = if let Some(generics) = self.generics(&ty_env) {
-            Some(generics)
-        } else {
-            None
-        };
-
-        if let Some(adt_type_id) = &self.ret_type {
-            let adt_ty = ty_env.ty(*adt_type_id)?;
-            if let Ty::CompoundType(inner_ty, adt_generics, ..) = adt_ty {
-                let generics = if let Some(adt_init_generics) = adt_init_generics {
-                    adt_init_generics
-                } else {
-                    adt_generics.clone()
-                };
-
-                // Remove the "name" fetched from the ADT type and use the name
-                // and the included generics from this ADT init instead.
-                let mut adt_path = inner_ty.get_ident().unwrap();
-                adt_path.pop();
-
-                let new_adt_name = LangPathPart(self.name.clone(), Some(generics));
-                let new_adt_path =
-                    adt_path.join(&LangPath::new(vec![new_adt_name], None), self.file_pos);
-
-                Ok(to_string_path(ty_env, &new_adt_path))
-            } else {
-                Err(LangError::new(
-                    format!("Unable to get full name for ADT init: {:#?}", self),
-                    LangErrorKind::GeneralError,
-                    self.file_pos.to_owned(),
-                ))
-            }
-        } else {
-            unreachable!("ADT init has no type: {:#?}", self);
-        }
+        let gens = self.generics(ty_env);
+        let adt_path = self
+            .module
+            .clone_push(&self.name, gens.as_ref(), self.file_pos);
+        Ok(to_string_path(ty_env, &adt_path))
     }
 }
 

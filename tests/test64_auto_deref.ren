@@ -1,0 +1,36 @@
+pub struct TestStruct {
+    var x: u32
+
+    pub fn this fn_by_val() { }
+    pub fn {this} fn_by_ref() { }
+}
+
+pub trait TestTrait {
+    pub fn this trait_fn_by_val()
+    pub fn {this} trait_fn_by_ref()
+}
+
+impl TestStruct: TestTrait {
+    pub fn this trait_fn_by_val() { }
+    pub fn {this} trait_fn_by_ref() { }
+}
+
+fn main() -> i32 {
+    var ts_val = TestStruct { 123 }
+    var ts_ref = ts_val.&
+
+    ts_val.fn_by_val()
+    ts_val.fn_by_ref()
+    ts_ref.fn_by_val()
+    ts_ref.fn_by_ref()
+
+    ts_val.trait_fn_by_val()
+    ts_val.trait_fn_by_ref()
+    ts_ref.trait_fn_by_val()
+    ts_ref.trait_fn_by_ref()
+
+    std::assert(ts_val.x == 123)
+    std::assert(ts_ref.x == 123)
+
+    return 0
+}

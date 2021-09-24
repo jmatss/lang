@@ -1,0 +1,10 @@
+use std::Hash
+use std::primitive::hash
+
+pub struct char
+
+impl char: Hash {
+    pub fn this hash() -> u32 {
+        return hash(this as u32)
+    }
+}

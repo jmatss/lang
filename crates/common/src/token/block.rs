@@ -1,7 +1,6 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
+use std::{collections::HashMap, sync::Arc};
+
+use parking_lot::RwLock;
 
 use super::{
     ast::AstToken,
@@ -10,9 +9,13 @@ use super::{
 };
 
 use crate::{
+    eq::path_eq,
+    error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
+    hash::DerefType,
+    hash_set::TyEnvHashSet,
     path::LangPath,
-    ty::{generics::Generics, ty_env::TyEnv},
+    ty::{generics::Generics, is::is_compatible, ty_env::TyEnv},
     util, BlockId, TypeId,
 };
 
@@ -38,11 +41,10 @@ pub enum BlockHeader {
     Trait(Arc<RwLock<Trait>>),
 
     /// The first LangPath is the path of the ADT that this impl block implements
-    /// and the second optional LangPath is the path of the trait if this impl
-    /// block implements a trait.
-    /// If this is just a impl for the struct, the optional will be None.
+    /// and the second LangPath is the path of the trait that this impl block
+    /// implements for the given ADT.
     /// The body of this block will contain the functions.
-    Implement(LangPath, Option<LangPath>),
+    Implement(LangPath, LangPath),
 
     /// A anonymous block "{ ... }" that can be used to limit the scope.
     Anonymous,
@@ -130,105 +132,181 @@ pub struct Adt {
     pub generics: Option<Generics>,
     /// The key is the the name of the generic and the values are the
     /// traits that the specific generic type needs to implement.
-    pub implements: Option<HashMap<String, Vec<TypeId>>>,
+    pub implements: Option<HashMap<String, Vec<LangPath>>>,
+    /// A set of all traits that the ADT implements. The trait paths should
+    /// contain the the full paths (including modules) and generics.
+    pub implemented_traits: TyEnvHashSet<LangPath>,
 
     /* Values set for Enum */
     /// The type of the enum values. Will most likely be a integer type.
     pub enum_ty: Option<TypeId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AdtKind {
     Struct,
     Union,
     Enum,
+    Tuple,
     Unknown,
 }
 
 impl Adt {
-    pub fn new_struct(
-        name: String,
-        module: LangPath,
-        modifiers: Vec<Modifier>,
-        members: Vec<Arc<RwLock<Var>>>,
-        file_pos: FilePosition,
-        has_definition: bool,
-        generics: Option<Generics>,
-        implements: Option<HashMap<String, Vec<TypeId>>>,
-    ) -> Self {
-        Self {
-            name,
-            module,
-            modifiers,
-            members,
-            file_pos,
-            has_definition,
-            kind: AdtKind::Struct,
-            methods: HashMap::default(),
-            generics,
-            implements,
-            enum_ty: None,
-        }
-    }
-
-    pub fn new_union(
-        name: String,
-        module: LangPath,
-        modifiers: Vec<Modifier>,
-        members: Vec<Arc<RwLock<Var>>>,
-        file_pos: FilePosition,
-        has_definition: bool,
-        generics: Option<Generics>,
-        implements: Option<HashMap<String, Vec<TypeId>>>,
-    ) -> Self {
-        Self {
-            name,
-            module,
-            modifiers,
-            members,
-            file_pos,
-            has_definition,
-            kind: AdtKind::Union,
-            methods: HashMap::default(),
-            generics,
-            implements,
-            enum_ty: None,
-        }
-    }
-
-    pub fn new_enum(
-        name: String,
-        module: LangPath,
-        modifiers: Vec<Modifier>,
-        members: Vec<Arc<RwLock<Var>>>,
-        file_pos: FilePosition,
-        has_definition: bool,
-        enum_ty: Option<TypeId>,
-    ) -> Self {
-        Self {
-            name,
-            module,
-            modifiers,
-            members,
-            file_pos,
-            has_definition,
-            kind: AdtKind::Enum,
-            methods: HashMap::default(),
-            generics: None,
-            implements: None,
-            enum_ty,
-        }
-    }
-
     /// Returns the index of the member with name `member_name` of this ADT.
     pub fn member_index(&self, member_name: &str) -> Option<usize> {
         for (idx, member) in self.members.iter().enumerate() {
-            if member.as_ref().read().unwrap().name == member_name {
+            if member.read().name == member_name {
                 return Some(idx);
             }
         }
         None
     }
+}
+
+#[derive(Debug)]
+pub struct AdtBuilder {
+    kind: AdtKind,
+    name: Option<String>,
+    module: Option<LangPath>,
+    modifiers: Option<Vec<Modifier>>,
+    file_pos: Option<FilePosition>,
+    has_definition: Option<bool>,
+
+    /// The key is the name of the method.
+    methods: HashMap<String, Arc<RwLock<Fn>>>,
+    members: Vec<Arc<RwLock<Var>>>,
+
+    /* Values set for Struct and Union */
+    generics: Option<Generics>,
+    implements: Option<HashMap<String, Vec<LangPath>>>,
+
+    /* Values set for Enum */
+    enum_ty: Option<TypeId>,
+}
+
+impl AdtBuilder {
+    pub fn new(kind: AdtKind) -> Self {
+        Self {
+            kind,
+            name: None,
+            module: None,
+            modifiers: None,
+            file_pos: None,
+            has_definition: None,
+
+            generics: None,
+            implements: None,
+            enum_ty: None,
+
+            methods: HashMap::default(),
+            members: Vec::default(),
+        }
+    }
+    pub fn new_struct() -> Self {
+        Self::new(AdtKind::Struct)
+    }
+
+    pub fn new_union() -> Self {
+        Self::new(AdtKind::Union)
+    }
+
+    pub fn new_enum() -> Self {
+        Self::new(AdtKind::Enum)
+    }
+
+    pub fn build(self) -> LangResult<Adt> {
+        let name = self.name.ok_or_else(|| {
+            LangError::new(
+                "name not set in AdtBuilder.".into(),
+                LangErrorKind::ParseError,
+                None,
+            )
+        })?;
+        let module = self.module.unwrap_or_else(LangPath::empty);
+        let modifiers = self.modifiers.unwrap_or_else(|| Vec::with_capacity(0));
+        let file_pos = self.file_pos.ok_or_else(|| {
+            LangError::new(
+                "file_pos not set in AdtBuilder.".into(),
+                LangErrorKind::ParseError,
+                None,
+            )
+        })?;
+        let has_definition = self.has_definition.unwrap_or(false);
+
+        Ok(Adt {
+            name,
+            module,
+            modifiers,
+            file_pos,
+            has_definition,
+            methods: self.methods,
+            members: self.members,
+            kind: self.kind,
+            generics: self.generics,
+            implements: self.implements,
+            implemented_traits: TyEnvHashSet::default(),
+            enum_ty: None,
+        })
+    }
+
+    pub fn name(&mut self, name: String) -> &mut Self {
+        self.name = Some(name);
+        self
+    }
+
+    pub fn module(&mut self, module: LangPath) -> &mut Self {
+        self.module = Some(module);
+        self
+    }
+
+    pub fn modifiers(&mut self, modifiers: Vec<Modifier>) -> &mut Self {
+        self.modifiers = Some(modifiers);
+        self
+    }
+
+    pub fn file_pos(&mut self, file_pos: FilePosition) -> &mut Self {
+        self.file_pos = Some(file_pos);
+        self
+    }
+
+    pub fn has_definition(&mut self, has_definition: bool) -> &mut Self {
+        self.has_definition = Some(has_definition);
+        self
+    }
+
+    pub fn generics(&mut self, generics: Option<Generics>) -> &mut Self {
+        self.generics = generics;
+        self
+    }
+
+    pub fn impls(&mut self, impls: Option<HashMap<String, Vec<LangPath>>>) -> &mut Self {
+        self.implements = impls;
+        self
+    }
+
+    pub fn enum_ty(&mut self, enum_ty: TypeId) -> &mut Self {
+        self.enum_ty = Some(enum_ty);
+        self
+    }
+
+    pub fn insert_method(&mut self, method: &Arc<RwLock<Fn>>) -> &mut Self {
+        let method_name = method.read().name.clone();
+        self.methods.insert(method_name, Arc::clone(method));
+        self
+    }
+
+    pub fn insert_member(&mut self, member: &Arc<RwLock<Var>>) -> &mut Self {
+        self.members.push(Arc::clone(member));
+        self
+    }
+}
+
+/// Used to store the modifer for fns when comparing with trait fn.
+#[derive(Debug)]
+pub enum FnModifier {
+    This,
+    ThisPointer,
+    None,
 }
 
 pub enum TraitCompareError {
@@ -259,6 +337,10 @@ pub enum TraitCompareError {
     //       actualy are.
     /// The string is the name generic that the impl is for.
     ImplsTypeDiff(String),
+
+    /// The impl and decl functions differs when it comes to this/thisPtr modifiers.
+    /// The first modifier is the impl modifier and the second is the decl.
+    ThisDiff(Option<FnModifier>, Option<FnModifier>),
 }
 
 #[derive(Debug, Clone)]
@@ -270,7 +352,7 @@ pub struct Fn {
 
     /// The key is the the name of the generic type it and the values are the
     /// traits that the specific generic type needs to implement.
-    pub implements: Option<HashMap<String, Vec<TypeId>>>,
+    pub implements: Option<HashMap<String, Vec<LangPath>>>,
 
     pub parameters: Option<Vec<Arc<RwLock<Var>>>>,
     pub ret_type: Option<TypeId>,
@@ -290,7 +372,7 @@ impl Fn {
         module: LangPath,
         generics: Option<Generics>,
         file_pos: FilePosition,
-        implements: Option<HashMap<String, Vec<TypeId>>>,
+        implements: Option<HashMap<String, Vec<LangPath>>>,
         parameters: Option<Vec<Arc<RwLock<Var>>>>,
         ret_type: Option<TypeId>,
         modifiers: Vec<Modifier>,
@@ -312,13 +394,52 @@ impl Fn {
 
     /// Checks if the name, parameter count, parameters types, generic count,
     /// generic names, implements and return types are the same.
-    pub fn trait_cmp(&self, trait_func: &Fn) -> Result<(), Vec<TraitCompareError>> {
+    pub fn trait_cmp(&self, ty_env: &TyEnv, trait_func: &Fn) -> Result<(), Vec<TraitCompareError>> {
         let mut errors = Vec::default();
+
+        let trait_fn_modifier = if trait_func.modifiers.contains(&Modifier::This) {
+            FnModifier::This
+        } else if trait_func.modifiers.contains(&Modifier::ThisPointer) {
+            FnModifier::ThisPointer
+        } else {
+            FnModifier::None
+        };
+
+        let self_fn_modifier = if self.modifiers.contains(&Modifier::This) {
+            FnModifier::This
+        } else if self.modifiers.contains(&Modifier::ThisPointer) {
+            FnModifier::ThisPointer
+        } else {
+            FnModifier::None
+        };
 
         // Since the `this`/`self` parameter won't be set for the trait function,
         // need to take that into consideration if the function as a `this` modifier.
-        let contains_this = self.modifiers.contains(&Modifier::This)
-            || self.modifiers.contains(&Modifier::ThisPointer);
+        let contains_this = match (&self_fn_modifier, &trait_fn_modifier) {
+            (FnModifier::This, FnModifier::This)
+            | (FnModifier::ThisPointer, FnModifier::ThisPointer) => true,
+
+            (FnModifier::None, FnModifier::None) => false,
+
+            (FnModifier::This, FnModifier::ThisPointer)
+            | (FnModifier::ThisPointer, FnModifier::This) => {
+                errors.push(TraitCompareError::ThisDiff(
+                    Some(self_fn_modifier),
+                    Some(trait_fn_modifier),
+                ));
+                return Err(errors);
+            }
+
+            (FnModifier::This, FnModifier::None) | (FnModifier::ThisPointer, FnModifier::None) => {
+                errors.push(TraitCompareError::ThisDiff(Some(self_fn_modifier), None));
+                return Err(errors);
+            }
+
+            (FnModifier::None, FnModifier::This) | (FnModifier::None, FnModifier::ThisPointer) => {
+                errors.push(TraitCompareError::ThisDiff(None, Some(trait_fn_modifier)));
+                return Err(errors);
+            }
+        };
 
         // Check parameters in this match-statement.
         match (&self.parameters, &trait_func.parameters, contains_this) {
@@ -333,7 +454,7 @@ impl Fn {
                     return Err(errors);
                 }
 
-                // Take a slice of `self_paramss` where the `this` parameter has
+                // Take a slice of `self_params` where the `this` parameter has
                 // been skipped so that the parameters can be compared to the
                 // `trait_func` parameters correctly.
                 for (idx, (self_param, other_param)) in self_params[1..self_params.len()]
@@ -341,9 +462,9 @@ impl Fn {
                     .zip(trait_params)
                     .enumerate()
                 {
-                    if self_param.as_ref().read().unwrap().ty
-                        != other_param.as_ref().read().unwrap().ty
-                    {
+                    let first_id = self_param.read().ty.unwrap();
+                    let second_id = other_param.read().ty.unwrap();
+                    if !is_compatible(ty_env, first_id, second_id).unwrap() {
                         errors.push(TraitCompareError::ParamTypeDiff(idx, true));
                     }
                 }
@@ -363,9 +484,9 @@ impl Fn {
                 for (idx, (self_param, other_param)) in
                     self_params.iter().zip(trait_params).enumerate()
                 {
-                    if self_param.as_ref().read().unwrap().ty
-                        != other_param.as_ref().read().unwrap().ty
-                    {
+                    let first_id = self_param.read().ty.unwrap();
+                    let second_id = other_param.read().ty.unwrap();
+                    if !is_compatible(ty_env, first_id, second_id).unwrap() {
                         errors.push(TraitCompareError::ParamTypeDiff(idx, false));
                     }
                 }
@@ -440,10 +561,10 @@ impl Fn {
 
             // Both functions have impls.
             (Some(self_impls), Some(trait_impls)) => {
-                for (self_impl_name, self_impl_tys) in self_impls.iter() {
-                    let trait_impl_tys =
-                        if let Some(trait_impl_tys) = trait_impls.get(self_impl_name) {
-                            trait_impl_tys
+                for (self_impl_name, self_impl_traits) in self_impls.iter() {
+                    let trait_impl_traits =
+                        if let Some(trait_impl_traits) = trait_impls.get(self_impl_name) {
+                            trait_impl_traits
                         } else {
                             errors.push(TraitCompareError::ImplsNameDiff(
                                 Some(self_impl_name.clone()),
@@ -452,8 +573,10 @@ impl Fn {
                             continue;
                         };
 
-                    if self_impl_tys != trait_impl_tys {
-                        errors.push(TraitCompareError::ImplsTypeDiff(self_impl_name.clone()));
+                    for (self_path, trait_path) in self_impl_traits.iter().zip(trait_impl_traits) {
+                        if path_eq(ty_env, self_path, trait_path, DerefType::Deep).unwrap() {
+                            errors.push(TraitCompareError::ImplsTypeDiff(self_impl_name.clone()));
+                        }
                     }
                 }
             }
@@ -462,8 +585,15 @@ impl Fn {
             (None, None) => (),
         }
 
-        if self.ret_type != trait_func.ret_type {
-            errors.push(TraitCompareError::ReturnTypeDiff);
+        // Check return types.
+        match (self.ret_type, trait_func.ret_type) {
+            (Some(first_id), Some(second_id)) => {
+                if !is_compatible(ty_env, first_id, second_id).unwrap() {
+                    errors.push(TraitCompareError::ReturnTypeDiff);
+                }
+            }
+            (None, Some(_)) | (Some(_), None) => errors.push(TraitCompareError::ReturnTypeDiff),
+            (None, None) => (),
         }
 
         if errors.is_empty() {

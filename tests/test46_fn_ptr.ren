@@ -1,0 +1,47 @@
+ext fn printf(format: {u8}, ...) -> i32
+
+fn test_fn1_impl() {}
+fn test_fn1(func: fn()) {
+    func()
+}
+
+fn test_fn2_impl(x: i8) {}
+fn test_fn2(func: fn(i8)) {
+    func(2)
+}
+
+fn test_fn3_impl() -> i8 {
+    return 3
+}
+fn test_fn3(func: fn() -> i8) -> i8 {
+    return func()
+}
+
+fn test_fn4_impl(x: i32) -> f32 {
+    return 4.4
+}
+fn test_fn4(func: fn(i32) -> f32) -> f32 {
+    return func(4)
+}
+
+// TODO: Generics on regular functions.
+//fn test_fn5(func: fn<u16>()) {}
+//fn test_fn5_impl<T>() {}
+
+fn main() -> i32
+{
+    var fn1_impl_ptr = fnptr test_fn1_impl
+    test_fn1(fn1_impl_ptr)
+
+    test_fn2(fnptr test_fn2_impl)
+
+    var result3 = test_fn3(fnptr test_fn3_impl)
+    printf(c"result3: %d", result3 as i32)
+    std::assert(result3 == 3)
+
+    var result4 = test_fn4(fnptr test_fn4_impl)
+    printf(c"\nresult4: %f", result4 as f64)
+    std::assert(result4 == 4.4)
+
+    return 0
+}

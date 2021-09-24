@@ -1,0 +1,43 @@
+ext fn printf(format: {u8}, ...) -> i32
+
+fn main() -> i32 {
+    var k = 0
+    defer printf(c"\nHELLO - k: %d", k)
+    if true {
+        k += 1
+    }
+
+    var i = 0
+    var abc = true
+    while i < 3 {
+        // Should be executed at the end of every iteration.
+        defer printf(c"\ni: %d", i)
+        i += 1
+        if abc  {
+            continue
+        } else {
+            break
+        }
+    }
+
+    var x = 0
+    var early_return = false
+
+    {
+        defer printf(c"\na, x: %d", x)
+        x += 1
+
+        if early_return {
+            return 0
+        } else {
+            x += 2
+        }
+
+        defer printf(c"\nb, x: %d", x)
+        x += 3
+    }
+
+    printf(c"\nEND")
+
+    return 0
+}

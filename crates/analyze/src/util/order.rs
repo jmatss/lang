@@ -1,11 +1,12 @@
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 use either::Either;
 use log::debug;
+use parking_lot::RwLock;
 
 use common::{
     ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx},
@@ -19,9 +20,13 @@ use common::{
         ast::AstToken,
         block::{Adt, Block, BlockHeader},
         expr::Var,
+        stmt::{ExternalDecl, Stmt},
     },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
-    ty::{get::get_adt_and_trait_paths, to_string::to_string_path, ty_env::TyEnv, type_id::TypeId},
+    ty::{
+        get::get_adt_and_trait_paths, inner_ty::InnerTy, to_string::to_string_path, ty_env::TyEnv,
+        type_id::TypeId,
+    },
     BlockId,
 };
 
@@ -59,7 +64,7 @@ pub fn dependency_order_from_ctx(
     // is referenced from the given "key" ADT. This does NOT include recursive
     // dependencies, only direct "top level" references.
     let references = order_step1(traverse_ctx, ast_token, include_impls, full_paths)?;
-    match order_step2(&traverse_ctx.ty_env.lock().unwrap(), &references) {
+    match order_step2(&traverse_ctx.ty_env.lock(), &references) {
         Ok(order) => {
             debug!("ADTs -- references: {:#?}, order: {:#?}", references, order);
             Ok(order)
@@ -104,9 +109,9 @@ pub fn order_step2(
 
         for prev_ident in &order {
             let prev_references_cur =
-                contains(ty_env, cur_ident, prev_ident, &references).map_err(Either::Left)?;
+                contains(ty_env, cur_ident, prev_ident, references).map_err(Either::Left)?;
             let cur_references_prev =
-                contains(ty_env, prev_ident, cur_ident, &references).map_err(Either::Left)?;
+                contains(ty_env, prev_ident, cur_ident, references).map_err(Either::Left)?;
 
             if prev_references_cur && cur_references_prev {
                 return Err(Either::Right(CyclicDependencyError(
@@ -154,8 +159,8 @@ pub fn order_step2_strings(
         let mut idx = 0;
 
         for prev_ident in &order {
-            let prev_references_cur = contains_strings(cur_ident, prev_ident, &references);
-            let cur_references_prev = contains_strings(prev_ident, cur_ident, &references);
+            let prev_references_cur = contains_strings(cur_ident, prev_ident, references);
+            let cur_references_prev = contains_strings(prev_ident, cur_ident, references);
 
             if prev_references_cur && cur_references_prev {
                 return Err(CyclicDependencyError(
@@ -215,18 +220,28 @@ fn contains_rec(
     references: &TyEnvHashMap<LangPath, TyEnvHashSet<LangPath>>,
     seen_idents: &mut TyEnvHashSet<LangPath>,
 ) -> LangResult<bool> {
+    let deref_type = DerefType::Deep;
+
+    // Prevent checking the same type multiple times to prevent infinite
+    // recursion. If we see this for the second time, should be ok to return
+    // a false.
+    if seen_idents.contains(ty_env, deref_type, ref_ident)? {
+        return Ok(false);
+    } else {
+        seen_idents.insert(ty_env, deref_type, ref_ident.clone())?;
+    }
+
     let ref_references =
-        if let Some(ref_references) = references.get(ty_env, DerefType::Deep, ref_ident)? {
+        if let Some(ref_references) = references.get(ty_env, deref_type, ref_ident)? {
             ref_references
         } else {
             return Ok(false);
         };
 
-    if ref_references.contains(ty_env, DerefType::Deep, cur_ident)? {
+    if ref_references.contains(ty_env, deref_type, cur_ident)? {
         return Ok(true);
     } else {
         for nested_ident in ref_references.values() {
-            seen_idents.insert(ty_env, DerefType::Deep, nested_ident.clone())?;
             if contains_rec(ty_env, cur_ident, nested_ident, references, seen_idents)? {
                 return Ok(true);
             }
@@ -253,6 +268,15 @@ fn contains_strings_rec(
     references: &HashMap<String, HashSet<String>>,
     seen_idents: &mut HashSet<String>,
 ) -> bool {
+    // Prevent checking the same string multiple times to prevent infinite
+    // recursion. If we see this for the second time, should be ok to return
+    // a false.
+    if seen_idents.contains(ref_ident) {
+        return false;
+    } else {
+        seen_idents.insert(ref_ident.to_string());
+    }
+
     let ref_references = if let Some(ref_references) = references.get(ref_ident) {
         ref_references
     } else {
@@ -263,7 +287,6 @@ fn contains_strings_rec(
         return true;
     } else {
         for nested_ident in ref_references {
-            seen_idents.insert(nested_ident.clone());
             if contains_strings_rec(cur_ident, nested_ident, references, seen_idents) {
                 return true;
             }
@@ -301,9 +324,9 @@ impl ReferenceCollector {
         let mut local_references = TyEnvHashSet::default();
 
         for member in members {
-            if let Some(type_id) = &member.as_ref().borrow().read().unwrap().ty {
+            if let Some(type_id) = &member.as_ref().borrow().read().ty {
                 let adt_and_trait_paths =
-                    get_adt_and_trait_paths(&ty_env, *type_id, self.full_paths)?;
+                    get_adt_and_trait_paths(ty_env, *type_id, self.full_paths)?;
 
                 for path in adt_and_trait_paths.values() {
                     if !path_eq(ty_env, path, adt_path, DerefType::Deep)? {
@@ -322,23 +345,21 @@ impl ReferenceCollector {
         &self,
         ast_ctx: &AstCtx,
         adt: &Arc<RwLock<Adt>>,
-        id: BlockId,
+        block_id: BlockId,
     ) -> LangResult<LangPath> {
-        let adt_name = adt.as_ref().borrow().read().unwrap().name.clone();
-        let adt_file_pos = Some(adt.as_ref().borrow().read().unwrap().file_pos);
+        let adt_name = adt.as_ref().borrow().read().name.clone();
+        let adt_file_pos = Some(adt.as_ref().borrow().read().file_pos);
 
-        let module = if let Some(module) = ast_ctx.get_module(id)? {
+        let module = if InnerTy::ident_to_type(&adt_name, block_id).is_primitive() {
+            LangPath::empty()
+        } else if let Some(module) = ast_ctx.get_module(block_id)? {
             module
         } else {
-            LangPath::default()
+            LangPath::empty()
         };
 
         Ok(if self.full_paths {
-            let generics = if let Some(generics) = &adt.as_ref().borrow().read().unwrap().generics {
-                Some(generics.clone())
-            } else {
-                None
-            };
+            let generics = adt.read().generics.as_ref().cloned();
             module.clone_push(&adt_name, generics.as_ref(), adt_file_pos)
         } else {
             module.clone_push(&adt_name, None, adt_file_pos)
@@ -369,9 +390,9 @@ impl Visitor for ReferenceCollector {
                 }
             };
             if let Err(err) = self.collect_member_references(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 &adt_path,
-                &adt.as_ref().borrow().read().unwrap().members,
+                &adt.as_ref().borrow().read().members,
             ) {
                 self.errors.push(err);
             }
@@ -392,9 +413,9 @@ impl Visitor for ReferenceCollector {
                 }
             };
             if let Err(err) = self.collect_member_references(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 &adt_path,
-                &adt.as_ref().borrow().read().unwrap().members,
+                &adt.as_ref().borrow().read().members,
             ) {
                 self.errors.push(err);
             }
@@ -415,50 +436,69 @@ impl Visitor for ReferenceCollector {
                 }
             };
             if let Err(err) = self.collect_member_references(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 &adt_path,
-                &adt.as_ref().borrow().read().unwrap().members,
+                &adt.as_ref().borrow().read().members,
             ) {
                 self.errors.push(err);
             }
         }
     }
 
-    fn visit_impl(&mut self, block: &mut Block, _ctx: &mut TraverseCtx) {
-        if let Block {
-            header: BlockHeader::Implement(impl_path, ..),
-            ..
-        } = block
-        {
-            self.cur_adt_path = Some(impl_path.clone());
+    fn visit_extern_decl(&mut self, stmt: &mut Stmt, ctx: &mut TraverseCtx) {
+        if let Stmt::ExternalDecl(ExternalDecl::Struct(struct_), ..) = stmt {
+            let adt_path = match self.adt_path(ctx.ast_ctx, struct_, ctx.block_id) {
+                Ok(adt_path) => adt_path,
+                Err(err) => {
+                    self.errors.push(err);
+                    return;
+                }
+            };
+
+            if let Err(err) = self.references.insert(
+                &ctx.ty_env.lock(),
+                DerefType::Deep,
+                adt_path,
+                TyEnvHashSet::default(),
+            ) {
+                self.errors.push(err);
+            }
         }
     }
 
+    /// Store the current "ADT path" so that one can see in which ADT one is in
+    /// when traversing the blocks.
     fn visit_block(&mut self, block: &mut Block, _ctx: &mut TraverseCtx) {
-        if let Block {
-            header: BlockHeader::Fn(func),
-            ..
-        } = block
-        {
-            // Need to do this in `visit_block` instead of `visit_fn` since the types
-            // in the function declaration/prototype is traversed before the
-            // `visit_fn` is.
-            //
+        let Block { header, .. } = block;
+
+        let cur_adt_path = match header {
+            BlockHeader::Implement(impl_path, ..) => Some(impl_path.clone()),
+
+            BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
+                let adt = adt.read();
+                Some(
+                    adt.module
+                        .clone_push(&adt.name, adt.generics.as_ref(), Some(adt.file_pos)),
+                )
+            }
+
             // This is a function, not a method. It is not located inside a impl
             // block, so reset the ADT name since it doesn't belong to the ADT.
-            if func.as_ref().borrow().read().unwrap().method_adt.is_none() {
-                self.cur_adt_path = None;
-            }
-        }
+            BlockHeader::Fn(func) if func.read().method_adt.is_none() => None,
+
+            _ => return,
+        };
+
+        self.cur_adt_path = cur_adt_path;
     }
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
         if self.include_impls {
             if let Some(cur_adt_path) = &self.cur_adt_path {
-                let ty_env_guard = &ctx.ty_env.lock().unwrap();
+                let ty_env_guard = &ctx.ty_env.lock();
 
                 let mut references =
-                    match get_adt_and_trait_paths(&ty_env_guard, *type_id, self.full_paths) {
+                    match get_adt_and_trait_paths(ty_env_guard, *type_id, self.full_paths) {
                         Ok(paths) => paths,
                         Err(err) => {
                             self.errors.push(err);
@@ -467,7 +507,7 @@ impl Visitor for ReferenceCollector {
                     };
 
                 // Do not add references to itself.
-                if let Err(err) = references.remove(&ty_env_guard, DerefType::Deep, cur_adt_path) {
+                if let Err(err) = references.remove(ty_env_guard, DerefType::Deep, cur_adt_path) {
                     self.errors.push(err);
                     return;
                 }
@@ -475,7 +515,7 @@ impl Visitor for ReferenceCollector {
                 let contains_key =
                     match self
                         .references
-                        .contains_key(&ty_env_guard, DerefType::Deep, cur_adt_path)
+                        .contains_key(ty_env_guard, DerefType::Deep, cur_adt_path)
                     {
                         Ok(contains_key) => contains_key,
                         Err(err) => {
@@ -487,16 +527,16 @@ impl Visitor for ReferenceCollector {
                 if contains_key {
                     let self_references = self
                         .references
-                        .get_mut(&ty_env_guard, DerefType::Deep, cur_adt_path)
+                        .get_mut(ty_env_guard, DerefType::Deep, cur_adt_path)
                         .unwrap()
                         .unwrap();
                     if let Err(err) =
-                        self_references.extend(&ty_env_guard, DerefType::Deep, &references)
+                        self_references.extend(ty_env_guard, DerefType::Deep, &references)
                     {
                         self.errors.push(err);
                     }
                 } else if let Err(err) = self.references.insert(
-                    &ty_env_guard,
+                    ty_env_guard,
                     DerefType::Deep,
                     cur_adt_path.clone(),
                     references,

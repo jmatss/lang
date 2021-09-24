@@ -1,0 +1,45 @@
+mod std::io
+
+use std::Result
+use std::string::AsView
+use std::string::StringView
+
+ext fn printf(format: {u8}, ...) -> i32
+ext fn _write(fd: i32, data: {u8}, len: u32) -> i32
+ext fn fflush(file: {FILE}) -> i32
+ext struct FILE
+
+pub fn print_fd(
+    view: StringView,
+    fd: i32,
+    line_break: bool = true,
+    flush: bool = false
+) -> Result<(), StringView> {
+    if _write(fd, view.ptr, view.len()) == -1 {
+        return Result::error("Error when writing to fd")
+    }
+
+    if line_break {
+        // TODO: Make static variable containing value instead.
+        var ascii = 10  // \n
+        if _write(fd, ascii.&, 1) == -1 {
+            return Result::error("Error when writing line break to fd")
+        }
+    }
+
+    if flush and fflush(@null()) == -1 {
+        return Result::error("Error when flushing to fd")
+    }
+
+    return Result::success(@tuple())
+}
+
+pub fn print(view: StringView, line_break: bool = true, flush: bool = false) -> Result<(), StringView> {
+    var stdout_fd = 1
+    return print_fd(view, stdout_fd, line_break, flush)
+}
+
+pub fn eprint(view: StringView, line_break: bool = true, flush: bool = false) -> Result<(), StringView> {
+    var stderr_fd = 2
+    return print_fd(view, stderr_fd, line_break, flush)
+}

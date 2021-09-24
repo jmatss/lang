@@ -1,0 +1,38 @@
+use std::Cmp
+use std::Order
+
+pub struct TestStruct {
+    var member: u8
+}
+
+impl TestStruct: Cmp<TestStruct> {
+    pub fn this cmp(other: TestStruct) -> Order {
+        if this.member < other.member {
+            return Order::Lt
+        } else this.member > other.member {
+            return Order::Gt
+        } else {
+            return Order::Eq
+        }
+    }
+}
+
+fn main() -> i32 {
+    var ts1 = TestStruct { 1 }
+    var ts2 = TestStruct { 1 }
+    std::assert(ts1.cmp(ts2) == Order::Eq)
+    std::assert(ts1 >= ts2)
+    std::assert(ts1 <= ts2)
+
+    var ts3 = TestStruct { 3 }
+    var ts4 = TestStruct { 4 }
+    std::assert(ts3.cmp(ts4) == Order::Lt)
+    std::assert(ts3 < ts4)
+
+    var ts5 = TestStruct { 10 }
+    var ts6 = TestStruct { 1 }
+    std::assert(ts5.cmp(ts6) == Order::Gt)
+    std::assert(ts5 > ts6)
+
+    return 0
+}

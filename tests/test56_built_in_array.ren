@@ -1,0 +1,41 @@
+use std::String
+
+struct TestStruct {
+    var x: u8
+}
+
+fn main() -> i32 {
+    var init_val = 123 as u64
+    var arr1 = @array(init_val, 2)
+    var arr2: [u64: 2] = @array(init_val, 2)
+    
+    var out1 = @format(
+        "arr1: [{}, {}]\narr2: [{}, {}]",
+        arr1.[0], arr1.[1], arr2.[0], arr2.[1]
+    )
+    std::io::print(out1.as_view())
+    out1.deinit()
+
+    var i = 0
+    while i < 2 {
+        std::assert(arr1.[i] == init_val and arr2.[i] == init_val)
+        i.++
+    }
+
+
+    var x_val = 3
+    var init_val_ts = TestStruct { x_val }
+    var arr3 = @array(init_val_ts, 2)
+
+    var out2 = @format("arr3.x: [{}, {}]", arr3.[0].x, arr3.[1].x)
+    std::io::print(out2.as_view())
+    out2.deinit()
+
+    i = 0
+    while i < 2 {
+        std::assert(arr3.[i].x == x_val)
+        i.++
+    }
+
+    return 0
+}

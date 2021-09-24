@@ -1,0 +1,163 @@
+mod std::string
+
+use std::Eq
+use std::Optional
+use std::Result
+use std::collection::List
+use std::mem::Allocator
+use std::mem::Disposable
+use std::string::AsView
+use std::string::StringView
+
+ext fn strlen(str: {u8}) -> u32
+
+/// Represents a mutable, heap-allocated, string of text.
+pub struct String {
+    var buf: List<u8>
+
+    /// Creates a new String with the initial capacity `size`.
+    ///
+    /// If unable to allocate memory, the function will return an error.
+    /// If the given `size` is 0, the memory allocation will be lazily initialized
+    /// at the first insertion into the string.
+    pub fn init(size: u32) -> Result<String, StringView> {
+        var buf_or_error = List::init(size)
+        if buf is buf_or_error.success {
+            var str = String { buf }
+            return Result::success(str)
+        } else {
+            var err = buf_or_error.get_error()
+            return Result::error(err)
+        }
+    }
+
+    /// Creates a new String from the given string literal `str_lit`.
+    ///
+    /// If no `start_idx` argument is given, it will be set to the default value 0.
+    /// If no `len` arguments is given, or it is set to 0, this function will assume that
+    /// the given `str_lit` is null-terminated and calculate the length with `strlen()`.
+    pub fn from_lit(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<String, StringView> {
+        if start_idx != 0 {
+            str_lit = @ptr_add(str_lit, start_idx)
+        }
+
+        if len == 0 {
+            len = strlen(str_lit)
+        }
+
+        var buf_or_error = List::init(len)
+        if err is buf_or_error.error {
+            return Result::error(err)
+        }
+        var buf = buf_or_error.get_success()
+
+        var str = String { buf }
+        str.append_lit(str_lit, 0, len)
+
+        return Result::success(str)
+    }
+
+    /// Creates a new String from the given StringView.
+    pub fn from_view(str_view: StringView, start_idx: u32 = 0, len: u32 = 0) -> Result<String, StringView> {
+        if len == 0 {
+            len = str_view.len()
+        }
+
+        if start_idx + len > str_view.len() {
+            return Result::error("When creating String from StringView: start_idx + len > str_view.len()")
+        }
+
+        return this::from_lit(str_view.ptr, start_idx, len)
+    }
+
+    pub fn this len() -> u32 {
+        return this.buf.len()
+    }
+
+    pub fn this cap() -> u32 {
+        return this.buf.cap()
+    }
+
+    /// Returns the underlying pointer to the string.
+    pub fn this ptr() -> {u8} {
+        return this.buf.ptr
+    }
+
+    /// Appends a string literal to this string.
+    ///
+    /// The given string literal will be copied into this strings heap allocated memory.
+    /// The memory will be realloced and increased if extra space is required.
+    ///
+    /// If no `start_idx` argument is given, it will be set to the default value 0.
+    /// If no `len` arguments is given, this function will assume that the given
+    /// `str_lit` is null-terminated and calculate the length with `strlen()`.
+    pub fn {this} append_lit(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<(), StringView> {
+        if start_idx != 0 {
+            str_lit = @ptr_add(str_lit, start_idx)
+        }
+
+        if len == 0 {
+            len = strlen(str_lit)
+        }
+
+        var i = 0
+        while i < len {
+            var item = @ptr_add(str_lit, i).*
+            var push_res = this.buf.push(item)
+            if err is push_res.error {
+                return Result::error(err)
+            }
+            i.++
+        }
+
+        return Result::success(@tuple())
+    }
+
+    /// Appends the contents of a StringView to this String.
+    pub fn {this} append_view(str_view: StringView) -> Result<(), StringView> {
+        return this.append_lit(str_view.ptr, 0, str_view.len())
+    }
+
+    /// Appends the given ascii character to this String.
+    pub fn {this} append_ascii(ascii: u8) -> Result<(), StringView> {
+        return this.append_lit(ascii.&, 0, 1)
+    }
+
+    /// Converts this `String` into a null-terminated C string.
+    ///
+    /// This function creates a new heap allocation with size `this.len` + 1
+    /// which needs to be free'd by the caller.
+    pub fn this to_c_string() -> Result<{u8}, StringView> {
+        var len = this.len()
+        var ptr_or_error = Allocator::init_size(len + 1)
+        if err is ptr_or_error.error {
+            return Result::error(err)
+        }
+
+        var c_str_ptr = ptr_or_error.get_success()
+        Allocator::copy(c_str_ptr, this.buf.ptr, len)
+
+        var null_byte_ptr = @ptr_add(c_str_ptr, len)
+        null_byte_ptr.* = '\0' as u8
+
+        return Result::success(c_str_ptr)
+    }
+}
+
+impl String: AsView {
+    pub fn {this} as_view() -> StringView {
+        return StringView::new(this.ptr(), 0, this.len())
+    }
+}
+
+impl String: Disposable {
+    pub fn {this} deinit() {
+        this.buf.deinit()
+    }
+}
+
+impl String: Eq<String> {
+    pub fn this eq(other: String) -> bool {
+        return this.as_view() == other.as_view()
+    }
+}

@@ -29,6 +29,8 @@ FLAGS:
     -h, --help        Prints help information
     -l, --llvm        Set to dump/print the generated LLVM IR code.
     -O, --optimize    Set to run optimization of the LLVM IR.
+    -q, --quiet       Set to not print step progress to stdout.
+    -v, --validate    Set to only validate the code and skip code generation.
     -V, --version     Prints version information
 
 OPTIONS:
@@ -36,6 +38,7 @@ OPTIONS:
                              relative to this file path.
     -m, --module <module>    Set the name of the LLVM module. [default: lang_module]
     -o, --output <NAME>      The output name of the produced object file. [default: a.o]
+    -t, --triple <triple>    Target triple.
 
 ARGS:
     <INPUTS>...    List of input files.
@@ -59,12 +62,28 @@ The batch file `scripts/run_tests.bat` can be used to compile and run the system
 ```
 
 ### String
-Represented as a C string. The type is a pointer to the type `u8` and the string is null-terminated.
+There are three different string types that are used in the language. 
+
+#### std::string::String
+A `std::string::String` is a mutable heap allocated string. The struct contains a pointer to the heap allocation, the size of the heap allocation and the length of the string in bytes. After use the string needs to be deallocated with a call to its `deinit` function.
 ```
-"A C string"
+var str: std::string::String = s"A heap allocated string"
+str.&.deinit()
 ```
 
-*TODO: A plain `"..."` string should probably initialize a std::String or std::StringView. Might make sense to have a syntax similar to `c"..."` for creating a C string*
+#### std::string::StringView
+Represents a immutable "view" of a string. The struct contains a pointer and the length of the string in bytes. Since the `StringView` isn't in charge of the underlying memory of the string(/pointer), one needs to be careful to not use the `StringView` longer than the lifetime of the underlying string(/pointer).
+This should be the preferred string representation in most situation. Creating a "normal" string literal will give back a `StringView` to access/view the static string literal.
+```
+var view: std::string::StringView = "A static string literal that is accessable through the StringView"
+```
+
+### C-string
+A null-terminated C string. The type of the C string is a `u8` pointer and is used for interoperability with C code.
+```
+var c_str: {u8} = c"A null-terminated string literal"
+```
+
 
 ### Character
 UTF-8 char, represented with type `i32`.
@@ -155,6 +174,33 @@ var y: i32 = x + x_ptr.*
 ```
 
 
+## Tuple Type
+A `tuple` is a group of zero or more values. Internally a tuple is compiled into a struct containing the values as its fields/members.
+The syntax for a tuple type is a comma separated list of types wrapped inside a pair of parenthesis.
+```
+([<TYPE> [,]]...)
+
+// Example of variable containing a tuple with no value (empty type).
+var tuple_a: ()
+// Example of variable containing a tuple with one value of type `i32`.
+var tuple_b: (i32)
+// Example of variable containing a tuple with two values of type `TestStruct` and `f32`.
+var tuple_c: (TestStruct, f32)
+```
+where `TYPE` can be any type.
+
+Creating a tuple is done with the built-in function `@tuple(...)` which creates a new struct with `<X>` arguments (where `<X>` is the amount of arguments given to the built-in function call).
+Internally this will create a struct called `Tuple` with the types of the arguments as generics.
+Accessing a specific value in the tuple is done with the `.(` syntax: 
+```
+var tuple_a: (i32) = @tuple(123)
+var x: i32 = tuple_a.(0)
+
+var tuple_b: (TestStruct, f64) = @tuple(TestStruct {}, 3.5)
+var ts: TestStruct = tuple_b.(0)
+var f: f64 = tuple_b.(1)
+```
+
 ## Modifiers
 Modifiers can be specified on ADT's and function declarations. The Modifiers should precede the declaration.
 
@@ -188,6 +234,7 @@ var z: i32 = 3 + y
 
 ### `GENERICS_LIST`
 A list of generics/type parameters. The generics are "static dispatch" which means that the generics are replaced and checked at compile-time. A new function is created for every use of a specific generic type.
+One can optionally specify a list of `trait`s on the generics to enforce that they must  implement the given `trait`s. This same information can also be specified in a `where`-clause.
 
 ### `PARAMETER_LIST`
 A comma separate list of parameters to the function. A parameter may optionaly have a default values set. If the caller doesn't specify a value for that parameter, the default value will be used (inserted at the call-site during compilation).
@@ -208,7 +255,7 @@ hid fn func(x: i32 = 5, y: i32 = 0) -> i32 {
     return x - y
 }
 
-pub fn generic_func<T>(x: T) -> T {
+pub fn generic_func<T: AsView>(x: T) -> T {
     return x
 }
 
@@ -231,12 +278,49 @@ std::assert(square(3) == 9)
 ```
 
 
+#### Static Functions
+A function can be "static" in a ADT/impl-block which means that it isn't tied to a instance of the ADT/trait (think of it as a Java static function). Example of static function for a struct and how to call it:
+```
+struct TestStruct {
+    fn static_func() -> i32 { return 0 }
+}
+
+var x = TestStruct::static_func()
+std::assert(x == 0)
+```
+
+#### Methods
+There can also be methods in a ADT/impl-block which are tied to an instance of the ADT/trait. They are declared with the `this` keyword following the `fn` keyword. Interally, when the methods are compiled, an instance of the ADT/trait are inserted as the first argument of the function call. A method can take the instance either by value or reference(/pointer).
+Examples of methods for a struct and how to call them:
+```
+struct TestStruct {
+    var member_a: i32
+
+    fn this method_by_value() {
+        this.member_a = 456
+    }
+
+    fn {this} method_by_reference() {
+        this.*.member_a = 456
+    }
+}
+
+var test_struct = TestStruct { 123 }
+
+test_struct.method_by_value()
+std::assert(test_struct.member_a == 123)
+
+test_struct.method_by_reference()
+std::assert(test_struct.member_a == 456)
+```
+
+
 ## Algebraic Data Types (ADT)
 A collective term used for convenience to refer to types that might consiting of
 multiple other types. This includes `struct`, `enum` and `union`. `trait`s are NOT
 considered ADT's in the code, but I put them under here in the readme file because I can't be arsed creating a section just for them.
 
-One can specify a `impl` block for any ADT or trait. This impl-block will contain functions/methods for the ADT/trait. For ADTs one can specify `impl-trait` blocks to implement a specific trait for the given ADT. See the sections `Impl` and `Impl Trait` below for more information.
+One can specify `impl` blocks for any ADT to implement a specific trait. This impl-block will contain implementations of the the functions declared in the trait. For ADTs one can specify `impl-trait` blocks to implement a specific trait for the given ADT. See the sections `Impl` and `Impl Trait` below for more information.
 
 
 ### Struct
@@ -245,20 +329,25 @@ Compiles into a regular C struct, no reordering of the members are done. The gen
 #### Declaration
 ```
 [<MODIFIERS>] struct <NAME> [<GENERICS_LIST> [where <TRAIT_CONSTRAINTS>]] {
-    [<MEMBER_NAME>: <MEMBER_TYPE> [,]]...
+    <VARs> ...
+    <FUNCTIONs> ...
 }
 
 pub struct TestStructA {
-    member_a: i8,
-    member_b: f32,
+    var member_a: i8
+    var member_b: f32
+
+    fn example(x: i32) -> i32 {
+        return x * 2
+    }
 }
 
 // In this example the types `K` and `V` are generics. The `where` clause enforces
 // that any type `K` must implement the trait `Hashable`. This also allows one to
 // use any functions found in trait `Hashable` on the member `member_k`.
 struct TestStructB<K, V> where K impls Hashable {
-    member_k: K,
-    member_v: V,
+    var member_k: K,
+    var member_v: V,
 }
 ```
 
@@ -311,12 +400,17 @@ The first member will be an array of the type `u8` with size equal to the larges
 #### Declaration
 ```
 [<MODIFIERS>] union <NAME> [<GENERICS_LIST> [where <TRAIT_CONSTRAINTS>]] {
-    [<MEMBER_NAME>: <MEMBER_TYPE> [,]]...
+    <VARs> ...
+    <FUNCTIONs> ...
 }
 
 pub union TestUnionA {
-    member_a: i8,
-    member_b: f32,
+    var member_a: i8,
+    var member_b: f32,
+
+    fn example(x: i32) -> i32 {
+        return x * 2
+    }
 }
 
 union TestUnionB<K, V> {
@@ -375,7 +469,25 @@ trait TestTrait {
 
 
 ### Impl
-Inside a `impl` block, one can define functions(/methods) that belongs to a specific ADT or trait. A `impl` block can currently only contain functions.
+`impl` blocks are used to implement traits for a specific ADT. These ADT types can then be used in place of any generics that reqires the type to implement a specific trait.
+
+#### Declaration
+```
+impl <ADT_NAME>: <TRAIT_NAME> {
+    [<TRAIT_FNs>]...
+}
+
+trait TestTrait {
+    fn trait_func(x: u8) -> i32 
+}
+
+struct TestStruct;
+impl TestStruct: TestTrait {
+    fn trait_func(x: u8) -> i32 {
+        return x as i32
+    }
+}
+```
 
 #### Declaration
 ```
@@ -385,68 +497,6 @@ impl <ADT_NAME/TRAIT_NAME> {
 
 impl TestStruct {
     fn func() {}
-}
-```
-
-#### Static Functions
-A function can be "static" in a impl-block which means that it isn't tied to a instance of the ADT/trait the the impl-block belongs to (think of it as a Java static function). Example of static function in impl-block and how to call it:
-```
-struct TestStruct {}
-
-impl TestStruct {
-    fn static_func() -> i32 { return 0 }
-}
-
-var x = TestStruct::static_func()
-std::assert(x == 0)
-```
-
-#### Methods
-There can also be methods in a impl-block which are tied to an instance of the ADT/trait. They are declared with the `this` keyword following the `fn` keyword. Interally, when the methods are compiled, an instance of the ADT/trait are inserted as the first argument of the function call. A method can take the instance either by value or reference(/pointer).
-Examples of methods in impl-block and how to call them:
-```
-struct TestStruct {
-    member_a: i32,
-}
-
-impl TestStruct {
-    fn this method_by_value() {
-        this.member_a = 456
-    }
-
-    fn {this} method_by_reference() {
-        this.*.member_a = 456
-    }
-}
-
-var test_struct = TestStruct { 123 }
-
-test_struct.method_by_value()
-std::assert(test_struct.member_a == 123)
-
-test_struct.method_by_reference()
-std::assert(test_struct.member_a == 456)
-```
-
-
-### Impl Trait
-`impl-trait` blocks are used to implement traits for a specific ADT. These ADT types can then be used in place of any generics that reqires the type to implement a specific trait.
-
-#### Declaration
-```
-impl <TRAIT_NAME> for <ADT_NAME> {
-    [<FN_DECL>]...
-}
-
-trait TestTrait {
-    fn trait_func(x: u8) -> i32 
-}
-
-struct TestStruct;
-impl TestTrait for TestStruct {
-    fn trait_func(x: u8) -> i32 {
-        return x as i32
-    }
 }
 ```
 
@@ -463,15 +513,32 @@ struct TestStruct;
 ```
 If one wants to access the `TestStruct` in the example above from a file with another `mod` module, it would have to be accessed with the path `std::name_space::TestStruct`. Any file with the same module would be able to access it as `TestStruct`.
 
-### use `<PATH>`
-Includes the path/namespace/module `PATH` into the current file.
+### use `<PATH>` [as `<IDENT>`]
+Includes the path/namespace/module `PATH` into the current file. The path can represent either a partial path, ADT or function. The `as` keywork can be used to give the path a "short-hand" name.
 ```
+use std::assert
+use std::mem
 use std::mem::Allocator
 
-// The call below is able to find `Allocator` correctly by using the path/namespace/module
-// in the `use` statement at the top of the example. The two calls below are equivalent. 
-Allocator::init("msg on heap")
+use std::Optional as Opt
+use std::assert as assert_fn
+use std as longer_std
+
+// Doesn't use any `use` statement, full path specified.
+std::assert(true == true)
+// Uses the `use std::assert` to find the correct path.
+assert(true == true)
+
+// Doesn't use any `use` statement, full path specified.
 std::mem::Allocator::init("msg on heap")
+// Uses the `use std::mem` to find the correct path.
+mem::Allocator::init("msg on heap")
+// Uses the `use std::mem::Allocator` to find the correct path.
+Allocator::init("msg on heap")
+
+Opt::empty()                // => std::Optional::empty()
+assert_fn(true)             // => std::assert(true)
+longer_std::assert(false)   // => std::assert(false)
 ```
 
 ### `return [<EXPRESSION>]`
@@ -539,6 +606,16 @@ var x = 5
 ```
 
 
+## Comparison
+Any ADT that implements the `std::Eq<T>` trait and its method `eq` can be compared using the `==` or `!=` symbols. The compiler will rewrite the comparison using the symbols into a call to the `std::Eq<T>` traits `eq` method. The `std::Cmp<T>` and its `cmp` method can be used to allow comparisons with the built in `>`, `<`, `>=` and `<=` symbols.
+Any primitive type can be compared with the comparison symbols without needing to implement the traits.
+
+
+## Auto deref
+ADT instances can be auto dereferenced depend on context. Given a ADT type `T`, one can access its members or call its methods on a expression of type `T` or `{T}`.
+For method calls, the compiler will rewrite the expression (if needed) by adding a deref/address operation to match the form of `this` in the method declaration. For member access on an expression of type `{T}`, a deref operation will be added.
+
+
 ## Built-in functions
 Built-in functions can be used in the same way as regular functions. Most of the built-in functions exists because they need some extra logic that needs to interact with the compiler and therefore can't be implemented as regular functions. A few of the built-in functions could be implemented as regular functions, but are built-in for convenience.
 
@@ -548,53 +625,56 @@ A built-in function is called in the same way as a regular function with the exc
 @ <NAME> [<GENERIC_LIST>] (<PARAMETER_LIST>)
 ```
 
-### `@size<T>()`
-Gets the size of the specified type `T`. The size is returned as a unsigned 32 bit integer.
+### `@size<T>() -> u32`
+Gets the size of the specified type `T`.
 
 ### `@type(expr: T)`
-Gets the type of the expression `expr`.
+Gets the type of the expression `expr`. The type will be solved during type inference and can be used anywhere a normal type would be used.
 
-### `@name(var: T)`
-Gets the name of the given variable `var` as a null terminated C string.
+### `@name(var: T) -> std::string::StringView`
+Gets the name of the given variable `var`. The given expression `var` must be a reference to an already declared variable. It can be a local, global, ADT member or parameter.
 
-### `@null<T>()`
-Creates a null/empty value of the specified type `T`.
+### `@null() -> any`
+Creates a null/empty value of a type inferred from its use.
 
-### `@is_null(expr: T)`
-Checks if the given argument `expr` is null/0.
+### `@is_null(expr: {T}) -> bool`
+Checks if the given argument `expr` is null.
 
-### `@ptr_add(ptr: {T}, amount: u32)`
+### `@is_not_null(expr: {T}) -> bool`
+Checks if the given argument `expr` isn't null.
+
+### `@ptr_add(ptr: {T}, amount: u32) -> {T}`
 Adds the value of the second parameter `amount` times the size of the type `T` to the pointer `ptr`.
 
-### `@ptr_sub(ptr: {T}, amount: u32)`
+### `@ptr_sub(ptr: {T}, amount: u32) -> {T}`
 Subtracts the value of the second parameter `amount` times the size of the type `T` to the pointer `ptr`.
 
-### `@format(format: {u8}, ...)`
-The first argument of the `format` call is a string literal and the rest of the arguments (variadic) are the arguments to the given format string literal.
+### `@format(format: std::string::StringView, ...) -> std::string::String`
+The first argument of the `format` call is a `StringView` and the rest of the arguments (variadic) are the arguments to the given format string literal. Currently the rest of the arguments must either be `StringView`s or primitives. In the future it would make sense to allow anything that can be turned into a `StringView` or `String` (probably enforces through a trait).
 All `{}` found in the `format` string literal will be replace with the arguments to the function in sequential order.
 
 For example:
 ```
 @format("abc{}def{}", 123, 456)
 ```
-would result in a std::StringView containing the string "abc123def456".
+would result in a `std::string::String` containing the string "abc123def456".
 
-### `@array(init_value: T, dimension: u32)`
+### `@array(init_value: T, dimension: u32) -> [T: _]`
 Creates a instance of an array with the specified length `dimension` and all values initialized to the value `init_value`.
 
-### `@argc()`
-Gets the amount of CLI arguments used when running the program (`argc`). If no `main` function is found in this module, this value will be set to 0. The returned value is of type `u32`.
+### `@argc() -> u32`
+Gets the amount of CLI arguments used when running the program (`argc`). If no `main` function is found in this module, this value will be set to 0.
 
-### `@argv()`
+### `@argv() -> {{u8}}`
 Gets the CLI arguments used when running the program (`argv`). If no `main` function is found in this module, this value will be set to 0. The returned value is of type `{{u8}}` (pointer to array of C strings).
 
-### `@file()`
+### `@file() -> std::string::StringView`
 Gets the filename of the file that this built-in call is in.
 
-### `@line()`
+### `@line() -> u32`
 Gets the line number at which this built-in is called.
 
-### `@column()`
+### `@column() -> u32`
 Gets the column number at which this built-in is called.
 
 ### `@unreachable()`

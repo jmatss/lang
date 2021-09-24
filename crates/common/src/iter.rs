@@ -100,11 +100,7 @@ impl<'a, I: Clone> TokenIter<'a, I> {
     /// Peeks and clones the two upcoming items in the iterator.
     #[inline]
     pub fn peek_two(&mut self) -> Option<(I, Option<I>)> {
-        if let Some(first) = self.peek_at_n(0) {
-            Some((first, self.peek_at_n(1)))
-        } else {
-            None
-        }
+        self.peek_at_n(0).map(|first| (first, self.peek_at_n(1)))
     }
 
     pub fn get_items(&self) -> &[I] {

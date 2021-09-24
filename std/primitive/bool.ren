@@ -1,0 +1,30 @@
+use std::Hash
+use std::string::AsView
+use std::string::String
+use std::string::StringView
+
+pub struct bool {
+    pub fn this to_string() -> Result<String, StringView> {
+        return String::from_view(this.as_view())
+    }
+}
+
+impl bool: AsView {
+    pub fn {this} as_view() -> StringView {
+        if this.* {
+            return "true"
+        } else {
+            return "false"
+        }
+    }
+}
+
+impl bool: Hash {
+    pub fn this hash() -> u32 {
+        if this {
+            return 1
+        } else {
+            return 0
+        }
+    }
+}

@@ -1,0 +1,43 @@
+ext fn printf(format: {u8}, ...) -> i32
+
+struct TestStruct<T> {
+    var inner: T
+}
+
+struct TestStructTwo<K, V> {
+    var key: K
+    var value: {V}
+}
+
+struct UnImplemented<U> {
+    var unimplemented: U
+}
+
+fn main() -> i32 {
+    var i: u64 = 1
+    var f: f32 = 123.
+
+    var test_struct_u64 = TestStruct { i }
+    var test_struct_f32 = TestStruct { f }
+
+    var expected_u64: u64 = 1
+    var expected_f32: f32 = 123.
+
+    printf(c"expected_u64: %llu, test_struct_u64.inner: %llu", expected_u64, test_struct_u64.inner)
+    std::assert(expected_u64 == test_struct_u64.inner)
+    printf(c"\nexpected_f32: %f, test_struct_f32.inner: %f", expected_f32 as f64, test_struct_f32.inner as f64)
+    std::assert(expected_f32 == test_struct_f32.inner)
+
+
+    var key = c"Key"
+    var value: u8 = 5
+
+    var test_struct_two = TestStructTwo { key, value.& }
+    test_struct_two.value.* = 10
+
+    printf(c"\ntest_struct_two.value.*: %d", test_struct_two.value.* as u32)
+    std::assert(test_struct_two.value.* == 10)
+
+
+    return 0
+}

@@ -1,0 +1,31 @@
+ext fn malloc(size: u32) -> {u8}
+ext fn free(ptr: {u8})
+
+fn test_func(a: i32, b: i32) -> i64 {
+    var tmp: i32 = a + b
+    return (a + b) as i64
+}
+
+fn main() -> i32 {
+    var a = 3
+    var b = 5
+    var c = a + b
+    std::assert(c == 8)
+
+    var d = test_func(a, b)
+    std::assert(d == 8)
+
+    var e = 3
+    var f = e.&
+    var g = f.*
+    f.* = 5
+    std::assert(e == 5)
+    std::assert(g == 3)
+
+    var h = malloc(1) as {u8}
+    defer free(h as {u8})
+    h.* = 3
+    std::assert(h.* == 3)
+
+    return 0
+}

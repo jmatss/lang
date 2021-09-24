@@ -1,0 +1,14 @@
+struct TestStruct<T> {
+    var m: T
+
+    fn fn_a(value: u64) {}
+    fn fn_b(value: T) {}
+}
+
+// Issue #7
+fn main() -> i32 {
+    TestStruct<u64>::fn_a(1)
+    TestStruct::fn_b(1 as i8)
+
+    return 0
+}

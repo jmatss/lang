@@ -1,0 +1,91 @@
+ext fn printf(format: {u8}, ...) -> i32
+
+struct TestStruct<T> {
+    var a: i64
+    var b: T
+
+    fn this generic_size() -> u32 {
+        return @size<T>()
+    }
+}
+
+
+fn main() -> i32 {
+    var ts = TestStruct<f64> { 123, 456. }
+    var size_inner = ts.generic_size()
+
+    var size_i = @size<i32>()
+    var size_f = @size<f64>()
+    var size_s = @size<TestStruct<f32>>()
+
+    // Size in bytes, so might not be true for all architectures.
+    printf(c"i32 size: %d", size_i)
+    std::assert(size_i == 4)
+
+    printf(c"\nf64 size: %d", size_f)
+    std::assert(size_f == 8)
+
+    printf(c"\nTestStruct{i64,f32} size: %d", size_s)
+    std::assert(size_s == 16)
+
+    printf(c"\ninner size (f64): %d", size_inner)
+    std::assert(size_inner == 8)
+
+
+    var int_1: i16 = 123
+    var int_2: @type(int_1) = 456  // No assert, just make sure that it compiles.
+    // TODO: This logic nesting of built-ins stopped working after
+    //       allowing any values as constraints. Fix this.
+    //var size_t = @size<@type(int_1)>()
+
+    //printf(c"\nsize_t(i16) size: %d", size_t)
+    //std::assert(size_t == 2)
+
+
+    //              21          33
+    var column_nr = @column() + @column()
+    var line_nr = @line()
+    var filename = @file()
+
+    printf(c"\ncolumn_nr: %d", column_nr)
+    std::assert(column_nr == 21 + 33)
+
+    printf(c"\nline_nr: %d", line_nr)
+    std::assert(line_nr == 47)
+
+    std::io::print("\nfilename: ", line_break = false)
+    std::io::print(filename, line_break = false)
+    std::assert(filename == "test35_built_in.ren")
+
+
+    var null_i: i64 = @null()
+    var null_s: TestStruct<f64> = @null()
+
+    printf(c"\nnull_i: %lld", null_i)
+    std::assert(null_i == 0)
+
+    printf(c"\nnull_s.a: %lld", null_s.a)
+    std::assert(null_s.a == 0)
+    printf(c"\nnull_s.b: %f", null_s.b)
+    std::assert(0.0 == null_s.b)
+
+
+    var null_ptr: {u64} = @null()
+    printf(c"\n@is_null(null_ptr): ")
+    if @is_null(null_ptr) { printf(c"true") } else { printf(c"false") }
+    std::assert(@is_null(null_ptr))
+
+
+    var var_name = 1
+    var var_name_content = @name(var_name)
+    std::io::print("\nvar_name: ", line_break = false)
+    std::io::print(var_name_content, line_break = false)
+    std::assert(var_name_content == "var_name")
+
+
+    if false {
+        @unreachable()
+    }
+
+    return 0
+}

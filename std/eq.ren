@@ -1,0 +1,38 @@
+mod std
+
+// TODO: The function currently takes both inputs as value.
+//       Should there be a function taking larger ADTs by ref?
+/// A trait used for types that can be be compared with the type `T`.
+///
+/// Any comparison of a ADT with either `==` or `!=` will be converted
+/// into a call to the `eq` function of the `Eq<T>` trait.
+///
+/// ```
+/// pub struct TestStruct {
+///     var member: i8
+/// }
+///
+/// impl TestStruct: Eq<TestStruct> {
+///     pub fn this eq(other: TestStruct) -> bool {
+///         return this.member == other.member
+///     }
+/// }
+///
+/// pub fn main() -> i32 {
+///     var ts1 = TestStruct { 3 }
+///     var ts2 = TestStruct { 5 }
+/// 
+///     // The two lines below are equivalent.
+///     var eq1 = (ts1 == ts2)
+///     var eq2 = (ts1.eq(ts2))
+/// 
+///     // The two lines below are equivalent.
+///     var ne1 = (ts1 != ts2)
+///     var ne2 = (not ts1.eq(ts2))
+/// 
+///     return 0
+/// }
+/// ```
+pub trait Eq<T> {
+    pub fn this eq(other: T) -> bool
+}

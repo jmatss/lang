@@ -1,6 +1,7 @@
-use std::sync::Mutex;
+use std::collections::HashMap;
 
 use log::debug;
+use parking_lot::Mutex;
 
 use common::{
     ctx::block_ctx::BlockCtx,
@@ -101,6 +102,10 @@ impl<'a> ParseTokenIter<'a> {
             ty_env,
             block_body: Vec::default(),
         }
+    }
+
+    pub fn file_pos(&self) -> FilePosition {
+        self.file_pos
     }
 
     /// Called when all files have been parsed and one wants to get the new whole
@@ -362,56 +367,75 @@ impl<'a> ParseTokenIter<'a> {
         TypeParser::parse(self, generics, path_builder)
     }
 
-    // TODO: Currently doesn't handle FilePosition. How should this be done?
-    //       The returned value will just contain a None file_pos.
-    /// Parses a variable, including type and default value. If `parse_type` is
-    /// set, a potential type will be parsed following the given variable.
-    /// If `parse_value` is set, a potential value will be parsed following the
+    /// Parses a variable declaration.
+    ///
+    /// This function will parse a potential type and init value  following the
     /// given variable.
-    pub fn parse_var(
+    ///
+    /// The symbol after the variable decl must be a linebreak or semicolon.
+    /// Since this function parses variables in parameter lists aswell, the
+    /// variable can end with a comma or end parenthesis.
+    pub fn parse_var_decl(
         &mut self,
         ident: &str,
-        parse_type: bool,
-        parse_value: bool,
         is_const: bool,
         generics: Option<&Generics>,
         mut file_pos: FilePosition,
     ) -> LangResult<Var> {
         // TODO: Handle file_pos.
         let (ty, ty_file_pos) = if let Some(next_token) = self.peek_skip_space() {
-            match next_token.kind {
-                LexTokenKind::Sym(Sym::Colon) if parse_type => {
-                    self.next_skip_space(); // Skip the colon.
-                    let (type_id, ty_file_pos) = self.parse_type(generics)?;
+            if let LexTokenKind::Sym(Sym::Colon) = next_token.kind {
+                self.next_skip_space(); // Skip the colon.
+                let (type_id, ty_file_pos) = self.parse_type(generics)?;
 
-                    file_pos.set_end(&ty_file_pos)?;
-                    (Some(type_id), Some(ty_file_pos))
-                }
-                _ => (None, None),
+                file_pos.set_end(&ty_file_pos)?;
+                (Some(type_id), Some(ty_file_pos))
+            } else {
+                (None, None)
             }
         } else {
             (None, None)
         };
 
         let value = if let Some(next_token) = self.peek_skip_space() {
-            match next_token.kind {
-                LexTokenKind::Sym(Sym::Equals) if parse_value => {
-                    self.next_skip_space(); // Skip the Equals.
-                    let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
+            if let LexTokenKind::Sym(Sym::Equals) = next_token.kind {
+                self.next_skip_space(); // Skip the Equals.
+                let expr = self.parse_expr(&DEFAULT_STOP_CONDS)?;
 
-                    if let Some(file_pos_last) = expr.file_pos() {
-                        file_pos.set_end(file_pos_last)?;
-                    } else {
-                        unreachable!("Value for var doesn't have a file_pos: {:#?}", expr);
-                    }
-
-                    Some(Box::new(expr))
+                if let Some(file_pos_last) = expr.file_pos() {
+                    file_pos.set_end(file_pos_last)?;
+                } else {
+                    unreachable!("Value for var doesn't have a file_pos: {:#?}", expr);
                 }
-                _ => None,
+
+                Some(Box::new(expr))
+            } else {
+                None
             }
         } else {
             None
         };
+
+        let is_valid_end_symbol = if let Some(next_token) = self.peek_skip_space() {
+            next_token.is_break_symbol()
+                || matches!(
+                    next_token.kind,
+                    LexTokenKind::Sym(Sym::ParenthesisEnd | Sym::Comma)
+                )
+        } else {
+            true
+        };
+
+        if !is_valid_end_symbol {
+            return Err(self.err(
+                format!(
+                    "Declaration of variable \"{}\" does not end with a valid symbol. \
+                    Must end with: linebreak, semicolon, comma or end parenthesis.",
+                    ident
+                ),
+                Some(file_pos),
+            ));
+        }
 
         Ok(Var::new(
             ident.into(),
@@ -520,7 +544,7 @@ impl<'a> ParseTokenIter<'a> {
 
                 if let Some(name_file_pos) = &mut name_file_pos {
                     if let Some(expr_file_pos) = expr.file_pos() {
-                        name_file_pos.set_end(&expr_file_pos)?;
+                        name_file_pos.set_end(expr_file_pos)?;
                     }
                 }
                 let arg = Argument::new(name, name_file_pos, expr);
@@ -635,17 +659,9 @@ impl<'a> ParseTokenIter<'a> {
                 // "TripleDot" which is the indicator for a variadic function.
                 match lex_token.kind {
                     LexTokenKind::Ident(ident) => {
-                        let parse_type = true;
-                        let parse_value = true;
                         let is_const = false;
-                        let parameter = self.parse_var(
-                            &ident,
-                            parse_type,
-                            parse_value,
-                            is_const,
-                            generics,
-                            lex_token.file_pos,
-                        )?;
+                        let parameter =
+                            self.parse_var_decl(&ident, is_const, generics, lex_token.file_pos)?;
 
                         parameters.push(parameter);
                     }
@@ -724,6 +740,7 @@ impl<'a> ParseTokenIter<'a> {
         &mut self,
         file_pos: &mut FilePosition,
         gens_kind: GenericsKind,
+        parse_gens: bool,
     ) -> LangResult<LangPath> {
         let mut path_builder = LangPathBuilder::default();
 
@@ -749,8 +766,8 @@ impl<'a> ParseTokenIter<'a> {
 
             file_pos.set_end(&ident_file_pos)?;
 
-            let next_token_kind = self.peek_skip_space().map(|t| t.kind);
-            if let Some(LexTokenKind::Sym(Sym::PointyBracketBegin)) = next_token_kind {
+            let next_kind = self.peek_skip_space().map(|t| t.kind);
+            if parse_gens && matches!(next_kind, Some(LexTokenKind::Sym(Sym::PointyBracketBegin))) {
                 let mut type_parser = TypeParser::new(self, None);
                 let (gens, gens_file_pos) = type_parser.parse_type_generics(gens_kind.clone())?;
 
@@ -758,40 +775,162 @@ impl<'a> ParseTokenIter<'a> {
                     file_pos.set_end(&gens_file_pos)?;
                 }
 
-                let generics = if let Some(gens) = gens {
-                    gens
-                } else {
-                    Generics::empty()
-                };
-
-                path_builder.add_path_gen(&ident, &generics);
+                path_builder.add_path_with_gen(&ident, gens.as_ref());
             } else {
                 path_builder.add_path(&ident);
             }
 
             // If the next token is a double colon, continue parsing the path.
-            // If a end symbol is found, the end of the path has been found,
-            // break out of this loop and return from the function.
-            // Otherwise, found unexpected symbol, something has gone wrong.
-            if let Some(lex_token) = self.peek_skip_space() {
-                if let LexTokenKind::Sym(Sym::DoubleColon) = lex_token.kind {
-                    self.next_skip_space();
-                    continue;
-                /*
-                } else if lex_token.is_break_symbol() {
-                    self.next_skip_space();
-                    break;
-                */
-                } else {
-                    break;
-                }
-            } else {
-                break;
+            // Otherwise assume that we are done parsing the path.
+            let next_kind = self.peek_skip_space().map(|t| t.kind);
+            if let Some(LexTokenKind::Sym(Sym::DoubleColon)) = next_kind {
+                self.next_skip_space();
+                continue;
             }
+
+            break;
         }
 
         path_builder.file_pos(*file_pos);
         Ok(path_builder.build())
+    }
+
+    /// Parses a generic list declaration.
+    ///
+    /// This function will parse the generic types plus potential traits that the
+    /// generics implements. If a generic implements multiple traits, the traits
+    /// will be separated by whitespace.
+    ///
+    /// # Examples of how generic lists are parsed:
+    /// `fn f<T>()`               =>  Ok(Some(Gen<T>, Map::empty()))
+    /// `fn f<T: std::AsView>()`  =>  Ok(Some(Gen(T), Map(T -> std::AsView)))
+    /// `fn f()`                  =>  Ok(None)
+    pub(crate) fn parse_gens_decl(
+        &mut self,
+        file_pos: &mut FilePosition,
+    ) -> LangResult<(Option<Generics>, Option<HashMap<String, Vec<LangPath>>>)> {
+        let next_kind = self.peek_skip_space().map(|t| t.kind);
+        if let Some(LexTokenKind::Sym(Sym::PointyBracketBegin)) = next_kind {
+            self.next_skip_space();
+        } else {
+            return Ok((None, None));
+        }
+
+        let mut gens = Generics::new();
+        let mut impls = HashMap::default();
+
+        loop {
+            let gen_name = if let Some(lex_token) = self.next_skip_space_line() {
+                if let LexTokenKind::Ident(gen_name) = lex_token.kind {
+                    file_pos.set_end(&lex_token.file_pos)?;
+                    gen_name
+                } else {
+                    return Err(self.err(
+                        format!("Expected ident when gens decl, got: {:#?}.", lex_token),
+                        Some(lex_token.file_pos),
+                    ));
+                }
+            } else {
+                return Err(self.err("Got None when parsing gens decl.".into(), Some(*file_pos)));
+            };
+
+            // If next token is a colon, this generic have declared traits that
+            // the generic should implement. Parse them and insert them into
+            // the hashmap.
+            let next_kind = self.peek_skip_space_line().map(|t| t.kind);
+            let cur_gen_impls = if let Some(LexTokenKind::Sym(Sym::Colon)) = next_kind {
+                self.next_skip_space_line();
+                self.parse_path_list(file_pos, GenericsKind::Impl)?
+            } else {
+                None
+            };
+
+            gens.insert_name(gen_name.clone());
+            if let Some(cur_gen_impls) = cur_gen_impls {
+                impls.insert(gen_name, cur_gen_impls);
+            }
+
+            let pos = self.pos();
+
+            // TODO: Copied from `parse_type_generics`, merge logic in some way.
+            //
+            //
+            // End of a type in the generic list. The next token should either
+            // be a comma if there are more arguments in the list or a
+            // "PointyBracketEnd" if the generic list have been parsed fully.
+            // It might also be a "ShiftRight" if this it is two "PointyBracketEnd"
+            // following each other, need to rewrite the token in that case.
+            if let Some(lex_token) = self.next_skip_space_line() {
+                match lex_token.kind {
+                    LexTokenKind::Sym(Sym::Comma) => {
+                        // Makes a extra check to allow for trailing commas.
+                        if let Some(next) = self.peek_skip_space_line() {
+                            if let LexTokenKind::Sym(Sym::PointyBracketEnd) = next.kind {
+                                self.next_skip_space_line();
+
+                                file_pos.set_end(&next.file_pos)?;
+                                break;
+                            }
+                        }
+                    }
+                    LexTokenKind::Sym(Sym::PointyBracketEnd) => {
+                        file_pos.set_end(&lex_token.file_pos)?;
+                        break;
+                    }
+                    LexTokenKind::Sym(Sym::ShiftRight) => {
+                        self.rewind_to_pos(pos);
+
+                        let kind = LexTokenKind::Sym(Sym::PointyBracketEnd);
+                        let token = LexToken::new(kind, lex_token.file_pos.to_owned());
+                        self.iter.replace(token);
+
+                        file_pos.set_end(&lex_token.file_pos)?;
+                        break;
+                    }
+                    _ => {
+                        return Err(self.err(
+                            format!(
+                                "Received unexpected token after argument in gens decl list: {:?}",
+                                lex_token
+                            ),
+                            Some(lex_token.file_pos),
+                        ));
+                    }
+                }
+            } else {
+                return Err(self.err(
+                    "Received None after argument in gens decl list.".into(),
+                    Some(*file_pos),
+                ));
+            }
+        }
+
+        Ok((Some(gens), Some(impls)))
+    }
+
+    /// Parses a whitespace separated list of paths.
+    /// This will be used to parse traits that a specific generics implements.
+    ///
+    /// This function will look at the next token (skipping whitespace). If it
+    /// is a "ident", it will start parsing it as a path. This will continue
+    /// until the next token isn't a ident.
+    fn parse_path_list(
+        &mut self,
+        file_pos: &mut FilePosition,
+        gens_kind: GenericsKind,
+    ) -> LangResult<Option<Vec<LangPath>>> {
+        let mut paths = Vec::default();
+
+        while let Some(LexTokenKind::Ident(_)) = self.peek_skip_space().map(|t| t.kind) {
+            let path = self.parse_path(file_pos, gens_kind.clone(), true)?;
+            paths.push(path);
+        }
+
+        if !paths.is_empty() {
+            Ok(Some(paths))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Replaces the lex token at the current position with the value of `item`.

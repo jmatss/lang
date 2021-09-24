@@ -1,5 +1,5 @@
 use std::collections::{
-    hash_map::{Values, ValuesMut},
+    hash_map::{Keys, Values, ValuesMut},
     HashMap,
 };
 
@@ -130,6 +130,30 @@ impl<K: TyEnvHash, V> TyEnvHashMap<K, V> {
         self.key_hashes.remove(&k_hash);
         Ok(self.map.remove(&k_hash))
     }
+
+    pub fn iter(&self) -> TyEnvHashMapIter<'_, K, V> {
+        TyEnvHashMapIter {
+            ty_env_hash_map: self,
+            key_iter: self.key_hashes.keys(),
+        }
+    }
+}
+
+/// An iterator to iterate over the key-value pairs of a `TyEnvHashMap`.
+pub struct TyEnvHashMapIter<'it, K: TyEnvHash, V> {
+    ty_env_hash_map: &'it TyEnvHashMap<K, V>,
+    key_iter: Keys<'it, u64, K>,
+}
+
+impl<'it, K: TyEnvHash, V> Iterator for TyEnvHashMapIter<'it, K, V> {
+    type Item = (&'it K, &'it V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let hash = self.key_iter.next()?;
+        let key = self.ty_env_hash_map.key_hashes.get(hash)?;
+        let value = self.ty_env_hash_map.map.get(hash)?;
+        Some((key, value))
+    }
 }
 
 impl<K, V> std::fmt::Debug for TyEnvHashMap<K, V>
@@ -138,7 +162,14 @@ where
     V: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "# map: {:#?}", self.map)?;
-        write!(f, "# key_hashes: {:#?}", self.key_hashes)
+        writeln!(f, "TyEnvHashMap {{")?;
+        for (key_hash, key) in &self.key_hashes {
+            if let Some(value) = self.map.get(key_hash) {
+                writeln!(f, "key: {:#?}, value: {:#?}", key, value)?;
+            } else {
+                writeln!(f, "key: {:#?}, value: #INVALID#", key)?;
+            }
+        }
+        write!(f, "}}")
     }
 }

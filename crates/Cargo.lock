@@ -33,6 +33,7 @@ dependencies = [
  "common",
  "either",
  "log",
+ "parking_lot",
  "parse",
 ]
 
@@ -127,15 +128,8 @@ dependencies = [
  "either",
  "inkwell",
  "log",
-]
-
-[[package]]
-name = "codegen_wasm"
-version = "0.1.0"
-dependencies = [
- "common",
- "leb128",
- "parse",
+ "parking_lot",
+ "rand",
 ]
 
 [[package]]
@@ -144,8 +138,10 @@ version = "0.1.0"
 dependencies = [
  "backtrace",
  "either",
+ "itertools",
  "lazy_static",
  "log",
+ "parking_lot",
  "rand",
 ]
 
@@ -252,11 +248,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69ddb889f9d0d08a67338271fa9b62996bc788c7796a5c18cf057420aaed5eaf"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "lang"
 version = "0.1.0"
 dependencies = [
  "analyze",
- "backtrace",
  "clap",
  "codegen_llvm",
  "common",
@@ -274,12 +278,6 @@ name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
-
-[[package]]
-name = "leb128"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3576a87f2ba00f6f106fdfcd16db1d698d648a26ad8e0573cad8537c3c362d2a"
 
 [[package]]
 name = "lex"
@@ -384,8 +382,10 @@ name = "parse"
 version = "0.1.0"
 dependencies = [
  "common",
+ "either",
  "lex",
  "log",
+ "parking_lot",
 ]
 
 [[package]]

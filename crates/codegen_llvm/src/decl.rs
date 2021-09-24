@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use inkwell::module::Linkage;
 
 use analyze::util::order::dependency_order;
@@ -22,8 +20,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     /// This function shall be ran before the function/method prototypes
     /// are compiled since they might contains references to types.
     pub(super) fn compile_type_decl(&mut self, ast_token: &mut AstToken) -> LangResult<()> {
-        self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
-
         // TODO: Currently only returns the first error, should return all.
         let include_impls = false;
         let full_paths = true;
@@ -34,20 +30,22 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             let adt = self
                 .analyze_ctx
                 .ast_ctx
-                .get_adt(&self.analyze_ctx.ty_env.lock().unwrap(), adt_path)?;
-            let adt = adt.as_ref().borrow().read().unwrap();
+                .get_adt(&self.analyze_ctx.ty_env.lock(), adt_path)?;
+            let adt = adt.read();
 
             match adt.kind {
-                AdtKind::Struct => {
-                    self.compile_struct(&adt)?;
+                AdtKind::Struct | AdtKind::Tuple => {
+                    self.compile_struct_decl(&adt)?;
                 }
                 AdtKind::Enum => {
-                    self.compile_enum(&adt)?;
+                    self.compile_enum_decl(&adt)?;
                 }
                 AdtKind::Union => {
-                    self.compile_union(&adt)?;
+                    self.compile_union_decl(&adt)?;
                 }
-                AdtKind::Unknown => unreachable!("Tried to compile AdtKind::Unknown"),
+                AdtKind::Unknown => {
+                    unreachable!("Tried to compile {:#?}", adt.kind)
+                }
             }
         }
 
@@ -59,8 +57,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     /// have do declare prototypes manual in the source before the use of the
     /// function/method.
     pub(super) fn compile_fn_decl(&mut self, mut ast_token: &mut AstToken) -> LangResult<()> {
-        self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
-
         if let AstToken::Block(Block {
             header,
             body,
@@ -71,7 +67,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             self.cur_block_id = *id;
 
             if let BlockHeader::Fn(func) = header {
-                let func = func.as_ref().borrow().read().unwrap();
+                let func = func.read();
 
                 let linkage = if func.modifiers.contains(&Modifier::Public)
                     || (func.name == "main" && func.module.count() == 0)

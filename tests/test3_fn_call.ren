@@ -1,0 +1,16 @@
+fn test_func() -> i32 {
+    var res: i32
+
+    var x: i32 = 2
+    if x >= 3 {
+        res = 1
+    } else {
+        res = 0
+    }
+
+    return res
+}
+
+fn main() -> i32 {
+    return test_func()
+}

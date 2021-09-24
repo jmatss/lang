@@ -1,0 +1,5 @@
+mod second_file
+
+fn double(n: {i32}) {
+    n.* *= 2
+}

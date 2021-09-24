@@ -1,3 +1,4 @@
+use either::Either;
 use log::debug;
 
 use common::{
@@ -7,7 +8,8 @@ use common::{
     token::{
         ast::AstToken,
         block::{AdtKind, BlockHeader},
-        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, FnPtr},
+        expr::{AdtInit, ArrayInit, BuiltInCall, Expr, FnCall, FnPtr, Var},
+        lit::Lit,
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
     },
     ty::{
@@ -255,6 +257,55 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     self.shunt_operand(built_in_expr)?;
                 }
 
+                // Tuple access.
+                LexTokenKind::Sym(Sym::TupleIndexBegin) => {
+                    let stop_conds = [Sym::ParenthesisEnd];
+
+                    let expr = if let Some(expr) = ExprParser::parse(self.iter, &stop_conds)? {
+                        expr
+                    } else {
+                        return Err(self.iter.err(
+                            "Found no expression in tuple indexing.".into(),
+                            Some(lex_token.file_pos),
+                        ));
+                    };
+
+                    let idx = if let Expr::Lit(Lit::Integer(lit, radix), ..) = &expr {
+                        match usize::from_str_radix(lit, *radix) {
+                            Ok(idx) => idx,
+                            Err(_) => {
+                                return Err(self.iter.err(
+                                    format!(
+                                        "Unable to parse tuple access expression as int literal. \
+                                        Literal value: {}, radix: {}",
+                                        lit, radix
+                                    ),
+                                    expr.file_pos().cloned(),
+                                ))
+                            }
+                        }
+                    } else {
+                        return Err(self.iter.err(
+                            format!(
+                                "Expression to access tuple must be integer literal. \
+                                Found non integer literal used: {:#?}",
+                                expr
+                            ),
+                            expr.file_pos().cloned(),
+                        ));
+                    };
+
+                    // Consume the "ParenthesisEnd".
+                    if let Some(end_token) = self.iter.next_skip_space() {
+                        file_pos.set_end(&end_token.file_pos)?;
+                    } else {
+                        unreachable!();
+                    }
+
+                    let op = Operator::UnaryOperator(UnOperator::AdtAccess(Either::Right(idx)));
+                    self.shunt_operator(op)?;
+                }
+
                 // Array access.
                 LexTokenKind::Sym(Sym::ArrayIndexBegin) => {
                     // TODO: Will only using the square bracket end as a stop
@@ -309,9 +360,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                 LexTokenKind::Kw(Kw::FunctionPointer) => {
                     let mut expr_file_pos = lex_token.file_pos.to_owned();
 
-                    let mut module = self
-                        .iter
-                        .parse_path(&mut expr_file_pos, GenericsKind::Impl)?;
+                    let mut module =
+                        self.iter
+                            .parse_path(&mut expr_file_pos, GenericsKind::Impl, true)?;
 
                     let last_part = module.pop().unwrap();
                     let name = last_part.0;
@@ -539,7 +590,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         let expr_file_pos = expr.file_pos().cloned();
                         prev_file_pos = expr_file_pos.to_owned();
 
-                        let op = UnOp::new(un_op, Box::new(expr), expr_file_pos);
+                        let is_const = expr.is_const();
+                        let op = UnOp::new(un_op, Box::new(expr), is_const, expr_file_pos);
                         expr_stack.push(Expr::Op(Op::UnOp(op)));
                     } else {
                         return Err(self.iter.err(
@@ -569,10 +621,12 @@ impl<'a, 'b> ExprParser<'a, 'b> {
 
                             prev_file_pos = Some(bin_op_file_pos.to_owned());
 
+                            let is_const = left.is_const() && right.is_const();
                             let op = BinOp::new(
                                 bin_op,
                                 Box::new(left),
                                 Box::new(right),
+                                is_const,
                                 Some(bin_op_file_pos),
                             );
                             expr_stack.push(Expr::Op(Op::BinOp(op)));
@@ -640,11 +694,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     ) -> LangResult<Expr> {
         let gens_opt = self.parse_generic_impls(&mut file_pos);
 
-        if let Some(gens) = &gens_opt {
-            path_builder.add_path_gen(ident, gens);
-        } else {
-            path_builder.add_path(ident);
-        }
+        path_builder.add_path_with_gen(ident, gens_opt.as_ref());
         path_builder.file_pos(file_pos.to_owned());
 
         let pos = self.iter.pos();
@@ -765,36 +815,25 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                         let mut adt_path = path_builder.build();
                         adt_path.pop(); // Remove the name of the enum variant.
 
-                        let mut ty_env_guard = self.iter.ty_env.lock().unwrap();
+                        let mut ty_env_guard = self.iter.ty_env.lock();
                         let enum_type_id = ty_env_guard.id(&Ty::CompoundType(
                             InnerTy::Enum(adt_path),
-                            Generics::empty(),
                             TypeInfo::Default(file_pos.to_owned()),
                         ))?;
+
                         let enum_access =
                             UnOperator::EnumAccess(ident.into(), self.iter.current_block_id());
                         let un_op = UnOp::new(
                             enum_access,
                             Box::new(Expr::Type(enum_type_id, Some(file_pos.to_owned()))),
+                            true,
                             Some(file_pos.to_owned()),
                         );
 
                         Ok(Expr::Op(Op::UnOp(un_op)))
                     } else {
                         // Otherwise this is just a regular variable name.
-                        let parse_type = true;
-                        let parse_value = false;
-                        let is_const = false;
-                        let var = self.iter.parse_var(
-                            ident,
-                            parse_type,
-                            parse_value,
-                            is_const,
-                            gens_opt.as_ref(),
-                            file_pos,
-                        )?;
-
-                        Ok(Expr::Var(var))
+                        Ok(Expr::Var(Var::new_use(ident.into(), file_pos)))
                     }
                 }
             }
@@ -811,7 +850,7 @@ impl<'a, 'b> ExprParser<'a, 'b> {
         // Keep track of the current type id. Parsing the types below might create
         // new types. If it turns out that this isn't a generic list, revert and
         // remove the newly created types.
-        let start_type_id = self.iter.ty_env.lock().unwrap().current_type_id();
+        let start_type_id = self.iter.ty_env.lock().current_type_id();
 
         // If the next token is a  "PointyBracketBegin" it can either be a start
         // of a generic list for structures/function, or it can also be a "LessThan"
@@ -828,9 +867,9 @@ impl<'a, 'b> ExprParser<'a, 'b> {
                     Err(_) => {
                         // Remove types that was created during the process of
                         // figuring out if they were types or not.
-                        let end_type_id = self.iter.ty_env.lock().unwrap().current_type_id();
+                        let end_type_id = self.iter.ty_env.lock().current_type_id();
                         for type_id in start_type_id..end_type_id {
-                            self.iter.ty_env.lock().unwrap().remove(TypeId(type_id))
+                            self.iter.ty_env.lock().remove(TypeId(type_id))
                         }
                         self.iter.rewind_to_pos(pos);
                         None

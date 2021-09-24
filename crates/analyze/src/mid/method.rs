@@ -10,7 +10,7 @@ use common::{
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
 };
 
-use crate::util::generics::combine_generics;
+use crate::util::generics::combine_generics_adt;
 
 /// Iterates through all method calls and inserts "this"/"self" into the calls
 /// as the first argument. The bin ops representing the method call will be
@@ -24,10 +24,10 @@ use crate::util::generics::combine_generics;
 /// function pointers rather than functions. A bool flag will be set in those calls.
 pub struct MethodAnalyzer {
     /// Contains the name for the ADT of the latest traversed impl block.
-    impl_adt_path: Option<LangPath>,
+    adt_path: Option<LangPath>,
 
     /// Contains the generics for the ADT of the latest traversed impl block.
-    impl_generics: Option<Generics>,
+    adt_gens: Option<Generics>,
 
     /// Contains the generics for the fn of the latest traversed fn block.
     fn_generics: Option<Generics>,
@@ -41,8 +41,8 @@ const THIS_VAR_NAME: &str = "this";
 impl MethodAnalyzer {
     pub fn new() -> Self {
         Self {
-            impl_adt_path: None,
-            impl_generics: None,
+            adt_path: None,
+            adt_gens: None,
             fn_generics: None,
             errors: Vec::default(),
         }
@@ -80,36 +80,47 @@ impl Visitor for MethodAnalyzer {
         }
     }
 
-    fn visit_impl(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
-        if let Block {
-            header: BlockHeader::Implement(adt_name, ..),
-            id,
-            ..
-        } = block
-        {
-            let module = match ctx.ast_ctx.get_module(*id) {
-                Ok(Some(module)) => module,
-                Ok(None) => LangPath::default(),
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+    fn visit_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        let Block { header, id, .. } = block;
 
-            let last_part = adt_name.last().unwrap();
-            let path = module.clone_push(&last_part.0, None, adt_name.file_pos);
+        let (path_without_gens, adt_gens) = match header {
+            BlockHeader::Implement(adt_path, ..) => {
+                let module = match ctx.ast_ctx.get_module(*id) {
+                    Ok(Some(module)) => module,
+                    Ok(None) => LangPath::default(),
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
 
-            let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock().unwrap(), &path) {
-                Ok(adt) => adt,
-                Err(err) => {
-                    self.errors.push(err);
-                    return;
-                }
-            };
+                let last_part = adt_path.last().unwrap();
+                let path = module.clone_push(&last_part.0, None, adt_path.file_pos);
 
-            self.impl_adt_path = Some(path);
-            self.impl_generics = adt.as_ref().read().unwrap().generics.clone();
-        }
+                let adt = match ctx.ast_ctx.get_adt(&ctx.ty_env.lock(), &path) {
+                    Ok(adt) => adt,
+                    Err(err) => {
+                        self.errors.push(err);
+                        return;
+                    }
+                };
+
+                let adt = adt.read();
+                (path, adt.generics.clone())
+            }
+
+            BlockHeader::Struct(adt) | BlockHeader::Union(adt) => {
+                let adt = adt.read();
+                let path = adt.module.clone_push(&adt.name, None, Some(adt.file_pos));
+
+                (path, adt.generics.clone())
+            }
+
+            _ => return,
+        };
+
+        self.adt_path = Some(path_without_gens);
+        self.adt_gens = adt_gens;
     }
 
     fn visit_fn(&mut self, block: &mut Block, _ctx: &mut TraverseCtx) {
@@ -118,13 +129,13 @@ impl Visitor for MethodAnalyzer {
             ..
         } = block
         {
-            self.fn_generics = func.as_ref().read().unwrap().generics.clone();
+            self.fn_generics = func.read().generics.clone();
 
             // This isn't a method, reset the variable for any impl block
             // because we have left the impl block.
-            if func.as_ref().read().unwrap().method_adt.is_none() {
-                self.impl_adt_path = None;
-                self.impl_generics = None;
+            if func.read().method_adt.is_none() {
+                self.adt_path = None;
+                self.adt_gens = None;
             }
         }
     }
@@ -135,12 +146,13 @@ impl Visitor for MethodAnalyzer {
         // to see if the module/path of the function call represents a ADT.
         // If that is the case, this is a static function call on that ADT.
         if fn_call.module.count() > 0 {
+            let potential_adt_path = &fn_call.module;
             let full_path_opt = if let Ok(adt) = ctx.ast_ctx.get_adt_partial(
-                &ctx.ty_env.lock().unwrap(),
-                &fn_call.module.without_gens(),
+                &ctx.ty_env.lock(),
+                &potential_adt_path.without_gens(),
                 ctx.block_id,
             ) {
-                let adt = adt.as_ref().read().unwrap();
+                let adt = adt.read();
                 let fn_call_gens = fn_call.module.last().unwrap().1.as_ref();
                 Some(
                     adt.module
@@ -151,20 +163,9 @@ impl Visitor for MethodAnalyzer {
             };
 
             if let Some(full_path) = full_path_opt {
-                let gens = if let Some(gens) = full_path
-                    .last()
-                    .map(|part| part.generics().as_ref())
-                    .flatten()
-                {
-                    gens.clone()
-                } else {
-                    Generics::empty()
-                };
-
-                let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
+                let type_id = match ctx.ty_env.lock().id(&Ty::CompoundType(
                     InnerTy::UnknownIdent(full_path, ctx.block_id),
-                    gens,
-                    TypeInfo::Default(ctx.file_pos.to_owned()),
+                    TypeInfo::Default(ctx.file_pos()),
                 )) {
                     Ok(type_id) => type_id,
                     Err(err) => {
@@ -189,21 +190,17 @@ impl Visitor for MethodAnalyzer {
             let first_part = fn_call.module.first().unwrap();
             let possible_gen_or_this = &first_part.0;
 
-            if let Some(adt_path) = &self.impl_adt_path {
+            if let Some(adt_path) = &self.adt_path {
                 if possible_gen_or_this == "this" {
-                    let this_gens = if let Some(this_gens) = first_part.1.clone() {
-                        this_gens
-                    } else {
-                        Generics::empty()
-                    };
-
+                    let this_gens = first_part.generics().as_ref();
                     let fn_call_path = fn_call.module.clone_push(
                         &fn_call.name,
                         fn_call.generics.as_ref(),
                         fn_call.file_pos,
                     );
+
                     let new_gens =
-                        match combine_generics(ctx, Some(adt_path), &this_gens, &fn_call_path) {
+                        match combine_generics_adt(ctx, adt_path, this_gens, &fn_call_path) {
                             Ok(new_gens) => new_gens,
                             Err(err) => {
                                 self.errors.push(err);
@@ -211,9 +208,9 @@ impl Visitor for MethodAnalyzer {
                             }
                         };
 
-                    let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::CompoundType(
-                        InnerTy::UnknownIdent(adt_path.to_owned(), ctx.block_id),
-                        new_gens,
+                    let adt_path_with_gens = adt_path.with_gens_opt(new_gens);
+                    let type_id = match ctx.ty_env.lock().id(&Ty::CompoundType(
+                        InnerTy::UnknownIdent(adt_path_with_gens, ctx.block_id),
                         TypeInfo::None,
                     )) {
                         Ok(type_id) => type_id,
@@ -232,11 +229,11 @@ impl Visitor for MethodAnalyzer {
 
             if let Some(fn_gens) = &self.fn_generics {
                 if fn_gens.contains(possible_gen_or_this) {
-                    let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-                    let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::Generic(
+                    let unique_id = ctx.ty_env.lock().new_unique_id();
+                    let type_id = match ctx.ty_env.lock().id(&Ty::Generic(
                         possible_gen_or_this.into(),
                         unique_id,
-                        TypeInfo::Default(ctx.file_pos.to_owned()),
+                        TypeInfo::Default(ctx.file_pos()),
                     )) {
                         Ok(type_id) => type_id,
                         Err(err) => {
@@ -252,13 +249,13 @@ impl Visitor for MethodAnalyzer {
                 }
             }
 
-            if let Some(impl_gens) = &self.impl_generics {
+            if let Some(impl_gens) = &self.adt_gens {
                 if impl_gens.contains(possible_gen_or_this) {
-                    let unique_id = ctx.ty_env.lock().unwrap().new_unique_id();
-                    let type_id = match ctx.ty_env.lock().unwrap().id(&Ty::Generic(
+                    let unique_id = ctx.ty_env.lock().new_unique_id();
+                    let type_id = match ctx.ty_env.lock().id(&Ty::Generic(
                         possible_gen_or_this.into(),
                         unique_id,
-                        TypeInfo::Default(ctx.file_pos.to_owned()),
+                        TypeInfo::Default(ctx.file_pos()),
                     )) {
                         Ok(type_id) => type_id,
                         Err(err) => {
@@ -280,7 +277,7 @@ impl Visitor for MethodAnalyzer {
         // incorrectly set `is_fn_ptr_call` to true. This can then be set to false
         // again in the `visit_expr()` function where we have more context about
         // how this `fn_call` is "used" in the AST.
-        if ctx.ast_ctx.get_var(&fn_call.name, ctx.block_id).is_ok() {
+        if fn_call.module.count() == 0 && ctx.ast_ctx.get_var(&fn_call.name, ctx.block_id).is_ok() {
             fn_call.is_fn_ptr_call = true;
         }
     }

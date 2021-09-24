@@ -16,7 +16,6 @@ use common::{
     ctx::analyze_ctx::AnalyzeCtx,
     error::{LangError, LangErrorKind::CodeGenError, LangResult},
     file::FilePosition,
-    path::LangPathPart,
     token::{
         ast::AstToken,
         expr::{Expr, Var},
@@ -25,7 +24,6 @@ use common::{
     ty::{
         get::get_file_pos,
         inner_ty::InnerTy,
-        solve::inferred_type,
         to_string::{to_string_inner_ty, to_string_path, to_string_type_id},
         ty::Ty,
         type_id::TypeId,
@@ -47,9 +45,6 @@ pub(super) struct CodeGen<'a, 'b, 'ctx> {
 
     /// The ID of the current block that is being compiled.
     pub cur_block_id: BlockId,
-
-    /// The file position of the current token.
-    pub cur_file_pos: FilePosition,
 
     /// Contains the current basic block that instructions are inserted into.
     pub cur_basic_block: Option<BasicBlock<'ctx>>,
@@ -109,7 +104,7 @@ pub fn generate<'a, 'b, 'ctx>(
                 .analyze_ctx
                 .ast_ctx
                 .block_ctxs
-                .get(&block_id)
+                .get(block_id)
                 .ok_or_else(|| {
                     LangError::new(
                         format!("Unable to find block info for block with id {}", block_id),
@@ -154,8 +149,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
             analyze_ctx,
 
-            cur_file_pos: FilePosition::default(),
-
             cur_block_id: 0,
             cur_basic_block: None,
             cur_func: None,
@@ -170,8 +163,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     }
 
     pub(super) fn compile(&mut self, mut ast_token: &mut AstToken) -> LangResult<()> {
-        self.cur_file_pos = ast_token.file_pos().cloned().unwrap_or_default();
-
         match &mut ast_token {
             AstToken::Block(block) => {
                 self.compile_block(block)?;
@@ -361,12 +352,24 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         if let Some(var_ptr) = self.variables.get(&key) {
             Ok(*var_ptr)
+        } else if self.constants.get(&key).is_some() {
+            Err(self.err(
+                format!(
+                    "Tried to get pointer to the constant with name \"{}\" in decl block ID {}. \
+                    Currently this is not allowed and the constant needs to be changed to \
+                    a variable (use the `var` keyword instead of `const`) in the code. \
+                    In the future, support for this will be implemented.",
+                    &var.full_name(),
+                    decl_block_id,
+                ),
+                var.file_pos.to_owned(),
+            ))
         } else {
             Err(self.err(
                 format!(
                     "Unable to find ptr for variable \"{}\" in decl block ID {}.",
                     &var.full_name(),
-                    decl_block_id
+                    decl_block_id,
                 ),
                 var.file_pos.to_owned(),
             ))
@@ -381,13 +384,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // TODO: What AddressSpace should be used?
         let address_space = AddressSpace::Generic;
 
-        let inf_type_id = inferred_type(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
-        let inf_ty = self
-            .analyze_ctx
-            .ty_env
-            .lock()
-            .unwrap()
-            .ty_clone(inf_type_id)?;
+        let inf_type_id = self.analyze_ctx.ty_env.lock().inferred_type(type_id)?;
+        let inf_ty = self.analyze_ctx.ty_env.lock().ty_clone(inf_type_id)?;
 
         Ok(match inf_ty {
             Ty::Pointer(ptr_type_id, ..) => {
@@ -455,8 +453,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             Ty::Fn(_, param_tys, ret_type_id_opt, type_info) => {
                 let mut param_types = Vec::with_capacity(param_tys.len());
                 for param_ty in param_tys {
-                    let file_pos =
-                        get_file_pos(&self.analyze_ctx.ty_env.lock().unwrap(), param_ty).cloned();
+                    let file_pos = get_file_pos(&self.analyze_ctx.ty_env.lock(), param_ty).cloned();
                     let compiled_ty = self.compile_type(param_ty, file_pos)?;
                     param_types.push(CodeGen::any_into_basic_type(compiled_ty)?);
                 }
@@ -480,43 +477,36 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             }
 
-            Ty::CompoundType(inner_ty, generics, ..) => {
+            Ty::CompoundType(inner_ty, ..) => {
                 match inner_ty {
-                    InnerTy::Struct(mut full_path) | InnerTy::Union(mut full_path) => {
-                        let last_part = full_path.pop().unwrap();
-                        full_path.push(LangPathPart(last_part.0, Some(generics)));
-
+                    InnerTy::Struct(full_path)
+                    | InnerTy::Union(full_path)
+                    | InnerTy::Tuple(full_path) => {
                         let struct_type_opt = self.module.get_struct_type(&to_string_path(
-                            &self.analyze_ctx.ty_env.lock().unwrap(),
+                            &self.analyze_ctx.ty_env.lock(),
                             &full_path,
                         ));
 
                         if let Some(struct_type) = struct_type_opt {
-                            struct_type.clone().into()
+                            struct_type.into()
                         } else {
                             return Err(self.err(
                                 format!(
                                     "Unable to find custom struct type with name: {}",
-                                    to_string_path(
-                                        &self.analyze_ctx.ty_env.lock().unwrap(),
-                                        &full_path
-                                    )
+                                    to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path)
                                 ),
                                 file_pos,
                             ));
                         }
                     }
-                    InnerTy::Enum(mut full_path) => {
-                        let last_part = full_path.pop().unwrap();
-                        full_path.push(LangPathPart(last_part.0, Some(generics)));
-
+                    InnerTy::Enum(full_path) => {
                         let struct_type_opt = self.module.get_struct_type(&to_string_path(
-                            &self.analyze_ctx.ty_env.lock().unwrap(),
+                            &self.analyze_ctx.ty_env.lock(),
                             &full_path,
                         ));
 
                         if let Some(struct_type) = struct_type_opt {
-                            struct_type.clone().into()
+                            struct_type.into()
                         } else {
                             return Err(self.err(
                                 format!(
@@ -551,10 +541,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     InnerTy::U128 => AnyTypeEnum::IntType(self.context.i128_type()),
 
                     _ => {
-                        let ty =
-                            to_string_type_id(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
+                        let ty = to_string_type_id(&self.analyze_ctx.ty_env.lock(), type_id)?;
                         let inner_ty =
-                            to_string_inner_ty(&self.analyze_ctx.ty_env.lock().unwrap(), &inner_ty);
+                            to_string_inner_ty(&self.analyze_ctx.ty_env.lock(), &inner_ty);
                         return Err(self.err(
                             format!(
                                 "Invalid inner type during type codegen. \
@@ -572,11 +561,12 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             _ => {
                 return Err(self.err(
                     format!(
-                    "Invalid type during type codegen. Type ID: {}, inf_type_id: {}, inf_ty: {:#?}",
-                    type_id,
-                    inf_type_id,
-                    to_string_type_id(&self.analyze_ctx.ty_env.lock().unwrap(), inf_type_id)?,
-                ),
+                        "Invalid type during type codegen. \
+                        Type ID: {}, inf_type_id: {}, inf_ty: {:#?}",
+                        type_id,
+                        inf_type_id,
+                        to_string_type_id(&self.analyze_ctx.ty_env.lock(), inf_type_id)?,
+                    ),
                     file_pos,
                 ))
             }

@@ -64,7 +64,6 @@ pub enum Kw {
 
     Trait,
     Implement,
-    Implements,
 
     Where,
     //Macro,
@@ -95,7 +94,6 @@ pub enum Sym {
     Dot,
     TripleDot,
     Comma,
-    UnderScore,
     QuestionMark,
     ExclamationMark,
     Equals,
@@ -118,8 +116,12 @@ pub enum Sym {
     Deref,           // .*
     Address,         // .&
     ArrayIndexBegin, // .[
+    TupleIndexBegin, // .(
     Increment,       // .++
     Decrement,       // .--
+    DoubleQuoteC,    // c"
+    DoubleQuoteS,    // s"
+    DoubleQuoteF,    // f"
 
     DoubleEquals,
     NotEquals,
@@ -238,7 +240,6 @@ impl LexToken {
 
             "trait" => LexTokenKind::Kw(Kw::Trait),
             "impl" => LexTokenKind::Kw(Kw::Implement),
-            "impls" => LexTokenKind::Kw(Kw::Implements),
 
             "where" => LexTokenKind::Kw(Kw::Where),
             "defer" => LexTokenKind::Kw(Kw::Defer),
@@ -296,7 +297,6 @@ impl LexToken {
             '{' => LexToken::ret_single_lookup(Sym::CurlyBracketBegin),
             '}' => LexToken::ret_single_lookup(Sym::CurlyBracketEnd),
             ',' => LexToken::ret_single_lookup(Sym::Comma),
-            '_' => LexToken::ret_single_lookup(Sym::UnderScore),
             '?' => LexToken::ret_single_lookup(Sym::QuestionMark),
             '\"' => LexToken::ret_single_lookup(Sym::DoubleQuote),
             '\'' => LexToken::ret_single_lookup(Sym::SingleQuote),
@@ -347,6 +347,7 @@ impl LexToken {
                     (".*", Sym::Deref),
                     (".&", Sym::Address),
                     (".[", Sym::ArrayIndexBegin),
+                    (".(", Sym::TupleIndexBegin),
                     (".++", Sym::Increment),
                     (".--", Sym::Decrement),
                     ("..=", Sym::RangeInclusive),
@@ -414,6 +415,10 @@ impl LexToken {
                     ("/=", Sym::AssignDiv),
                 ],
             ),
+
+            'c' => LexToken::match_symbol(&real_string, vec![("c\"", Sym::DoubleQuoteC)]),
+            's' => LexToken::match_symbol(&real_string, vec![("s\"", Sym::DoubleQuoteS)]),
+            'f' => LexToken::match_symbol(&real_string, vec![("f\"", Sym::DoubleQuoteF)]),
 
             _ => None,
         }

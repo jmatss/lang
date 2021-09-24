@@ -1,8 +1,6 @@
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry, HashMap, HashSet},
-    fmt::Debug,
-    sync::Mutex,
 };
 
 use crate::{
@@ -90,6 +88,9 @@ impl SubstitutionSets {
     }
 }
 
+// Warning incorrectly triggered in the `new_root_id` if-block. Can be removed
+// once CLippy fixes the problem.
+#[allow(clippy::branches_sharing_code)]
 /// Creates a union of the two sets containing the types `type_id_a` and `type_id_b`.
 /// If any of the given types doesn't exist, they will be created and inserted
 /// into the sets.
@@ -101,25 +102,23 @@ impl SubstitutionSets {
 ///
 /// Returns the type of the new root node of the unioned sets. This will be
 /// the type with the highest precedence in the set.
-pub fn union(ty_env: &Mutex<TyEnv>, type_id_a: TypeId, type_id_b: TypeId) -> LangResult<TypeId> {
-    let mut ty_env_guard = ty_env.lock().unwrap();
+pub fn union(ty_env: &mut TyEnv, type_id_a: TypeId, type_id_b: TypeId) -> LangResult<TypeId> {
+    compatible(ty_env, type_id_a, type_id_b)?;
 
-    compatible(&ty_env_guard, type_id_a, type_id_b)?;
-
-    let id_a = if let Some(id) = ty_env_guard.sub_sets.ty_to_id.get(&type_id_a) {
+    let id_a = if let Some(id) = ty_env.sub_sets.ty_to_id.get(&type_id_a) {
         *id
     } else {
-        ty_env_guard.sub_sets.new_node(type_id_a)
+        ty_env.sub_sets.new_node(type_id_a)
     };
 
-    let id_b = if let Some(id) = ty_env_guard.sub_sets.ty_to_id.get(&type_id_b) {
+    let id_b = if let Some(id) = ty_env.sub_sets.ty_to_id.get(&type_id_b) {
         *id
     } else {
-        ty_env_guard.sub_sets.new_node(type_id_b)
+        ty_env.sub_sets.new_node(type_id_b)
     };
 
-    let root_id_a = ty_env_guard.sub_sets.find_root(id_a).unwrap();
-    let root_id_b = ty_env_guard.sub_sets.find_root(id_b).unwrap();
+    let root_id_a = ty_env.sub_sets.find_root(id_a).unwrap();
+    let root_id_b = ty_env.sub_sets.find_root(id_b).unwrap();
 
     debug!(
         "Creating union of root_id_a: {}, root_id_b: {} -- type_id_a: {}, type_id_b: {}",
@@ -128,25 +127,19 @@ pub fn union(ty_env: &Mutex<TyEnv>, type_id_a: TypeId, type_id_b: TypeId) -> Lan
 
     // TODO: Balancing.
     let new_root_id = if root_id_a != root_id_b {
-        let new_root_id_a = infer_root(&mut ty_env_guard, root_id_a, id_a)?;
-        let new_root_id_b = infer_root(&mut ty_env_guard, root_id_b, id_b)?;
+        let new_root_id_a = infer_root(ty_env, root_id_a, id_a)?;
+        let new_root_id_b = infer_root(ty_env, root_id_b, id_b)?;
 
-        infer_root_with_start(
-            &mut ty_env_guard,
-            new_root_id_a,
-            new_root_id_b,
-            type_id_a,
-            type_id_b,
-        )?
+        infer_root_with_start(ty_env, new_root_id_a, new_root_id_b, type_id_a, type_id_b)?
     } else {
         // Both types are in the same set with the same root. Changing the
         // root for `a` will then affect the root for `b`, so need to take
         // that into consideration.
-        let new_root_id = infer_root(&mut ty_env_guard, root_id_a, id_a)?;
-        infer_root(&mut ty_env_guard, new_root_id, id_b)?
+        let new_root_id = infer_root(ty_env, root_id_a, id_a)?;
+        infer_root(ty_env, new_root_id, id_b)?
     };
 
-    Ok(ty_env_guard
+    Ok(ty_env
         .sub_sets
         .id_to_node
         .get(&new_root_id)
@@ -158,31 +151,29 @@ pub fn union(ty_env: &Mutex<TyEnv>, type_id_a: TypeId, type_id_b: TypeId) -> Lan
 /// become the new root of its set. This will happen if this type is fully
 /// solvable while the current root isn't.
 /// Returns the type ID of the new root type.
-pub fn promote(ty_env: &Mutex<TyEnv>, type_id: TypeId) -> LangResult<TypeId> {
-    let mut ty_env_guard = ty_env.lock().unwrap();
-
+pub fn promote(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<TypeId> {
     let check_inf = true;
     let solve_cond = SolveCond::new().excl_unknown();
-    let is_solved = is_solved(&ty_env_guard, type_id, check_inf, solve_cond).unwrap_or(false);
-    let is_in_ty_env = ty_env_guard.sub_sets.ty_to_id.contains_key(&type_id);
+    let is_solved = is_solved(ty_env, type_id, check_inf, solve_cond).unwrap_or(false);
+    let is_in_ty_env = ty_env.sub_sets.ty_to_id.contains_key(&type_id);
 
     if is_solved && is_in_ty_env {
-        let node_id = *ty_env_guard.sub_sets.ty_to_id.get(&type_id).unwrap();
-        let root_node_id = ty_env_guard.sub_sets.find_root(node_id).unwrap();
+        let node_id = *ty_env.sub_sets.ty_to_id.get(&type_id).unwrap();
+        let root_node_id = ty_env.sub_sets.find_root(node_id).unwrap();
 
         if node_id == root_node_id {
             return Ok(type_id);
         }
 
-        let new_node_id = infer_root(&mut ty_env_guard, node_id, root_node_id)?;
-        Ok(ty_env_guard
+        let new_node_id = infer_root(ty_env, node_id, root_node_id)?;
+        Ok(ty_env
             .sub_sets
             .id_to_node
             .get(&new_node_id)
             .unwrap()
             .type_id)
     } else {
-        ty_env_guard.inferred_type(type_id)
+        ty_env.inferred_type(type_id)
     }
 }
 
@@ -256,7 +247,7 @@ fn compatible_with_start(
     start_type_id_a: TypeId,
     start_type_id_b: TypeId,
 ) -> LangResult<()> {
-    if is_compatible(&ty_env, type_id_a, type_id_b)? {
+    if is_compatible(ty_env, type_id_a, type_id_b)? {
         Ok(())
     } else {
         let mut msg = format!(
@@ -264,10 +255,10 @@ fn compatible_with_start(
             1. {} ({} -- {:?})\n  2. {} ({} -- {:?})",
             to_string_type_id(ty_env, type_id_a)?,
             type_id_a,
-            get_file_pos(&ty_env, type_id_a),
+            get_file_pos(ty_env, type_id_a),
             to_string_type_id(ty_env, type_id_b)?,
             type_id_b,
-            get_file_pos(&ty_env, type_id_b),
+            get_file_pos(ty_env, type_id_b),
         );
 
         if type_id_a != start_type_id_a {
@@ -275,7 +266,7 @@ fn compatible_with_start(
                 "\nThe first type (1) was inferred from the type: {} ({} -- {:?})",
                 to_string_type_id(ty_env, start_type_id_a)?,
                 start_type_id_a,
-                get_file_pos(&ty_env, start_type_id_a),
+                get_file_pos(ty_env, start_type_id_a),
             ));
         }
 
@@ -284,7 +275,7 @@ fn compatible_with_start(
                 "\nThe second type (2) was inferred from the type: {} ({} -- {:?})",
                 to_string_type_id(ty_env, start_type_id_b)?,
                 start_type_id_b,
-                get_file_pos(&ty_env, start_type_id_b),
+                get_file_pos(ty_env, start_type_id_b),
             ));
         }
 
@@ -292,13 +283,11 @@ fn compatible_with_start(
     }
 }
 
-pub fn sub_sets_debug_print(ty_env: &Mutex<TyEnv>) {
-    let ty_env_guard = ty_env.lock().unwrap();
-
+pub fn sub_sets_debug_print(ty_env: &TyEnv) -> String {
     let mut root_to_children: HashMap<NodeId, HashSet<NodeId>> = HashMap::new();
 
-    for id in ty_env_guard.sub_sets.id_to_node.keys() {
-        let root_id = ty_env_guard.sub_sets.find_root(*id).unwrap();
+    for id in ty_env.sub_sets.id_to_node.keys() {
+        let root_id = ty_env.sub_sets.find_root(*id).unwrap();
 
         if *id == root_id {
             continue;
@@ -326,7 +315,7 @@ pub fn sub_sets_debug_print(ty_env: &Mutex<TyEnv>) {
             s.push_str(&format!(" {}\n", child_id));
         }
 
-        let root_node = ty_env_guard.sub_sets.id_to_node.get(&root_id).unwrap();
+        let root_node = ty_env.sub_sets.id_to_node.get(&root_id).unwrap();
         let root_parent = root_node.parent_id;
         let root_type_id = &root_node.type_id;
         s.push_str(&format!(
@@ -334,11 +323,11 @@ pub fn sub_sets_debug_print(ty_env: &Mutex<TyEnv>) {
             root_id,
             root_parent,
             root_type_id,
-            ty_env_guard.ty(*root_type_id)
+            ty_env.ty(*root_type_id)
         ));
 
         for child_id in children_ids.iter() {
-            let child_node = ty_env_guard.sub_sets.id_to_node.get(child_id).unwrap();
+            let child_node = ty_env.sub_sets.id_to_node.get(child_id).unwrap();
             let child_parent = child_node.parent_id;
             let child_type_id = &child_node.type_id;
             s.push_str(&format!(
@@ -346,10 +335,10 @@ pub fn sub_sets_debug_print(ty_env: &Mutex<TyEnv>) {
                 child_id,
                 child_parent,
                 child_type_id,
-                ty_env_guard.ty(*child_type_id)
+                ty_env.ty(*child_type_id)
             ));
         }
     }
 
-    debug!("{}", s);
+    s
 }

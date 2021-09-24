@@ -1,4 +1,6 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 use common::{
     ctx::block_ctx::BlockCtx,
@@ -6,12 +8,11 @@ use common::{
     hash::DerefType,
     path::LangPath,
     token::{
-        ast::AstToken,
-        block::{Adt, Block, BlockHeader},
+        block::{Adt, AdtKind, Block, BlockHeader},
         stmt::{ExternalDecl, Stmt},
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
-    ty::to_string::to_string_path,
+    ty::{inner_ty::InnerTy, to_string::to_string_path},
     BlockId,
 };
 
@@ -37,15 +38,26 @@ impl DeclTypeAnalyzer {
         adt: &Arc<RwLock<Adt>>,
         id: BlockId,
     ) -> LangResult<()> {
-        let module = ctx.ast_ctx.get_module(id)?.unwrap_or_else(LangPath::empty);
-        adt.as_ref().write().unwrap().module = module.clone();
+        let adt_name = adt.read().name.clone();
 
-        let adt_full_path = {
-            let adt_lock = adt.as_ref().read().unwrap();
+        let adt_full_path = if InnerTy::ident_to_type(&adt_name, 0).is_primitive() {
+            let adt_kind = adt.read().kind;
+            if !matches!(adt_kind, AdtKind::Struct) {
+                return Err(ctx.ast_ctx.err(format!(
+                    "Tried to create non-struct ADT with primitive name: {}",
+                    adt_name
+                )));
+            }
+            LangPath::new(vec![adt_name.into()], Some(adt.read().file_pos))
+        } else {
+            let module = ctx.ast_ctx.get_module(id)?.unwrap_or_else(LangPath::empty);
+            adt.write().module = module.clone();
+
+            let adt_lock = adt.read();
             module.clone_push(&adt_lock.name, None, Some(adt_lock.file_pos))
         };
 
-        let ty_env_guard = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock();
 
         // TODO: Add file positions to error message.
         if ctx.ast_ctx.get_adt(&ty_env_guard, &adt_full_path).is_ok() {
@@ -73,10 +85,6 @@ impl Visitor for DeclTypeAnalyzer {
         } else {
             Some(std::mem::take(&mut self.errors))
         }
-    }
-
-    fn visit_token(&mut self, ast_token: &mut AstToken, ctx: &mut TraverseCtx) {
-        ctx.ast_ctx.file_pos = ast_token.file_pos().cloned().unwrap_or_default();
     }
 
     fn visit_struct(&mut self, mut block: &mut Block, ctx: &mut TraverseCtx) {
@@ -139,9 +147,9 @@ impl Visitor for DeclTypeAnalyzer {
             let trait_full_path = match ctx.ast_ctx.get_module(*id) {
                 Ok(module_opt) => {
                     let module = module_opt.unwrap_or_else(LangPath::empty);
-                    trait_.as_ref().write().unwrap().module = module.clone();
+                    trait_.write().module = module.clone();
 
-                    let trait_ = trait_.as_ref().read().unwrap();
+                    let trait_ = trait_.read();
                     module.clone_push(&trait_.name, None, Some(trait_.file_pos))
                 }
                 Err(err) => {
@@ -150,7 +158,7 @@ impl Visitor for DeclTypeAnalyzer {
                 }
             };
 
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
 
             // TODO: Add file positions to error message.
             if ctx
@@ -182,7 +190,7 @@ impl Visitor for DeclTypeAnalyzer {
             //       declarations of a struct.
             // External declarations should always be in the default block.
             let key = {
-                let struct_ = struct_.as_ref().read().unwrap();
+                let struct_ = struct_.read();
                 let path = struct_
                     .module
                     .clone_push(&struct_.name, None, Some(struct_.file_pos));
@@ -190,7 +198,7 @@ impl Visitor for DeclTypeAnalyzer {
             };
 
             if let Err(err) = ctx.ast_ctx.adts.insert(
-                &ctx.ty_env.lock().unwrap(),
+                &ctx.ty_env.lock(),
                 DerefType::Shallow,
                 key,
                 Arc::clone(struct_),

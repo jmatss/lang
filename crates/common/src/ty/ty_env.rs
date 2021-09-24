@@ -1,9 +1,7 @@
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    sync::Mutex,
-};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 
 use lazy_static::lazy_static;
+use parking_lot::Mutex;
 
 use crate::{
     error::{LangError, LangErrorKind, LangResult},
@@ -21,6 +19,13 @@ lazy_static! {
 pub struct TyEnv {
     pub interner: TyInterner,
     pub sub_sets: SubstitutionSets,
+
+    /// This will be set to `true` when it is time to start solving all
+    /// the types. When this is activated, newly created types will be inserted
+    /// into the `unsolved`. This is used so that one can quickly fetch any
+    /// new types created during the solving phase.
+    pub solve_mode: bool,
+    pub new_type_ids: HashSet<TypeId>,
 }
 
 impl Default for TyEnv {
@@ -28,6 +33,8 @@ impl Default for TyEnv {
         Self {
             interner: TyInterner::default(),
             sub_sets: SubstitutionSets::default(),
+            solve_mode: false,
+            new_type_ids: HashSet::default(),
         }
     }
 }
@@ -40,13 +47,14 @@ impl TyEnv {
     /// If the given `type_id` doesn't exist in any set, returns the given
     /// `type_id` itself.
     pub fn inferred_type(&self, type_id: TypeId) -> LangResult<TypeId> {
-        if let Some(id) = self.sub_sets.ty_to_id.get(&type_id) {
+        let fwd_type_id = self.forwarded(type_id);
+        if let Some(id) = self.sub_sets.ty_to_id.get(&fwd_type_id) {
             let root_id = self.sub_sets.find_root(*id).unwrap();
             let root_node = self.sub_sets.id_to_node.get(&root_id).unwrap();
 
             Ok(root_node.type_id)
         } else {
-            Ok(type_id)
+            Ok(fwd_type_id)
         }
     }
 
@@ -62,23 +70,28 @@ impl TyEnv {
         self.interner.id_to_ty.insert(type_id, ty.clone());
 
         let deref_type = DerefType::Shallow;
-        if !self.interner.ty_to_id.contains_key(self, deref_type, &ty)? {
-            // TODO: Make safe.
-            let unsafe_self = unsafe { (self as *const TyEnv).as_ref().unwrap() };
-            self.interner
-                .ty_to_id
-                .insert(unsafe_self, deref_type, ty, type_id)?;
-            Ok(type_id)
-        } else {
-            Err(LangError::new(
+        if self.interner.ty_to_id.contains_key(self, deref_type, &ty)? {
+            return Err(LangError::new(
                 format!(
                     "Tried to create new type that already exists in environment: {:#?}",
                     ty
                 ),
                 LangErrorKind::GeneralError,
                 None,
-            ))
+            ));
         }
+
+        // TODO: Make safe.
+        let unsafe_self = unsafe { (self as *const TyEnv).as_ref().unwrap() };
+        self.interner
+            .ty_to_id
+            .insert(unsafe_self, deref_type, ty, type_id)?;
+
+        if self.solve_mode {
+            self.new_type_ids.insert(type_id);
+        }
+
+        Ok(type_id)
     }
 
     pub fn current_type_id(&self) -> u64 {
@@ -96,7 +109,7 @@ impl TyEnv {
     /// that type is returned. If `ty` is a new type that haven't been "seen"
     /// before, a new TypeId will be assigned to it and returned.
     pub fn id(&mut self, ty: &Ty) -> LangResult<TypeId> {
-        if let Some(type_id) = self.interner.ty_to_id.get(self, DerefType::Shallow, &ty)? {
+        if let Some(type_id) = self.interner.ty_to_id.get(self, DerefType::Shallow, ty)? {
             Ok(*type_id)
         } else {
             self.new_ty(ty.clone())
@@ -107,7 +120,7 @@ impl TyEnv {
     /// If `ty` is a type that doesn't exists in this type environment, a error
     /// is returned.
     pub fn id_try(&self, ty: &Ty) -> LangResult<TypeId> {
-        if let Some(type_id) = self.interner.ty_to_id.get(self, DerefType::Shallow, &ty)? {
+        if let Some(type_id) = self.interner.ty_to_id.get(self, DerefType::Shallow, ty)? {
             Ok(*type_id)
         } else {
             Err(LangError::new(

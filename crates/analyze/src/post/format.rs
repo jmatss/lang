@@ -4,7 +4,7 @@ use common::{
     iter::TokenIter,
     token::{
         expr::{Argument, BuiltInCall, Expr, FormatPart},
-        lit::Lit,
+        lit::{Lit, StringType},
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{get::get_ident, is::is_primitive, ty_env::TyEnv},
@@ -60,10 +60,10 @@ impl FormatParser {
                                 std::str::from_utf8(&cur_string_part).map_err(|_| {
                                     LangError::new(
                                         format!(
-                                    "Unable to convert format text to string at pos {}: {:#?}",
-                                    iter.pos(),
-                                    std::str::from_utf8(iter.get_items())
-                                ),
+                                            "Unable to convert format text to string at pos {}: {:#?}",
+                                            iter.pos(),
+                                            std::str::from_utf8(iter.get_items())
+                                        ),
                                         LangErrorKind::AnalyzeError,
                                         file_pos,
                                     )
@@ -166,11 +166,11 @@ impl FormatParser {
             }
 
             let type_id = arg.value.get_expr_type()?;
-            if !get_ident(&ty_env, type_id)?
+            if !get_ident(ty_env, type_id)?
                 .map(|path| path.last().map(|part| part.0 == "StringView"))
                 .flatten()
                 .unwrap_or(false)
-                && !is_primitive(&ty_env, type_id)?
+                && !is_primitive(ty_env, type_id)?
             {
                 // Error because the argument type is neither StringView or primitive.
                 LangError::new(
@@ -215,11 +215,13 @@ impl Visitor for FormatParser {
 
             let format_arg = built_in_call.arguments.first().unwrap();
             let (str_lit, file_pos) =
-                if let Expr::Lit(Lit::String(str_lit), _, file_pos) = &format_arg.value {
+                if let Expr::Lit(Lit::String(str_lit, StringType::Regular), _, file_pos) =
+                    &format_arg.value
+                {
                     (str_lit, file_pos)
                 } else {
                     let err = LangError::new(
-                        "Built-in `@format()` first argument not a string literal.".into(),
+                        "Built-in `@format()` first argument not a regular string literal.".into(),
                         LangErrorKind::AnalyzeError,
                         Some(built_in_call.file_pos),
                     );
@@ -235,7 +237,7 @@ impl Visitor for FormatParser {
                 }
             }
 
-            if let Err(err) = self.verify_arg_types(&ctx.ty_env.lock().unwrap(), &built_in_call) {
+            if let Err(err) = self.verify_arg_types(&ctx.ty_env.lock(), built_in_call) {
                 self.errors.push(err);
             }
         }

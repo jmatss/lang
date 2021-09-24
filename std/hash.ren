@@ -1,0 +1,6 @@
+mod std
+
+/// A trait used for types that can be hashed.
+pub trait Hash {
+    pub fn this hash() -> u32
+}

@@ -29,23 +29,27 @@ use super::{inner_ty::InnerTy, ty_env::TyEnv};
 ///
 /// General ordering list (most preferred at the top, least at bottom):
 ///  1.  Primitive
-///  2.  ADT/Trait
-///  3.  UnknownInt
-///      UnknownFloat
-///  4.  Fn
+///  2.  ADT/Trait/Tuple
+///  3.  Fn
 ///      Array
 ///      Pointer
-///  5.  GenericInstance
-///  6.  UnknownIdent
+///  4.  Generic
+///  5.  UnknownInt
+///      UnknownFloat
+///  6.  GenericInstance
+///  7.  UnknownIdent
 ///      UnknownMethodGeneric
 ///      UnknownMethodArgument
 ///      UnknownAdtMethod
 ///      UnknownAdtMember
-///  7.  UnknownArrayMember
-///  8.  Generic
+///  8.  UnknownArrayMember
 ///  9.  Unknown
 ///  10. Any
 ///  11. Expr   (expression evaluated to a type)
+///
+/// The reason for `Generic` being prefered over `UnknownInt`/`UnknownFloat` is
+/// to allow for returning a default literal int/float from a function returning
+/// a generic type.
 pub fn precedence(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangResult<Ordering> {
     match prec_allow_eq(ty_env, first_id, second_id)? {
         Ordering::Equal => Ok(prec_eq(first_id, second_id)),
@@ -102,17 +106,13 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (Ty::Any(..), _) => Ok(Ordering::Greater),
         (_, Ty::Any(..)) => Ok(Ordering::Less),
 
-        (Ty::CompoundType(inner_a, _, info_a), Ty::CompoundType(inner_b, _, info_b))
+        (Ty::CompoundType(inner_a, info_a), Ty::CompoundType(inner_b, info_b))
             if inner_a.is_unknown() && inner_b.is_unknown() =>
         {
             prec_inner_ty(inner_a, info_a.file_pos(), inner_b, info_b.file_pos())
         }
         (Ty::CompoundType(inner, ..), _) if inner.is_unknown() => Ok(Ordering::Greater),
         (_, Ty::CompoundType(inner, ..)) if inner.is_unknown() => Ok(Ordering::Less),
-
-        (Ty::Generic(_, id_a, ..), Ty::Generic(_, id_b, ..)) => Ok(id_a.cmp(id_b)),
-        (Ty::Generic(..), _) => Ok(Ordering::Greater),
-        (_, Ty::Generic(..)) => Ok(Ordering::Less),
 
         (
             Ty::UnknownArrayMember(type_id_a, unique_id_a, ..),
@@ -144,8 +144,8 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (_, Ty::UnknownAdtMember(..)) => Ok(Ordering::Less),
 
         (
-            Ty::UnknownAdtMethod(_, _, _, unique_id_a, ..),
-            Ty::UnknownAdtMethod(_, _, _, unique_id_b, ..),
+            Ty::UnknownAdtMethod(_, _, unique_id_a, ..),
+            Ty::UnknownAdtMethod(_, _, unique_id_b, ..),
         ) => {
             if unique_id_a != unique_id_b {
                 Ok(unique_id_a.cmp(unique_id_b))
@@ -157,8 +157,8 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (_, Ty::UnknownAdtMethod(..)) => Ok(Ordering::Less),
 
         (
-            Ty::UnknownMethodArgument(_, _, _, _, unique_id_a, ..),
-            Ty::UnknownMethodArgument(_, _, _, _, unique_id_b, ..),
+            Ty::UnknownFnArgument(_, _, _, unique_id_a, ..),
+            Ty::UnknownFnArgument(_, _, _, unique_id_b, ..),
         ) => {
             if unique_id_a != unique_id_b {
                 Ok(unique_id_a.cmp(unique_id_b))
@@ -166,23 +166,10 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
                 Ok(Ordering::Equal)
             }
         }
-        (Ty::UnknownMethodArgument(..), _) => Ok(Ordering::Greater),
-        (_, Ty::UnknownMethodArgument(..)) => Ok(Ordering::Less),
+        (Ty::UnknownFnArgument(..), _) => Ok(Ordering::Greater),
+        (_, Ty::UnknownFnArgument(..)) => Ok(Ordering::Less),
 
-        (
-            Ty::UnknownMethodGeneric(_, _, _, unique_id_a, ..),
-            Ty::UnknownMethodGeneric(_, _, _, unique_id_b, ..),
-        ) => {
-            if unique_id_a != unique_id_b {
-                Ok(unique_id_a.cmp(unique_id_b))
-            } else {
-                Ok(Ordering::Equal)
-            }
-        }
-        (Ty::UnknownMethodGeneric(..), _) => Ok(Ordering::Greater),
-        (_, Ty::UnknownMethodGeneric(..)) => Ok(Ordering::Less),
-
-        (Ty::CompoundType(inner_a, _, info_a), Ty::CompoundType(inner_b, _, info_b))
+        (Ty::CompoundType(inner_a, info_a), Ty::CompoundType(inner_b, info_b))
             if inner_a.is_unknown_ident() && inner_b.is_unknown_ident() =>
         {
             prec_inner_ty(inner_a, info_a.file_pos(), inner_b, info_b.file_pos())
@@ -193,6 +180,23 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (Ty::GenericInstance(_, id_a, ..), Ty::GenericInstance(_, id_b, ..)) => Ok(id_a.cmp(id_b)),
         (Ty::GenericInstance(..), _) => Ok(Ordering::Greater),
         (_, Ty::GenericInstance(..)) => Ok(Ordering::Less),
+
+        (Ty::CompoundType(inner_a, info_a), Ty::CompoundType(inner_b, info_b))
+            if (inner_a.is_unknown_int() || inner_a.is_unknown_float())
+                && (inner_b.is_unknown_int() || inner_b.is_unknown_float()) =>
+        {
+            prec_inner_ty(inner_a, info_a.file_pos(), inner_b, info_b.file_pos())
+        }
+        (Ty::CompoundType(inner, ..), _) if inner.is_unknown_int() || inner.is_unknown_float() => {
+            Ok(Ordering::Greater)
+        }
+        (_, Ty::CompoundType(inner, ..)) if inner.is_unknown_int() || inner.is_unknown_float() => {
+            Ok(Ordering::Less)
+        }
+
+        (Ty::Generic(_, id_a, ..), Ty::Generic(_, id_b, ..)) => Ok(id_a.cmp(id_b)),
+        (Ty::Generic(..), _) => Ok(Ordering::Greater),
+        (_, Ty::Generic(..)) => Ok(Ordering::Less),
 
         (Ty::Pointer(type_id_a, ..), Ty::Pointer(type_id_b, ..)) => {
             prec_allow_eq(ty_env, *type_id_a, *type_id_b)
@@ -240,7 +244,7 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
 
             assert!(
                 param_type_ids_a.len() == param_type_ids_b.len(),
-                "gen len diff. param_type_ids_a: {:#?}, param_type_ids_b: {:#?}",
+                "param len diff. param_type_ids_a: {:#?}, param_type_ids_b: {:#?}",
                 param_type_ids_a,
                 param_type_ids_b
             );
@@ -258,18 +262,28 @@ fn prec_allow_eq(ty_env: &TyEnv, first_id: TypeId, second_id: TypeId) -> LangRes
         (Ty::Fn(..), _) => Ok(Ordering::Greater),
         (_, Ty::Fn(..)) => Ok(Ordering::Less),
 
-        (Ty::CompoundType(inner_a, gens_a, info_a), Ty::CompoundType(inner_b, gens_b, info_b)) => {
+        (Ty::CompoundType(inner_a, info_a), Ty::CompoundType(inner_b, info_b)) => {
             let ord = prec_inner_ty(inner_a, info_a.file_pos(), inner_b, info_b.file_pos())?;
             if ord != Ordering::Equal {
                 return Ok(ord);
             }
 
+            let gens_a = inner_a.gens();
+            let gens_b = inner_b.gens();
+
+            if gens_a.is_none() && gens_b.is_none() {
+                return Ok(Ordering::Equal);
+            }
+
             assert!(
-                gens_a.len() == gens_b.len(),
-                "gen len diff. gens_a: {:#?}, gens_b: {:#?}",
+                gens_a.is_some() == gens_b.is_some(),
+                "gens diff Some/None. gens_a: {:#?}, gens_b: {:#?}",
                 gens_a,
                 gens_b
             );
+
+            let gens_a = gens_a.unwrap();
+            let gens_b = gens_b.unwrap();
 
             for (gen_a_type_id, gen_b_type_id) in gens_a.iter_types().zip(gens_b.iter_types()) {
                 let ord = prec_allow_eq(ty_env, *gen_a_type_id, *gen_b_type_id)?;
@@ -328,6 +342,7 @@ fn prec_inner_ty(
         | (InnerTy::Enum(_), InnerTy::Enum(_))
         | (InnerTy::Union(_), InnerTy::Union(_))
         | (InnerTy::Trait(_), InnerTy::Trait(_))
+        | (InnerTy::Tuple(_), InnerTy::Tuple(_))
         | (InnerTy::Void, InnerTy::Void)
         | (InnerTy::Character, InnerTy::Character)
         | (InnerTy::String, InnerTy::String)
@@ -348,8 +363,8 @@ fn prec_inner_ty(
         _ => {
             return Err(LangError::new(
                 format!(
-                    "Tried to map incompatible inner types. First: {:?}, second: {:?}.\n\
-                        First type found at position: {:#?}.\nSecond found at position: {:#?}",
+                    "Tried to map incompatible inner types. First: {:#?}, second: {:#?}.\n\
+                    First type found at position: {:#?}.\nSecond found at position: {:#?}",
                     first_inner_ty, second_inner_ty, first_file_pos, second_file_pos
                 ),
                 LangErrorKind::AnalyzeError,

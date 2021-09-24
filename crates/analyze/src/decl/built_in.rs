@@ -1,44 +1,33 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::collections::HashMap;
+
+use parking_lot::Mutex;
 
 use common::{
     error::LangResult,
     token::{block::BuiltIn, expr::Var},
-    ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, ty_env::TyEnv, type_info::TypeInfo},
+    ty::{inner_ty::InnerTy, ty::Ty, ty_env::TyEnv, type_info::TypeInfo},
 };
 
 /// Stores information about all built-in functions into a hashmap.
 pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str, BuiltIn>> {
-    let mut ty_env_guard = ty_env.lock().unwrap();
+    let mut ty_env_guard = ty_env.lock();
     let mut built_ins = HashMap::with_capacity(9);
 
     let unique_id = ty_env_guard.new_unique_id();
     let any_type_id = ty_env_guard.id(&Ty::Any(unique_id, TypeInfo::BuiltIn))?;
     let any_ptr_type_id = ty_env_guard.id(&Ty::Pointer(any_type_id, TypeInfo::BuiltIn))?;
-    let u32_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::U32,
-        Generics::empty(),
-        TypeInfo::BuiltIn,
-    ))?;
-    let u8_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::U8,
-        Generics::empty(),
-        TypeInfo::BuiltIn,
-    ))?;
+    let u32_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::U32, TypeInfo::BuiltIn))?;
+    let u8_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::U8, TypeInfo::BuiltIn))?;
     let u8_ptr_type_id = ty_env_guard.id(&Ty::Pointer(u8_type_id, TypeInfo::BuiltIn))?;
     let u8_ptr_ptr_type_id = ty_env_guard.id(&Ty::Pointer(u8_ptr_type_id, TypeInfo::BuiltIn))?;
-    let bool_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::Boolean,
-        Generics::empty(),
-        TypeInfo::BuiltIn,
-    ))?;
+    let bool_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::Boolean, TypeInfo::BuiltIn))?;
+    let void_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::Void, TypeInfo::BuiltIn))?;
     let string_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::String,
-        Generics::empty(),
+        InnerTy::Struct(["std".into(), "string".into(), "String".into()].into()),
         TypeInfo::BuiltIn,
     ))?;
-    let void_type_id = ty_env_guard.id(&Ty::CompoundType(
-        InnerTy::Void,
-        Generics::empty(),
+    let string_view_type_id = ty_env_guard.id(&Ty::CompoundType(
+        InnerTy::Struct(["std".into(), "string".into(), "StringView".into()].into()),
         TypeInfo::BuiltIn,
     ))?;
 
@@ -81,18 +70,34 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let generics = None;
     built_ins.insert(
         name,
-        BuiltIn::new(name, parameters, generics, u8_ptr_type_id, false),
+        BuiltIn::new(name, parameters, generics, string_view_type_id, false),
     );
 
     let name = "null";
     let parameters = Vec::with_capacity(0);
-    let generics = Some(vec![any_type_id]);
+    let generics = None;
     built_ins.insert(
         name,
         BuiltIn::new(name, parameters, generics, any_type_id, false),
     );
 
     let name = "is_null";
+    let parameters = vec![Var::new(
+        "value".into(),
+        Some(any_ptr_type_id),
+        None,
+        None,
+        None,
+        None,
+        false,
+    )];
+    let generics = None;
+    built_ins.insert(
+        name,
+        BuiltIn::new(name, parameters, generics, bool_type_id, false),
+    );
+
+    let name = "is_not_null";
     let parameters = vec![Var::new(
         "value".into(),
         Some(any_ptr_type_id),
@@ -189,9 +194,20 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         BuiltIn::new(name, parameters, generics, any_type_id, false),
     );
 
-    // TODO: Want this to return `std::types::String`, but at the same time
-    //       we don't want to force the user to have to include the string.ren file
-    //       just to compile the code even if `@format()` isn't used.
+    // The parameters and generics are variadic/varargs. The amount of params
+    // and generics should be the same. The generic at index 0 represents the
+    // type of the parameter at index 0 and so on.
+    let name = "tuple";
+    let parameters = Vec::with_capacity(0);
+    let generics = None;
+    built_ins.insert(
+        name,
+        BuiltIn::new(name, parameters, generics, any_type_id, true),
+    );
+
+    // TODO: Is it possible to make this StringView in some scenarios? Ex.
+    //       if the arguments are constants and the whole string result can be
+    //       calculated at compile time?
     let name = "format";
     let parameters = vec![Var::new(
         "format".into(),
@@ -205,7 +221,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let generics = None;
     built_ins.insert(
         name,
-        BuiltIn::new(name, parameters, generics, any_type_id, true),
+        BuiltIn::new(name, parameters, generics, string_type_id, true),
     );
 
     let name = "argc";
@@ -229,7 +245,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let generics = None;
     built_ins.insert(
         name,
-        BuiltIn::new(name, parameters, generics, string_type_id, false),
+        BuiltIn::new(name, parameters, generics, string_view_type_id, false),
     );
 
     let name = "line";

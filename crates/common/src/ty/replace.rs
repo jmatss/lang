@@ -1,77 +1,9 @@
-use std::sync::Mutex;
-
 use crate::{
-    ctx::ast_ctx::AstCtx,
-    eq::path_eq,
-    error::LangResult,
-    hash::DerefType,
-    path::LangPath,
-    ty::{
-        solve::{inferred_type, solve},
-        ty::Ty,
-    },
-    TypeId,
+    ctx::ast_ctx::AstCtx, eq::path_eq, error::LangResult, hash::DerefType, path::LangPath,
+    ty::ty::Ty, TypeId,
 };
 
 use super::{generics::Generics, inner_ty::InnerTy, ty_env::TyEnv};
-
-/// Recursively replaces any generic identifiers from "UnknownIdent" wrapped
-/// inside a "CompoundType" into "Generic"s.
-pub fn replace_gens(ty_env: &mut TyEnv, id: TypeId, generics: &Generics) -> LangResult<()> {
-    match ty_env.ty(id)?.clone() {
-        Ty::CompoundType(InnerTy::UnknownIdent(path, ..), gens, type_info) => {
-            for gen_type_id in gens.iter_types() {
-                replace_gens(ty_env, *gen_type_id, generics)?;
-            }
-
-            if path.count() == 1 {
-                let possible_gen_name = path.first().unwrap().name();
-                for gen_name in generics.iter_names() {
-                    if gen_name == possible_gen_name {
-                        let new_ty = Ty::Generic(
-                            possible_gen_name.into(),
-                            ty_env.new_unique_id(),
-                            type_info.clone(),
-                        );
-                        ty_env.update(id, new_ty)?;
-                    }
-                }
-            }
-        }
-
-        Ty::Pointer(type_id, ..)
-        | Ty::Array(type_id, ..)
-        | Ty::UnknownAdtMember(type_id, ..)
-        | Ty::UnknownAdtMethod(type_id, ..)
-        | Ty::UnknownMethodArgument(type_id, ..)
-        | Ty::UnknownMethodGeneric(type_id, ..)
-        | Ty::UnknownArrayMember(type_id, ..) => {
-            replace_gens(ty_env, type_id, generics)?;
-        }
-
-        Ty::Fn(gens, params, ret_type_id_opt, ..) => {
-            if let Some(ret_type_id) = ret_type_id_opt {
-                replace_gens(ty_env, ret_type_id, generics)?;
-            }
-            for gen_type_id in gens.iter() {
-                replace_gens(ty_env, *gen_type_id, generics)?;
-            }
-            for param_type_id in params.iter() {
-                replace_gens(ty_env, *param_type_id, generics)?;
-            }
-        }
-
-        Ty::Expr(expr, ..) => {
-            if let Ok(type_id) = expr.get_expr_type() {
-                replace_gens(ty_env, type_id, generics)?;
-            }
-        }
-
-        _ => (),
-    }
-
-    Ok(())
-}
 
 /// Recursively replaces any "Generic" types with the actual implementation
 /// type. I.e. any "Generic" type that has a ident that is a key in the
@@ -88,22 +20,22 @@ pub fn replace_gens(ty_env: &mut TyEnv, id: TypeId, generics: &Generics) -> Lang
 /// When a new type is inserted/created, the type will be solved and then
 /// inferred before being returned.
 pub fn replace_gen_impls(
-    ty_env: &Mutex<TyEnv>,
+    ty_env: &mut TyEnv,
     ast_ctx: &AstCtx,
     type_id: TypeId,
-    generics_impl: &Generics,
+    gen_impls: &Generics,
 ) -> LangResult<Option<TypeId>> {
-    let mut ty_clone = ty_env.lock().unwrap().ty_clone(type_id)?;
+    let mut ty_clone = ty_env.ty_clone(type_id)?;
 
     debug!(
         "replace_gen_impls -- type_id: {}, ty: {:#?} generics_impl: {:#?}",
-        type_id, ty_clone, generics_impl
+        type_id, ty_clone, gen_impls
     );
 
     let ty_was_updated = match &mut ty_clone {
         Ty::Generic(ident, ..) => {
-            if let Some(impl_type_id) = generics_impl.get(ident) {
-                ty_clone = ty_env.lock().unwrap().ty(impl_type_id)?.clone();
+            if let Some(impl_type_id) = gen_impls.get(ident) {
+                ty_clone = ty_env.ty(impl_type_id)?.clone();
                 true
             } else {
                 false
@@ -111,15 +43,14 @@ pub fn replace_gen_impls(
         }
 
         Ty::GenericInstance(ident, unique_id, ..) => {
-            if let Some(impl_type_id) = generics_impl.get(ident) {
-                let ty_env_guard = ty_env.lock().unwrap();
-                match ty_env_guard.ty(impl_type_id)?.clone() {
+            if let Some(impl_type_id) = gen_impls.get(ident) {
+                match ty_env.ty(impl_type_id)?.clone() {
                     Ty::Generic(..) => false,
                     Ty::GenericInstance(_, impl_unique_id, ..) if impl_unique_id == *unique_id => {
                         false
                     }
                     _ => {
-                        ty_clone = ty_env_guard.ty(impl_type_id)?.clone();
+                        ty_clone = ty_env.ty(impl_type_id)?.clone();
                         true
                     }
                 }
@@ -128,47 +59,27 @@ pub fn replace_gen_impls(
             }
         }
 
-        // Need to update generics both in the type `gens_clone` and the
-        // generics declared inside a potential LangPath of the InnerTy.
-        Ty::CompoundType(inner_ty, gens_clone, ..) => {
+        Ty::CompoundType(inner_ty, ..) => {
             let mut was_updated = false;
-
-            for gen_type_id in gens_clone.iter_types_mut() {
-                if let Some(new_gen_type_id) =
-                    replace_gen_impls(ty_env, ast_ctx, *gen_type_id, generics_impl)?
-                {
-                    *gen_type_id = new_gen_type_id;
-                    was_updated = true;
-                }
-            }
-
-            if let Some(path) = inner_ty.get_ident_mut() {
-                if let Some(inner_gens_clune) =
-                    path.last_mut().map(|part| part.1.as_mut()).flatten()
-                {
-                    for gen_type_id in inner_gens_clune.iter_types_mut() {
-                        if let Some(new_gen_type_id) =
-                            replace_gen_impls(ty_env, ast_ctx, *gen_type_id, generics_impl)?
-                        {
-                            *gen_type_id = new_gen_type_id;
-                            was_updated = true;
-                        }
+            if let Some(gens) = inner_ty.gens_mut() {
+                for gen_type_id in gens.iter_types_mut() {
+                    if let Some(new_gen_type_id) =
+                        replace_gen_impls(ty_env, ast_ctx, *gen_type_id, gen_impls)?
+                    {
+                        *gen_type_id = new_gen_type_id;
+                        was_updated = true;
                     }
                 }
             }
-
             was_updated
         }
 
         Ty::Pointer(type_id_i, ..)
         | Ty::Array(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
-        | Ty::UnknownAdtMethod(type_id_i, ..)
-        | Ty::UnknownMethodArgument(type_id_i, ..)
-        | Ty::UnknownMethodGeneric(type_id_i, ..)
+        | Ty::UnknownFnArgument(type_id_i, ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
-            if let Some(new_type_id_i) =
-                replace_gen_impls(ty_env, ast_ctx, *type_id_i, generics_impl)?
+            if let Some(new_type_id_i) = replace_gen_impls(ty_env, ast_ctx, *type_id_i, gen_impls)?
             {
                 *type_id_i = new_type_id_i;
                 true
@@ -177,11 +88,29 @@ pub fn replace_gen_impls(
             }
         }
 
+        Ty::UnknownAdtMethod(type_id_i, _, arg_type_ids, ..) => {
+            let mut was_updated = false;
+            if let Some(new_type_id_i) = replace_gen_impls(ty_env, ast_ctx, *type_id_i, gen_impls)?
+            {
+                *type_id_i = new_type_id_i;
+                was_updated = true
+            }
+            for arg_type_id in arg_type_ids {
+                if let Some(new_gen_type_id) =
+                    replace_gen_impls(ty_env, ast_ctx, *arg_type_id, gen_impls)?
+                {
+                    *arg_type_id = new_gen_type_id;
+                    was_updated = true;
+                }
+            }
+            was_updated
+        }
+
         Ty::Fn(gens, params, ret_type_id_opt, ..) => {
             let mut was_updated = false;
             if let Some(ret_type_id) = ret_type_id_opt {
                 if let Some(new_ret_type_id) =
-                    replace_gen_impls(ty_env, ast_ctx, *ret_type_id, generics_impl)?
+                    replace_gen_impls(ty_env, ast_ctx, *ret_type_id, gen_impls)?
                 {
                     *ret_type_id = new_ret_type_id;
                     was_updated = true;
@@ -189,7 +118,7 @@ pub fn replace_gen_impls(
             }
             for gen_type_id in gens.iter_mut() {
                 if let Some(new_gen_type_id) =
-                    replace_gen_impls(ty_env, ast_ctx, *gen_type_id, generics_impl)?
+                    replace_gen_impls(ty_env, ast_ctx, *gen_type_id, gen_impls)?
                 {
                     *gen_type_id = new_gen_type_id;
                     was_updated = true;
@@ -197,7 +126,7 @@ pub fn replace_gen_impls(
             }
             for param_type_id in params.iter_mut() {
                 if let Some(new_param_type_id) =
-                    replace_gen_impls(ty_env, ast_ctx, *param_type_id, generics_impl)?
+                    replace_gen_impls(ty_env, ast_ctx, *param_type_id, gen_impls)?
                 {
                     *param_type_id = new_param_type_id;
                     was_updated = true;
@@ -209,7 +138,7 @@ pub fn replace_gen_impls(
         Ty::Expr(expr, ..) => {
             if let Ok(type_id_i) = expr.get_expr_type_mut() {
                 if let Some(new_type_id_i) =
-                    replace_gen_impls(ty_env, ast_ctx, *type_id_i, generics_impl)?
+                    replace_gen_impls(ty_env, ast_ctx, *type_id_i, gen_impls)?
                 {
                     *type_id_i = new_type_id_i;
                     true
@@ -229,9 +158,8 @@ pub fn replace_gen_impls(
     // the type environment (if it is a new unique type) and return the new
     // type ID to indicate to the caller that the type have changed.
     Ok(if ty_was_updated {
-        let new_type_id = ty_env.lock().unwrap().id(&ty_clone)?;
-        solve(ty_env, ast_ctx, new_type_id)?;
-        Some(inferred_type(&ty_env.lock().unwrap(), new_type_id)?)
+        let new_type_id = ty_env.id(&ty_clone)?;
+        Some(ty_env.inferred_type(new_type_id)?)
     } else {
         None
     })
@@ -282,9 +210,7 @@ pub fn replace_self(
         Ty::Pointer(type_id_i, ..)
         | Ty::Array(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
-        | Ty::UnknownAdtMethod(type_id_i, ..)
-        | Ty::UnknownMethodArgument(type_id_i, ..)
-        | Ty::UnknownMethodGeneric(type_id_i, ..)
+        | Ty::UnknownFnArgument(type_id_i, ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             if let Some(new_type_id) = replace_self(ty_env, *type_id_i, old_path, new_self_type_id)?
             {
@@ -293,6 +219,24 @@ pub fn replace_self(
             } else {
                 false
             }
+        }
+
+        Ty::UnknownAdtMethod(type_id_i, _, arg_type_ids, ..) => {
+            let mut was_updated = false;
+            if let Some(new_type_id) = replace_self(ty_env, *type_id_i, old_path, new_self_type_id)?
+            {
+                *type_id_i = new_type_id;
+                was_updated = true;
+            }
+            for arg_type_id in arg_type_ids {
+                if let Some(new_type_id) =
+                    replace_self(ty_env, *arg_type_id, old_path, new_self_type_id)?
+                {
+                    *arg_type_id = new_type_id;
+                    was_updated = true;
+                }
+            }
+            was_updated
         }
 
         Ty::Fn(gens, params, ret_type_id_opt, ..) => {
@@ -394,14 +338,16 @@ pub fn replace_gens_with_gen_instances(
             true
         }
 
-        Ty::CompoundType(_, gens_clone, ..) => {
+        Ty::CompoundType(inner_ty, ..) => {
             let mut was_updated = false;
-            for gen_type_id in gens_clone.iter_types_mut() {
-                if let Some(new_gen_type_id) =
-                    replace_gens_with_gen_instances(ty_env, *gen_type_id, unique_id)?
-                {
-                    *gen_type_id = new_gen_type_id;
-                    was_updated = true;
+            if let Some(gens) = inner_ty.gens_mut() {
+                for gen_type_id in gens.iter_types_mut() {
+                    if let Some(new_gen_type_id) =
+                        replace_gens_with_gen_instances(ty_env, *gen_type_id, unique_id)?
+                    {
+                        *gen_type_id = new_gen_type_id;
+                        was_updated = true;
+                    }
                 }
             }
             was_updated
@@ -410,9 +356,7 @@ pub fn replace_gens_with_gen_instances(
         Ty::Pointer(type_id_i, ..)
         | Ty::Array(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
-        | Ty::UnknownAdtMethod(type_id_i, ..)
-        | Ty::UnknownMethodArgument(type_id_i, ..)
-        | Ty::UnknownMethodGeneric(type_id_i, ..)
+        | Ty::UnknownFnArgument(type_id_i, ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             if let Some(new_type_id_i) =
                 replace_gens_with_gen_instances(ty_env, *type_id_i, unique_id)?
@@ -422,6 +366,25 @@ pub fn replace_gens_with_gen_instances(
             } else {
                 false
             }
+        }
+
+        Ty::UnknownAdtMethod(type_id_i, _, arg_type_ids, ..) => {
+            let mut was_updated = false;
+            if let Some(new_type_id_i) =
+                replace_gens_with_gen_instances(ty_env, *type_id_i, unique_id)?
+            {
+                *type_id_i = new_type_id_i;
+                was_updated = true;
+            }
+            for arg_type_id in arg_type_ids {
+                if let Some(new_gen_type_id) =
+                    replace_gens_with_gen_instances(ty_env, *arg_type_id, unique_id)?
+                {
+                    *arg_type_id = new_gen_type_id;
+                    was_updated = true;
+                }
+            }
+            was_updated
         }
 
         Ty::Fn(gens, params, ret_type_id_opt, ..) => {
@@ -501,9 +464,7 @@ pub fn replace_unique_ids(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<Opt
         }
 
         Ty::UnknownAdtMember(type_id_i, _, unique_id, ..)
-        | Ty::UnknownAdtMethod(type_id_i, _, _, unique_id, ..)
-        | Ty::UnknownMethodArgument(type_id_i, _, _, _, unique_id, ..)
-        | Ty::UnknownMethodGeneric(type_id_i, _, _, unique_id, ..)
+        | Ty::UnknownFnArgument(type_id_i, _, _, unique_id, ..)
         | Ty::UnknownArrayMember(type_id_i, unique_id, ..) => {
             if let Some(new_type_id_i) = replace_unique_ids(ty_env, *type_id_i)? {
                 *type_id_i = new_type_id_i;
@@ -513,12 +474,29 @@ pub fn replace_unique_ids(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<Opt
             true
         }
 
-        Ty::CompoundType(_, gens_clone, ..) => {
+        Ty::UnknownAdtMethod(type_id_i, _, arg_type_ids, unique_id, ..) => {
+            if let Some(new_type_id_i) = replace_unique_ids(ty_env, *type_id_i)? {
+                *type_id_i = new_type_id_i;
+            }
+
+            for arg_type_id in arg_type_ids {
+                if let Some(new_arg_type_id) = replace_unique_ids(ty_env, *arg_type_id)? {
+                    *arg_type_id = new_arg_type_id;
+                }
+            }
+
+            *unique_id = ty_env.new_unique_id();
+            true
+        }
+
+        Ty::CompoundType(inner_ty, ..) => {
             let mut was_updated = false;
-            for gen_type_id in gens_clone.iter_types_mut() {
-                if let Some(new_gen_type_id) = replace_unique_ids(ty_env, *gen_type_id)? {
-                    *gen_type_id = new_gen_type_id;
-                    was_updated = true;
+            if let Some(gens) = inner_ty.gens_mut() {
+                for gen_type_id in gens.iter_types_mut() {
+                    if let Some(new_gen_type_id) = replace_unique_ids(ty_env, *gen_type_id)? {
+                        *gen_type_id = new_gen_type_id;
+                        was_updated = true;
+                    }
                 }
             }
             was_updated
@@ -585,10 +563,10 @@ pub fn replace_unique_ids(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<Opt
 /// is the inferred type of its substitution set and is a type that currently
 /// isn't known but can be turned into a default type, convert it to the
 /// default type.
-pub fn convert_defaults(ty_env: &Mutex<TyEnv>) -> LangResult<()> {
-    let all_types = ty_env.lock().unwrap().interner.all_types();
+pub fn convert_defaults(ty_env: &mut TyEnv) -> LangResult<()> {
+    let all_types = ty_env.interner.all_types();
     for type_id in all_types {
-        let inf_type_id = inferred_type(&ty_env.lock().unwrap(), type_id)?;
+        let inf_type_id = ty_env.inferred_type(type_id)?;
         if type_id == inf_type_id {
             convert_default(ty_env, type_id)?;
         }
@@ -599,18 +577,20 @@ pub fn convert_defaults(ty_env: &Mutex<TyEnv>) -> LangResult<()> {
 /// Converts any unknown values to their corresponding "default" values
 /// if possible. This includes ints and floats that are converted to i32
 /// and f32 respectively.
-pub fn convert_default(ty_env: &Mutex<TyEnv>, type_id: TypeId) -> LangResult<()> {
-    let inf_type_id = inferred_type(&ty_env.lock().unwrap(), type_id)?;
+pub fn convert_default(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<()> {
+    let inf_type_id = ty_env.inferred_type(type_id)?;
 
-    let ty_clone = ty_env.lock().unwrap().ty_clone(inf_type_id)?;
+    let ty_clone = ty_env.ty_clone(inf_type_id)?;
     match ty_clone {
-        Ty::CompoundType(inner_ty, generics, ..) => {
+        Ty::CompoundType(inner_ty, ..) => {
             if inner_ty.is_unknown_int() || inner_ty.is_unknown_float() {
-                replace_default(&mut ty_env.lock().unwrap(), inf_type_id)?;
+                replace_default(ty_env, inf_type_id)?;
             }
 
-            for gen_type_id in generics.iter_types() {
-                convert_default(ty_env, *gen_type_id)?;
+            if let Some(gens) = inner_ty.gens() {
+                for gen_type_id in gens.iter_types() {
+                    convert_default(ty_env, *gen_type_id)?;
+                }
             }
         }
 
@@ -645,8 +625,7 @@ pub fn convert_default(ty_env: &Mutex<TyEnv>, type_id: TypeId) -> LangResult<()>
         Ty::Pointer(type_id_i, ..)
         | Ty::UnknownAdtMember(type_id_i, ..)
         | Ty::UnknownAdtMethod(type_id_i, ..)
-        | Ty::UnknownMethodArgument(type_id_i, ..)
-        | Ty::UnknownMethodGeneric(type_id_i, ..)
+        | Ty::UnknownFnArgument(type_id_i, ..)
         | Ty::UnknownArrayMember(type_id_i, ..) => {
             convert_default(ty_env, type_id_i)?;
         }

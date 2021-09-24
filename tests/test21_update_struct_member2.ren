@@ -1,0 +1,18 @@
+ext fn printf(format: {u8}, ...) -> i32
+
+struct TestStruct {
+    var a: i32
+    var b: f64
+}
+
+fn main() -> i32 {
+    var test_struct = TestStruct { 123, 456.789 }
+    var x = test_struct.a
+    test_struct.b = 3.4
+
+    printf(c"x: %d, test_struct.b: %f", x, test_struct.b)
+    std::assert(x == 123)
+    std::assert(test_struct.b == 3.4)
+
+    return 0
+}

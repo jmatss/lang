@@ -1,9 +1,1 @@
-test52.ren
-..\std\assert.ren
-..\std\mem.ren
-..\std\types\disposable.ren
-..\std\types\optional.ren
-..\std\types\result.ren
-..\std\types\primitives.ren
-..\std\types\string.ren
-..\std\types\string_view.ren
+test52_to_string.ren

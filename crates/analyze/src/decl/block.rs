@@ -1,11 +1,13 @@
 use std::collections::{hash_map::Entry, HashMap};
 
-use log::debug;
+use log::{debug, log_enabled, Level};
 
 use common::{
     ctx::{ast_ctx::AstCtx, block_ctx::BlockCtx},
     error::{LangError, LangErrorKind, LangResult},
+    file::FilePosition,
     hash::DerefType,
+    hash_map::TyEnvHashMap,
     hash_set::TyEnvHashSet,
     path::LangPath,
     token::{
@@ -28,7 +30,7 @@ pub struct BlockAnalyzer {
 
     /// Contains all "use" statements found in the blocks with ID `BlockId` that
     /// have been traversed so far.
-    uses: HashMap<BlockId, TyEnvHashSet<LangPath>>,
+    uses: HashMap<BlockId, TyEnvHashSet<(LangPath, Option<String>)>>,
 
     /// Will be set to true every time a new file is started to be analyzed.
     /// A "mod" statement must be the first statement in a file, it is not allowed
@@ -76,7 +78,7 @@ impl BlockAnalyzer {
         ty_env: &TyEnv,
         ast_ctx: &mut AstCtx,
         id: BlockId,
-    ) -> LangResult<TyEnvHashSet<LangPath>> {
+    ) -> LangResult<TyEnvHashSet<(LangPath, Option<String>)>> {
         let mut uses = TyEnvHashSet::default();
 
         let mut cur_id = id;
@@ -127,8 +129,8 @@ impl BlockAnalyzer {
         ast_ctx: &mut AstCtx,
         stmt: &Stmt,
         id: usize,
+        file_pos: FilePosition,
     ) -> LangResult<()> {
-        let file_pos = ast_ctx.file_pos.to_owned();
         let block_ctx = ast_ctx.block_ctxs.get_mut(&id).unwrap();
 
         match stmt {
@@ -140,19 +142,19 @@ impl BlockAnalyzer {
 
             // Add the use to the current block. Also add it to the `self.uses`
             // so that it can be found from the child blocks as well.
-            Stmt::Use(path) => {
+            Stmt::Use(path, ident) => {
+                let entry = (path.clone(), ident.clone());
                 match self.uses.entry(block_ctx.block_id) {
                     Entry::Occupied(mut o) => {
-                        o.get_mut().insert(ty_env, DerefType::None, path.clone())?;
+                        o.get_mut().insert(ty_env, DerefType::None, entry)?;
                     }
                     Entry::Vacant(v) => {
                         let mut set = TyEnvHashSet::default();
-                        set.insert(ty_env, DerefType::None, path.clone())?;
+                        set.insert(ty_env, DerefType::None, entry)?;
                         v.insert(set);
                     }
                 }
-
-                block_ctx.add_use(ty_env, path.clone());
+                block_ctx.add_use(ty_env, path.clone(), ident.clone());
             }
 
             // Module statements are only allowed in the default block (top
@@ -211,14 +213,23 @@ impl BlockAnalyzer {
         block: &Block,
         parent_id: usize,
     ) -> LangResult<()> {
-        ast_ctx.file_pos = block.file_pos;
-
         let is_root_block = self.is_root(&block.header);
         let is_branchable_block = self.is_branchable(&block.header);
 
+        let mut uses = TyEnvHashSet::default();
+        let mut uses_as = TyEnvHashMap::default();
+        for (use_path, ident) in self.get_uses(ty_env, ast_ctx, parent_id)?.values() {
+            if let Some(ident) = ident {
+                let ident_path = LangPath::new(vec![ident.into()], use_path.file_pos);
+                uses_as.insert(ty_env, DerefType::None, ident_path, use_path.clone())?;
+            } else {
+                uses.insert(ty_env, DerefType::None, use_path.clone())?;
+            }
+        }
+
         // OBS! The "module" and "uses" set at this point might not be the
         //      final values. The module might not be set at this point (ex.
-        //      if this is the first block being traversed in a new fule) and
+        //      if this is the first block being traversed in a new file) and
         //      the uses that is fetched with the `get_uses` only contains
         //      the "use"s that have been seen/traversed.
         //      These values might be updated when statements in this block
@@ -229,7 +240,8 @@ impl BlockAnalyzer {
             is_root_block,
             is_branchable_block,
             self.module.clone(),
-            self.get_uses(ty_env, ast_ctx, parent_id)?,
+            uses,
+            uses_as,
         );
 
         if block.id != BlockCtx::DEFAULT_BLOCK_ID {
@@ -313,13 +325,14 @@ impl BlockAnalyzer {
                 }
 
                 AstToken::Stmt(ref stmt) => {
-                    self.analyze_stmt(ty_env, ast_ctx, stmt, block.id)?;
+                    self.analyze_stmt(ty_env, ast_ctx, stmt, block.id, block.file_pos)?;
                 }
 
                 // Reset the "mod" statement when the end of the file is reached.
                 AstToken::EOF => {
                     self.module = None;
                     self.is_first_stmt = true;
+                    self.uses.remove(&BlockCtx::DEFAULT_BLOCK_ID);
                     is_eof = true;
                 }
 
@@ -360,21 +373,16 @@ impl Visitor for BlockAnalyzer {
     /// will be used. The reason being that this needs to be called recursively
     /// on blocks, which currently isn't possible to do with the regular traverser.
     fn visit_default_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
-        if let Err(err) = self.analyze_block(
-            &ctx.ty_env.lock().unwrap(),
-            &mut ctx.ast_ctx,
-            block,
-            usize::MAX,
-        ) {
+        if let Err(err) =
+            self.analyze_block(&ctx.ty_env.lock(), &mut ctx.ast_ctx, block, usize::MAX)
+        {
             self.errors.push(err);
         }
     }
 
-    fn visit_eof(&mut self, _ast_token: &mut AstToken, _ctx: &mut TraverseCtx) {
-        self.is_first_stmt = true;
-    }
-
     fn visit_end(&mut self, ctx: &mut TraverseCtx) {
-        debug!("BLOCK_CTX --\n{:#?}", ctx.ast_ctx.block_ctxs);
+        if log_enabled!(Level::Debug) {
+            debug!("BLOCK_CTX --\n{:#?}", ctx.ast_ctx.block_ctxs);
+        }
     }
 }

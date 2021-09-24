@@ -1,19 +1,17 @@
-use std::{
-    borrow::Borrow,
-    sync::{Arc, RwLock},
-};
+use std::sync::Arc;
 
+use either::Either;
 use inkwell::{
     types::{AnyTypeEnum, BasicType, BasicTypeEnum},
     values::{AggregateValue, AnyValueEnum, BasicValueEnum, IntValue, PointerValue},
     AddressSpace, FloatPredicate, IntPredicate,
 };
 use log::debug;
+use parking_lot::RwLock;
 
 use common::{
     error::LangResult,
     file::FilePosition,
-    path::LangPathPart,
     token::{
         block::Adt,
         expr::Expr,
@@ -121,7 +119,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // Since lhs and rhs should be the same type when the signedness actual
         // matters, we can use either one of them to check it.
         let type_id = bin_op.lhs.get_expr_type()?;
-        let is_signed = is_signed(&self.analyze_ctx.ty_env.lock().unwrap(), type_id)?;
+        let is_signed = is_signed(&self.analyze_ctx.ty_env.lock(), type_id)?;
 
         Ok(match bin_op.operator {
             BinOperator::In => panic!("TODO: In"),
@@ -227,10 +225,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                             let ptr = any_value.into_pointer_value();
                             Ok(self.builder.build_load(ptr, "deref.rval").into())
                         } else {
-                            Err(self.err(
-                                format!("Tried to deref non pointer in rvalue {:?}", any_value),
-                                file_pos,
-                            ))
+                            // TODO: Is it OK to allow this case and don't report
+                            //       it as an error?
+                            Ok(any_value)
                         }
                     }
                 }
@@ -246,19 +243,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     ExprTy::RValue => Ok(self.builder.build_load(ptr, "array.gep.rval").into()),
                 }
             }
-            UnOperator::AdtAccess(..) => {
-                let val = self.compile_un_op_adt_access(un_op, expr_ty)?;
-                match expr_ty {
-                    ExprTy::LValue => Ok(val),
-                    ExprTy::RValue => Ok(if val.is_pointer_value() {
-                        self.builder
-                            .build_load(val.into_pointer_value(), "struct.gep.rval")
-                            .into()
-                    } else {
-                        val
-                    }),
-                }
-            }
+            UnOperator::AdtAccess(..) => self.compile_un_op_adt_access(un_op, expr_ty),
             UnOperator::EnumAccess(..) => match expr_ty {
                 ExprTy::LValue => Err(self.err(
                     format!("Enum access is not allowed as a LValue: {:?}", un_op),
@@ -279,11 +264,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 //       might not evaluate to true. Change this so that the var
                 //       is declared and initialized ONLY if the expr evals to true.
                 let union_access = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
-                self.compile_var_decl(&mut var.as_ref().borrow().write().unwrap())?;
-                self.compile_var_store(
-                    &var.as_ref().borrow().read().unwrap(),
-                    CodeGen::any_into_basic_value(union_access)?,
-                )?;
+                self.compile_var_decl(&mut var.write())?;
+                self.compile_var_store(&var.read(), CodeGen::any_into_basic_value(union_access)?)?;
 
                 let inner_un_op = if let Expr::Op(Op::UnOp(inner_un_op)) = un_op.value.as_mut() {
                     inner_un_op
@@ -295,22 +277,18 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 };
 
                 // The tag that this UnionIs is expected to match against.
-                let expected_tag = if let UnOperator::AdtAccess(_, tag_opt) = &inner_un_op.operator
-                {
-                    if let Some(tag) = tag_opt {
-                        self.context.i8_type().const_int(*tag, false)
+                let expected_tag =
+                    if let UnOperator::AdtAccess(Either::Right(tag)) = &inner_un_op.operator {
+                        self.context.i8_type().const_int(*tag as u64, false)
                     } else {
-                        unreachable!("Index not set for AdtAccess in UnionIs: {:#?}", inner_un_op);
-                    }
-                } else {
-                    return Err(self.err(
-                        format!(
-                            "Rhs value of UnionIs wasn't AdtAccess. un_op value: {:#?}",
-                            &inner_un_op
-                        ),
-                        inner_un_op.file_pos.to_owned(),
-                    ));
-                };
+                        return Err(self.err(
+                            format!(
+                                "Rhs value of UnionIs wasn't valid AdtAccess. un_op value: {:#?}",
+                                &inner_un_op
+                            ),
+                            inner_un_op.file_pos.to_owned(),
+                        ));
+                    };
 
                 // The actual tag of the current instance of the enum in the code.
                 let actual_tag = self.compile_union_tag_access(inner_un_op, expr_ty)?;
@@ -333,7 +311,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 Ok(any_value)
             }
 
-            UnOperator::Negative => self.compile_un_op_negative(ret_type, un_op),
+            UnOperator::Negative => unreachable!("`Negative` rewritten/removed in analyze stage."),
             UnOperator::Increment => self.compile_un_op_inc(un_op),
             UnOperator::Decrement => self.compile_un_op_dec(un_op),
             UnOperator::BitComplement => panic!("TODO: Bit complement"),
@@ -587,6 +565,38 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     self.builder
                         .build_int_compare(predicate, lhs_ptr, rhs_ptr, "compare.ptr")
                         .into()
+                }
+            }
+
+            // Allow struct type if the struct type only has a single member and
+            // that member is a type that can be compared (float, int or pointer).
+            // This will for example allow compares of enums (since they are
+            // compiled down to a struct with a single i8 member).
+            BasicTypeEnum::StructType(struct_type) if struct_type.count_fields() == 1 => {
+                let field_type = struct_type.get_field_type_at_index(0).unwrap();
+                if field_type.is_int_type()
+                    || field_type.is_float_type()
+                    || field_type.is_pointer_type()
+                {
+                    let lhs_member =
+                        self.compile_struct_access(lhs.into(), ExprTy::RValue, is_const, 0)?;
+                    let rhs_member =
+                        self.compile_struct_access(rhs.into(), ExprTy::RValue, is_const, 0)?;
+                    self.compile_bin_op_compare(
+                        is_signed,
+                        is_const,
+                        op,
+                        CodeGen::any_into_basic_value(lhs_member)?,
+                        CodeGen::any_into_basic_value(rhs_member)?,
+                    )?
+                } else {
+                    return Err(self.err(
+                        format!(
+                            "Invalid struct type used in bin op compare: {:?}",
+                            lhs.get_type()
+                        ),
+                        None,
+                    ));
                 }
             }
 
@@ -1069,18 +1079,18 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // TODO: Const.
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
-                if let Some(cur_basic_block) = self.cur_basic_block {
+                if let Some(start_basic_block) = self.cur_basic_block {
                     // The eval block is to evaluate the rhs only if the lhs
                     // evaluates to true to allow for short circuit.
                     let eval_block = self
                         .context
-                        .insert_basic_block_after(cur_basic_block, "bool.and.rhs");
+                        .insert_basic_block_after(start_basic_block, "bool.and.rhs");
                     let phi_block = self
                         .context
                         .insert_basic_block_after(eval_block, "bool.and.merge");
 
                     // The old `cur_basic_block` will be used as a branch block.
-                    self.builder.position_at_end(cur_basic_block);
+                    self.builder.position_at_end(start_basic_block);
                     self.builder.build_conditional_branch(
                         left.into_int_value(),
                         eval_block,
@@ -1090,6 +1100,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     // TODO: Must be a better way to do this branch. Currently
                     //       this eval block only exists to compile the expr and
                     //       then jump into a phi-block.
+                    self.cur_basic_block = Some(eval_block);
                     self.builder.position_at_end(eval_block);
                     let right = self.compile_expr(right_expr, ExprTy::RValue)?;
                     self.builder.build_unconditional_branch(phi_block);
@@ -1100,8 +1111,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     self.builder.position_at_end(phi_block);
                     let phi_val = self.builder.build_phi(bool_type, "bool.and.phi");
                     phi_val.add_incoming(&[
-                        (&false_val, cur_basic_block),
-                        (&right.into_int_value(), eval_block),
+                        (&false_val, start_basic_block),
+                        (&right.into_int_value(), self.cur_basic_block.unwrap()),
                     ]);
 
                     self.cur_basic_block = Some(phi_block);
@@ -1137,18 +1148,18 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // TODO: Const.
         Ok(match ret_type {
             AnyTypeEnum::IntType(_) => {
-                if let Some(cur_basic_block) = self.cur_basic_block {
+                if let Some(start_basic_block) = self.cur_basic_block {
                     // The eval block is to evaluate the rhs only if the lhs
                     // evaluates to false to allow for short circuit.
                     let eval_block = self
                         .context
-                        .insert_basic_block_after(cur_basic_block, "bool.or.rhs");
+                        .insert_basic_block_after(start_basic_block, "bool.or.rhs");
                     let phi_block = self
                         .context
                         .insert_basic_block_after(eval_block, "bool.or.merge");
 
                     // The old "if.case" will be used as a branch block.
-                    self.builder.position_at_end(cur_basic_block);
+                    self.builder.position_at_end(start_basic_block);
                     self.builder.build_conditional_branch(
                         left.into_int_value(),
                         phi_block,
@@ -1158,6 +1169,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     // TODO: Must be a better way to do this branch. Currently
                     //       this eval block only exists to compile the expr and
                     //       then jump into a phi-block.
+                    self.cur_basic_block = Some(eval_block);
                     self.builder.position_at_end(eval_block);
                     let right = self.compile_expr(right_expr, ExprTy::RValue)?;
                     self.builder.build_unconditional_branch(phi_block);
@@ -1168,8 +1180,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     self.builder.position_at_end(phi_block);
                     let phi_val = self.builder.build_phi(bool_type, "bool.or.phi");
                     phi_val.add_incoming(&[
-                        (&true_val, cur_basic_block),
-                        (&right.into_int_value(), eval_block),
+                        (&true_val, start_basic_block),
+                        (&right.into_int_value(), self.cur_basic_block.unwrap()),
                     ]);
 
                     self.cur_basic_block = Some(phi_block);
@@ -1204,17 +1216,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         un_op.is_const = CodeGen::is_const(&[any_value]);
 
         if any_value.is_pointer_value() {
-            // TODO: Find better way to do this.
-            // Edge case if this is a pointer value containing a struct value.
-            // Struct values should ALWAYS be wrapped in a pointer, otherwise
-            // the members can't be accessed. Prevent deref of the pointer if
-            // this is the case.
             let ptr = any_value.into_pointer_value();
-            if let AnyTypeEnum::StructType(_) = ptr.get_type().get_element_type() {
-                Ok(any_value)
-            } else {
-                Ok(self.builder.build_load(ptr, "deref").into())
-            }
+            Ok(self.builder.build_load(ptr, "deref").into())
         } else {
             Err(self.err(
                 format!("Tried to deref non pointer type expr: {:?}", un_op),
@@ -1307,11 +1310,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let sign_extend = false;
         let zero = self.context.i32_type().const_int(0, sign_extend);
 
-        let tmp = Ok(unsafe {
+        Ok(unsafe {
             self.builder
                 .build_gep(ptr, &[zero, compiled_dim.into_int_value()], "array.gep")
-        });
-        tmp
+        })
     }
 
     /// This function accessed the member at index `idx_opt` for the ADT in
@@ -1322,27 +1324,17 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         un_op: &mut UnOp,
         expr_ty: ExprTy,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let idx = if let UnOperator::AdtAccess(_, idx) = &un_op.operator {
-            idx.unwrap()
+        let idx = if let UnOperator::AdtAccess(Either::Right(idx)) = &un_op.operator {
+            *idx
         } else {
             unreachable!();
         };
 
         let adt_type_id = un_op.value.get_expr_type()?;
-        let adt_ty = self
-            .analyze_ctx
-            .ty_env
-            .lock()
-            .unwrap()
-            .ty(adt_type_id)?
-            .clone();
-        let full_path = if let Ty::CompoundType(inner_ty, generics, ..) = &adt_ty {
+        let adt_ty = self.analyze_ctx.ty_env.lock().ty(adt_type_id)?.clone();
+        let full_path = if let Ty::CompoundType(inner_ty, ..) = &adt_ty {
             if inner_ty.is_adt() {
-                let mut full_path = inner_ty.get_ident().unwrap();
-                let last_part = full_path.pop().unwrap();
-                full_path.push(LangPathPart(last_part.0, Some(generics.clone())));
-
-                full_path
+                inner_ty.get_ident().unwrap()
             } else {
                 return Err(self.analyze_ctx.ast_ctx.err(format!(
                     "Expression that was ADT accessed wasn't ADT, was: {:#?}",
@@ -1356,21 +1348,26 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             )));
         };
 
-        if self
+        let is_struct = self
             .analyze_ctx
             .ast_ctx
-            .is_struct(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
-        {
+            .is_struct(&self.analyze_ctx.ty_env.lock(), &full_path);
+        let is_tuple = self
+            .analyze_ctx
+            .ast_ctx
+            .is_tuple(&self.analyze_ctx.ty_env.lock(), &full_path);
+        let is_union = self
+            .analyze_ctx
+            .ast_ctx
+            .is_union(&self.analyze_ctx.ty_env.lock(), &full_path);
+
+        if is_struct || is_tuple {
             self.compile_un_op_struct_access(un_op, expr_ty, idx as u32)
-        } else if self
-            .analyze_ctx
-            .ast_ctx
-            .is_union(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
-        {
+        } else if is_union {
             let union_ = self
                 .analyze_ctx
                 .ast_ctx
-                .get_adt(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)?;
+                .get_adt(&self.analyze_ctx.ty_env.lock(), &full_path)?;
             self.compile_un_op_union_access(un_op, expr_ty, idx as u32, Arc::clone(&union_))
         } else {
             unreachable!("{:#?}", un_op);
@@ -1383,12 +1380,21 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         expr_ty: ExprTy,
         idx: u32,
     ) -> LangResult<AnyValueEnum<'ctx>> {
-        let mut any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
+        let any_value = self.compile_expr(&mut un_op.value, ExprTy::LValue)?;
         un_op.is_const = CodeGen::is_const(&[any_value]);
+        self.compile_struct_access(any_value, expr_ty, un_op.is_const, idx)
+    }
 
+    pub fn compile_struct_access(
+        &mut self,
+        mut any_value: AnyValueEnum<'ctx>,
+        expr_ty: ExprTy,
+        is_const: bool,
+        idx: u32,
+    ) -> LangResult<AnyValueEnum<'ctx>> {
         debug!(
-            "Compiling struct access, idx: {} -- un_op: {:#?}\nany_value: {:#?}",
-            idx, un_op, any_value
+            "Compiling struct access, idx: {}, any_value: {:#?}",
+            idx, any_value
         );
 
         // TODO: Better way to do this? Can one skip this stack allocation
@@ -1396,7 +1402,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // If the value is given as a struct value and it isn't a const, it needs
         // to be stored temporarily on the stack to get a pointer which can then
         // be non-const GEPd.
-        if any_value.is_struct_value() && !un_op.is_const {
+        if any_value.is_struct_value() && !is_const {
             let ptr = self
                 .builder
                 .build_alloca(any_value.into_struct_value().get_type(), "struct.tmp.alloc");
@@ -1407,15 +1413,27 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         if any_value.is_pointer_value() {
             let ptr = any_value.into_pointer_value();
-            self.builder
+            let member_ptr = self
+                .builder
                 .build_struct_gep(ptr, idx, "struct.gep")
-                .map(|val| val.into())
                 .map_err(|_| {
                     self.err(
-                        format!("Unable to gep for struct member index: {:?}.", un_op),
+                        format!(
+                            "Unable to gep struct member at index {}: {:?}.",
+                            idx, any_value
+                        ),
                         None,
                     )
-                })
+                })?;
+
+            if let ExprTy::RValue = expr_ty {
+                Ok(self
+                    .builder
+                    .build_load(member_ptr, "struct.gep.member.load")
+                    .into())
+            } else {
+                Ok(member_ptr.into())
+            }
         } else if any_value.is_struct_value() {
             // Known to be const at this point, so safe to "const extract".
             if let ExprTy::RValue = expr_ty {
@@ -1425,15 +1443,15 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     .into())
             } else {
                 Err(self.err(
-                    format!("StructValue not allowed in lvalue: {:#?}", un_op),
+                    format!("StructValue not allowed in lvalue: {:#?}", any_value),
                     None,
                 ))
             }
         } else {
             Err(self.err(
                 format!(
-                    "Expr in struct access not a pointer or struct. Un up: {:#?}\ncompiled expr: {:#?}",
-                    un_op, any_value
+                    "Expr in struct access not a pointer or struct. Compiled expr: {:#?}",
+                    any_value
                 ),
                 None,
             ))
@@ -1459,21 +1477,14 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         );
 
         let type_id = union_
-            .as_ref()
-            .borrow()
             .read()
-            .unwrap()
             .members
             .get(idx as usize)
             .unwrap()
-            .as_ref()
-            .borrow()
             .read()
-            .unwrap()
             .ty
-            .clone()
             .unwrap();
-        let file_pos = get_file_pos(&self.analyze_ctx.ty_env.lock().unwrap(), type_id).cloned();
+        let file_pos = get_file_pos(&self.analyze_ctx.ty_env.lock(), type_id).cloned();
         let member_ty = self.compile_type(type_id, file_pos)?;
         let basic_member_ty = CodeGen::any_into_basic_type(member_ty)?;
 
@@ -1490,14 +1501,20 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     )
                 })?;
 
-            Ok(self
-                .builder
-                .build_pointer_cast(
-                    member_ptr,
-                    basic_member_ty.ptr_type(address_space),
-                    "union.ptr.cast",
-                )
-                .into())
+            let member_ptr_correct_type = self.builder.build_pointer_cast(
+                member_ptr,
+                basic_member_ty.ptr_type(address_space),
+                "union.ptr.cast",
+            );
+
+            if let ExprTy::RValue = expr_ty {
+                Ok(self
+                    .builder
+                    .build_load(member_ptr_correct_type, "union.gep.member.load")
+                    .into())
+            } else {
+                Ok(member_ptr_correct_type.into())
+            }
         } else if any_value.is_struct_value() {
             // Known to be const at this point, so safe to "const extract".
             if let ExprTy::RValue = expr_ty {
@@ -1598,7 +1615,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         };
 
         let full_path = if let Expr::Type(type_id, ..) = un_op.value.as_ref() {
-            get_ident(&self.analyze_ctx.ty_env.lock().unwrap(), *type_id)?.unwrap()
+            get_ident(&self.analyze_ctx.ty_env.lock(), *type_id)?.unwrap()
         } else {
             return Err(self.err(
                 format!("Unop value in enum access not a enum type: {:#?}", un_op,),
@@ -1607,37 +1624,36 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         };
 
         let member = self.analyze_ctx.ast_ctx.get_adt_member(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
+            &self.analyze_ctx.ty_env.lock(),
             &full_path,
             &member_name,
             un_op.file_pos,
         )?;
 
-        let basic_value =
-            if let Some(mut value) = member.as_ref().borrow().read().unwrap().value.clone() {
-                let any_value = self.compile_expr(value.as_mut(), ExprTy::RValue)?;
-                CodeGen::any_into_basic_value(any_value)?
-            } else {
-                return Err(self.err(
-                    format!(
-                        "Member of enum \"{}\" has no value set, member: {:#?}",
-                        to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
-                        member
-                    ),
-                    None,
-                ));
-            };
+        let basic_value = if let Some(mut value) = member.read().value.clone() {
+            let any_value = self.compile_expr(value.as_mut(), ExprTy::RValue)?;
+            CodeGen::any_into_basic_value(any_value)?
+        } else {
+            return Err(self.err(
+                format!(
+                    "Member of enum \"{}\" has no value set, member: {:#?}",
+                    to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path),
+                    member
+                ),
+                None,
+            ));
+        };
 
-        let enum_ty = if let Some(enum_ty) = self.module.get_struct_type(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        )) {
+        let enum_ty = if let Some(enum_ty) = self
+            .module
+            .get_struct_type(&to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path))
+        {
             enum_ty
         } else {
             return Err(self.err(
                 format!(
                     "Unable to find enum with name \"{}\" in codegen module.",
-                    to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
+                    to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path),
                 ),
                 None,
             ));
@@ -1645,7 +1661,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         debug!(
             "Compiling enum access -- enum_name: {}, member_name: {}, basic_value: {:#?}",
-            to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
+            to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path),
             member_name,
             basic_value
         );
@@ -1715,47 +1731,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
 
         self.builder.build_store(ptr, new_value);
         Ok(self.builder.build_load(ptr, "dec.res").into())
-    }
-
-    fn compile_un_op_negative(
-        &mut self,
-        ret_type: AnyTypeEnum<'ctx>,
-        un_op: &mut UnOp,
-    ) -> LangResult<AnyValueEnum<'ctx>> {
-        let any_value = self.compile_expr(&mut un_op.value, ExprTy::RValue)?;
-        un_op.is_const = CodeGen::is_const(&[any_value]);
-
-        Ok(match ret_type {
-            AnyTypeEnum::FloatType(_) => {
-                if un_op.is_const {
-                    any_value.into_float_value().const_neg().into()
-                } else {
-                    self.builder
-                        .build_float_neg(any_value.into_float_value(), "neg.float")
-                        .into()
-                }
-            }
-            AnyTypeEnum::IntType(_) => {
-                if un_op.is_const {
-                    any_value.into_int_value().const_neg().into()
-                } else {
-                    self.builder
-                        .build_int_neg(any_value.into_int_value(), "neg.int")
-                        .into()
-                }
-            }
-            AnyTypeEnum::ArrayType(_)
-            | AnyTypeEnum::FunctionType(_)
-            | AnyTypeEnum::PointerType(_)
-            | AnyTypeEnum::StructType(_)
-            | AnyTypeEnum::VectorType(_)
-            | AnyTypeEnum::VoidType(_) => {
-                return Err(self.err(
-                    format!("Invalid type for UnaryOperator::Negative: {:?}", ret_type),
-                    None,
-                ))
-            }
-        })
     }
 
     fn compile_un_op_bool_not(

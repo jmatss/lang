@@ -1,0 +1,7 @@
+mod std::math
+
+extern fn fabs(x: f64) -> f64
+
+fn abs_f64(x: f64) -> f64 {
+    return fabs(x)
+}

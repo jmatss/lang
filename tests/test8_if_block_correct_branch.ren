@@ -1,0 +1,18 @@
+ext fn printf(format: {u8}, ...) -> i32
+
+fn main() -> i32 {
+    var correct
+    
+    var f = 1.0 as f64
+    if f > 2.0 {
+        printf(c"unreachable!")
+        correct = false
+    } else {
+        printf(c"Result: %f", f)
+        correct = true
+    }
+
+    std::assert(correct)
+
+    return 0
+}

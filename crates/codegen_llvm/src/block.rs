@@ -1,11 +1,8 @@
-use std::borrow::Borrow;
-
 use inkwell::{
     basic_block::BasicBlock,
-    builder::Builder,
     module::Linkage,
     types::AnyTypeEnum,
-    values::{AggregateValue, AnyValueEnum, FunctionValue, IntValue, PointerValue},
+    values::{AnyValueEnum, FunctionValue, IntValue, PointerValue},
 };
 use log::debug;
 
@@ -16,13 +13,13 @@ use common::{
         LangResult,
     },
     file::FilePosition,
-    path::LangPath,
+    path::{LangPath, LangPathPart},
     token::{
         ast::AstToken,
         block::{Adt, Block, BlockHeader, Fn},
         expr::{Expr, Var},
     },
-    ty::{inner_ty::InnerTy, to_string::to_string_path, ty::Ty, ty_env::TyEnv, type_id::TypeId},
+    ty::{to_string::to_string_path, ty::Ty},
     util, BlockId,
 };
 
@@ -82,114 +79,6 @@ impl<'ctx> BranchInfo<'ctx> {
     }
 }
 
-/// The type information for something that is being generated. This can for
-/// example be used to ensure that "enum"s are handled correctly in match cases.
-/// Since match cases needs to be ints, the enums needs to be converted to ints.
-enum CodeGenTy {
-    Int(Option<FilePosition>),
-    Enum(Option<FilePosition>),
-}
-
-impl CodeGenTy {
-    fn new(ty_env: &TyEnv, type_id: TypeId, file_pos: Option<FilePosition>) -> LangResult<Self> {
-        // TODO: Add more types.
-        match ty_env.ty(type_id)? {
-            Ty::CompoundType(inner_ty, ..) => match inner_ty {
-                InnerTy::Enum(_) => Ok(CodeGenTy::Enum(file_pos)),
-                _ if inner_ty.is_int() => Ok(CodeGenTy::Int(file_pos)),
-                _ => Err(LangError::new(
-                    format!("Invalid type when creating CodeGenTy: {:#?}", type_id),
-                    LangErrorKind::GeneralError,
-                    file_pos,
-                )),
-            },
-
-            _ => Err(LangError::new(
-                format!("Invalid type when creating CodeGenTy: {:#?}", type_id),
-                LangErrorKind::GeneralError,
-                file_pos,
-            )),
-        }
-    }
-
-    pub fn file_pos(&self) -> Option<FilePosition> {
-        match self {
-            CodeGenTy::Int(file_pos) | CodeGenTy::Enum(file_pos) => file_pos.to_owned(),
-        }
-    }
-
-    /// Helper function to get the given `value` as a integer const.
-    fn as_int_const<'ctx>(&self, value: AnyValueEnum<'ctx>) -> LangResult<IntValue<'ctx>> {
-        let value = match self {
-            CodeGenTy::Int(_) => value,
-
-            CodeGenTy::Enum(_) => {
-                assert!(value.is_struct_value());
-
-                value
-                    .into_struct_value()
-                    .const_extract_value(&mut [0])
-                    .into()
-            }
-        };
-
-        if value.is_int_value() {
-            Ok(value.into_int_value())
-        } else {
-            Err(LangError::new(
-                format!(
-                    "Given `value` expected to be const int, was not: {:#?}",
-                    value
-                ),
-                LangErrorKind::CodeGenError,
-                self.file_pos(),
-            ))
-        }
-    }
-
-    /// Helper function to get the given `value` as a integer.
-    fn as_int<'ctx>(
-        &self,
-        builder: &Builder<'ctx>,
-        value: AnyValueEnum<'ctx>,
-    ) -> LangResult<IntValue<'ctx>> {
-        let value = match self {
-            CodeGenTy::Int(_) => value,
-
-            CodeGenTy::Enum(_) => {
-                assert!(value.is_struct_value());
-                let basic_value = CodeGen::any_into_basic_value(value)?;
-
-                // TODO: Is there a better way to do this other than storing it
-                //       on the stack temporarily to GEP?
-                let enum_ptr = builder.build_alloca(basic_value.get_type(), "enum.as.int.alloc");
-                builder.build_store(enum_ptr, basic_value);
-
-                let value_ptr = builder
-                    .build_struct_gep(enum_ptr, 0, "enum.as.int.gep")
-                    .map_err(|_| {
-                        LangError::new(
-                            format!("Unable to GEP enum: {:#?}", &value),
-                            LangErrorKind::GeneralError,
-                            self.file_pos(),
-                        )
-                    })?;
-                builder.build_load(value_ptr, "enum.as.int.load").into()
-            }
-        };
-
-        if value.is_int_value() {
-            Ok(value.into_int_value())
-        } else {
-            Err(LangError::new(
-                format!("Given `value` expected to be int, was not: {:#?}", value),
-                LangErrorKind::CodeGenError,
-                self.file_pos(),
-            ))
-        }
-    }
-}
-
 impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     pub(super) fn compile_block(&mut self, block: &mut Block) -> LangResult<()> {
         self.cur_block_id = block.id;
@@ -202,14 +91,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             }
             BlockHeader::Fn(func) => {
-                self.compile_fn(
-                    &func.as_ref().borrow().read().unwrap(),
-                    &block.file_pos,
-                    block.id,
-                    &mut block.body,
-                )?;
+                self.compile_fn(&func.read(), &block.file_pos, block.id, &mut block.body)?;
             }
-            BlockHeader::Implement(..) => {
+            BlockHeader::Implement(..) | BlockHeader::Struct(..) | BlockHeader::Union(..) => {
                 for mut ast_token in &mut block.body {
                     if let AstToken::Block(Block {
                         header: BlockHeader::Fn(func),
@@ -218,12 +102,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                         file_pos: func_file_pos,
                     }) = &mut ast_token
                     {
-                        self.compile_fn(
-                            &func.as_ref().borrow().read().unwrap(),
-                            func_file_pos,
-                            *func_id,
-                            func_body,
-                        )?;
+                        self.compile_fn(&func.read(), func_file_pos, *func_id, func_body)?;
                     }
                 }
             }
@@ -249,11 +128,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 ));
             }
 
-            BlockHeader::Struct(_)
-            | BlockHeader::Enum(_)
-            | BlockHeader::Union(_)
-            | BlockHeader::Trait(_) => {
+            BlockHeader::Enum(_) | BlockHeader::Trait(_) => {
                 // All ADTs and traits already compiled at this stage.
+                // Only the methods inside structs and unions are compiled
+                // at this stage.
             }
 
             //BlockHeader::For(var, expr) => self.compile_for(var, expr),
@@ -300,7 +178,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         func_id: BlockId,
         body: &mut [AstToken],
     ) -> LangResult<()> {
-        let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+        let ty_env_guard = self.analyze_ctx.ty_env.lock();
 
         let module = self
             .analyze_ctx
@@ -308,25 +186,28 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             .get_module(self.cur_block_id)?
             .unwrap_or_default();
 
-        let fn_name = if let Some(adt_type_id) = &func.method_adt {
+        let (fn_name, is_primitive_adt) = if let Some(adt_type_id) = &func.method_adt {
             let adt_ty = ty_env_guard.ty_clone(*adt_type_id)?;
-            if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
+            if let Ty::CompoundType(inner_ty, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
-                util::to_method_name(
-                    &ty_env_guard,
-                    &adt_path.last().cloned().unwrap().into(),
-                    Some(&adt_gens),
-                    &func.name,
-                    None,
+                let adt_path_without_module = &adt_path.last().cloned().unwrap().into();
+                (
+                    util::to_method_name(&ty_env_guard, adt_path_without_module, &func.name, None),
+                    inner_ty.is_primitive(),
                 )
             } else {
                 unreachable!("method call on non compund type: {:#?}", func);
             }
         } else {
-            func.name.clone()
+            (func.name.clone(), false)
         };
 
-        let full_path = module.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos));
+        let full_path = if is_primitive_adt {
+            let lang_part = LangPathPart(fn_name, func.generics.clone());
+            LangPath::new(vec![lang_part], Some(func.file_pos))
+        } else {
+            module.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos))
+        };
 
         let fn_val = if let Some(fn_val) = self
             .module
@@ -375,10 +256,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         //       it is only allowed in external functions (for C interop).
         // Allocated space for the function parameters on the stack.
         for (param_value, param) in fn_val.get_param_iter().zip(params) {
-            let ptr = self.alloc_param(&param.as_ref().borrow().read().unwrap())?;
+            let ptr = self.alloc_param(&param.read())?;
             self.builder.build_store(ptr, param_value);
 
-            let key = (param.as_ref().borrow().read().unwrap().full_name(), func_id);
+            let key = (param.read().full_name(), func_id);
             self.variables.insert(key, ptr);
         }
 
@@ -388,33 +269,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             self.compile(token)?;
         }
 
-        // Add a "invisible" return at the end of the last block if this is a
-        // function with no return type. Also check to see if this block
-        // contains a return stmt even though it should NOT return anything.
-        if func.ret_type.is_none() {
-            if let Some(last_block) = fn_val.get_last_basic_block() {
-                if last_block.get_terminator().is_none() {
-                    self.builder.position_at_end(last_block);
-                    self.builder.build_return(None);
-                    Ok(())
-                } else {
-                    Err(self.err(
-                        format!(
-                            "Found return stmt in func \"{}\", but it has no return type.",
-                            &func.name
-                        ),
-                        Some(file_pos.to_owned()),
-                    ))
-                }
-            } else {
-                Err(self.err(
-                    format!("No basic block in func: {}", &func.name),
-                    Some(file_pos.to_owned()),
-                ))
-            }
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     /// Compiles a function prototype.
@@ -432,35 +287,35 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             .get_module(self.cur_block_id)?
             .unwrap_or_default();
 
-        let fn_name = if let Some(adt_type_id) = &func.method_adt {
-            let ty_env_guard = self.analyze_ctx.ty_env.lock().unwrap();
+        let (fn_name, is_primitive_adt) = if let Some(adt_type_id) = &func.method_adt {
+            let ty_env_guard = self.analyze_ctx.ty_env.lock();
             let adt_ty = ty_env_guard.ty_clone(*adt_type_id)?;
 
-            if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
+            if let Ty::CompoundType(inner_ty, ..) = adt_ty {
                 let adt_path = inner_ty.get_ident().unwrap();
-                let adt_path_without_module =
-                    LangPath::new(vec![adt_path.last().unwrap().clone()], None);
-
-                util::to_method_name(
-                    &ty_env_guard,
-                    &adt_path_without_module,
-                    Some(&adt_gens),
-                    &func.name,
-                    None,
+                let adt_path_without_module = &adt_path.last().cloned().unwrap().into();
+                (
+                    util::to_method_name(&ty_env_guard, adt_path_without_module, &func.name, None),
+                    inner_ty.is_primitive(),
                 )
             } else {
                 unreachable!("method call on non compund type: {:#?}", func);
             }
         } else {
-            func.name.clone()
+            (func.name.clone(), false)
         };
 
-        let full_path = module.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos));
+        let full_path = if is_primitive_adt {
+            let lang_part = LangPathPart(fn_name, func.generics.clone());
+            LangPath::new(vec![lang_part], Some(func.file_pos))
+        } else {
+            module.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos))
+        };
 
         let param_types = if let Some(params) = &func.parameters {
             let mut inner_types = Vec::with_capacity(params.len());
             for param in params {
-                let param = param.as_ref().borrow().read().unwrap();
+                let param = param.read();
 
                 if let Some(param_type_id) = &param.ty {
                     let any_type = self.compile_type(*param_type_id, param.file_pos.to_owned())?;
@@ -471,7 +326,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                         format!(
                             "Bad type for parameter with name\"{}\" in function \"{}\".",
                             &param.name,
-                            to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
+                            to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path)
                         ),
                         param.file_pos.to_owned(),
                     ));
@@ -502,7 +357,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 .fn_type(param_types.as_slice(), func.is_var_arg)
         };
 
-        let fn_name = to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path);
+        let fn_name = to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path);
         if let Some(fn_ptr) = self.module.get_function(&fn_name) {
             Ok(fn_ptr)
         } else {
@@ -755,12 +610,6 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             )
         })?;
 
-        let codegen_ty = CodeGenTy::new(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            expr.get_expr_type()?,
-            file_pos,
-        )?;
-
         let mut cases = Vec::default();
         let mut blocks_without_branch = Vec::default();
 
@@ -783,7 +632,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                     .insert_basic_block_after(cur_block, "match.case");
 
                 let value_expr = self.compile_expr(case_expr, ExprTy::RValue)?;
-                let value = codegen_ty.as_int_const(value_expr)?;
+                let value = self.as_int(value_expr, file_pos.as_ref())?;
 
                 // The case expressions in a switch needs to be constant.
                 if !value.is_constant_int() {
@@ -906,7 +755,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         self.builder.position_at_end(start_block);
 
         let value_expr = self.compile_expr(expr, ExprTy::RValue)?;
-        let value = codegen_ty.as_int(self.builder, value_expr)?;
+        let value = self.as_int(value_expr, file_pos.as_ref())?;
 
         self.builder.build_switch(value, default_block, &cases);
 
@@ -916,8 +765,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn compile_struct(&mut self, struct_: &Adt) -> LangResult<()> {
-        debug!("Compiling struct -- {:#?}", struct_);
+    pub(super) fn compile_struct_decl(&mut self, struct_: &Adt) -> LangResult<()> {
+        debug!("Compiling struct decl -- {:#?}", struct_);
 
         let full_path = struct_.module.clone_push(
             &struct_.name,
@@ -931,7 +780,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // Go through all members of the struct and create a vector containing
         // all their types.
         for member in members {
-            let member = member.as_ref().borrow().read().unwrap();
+            let member = member.read();
             let member_file_pos = member.file_pos.to_owned();
 
             if let Some(member_type_id) = &member.ty {
@@ -942,7 +791,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Bad type for struct \"{}\" member \"{}\".",
-                        to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
+                        to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path),
                         &member.name
                     ),
                     member_file_pos,
@@ -950,10 +799,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             }
         }
 
-        let struct_ty = self.context.opaque_struct_type(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        ));
+        let struct_ty = self
+            .context
+            .opaque_struct_type(&to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path));
 
         if struct_.has_definition {
             let packed = false;
@@ -963,8 +811,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         Ok(())
     }
 
-    pub(super) fn compile_enum(&mut self, enum_: &Adt) -> LangResult<()> {
-        debug!("Compiling enum -- {:#?}", enum_);
+    pub(super) fn compile_enum_decl(&mut self, enum_: &Adt) -> LangResult<()> {
+        debug!("Compiling enum decl -- {:#?}", enum_);
 
         let full_path =
             enum_
@@ -978,7 +826,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // set for the members as well. Only the given literal values of the members
         // will be the inner type.
         let (type_id, file_pos) = if let Some(member) = &enum_.members.first() {
-            let member = member.as_ref().borrow().read().unwrap();
+            let member = member.read();
             let member_file_pos = member.file_pos.to_owned();
 
             if let Some(ty) = &member.value {
@@ -987,7 +835,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 return Err(self.err(
                     format!(
                         "No default value set for first member in enum \"{}\".",
-                        to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
+                        to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path)
                     ),
                     member_file_pos,
                 ));
@@ -996,7 +844,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             return Err(self.err(
                 format!(
                     "Unable to find first member in enum \"{}\".",
-                    to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path)
+                    to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path)
                 ),
                 None,
             ));
@@ -1006,10 +854,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let basic_ty = CodeGen::any_into_basic_type(any_ty)?;
 
         let packed = false;
-        let enum_ty = self.context.opaque_struct_type(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        ));
+        let enum_ty = self
+            .context
+            .opaque_struct_type(&to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path));
         enum_ty.set_body(&[basic_ty], packed);
 
         Ok(())
@@ -1018,8 +865,8 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     /// The union will be represented with a "struct" contain a i8 `tag` member
     /// indicating which variant it is followed by an array of i8s with the size
     /// of the largest member.
-    pub(super) fn compile_union(&mut self, union: &Adt) -> LangResult<()> {
-        debug!("Compiling union -- {:#?}", union);
+    pub(super) fn compile_union_decl(&mut self, union: &Adt) -> LangResult<()> {
+        debug!("Compiling union decl -- {:#?}", union);
 
         let full_path =
             union
@@ -1032,7 +879,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         // The union will contain also be created that contains an array with
         // the size of the largest member.
         for member in &union.members {
-            let member = member.as_ref().borrow().read().unwrap();
+            let member = member.read();
             let member_file_pos = member.file_pos.to_owned();
 
             if let Some(member_type_id) = &member.ty {
@@ -1050,7 +897,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 return Err(self.err(
                     format!(
                         "Bad type for union \"{}\" member \"{}\".",
-                        to_string_path(&self.analyze_ctx.ty_env.lock().unwrap(), &full_path),
+                        to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path),
                         &member.name
                     ),
                     member_file_pos,
@@ -1062,10 +909,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         let member_ty = self.context.i8_type().array_type(largest_size as u32);
 
         let packed = false;
-        let union_ty = self.context.opaque_struct_type(&to_string_path(
-            &self.analyze_ctx.ty_env.lock().unwrap(),
-            &full_path,
-        ));
+        let union_ty = self
+            .context
+            .opaque_struct_type(&to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path));
         union_ty.set_body(&[tag_ty.into(), member_ty.into()], packed);
 
         Ok(())
@@ -1101,6 +947,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         self.builder.build_unconditional_branch(while_branch_block);
 
         // If expression is NOT set, treat this as a infinite while loop.
+        self.cur_basic_block = Some(while_branch_block);
         self.builder.position_at_end(while_branch_block);
         if let Some(ref mut expr) = expr_opt {
             let value = self.compile_expr(expr, ExprTy::RValue)?;
@@ -1157,5 +1004,41 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         self.builder.position_at_end(merge_block);
         self.cur_branch_block = None;
         Ok(())
+    }
+
+    /// Helper function to get the given `value` as a integer. If the underlying
+    /// `value` is compile-time const, it will be fetched and returns as a
+    /// compile-time const integer.
+    ///
+    /// This function will be used when converting values used in if/match cases
+    /// into integers.
+    fn as_int(
+        &mut self,
+        value: AnyValueEnum<'ctx>,
+        file_pos: Option<&FilePosition>,
+    ) -> LangResult<IntValue<'ctx>> {
+        // Currently only integeres and enums allowed in match-statements.
+        // The types are validated in the analyzer.
+        let int_value = match value.get_type() {
+            AnyTypeEnum::IntType(_) => value,
+            AnyTypeEnum::StructType(_) => {
+                let is_const = CodeGen::is_const(&[value]);
+                self.compile_struct_access(value, ExprTy::RValue, is_const, 0)?
+            }
+            _ => unreachable!(
+                "Bad type when getting value as int: {:#?}, file_pos: {:#?}",
+                value, file_pos
+            ),
+        };
+
+        if int_value.is_int_value() {
+            Ok(int_value.into_int_value())
+        } else {
+            Err(LangError::new(
+                format!("Given `value` expected to be int, was not: {:#?}", value),
+                LangErrorKind::CodeGenError,
+                file_pos.cloned(),
+            ))
+        }
     }
 }

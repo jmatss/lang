@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use inkwell::{module::Linkage, values::BasicValueEnum, values::InstructionValue};
 use log::debug;
 
@@ -12,6 +10,7 @@ use common::{
         op::AssignOperator,
         stmt::{ExternalDecl, Stmt},
     },
+    ty::is::is_signed,
 };
 
 use crate::{expr::ExprTy, generator::CodeGen};
@@ -23,7 +22,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             Stmt::Yield(expr, file_pos) => self.compile_yield(expr, file_pos),
             Stmt::Break(file_pos) => self.compile_break(file_pos),
             Stmt::Continue(file_pos) => self.compile_continue(file_pos),
-            Stmt::Use(path) => self.compile_use(path),
+            Stmt::Use(path, ident) => self.compile_use(path, ident),
             Stmt::Module(path) => self.compile_module(path),
 
             // Only the "DeferExecution" are compiled into code, the "Defer" is
@@ -35,7 +34,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             }
 
             Stmt::VariableDecl(var, ..) => {
-                let mut var = var.as_ref().borrow().write().unwrap();
+                let mut var = var.write();
 
                 self.compile_var_decl(&mut var)?;
                 if var.is_global {
@@ -59,14 +58,10 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 match ext_decl {
                     ExternalDecl::Fn(func) => {
                         let linkage = Linkage::External;
-                        self.compile_fn_proto(
-                            &func.as_ref().borrow().read().unwrap(),
-                            file_pos.to_owned(),
-                            Some(linkage),
-                        )?;
+                        self.compile_fn_proto(&func.read(), file_pos.to_owned(), Some(linkage))?;
                     }
                     ExternalDecl::Struct(struct_) => {
-                        self.compile_struct(&struct_.as_ref().borrow().read().unwrap())?;
+                        self.compile_struct_decl(&struct_.read())?;
                     }
                 }
                 Ok(())
@@ -116,7 +111,7 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
     }
 
     #[allow(clippy::unnecessary_wraps)]
-    fn compile_use(&mut self, _path: &LangPath) -> LangResult<()> {
+    fn compile_use(&mut self, _path: &LangPath, _ident: &Option<String>) -> LangResult<()> {
         // Do nothing, "use"s are done during lexing/parsing for now.
         Ok(())
     }
@@ -150,6 +145,9 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
             }
         };
         let lhs_val = self.builder.build_load(lhs_ptr, "assign.lhs.val");
+
+        let type_id = lhs.get_expr_type()?;
+        let is_signed = is_signed(&self.analyze_ctx.ty_env.lock(), type_id)?;
 
         let rhs_val = self.compile_expr(rhs, ExprTy::RValue)?;
         let value = match assign_op {
@@ -233,15 +231,25 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             },
             AssignOperator::AssignDiv => match lhs_val {
-                // TODO: Check signess.
-                BasicValueEnum::IntValue(_) => self
-                    .builder
-                    .build_int_signed_div(
-                        lhs_val.into_int_value(),
-                        rhs_val.into_int_value(),
-                        "assign.div.int",
-                    )
-                    .into(),
+                BasicValueEnum::IntValue(_) => {
+                    if is_signed {
+                        self.builder
+                            .build_int_signed_div(
+                                lhs_val.into_int_value(),
+                                rhs_val.into_int_value(),
+                                "assign.div.int.signed",
+                            )
+                            .into()
+                    } else {
+                        self.builder
+                            .build_int_unsigned_div(
+                                lhs_val.into_int_value(),
+                                rhs_val.into_int_value(),
+                                "assign.div.int.unsigned",
+                            )
+                            .into()
+                    }
+                }
                 BasicValueEnum::FloatValue(_) => self
                     .builder
                     .build_float_div(
@@ -258,15 +266,25 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
                 }
             },
             AssignOperator::AssignMod => match lhs_val {
-                // TODO: Check signess.
-                BasicValueEnum::IntValue(_) => self
-                    .builder
-                    .build_int_signed_rem(
-                        lhs_val.into_int_value(),
-                        rhs_val.into_int_value(),
-                        "assign.mod.int",
-                    )
-                    .into(),
+                BasicValueEnum::IntValue(_) => {
+                    if is_signed {
+                        self.builder
+                            .build_int_signed_rem(
+                                lhs_val.into_int_value(),
+                                rhs_val.into_int_value(),
+                                "assign.mod.int.signed",
+                            )
+                            .into()
+                    } else {
+                        self.builder
+                            .build_int_unsigned_rem(
+                                lhs_val.into_int_value(),
+                                rhs_val.into_int_value(),
+                                "assign.mod.int.unsigned",
+                            )
+                            .into()
+                    }
+                }
                 BasicValueEnum::FloatValue(_) => self
                     .builder
                     .build_float_rem(

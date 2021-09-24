@@ -1,0 +1,71 @@
+ext fn printf(format: {u8}, ...) -> i32
+
+fn main() -> i32 {
+    test_normal()
+    test_default()
+    test_enum()
+
+    return 0
+}
+
+fn test_normal() {
+    var correct
+    const value = 1
+
+    match value {
+        1 {
+            correct = true
+            printf(c"1")
+        }
+
+        default {
+            correct = false
+            printf(c"default")
+        }
+    }
+
+    std::assert(correct)
+}
+
+fn test_default() {
+    var correct
+    const value = 99
+
+    match value {
+        1 {
+            correct = false
+            printf(c"\n1")
+        }
+
+        default {
+            correct = true
+            printf(c"\ndefault")
+        }
+    }
+
+    std::assert(correct)
+}
+
+enum TestEnum {
+    FIRST
+    SECOND
+}
+
+fn test_enum() {
+    var correct
+    const value = TestEnum::SECOND
+
+    match value {
+        TestEnum::FIRST {
+            correct = false
+            printf(c"\nFIRST")
+        }
+
+        TestEnum::SECOND {
+            correct = true
+            printf(c"\nSECOND")
+        }
+    }
+
+    std::assert(correct)
+}

@@ -1,0 +1,27 @@
+use std::Optional
+
+ext fn printf(format: {u8}, ...) -> i32
+
+struct TypeStruct {
+    var len: u64
+
+    fn this len() -> u64 {
+        return this.len
+    }
+}
+
+fn main() -> i32 {
+    var x = Optional::value(TypeStruct { 123 })
+
+    var y
+    if val is x.value {
+        y = Optional::value(val.len())
+    } else {
+        y = Optional::empty()
+    }
+
+    printf(c"y.get(): %d", y.&.get() as i32)
+    std::assert(y.value == 123)
+
+    return 0
+}

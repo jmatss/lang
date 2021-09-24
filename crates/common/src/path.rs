@@ -39,7 +39,7 @@ impl LangPath {
         self.with_gens_opt(Some(generics))
     }
 
-    fn with_gens_opt(&self, generics: Option<Generics>) -> LangPath {
+    pub fn with_gens_opt(&self, generics: Option<Generics>) -> LangPath {
         let mut path = self.clone();
         let last_part = path.pop().unwrap();
         path.push(LangPathPart(last_part.0, generics));
@@ -95,6 +95,14 @@ impl LangPath {
         self.file_pos.as_mut()
     }
 
+    pub fn gens(&self) -> Option<&Generics> {
+        self.last().map(|part| part.generics().as_ref()).flatten()
+    }
+
+    pub fn gens_mut(&mut self) -> Option<&mut Generics> {
+        self.last_mut().map(|part| part.1.as_mut()).flatten()
+    }
+
     /// Creates a new LangPath by appending `other` to the end of the `self` path.
     /// The new path will be set to `resolved`.
     pub fn join(&self, other: &LangPath, file_pos: Option<FilePosition>) -> LangPath {
@@ -110,6 +118,12 @@ impl Default for LangPath {
     }
 }
 
+impl From<&str> for LangPath {
+    fn from(part: &str) -> Self {
+        LangPath::new(vec![part.into()], None)
+    }
+}
+
 impl From<LangPathPart> for LangPath {
     fn from(part: LangPathPart) -> Self {
         LangPath::new(vec![part], None)
@@ -122,7 +136,28 @@ impl From<Vec<LangPathPart>> for LangPath {
     }
 }
 
+impl<const N: usize> From<[LangPathPart; N]> for LangPath {
+    fn from(parts: [LangPathPart; N]) -> Self {
+        LangPath::new(parts.to_vec(), None)
+    }
+}
+
 impl TyEnvHash for LangPath {
+    fn hash_with_state<H: std::hash::Hasher>(
+        &self,
+        ty_env: &TyEnv,
+        deref_type: DerefType,
+        state: &mut H,
+    ) -> LangResult<()> {
+        for (i, part) in self.parts.iter().enumerate() {
+            i.hash(state);
+            part.hash_with_state(ty_env, deref_type, state)?;
+        }
+        Ok(())
+    }
+}
+
+impl TyEnvHash for &LangPath {
     fn hash_with_state<H: std::hash::Hasher>(
         &self,
         ty_env: &TyEnv,
@@ -150,6 +185,19 @@ impl TyEnvHash for (LangPath, BlockId) {
     }
 }
 
+impl TyEnvHash for (LangPath, Option<String>) {
+    fn hash_with_state<H: std::hash::Hasher>(
+        &self,
+        ty_env: &TyEnv,
+        deref_type: DerefType,
+        state: &mut H,
+    ) -> LangResult<()> {
+        self.0.hash_with_state(ty_env, deref_type, state)?;
+        self.1.hash(state);
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LangPathPart(pub String, pub Option<Generics>);
 
@@ -163,6 +211,24 @@ impl LangPathPart {
     }
 }
 
+impl From<&str> for LangPathPart {
+    fn from(name: &str) -> Self {
+        LangPathPart(name.into(), None)
+    }
+}
+
+impl From<&String> for LangPathPart {
+    fn from(name: &String) -> Self {
+        LangPathPart(name.into(), None)
+    }
+}
+
+impl From<String> for LangPathPart {
+    fn from(name: String) -> Self {
+        LangPathPart(name, None)
+    }
+}
+
 impl TyEnvHash for LangPathPart {
     fn hash_with_state<H: std::hash::Hasher>(
         &self,
@@ -173,7 +239,7 @@ impl TyEnvHash for LangPathPart {
         self.0.hash(state);
         // A empty list of generics and no generics at all is considered equals.
         if let Some(gens) = self.1.as_ref() {
-            if !gens.is_empty() {
+            if !gens.is_empty_types() {
                 gens.hash_with_state(ty_env, deref_type, state)?;
             }
         }
@@ -207,9 +273,8 @@ impl LangPathBuilder {
         self
     }
 
-    pub fn add_path_gen(&mut self, s: &str, generics: &Generics) -> &mut Self {
-        self.parts
-            .push(LangPathPart(s.into(), Some(generics.clone())));
+    pub fn add_path_with_gen(&mut self, s: &str, gens: Option<&Generics>) -> &mut Self {
+        self.parts.push(LangPathPart(s.into(), gens.cloned()));
         self
     }
 

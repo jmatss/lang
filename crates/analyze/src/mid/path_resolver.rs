@@ -1,5 +1,9 @@
+use std::collections::HashMap;
+
 use common::{
+    ctx::ast_ctx::AstCtx,
     error::{LangError, LangResult},
+    path::LangPath,
     token::{
         block::{Block, BlockHeader},
         expr::{AdtInit, FnCall},
@@ -9,6 +13,7 @@ use common::{
         get::{get_inner, get_inner_mut},
         to_string::to_string_path,
         ty::Ty,
+        ty_env::TyEnv,
         type_id::TypeId,
     },
     BlockId,
@@ -34,14 +39,14 @@ impl PathResolver {
         type_id: TypeId,
         block_id: BlockId,
     ) -> LangResult<()> {
-        let mut ty_env_guard = ctx.ty_env.lock().unwrap();
+        let mut ty_env_guard = ctx.ty_env.lock();
 
         let inner_ty = match get_inner(&ty_env_guard, type_id) {
             Ok(inner_ty) => inner_ty.clone(),
             _ => return Ok(()),
         };
 
-        if inner_ty.is_adt() {
+        if inner_ty.is_adt() && !inner_ty.is_tuple() {
             let path = inner_ty.get_ident().unwrap();
             let full_path = ctx
                 .ast_ctx
@@ -73,11 +78,13 @@ impl PathResolver {
         // TODO: From what I know, only Compound types needs to be solved here
         //       since they are created for enum accesses during parsing.
         //       Is this a correct assumption?
-        let ty = ctx.ty_env.lock().unwrap().ty_clone(type_id)?;
+        let ty = ctx.ty_env.lock().ty_clone(type_id)?;
         match ty {
-            Ty::CompoundType(_, gens, ..) => {
-                for gen_type_id in gens.iter_types() {
-                    self.resolve_ty_path(ctx, *gen_type_id, block_id)?;
+            Ty::CompoundType(inner_ty, ..) => {
+                if let Some(gens) = inner_ty.gens() {
+                    for gen_type_id in gens.iter_types() {
+                        self.resolve_ty_path(ctx, *gen_type_id, block_id)?;
+                    }
                 }
                 self.replace_inner_path(ctx, type_id, block_id)?;
             }
@@ -101,8 +108,7 @@ impl PathResolver {
             | Ty::Pointer(inner_type_id, ..)
             | Ty::UnknownAdtMember(inner_type_id, ..)
             | Ty::UnknownAdtMethod(inner_type_id, ..)
-            | Ty::UnknownMethodArgument(inner_type_id, ..)
-            | Ty::UnknownMethodGeneric(inner_type_id, ..)
+            | Ty::UnknownFnArgument(inner_type_id, ..)
             | Ty::UnknownArrayMember(inner_type_id, ..) => {
                 self.resolve_ty_path(ctx, inner_type_id, block_id)?;
             }
@@ -110,6 +116,24 @@ impl PathResolver {
             Ty::Any(..) | Ty::Generic(..) | Ty::GenericInstance(..) => (),
         }
 
+        Ok(())
+    }
+
+    fn resolve_impls(
+        ty_env: &TyEnv,
+        ast_ctx: &AstCtx,
+        impls: &mut HashMap<String, Vec<LangPath>>,
+        block_id: BlockId,
+    ) -> LangResult<()> {
+        for trait_paths in impls.values_mut() {
+            for trait_path in trait_paths {
+                if let Ok(full_path) =
+                    ast_ctx.calculate_trait_full_path(ty_env, &trait_path.without_gens(), block_id)
+                {
+                    *trait_path = full_path.with_gens_opt(trait_path.gens().cloned())
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -133,14 +157,15 @@ impl Visitor for PathResolver {
             .module
             .clone_push(&fn_call.name, None, fn_call.file_pos);
 
-        let ty_env_guard = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock();
         match ctx
             .ast_ctx
             .calculate_fn_full_path(&ty_env_guard, &half_path, ctx.block_id)
         {
             Ok(mut full_path) => {
-                full_path.pop();
+                let name_part = full_path.pop().unwrap();
                 fn_call.module = full_path;
+                fn_call.name = name_part.name().into();
             }
             Err(_) => {
                 let err = ctx.ast_ctx.err_fn(
@@ -164,14 +189,15 @@ impl Visitor for PathResolver {
             .module
             .clone_push(&adt_init.name, None, adt_init.file_pos);
 
-        let ty_env_guard = ctx.ty_env.lock().unwrap();
+        let ty_env_guard = ctx.ty_env.lock();
         match ctx
             .ast_ctx
             .calculate_adt_full_path(&ty_env_guard, &half_path, ctx.block_id)
         {
             Ok(mut full_path) => {
-                full_path.pop();
+                let name_part = full_path.pop().unwrap();
                 adt_init.module = full_path;
+                adt_init.name = name_part.name().into();
             }
             Err(_) => {
                 let err = ctx.ast_ctx.err_adt(
@@ -192,63 +218,98 @@ impl Visitor for PathResolver {
 
     fn visit_impl(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
         if let Block {
-            header: BlockHeader::Implement(path, trait_path_opt),
+            header: BlockHeader::Implement(adt_path, trait_path),
             ..
         } = block
         {
-            let ty_env_guard = ctx.ty_env.lock().unwrap();
+            let ty_env_guard = ctx.ty_env.lock();
 
-            if let Ok(full_path) =
-                ctx.ast_ctx
-                    .calculate_adt_full_path(&ty_env_guard, path, ctx.block_id)
-            {
-                *path = full_path
-            } else if let Ok(full_path) =
-                ctx.ast_ctx
-                    .calculate_trait_full_path(&ty_env_guard, path, ctx.block_id)
-            {
-                *path = full_path
+            let adt_path_without_gens = adt_path.without_gens();
+            let adt_full_path = if let Ok(full_path) = ctx.ast_ctx.calculate_adt_full_path(
+                &ty_env_guard,
+                &adt_path_without_gens,
+                ctx.block_id,
+            ) {
+                full_path.with_gens_opt(adt_path.gens().cloned())
             } else {
-                let mut err = ctx.ast_ctx.err_adt(
+                let err = ctx.ast_ctx.err_adt(
                     &ty_env_guard,
                     format!(
-                        "Unable to find full path for type defined in impl block: {}",
-                        to_string_path(&ty_env_guard, &path)
+                        "Unable to find full path for ADT defined in impl block: {}",
+                        to_string_path(&ty_env_guard, &adt_path_without_gens)
                     ),
-                    path,
+                    adt_path,
                 );
-                err = ctx.ast_ctx.err_trait(&ty_env_guard, err.msg, path);
+
+                if !self.errors.contains(&err) {
+                    self.errors.push(err);
+                }
+                return;
+            };
+
+            *adt_path = adt_full_path.clone();
+
+            let trait_path_without_gens = trait_path.without_gens();
+            if let Ok(full_path) = ctx.ast_ctx.calculate_trait_full_path(
+                &ty_env_guard,
+                &trait_path_without_gens,
+                ctx.block_id,
+            ) {
+                *trait_path = full_path.with_gens_opt(trait_path.gens().cloned())
+            } else {
+                let err = ctx.ast_ctx.err_trait(
+                    &ty_env_guard,
+                    format!(
+                        "Unable to find trait defined in impl block for ADT \"{}\". \
+                        Trait that can't be found: \"{}\"",
+                        to_string_path(&ty_env_guard, &adt_full_path),
+                        to_string_path(&ty_env_guard, &trait_path_without_gens)
+                    ),
+                    trait_path,
+                );
 
                 if !self.errors.contains(&err) {
                     self.errors.push(err);
                 }
             }
+        }
+    }
 
-            if let Some(trait_path) = trait_path_opt {
-                if let Ok(full_path) =
-                    ctx.ast_ctx
-                        .calculate_adt_full_path(&ty_env_guard, trait_path, ctx.block_id)
-                {
-                    *trait_path = full_path
-                } else if let Ok(full_path) =
-                    ctx.ast_ctx
-                        .calculate_trait_full_path(&ty_env_guard, trait_path, ctx.block_id)
-                {
-                    *trait_path = full_path
-                } else {
-                    let mut err = ctx.ast_ctx.err_trait(
-                        &ty_env_guard,
-                        format!(
-                            "Unable to find full path for trait defined in impl block: {}",
-                            to_string_path(&ty_env_guard, &trait_path)
-                        ),
-                        trait_path,
-                    );
-                    err = ctx.ast_ctx.err_trait(&ty_env_guard, err.msg, trait_path);
+    fn visit_fn(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Fn(func),
+            ..
+        } = block
+        {
+            match ctx.ast_ctx.get_module(ctx.block_id) {
+                Ok(Some(module)) => func.write().module = module,
+                Ok(None) => (),
+                Err(err) => {
+                    self.errors.push(err);
+                }
+            }
 
-                    if !self.errors.contains(&err) {
-                        self.errors.push(err);
-                    }
+            if let Some(impls) = &mut func.write().implements {
+                if let Err(err) =
+                    Self::resolve_impls(&ctx.ty_env.lock(), ctx.ast_ctx, impls, ctx.block_id)
+                {
+                    self.errors.push(err);
+                }
+            }
+        }
+    }
+
+    fn visit_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
+        if let Block {
+            header: BlockHeader::Struct(adt) | BlockHeader::Union(adt),
+            ..
+        } = block
+        {
+            if let Some(impls) = &mut adt.write().implements {
+                if let Err(err) =
+                    Self::resolve_impls(&ctx.ty_env.lock(), ctx.ast_ctx, impls, ctx.block_id)
+                {
+                    self.errors.push(err);
                 }
             }
         }

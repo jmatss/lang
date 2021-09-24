@@ -7,7 +7,7 @@ use crate::{
     BlockId, UniqueId,
 };
 
-use super::{ty::SolveCond, ty_env::TyEnv};
+use super::{generics::Generics, ty::SolveCond, ty_env::TyEnv};
 
 #[derive(Debug, Clone)]
 pub enum InnerTy {
@@ -15,6 +15,7 @@ pub enum InnerTy {
     Enum(LangPath),
     Union(LangPath),
     Trait(LangPath),
+    Tuple(LangPath),
 
     Void,
     Character,
@@ -68,6 +69,7 @@ impl InnerTy {
             | InnerTy::Enum(ident)
             | InnerTy::Union(ident)
             | InnerTy::Trait(ident)
+            | InnerTy::Tuple(ident)
             | InnerTy::UnknownIdent(ident, ..) => Some(ident.clone()),
             _ => None,
         }
@@ -79,6 +81,7 @@ impl InnerTy {
             | InnerTy::Enum(ident)
             | InnerTy::Union(ident)
             | InnerTy::Trait(ident)
+            | InnerTy::Tuple(ident)
             | InnerTy::UnknownIdent(ident, ..) => Some(ident),
             _ => None,
         }
@@ -90,8 +93,54 @@ impl InnerTy {
             | InnerTy::Enum(ident)
             | InnerTy::Union(ident)
             | InnerTy::Trait(ident)
+            | InnerTy::Tuple(ident)
             | InnerTy::UnknownIdent(ident, ..) => Some(ident),
             _ => None,
+        }
+    }
+
+    pub fn get_primitive_ident(&self) -> &'static str {
+        match self {
+            InnerTy::Character => "char",
+            InnerTy::Boolean => "bool",
+            InnerTy::I8 => "i8",
+            InnerTy::U8 => "u8",
+            InnerTy::I16 => "i16",
+            InnerTy::U16 => "u16",
+            InnerTy::I32 => "i32",
+            InnerTy::U32 => "u32",
+            InnerTy::F32 => "f32",
+            InnerTy::I64 => "i64",
+            InnerTy::U64 => "u64",
+            InnerTy::F64 => "f64",
+            InnerTy::I128 => "i128",
+            InnerTy::U128 => "u128",
+            InnerTy::UnknownIdent(path, ..) | InnerTy::Struct(path) if path.count() == 1 => {
+                let ident = path.last().unwrap().name();
+                let inner_ty = InnerTy::ident_to_type(ident, 0);
+                if inner_ty.is_primitive() {
+                    inner_ty.get_primitive_ident()
+                } else {
+                    unreachable!("{:#?}", self)
+                }
+            }
+            _ => unreachable!("{:#?}", self),
+        }
+    }
+
+    pub fn gens(&self) -> Option<&Generics> {
+        if let Some(ident) = self.get_ident_ref() {
+            ident.last().map(|part| part.1.as_ref()).flatten()
+        } else {
+            None
+        }
+    }
+
+    pub fn gens_mut(&mut self) -> Option<&mut Generics> {
+        if let Some(ident) = self.get_ident_mut() {
+            ident.last_mut().map(|part| part.1.as_mut()).flatten()
+        } else {
+            None
         }
     }
 
@@ -199,6 +248,14 @@ impl InnerTy {
             | InnerTy::F64
             | InnerTy::I128
             | InnerTy::U128 => true,
+            InnerTy::UnknownIdent(path, ..) | InnerTy::Struct(path) => {
+                let ident = path.last().unwrap().name();
+                let inner_ty = InnerTy::ident_to_type(ident, 0);
+                path.count() == 1
+                    && !inner_ty.is_adt()
+                    && !inner_ty.is_unknown_ident()
+                    && inner_ty.is_primitive()
+            }
             _ => false,
         }
     }
@@ -208,12 +265,20 @@ impl InnerTy {
     pub fn is_adt(&self) -> bool {
         matches!(
             self,
-            InnerTy::Struct(_) | InnerTy::Enum(_) | InnerTy::Union(_)
+            InnerTy::Struct(_) | InnerTy::Enum(_) | InnerTy::Union(_) | InnerTy::Tuple(_)
         )
+    }
+
+    pub fn is_enum(&self) -> bool {
+        matches!(self, InnerTy::Enum(_))
     }
 
     pub fn is_trait(&self) -> bool {
         matches!(self, InnerTy::Trait(..))
+    }
+
+    pub fn is_tuple(&self) -> bool {
+        matches!(self, InnerTy::Tuple(_))
     }
 
     pub fn is_unknown(&self) -> bool {
@@ -248,12 +313,20 @@ impl InnerTy {
         }
     }
 
+    pub fn is_signed(&self) -> bool {
+        matches!(
+            self,
+            InnerTy::I8 | InnerTy::I16 | InnerTy::I32 | InnerTy::I64 | InnerTy::I128
+        )
+    }
+
     pub fn contains_inner_ty_shallow(&self, inner_ty: &InnerTy) -> bool {
         match (self, inner_ty) {
             (InnerTy::Struct(_), InnerTy::Struct(_))
             | (InnerTy::Enum(_), InnerTy::Enum(_))
             | (InnerTy::Union(_), InnerTy::Union(_))
             | (InnerTy::Trait(_), InnerTy::Trait(_))
+            | (InnerTy::Tuple(_), InnerTy::Tuple(_))
             | (InnerTy::Void, InnerTy::Void)
             | (InnerTy::Character, InnerTy::Character)
             | (InnerTy::String, InnerTy::String)
@@ -303,37 +376,41 @@ impl TyEnvHash for InnerTy {
                 3.hash(state);
                 path.hash_with_state(ty_env, deref_type, state)?;
             }
-            InnerTy::Void => 4.hash(state),
-            InnerTy::Character => 5.hash(state),
-            InnerTy::String => 6.hash(state),
-            InnerTy::Boolean => 7.hash(state),
-            InnerTy::I8 => 8.hash(state),
-            InnerTy::U8 => 9.hash(state),
-            InnerTy::I16 => 10.hash(state),
-            InnerTy::U16 => 11.hash(state),
-            InnerTy::I32 => 12.hash(state),
-            InnerTy::U32 => 13.hash(state),
-            InnerTy::F32 => 14.hash(state),
-            InnerTy::I64 => 15.hash(state),
-            InnerTy::U64 => 16.hash(state),
-            InnerTy::F64 => 17.hash(state),
-            InnerTy::I128 => 18.hash(state),
-            InnerTy::U128 => 19.hash(state),
+            InnerTy::Tuple(path) => {
+                4.hash(state);
+                path.hash_with_state(ty_env, deref_type, state)?;
+            }
+            InnerTy::Void => 5.hash(state),
+            InnerTy::Character => 6.hash(state),
+            InnerTy::String => 7.hash(state),
+            InnerTy::Boolean => 8.hash(state),
+            InnerTy::I8 => 9.hash(state),
+            InnerTy::U8 => 10.hash(state),
+            InnerTy::I16 => 11.hash(state),
+            InnerTy::U16 => 12.hash(state),
+            InnerTy::I32 => 13.hash(state),
+            InnerTy::U32 => 14.hash(state),
+            InnerTy::F32 => 15.hash(state),
+            InnerTy::I64 => 16.hash(state),
+            InnerTy::U64 => 17.hash(state),
+            InnerTy::F64 => 18.hash(state),
+            InnerTy::I128 => 19.hash(state),
+            InnerTy::U128 => 20.hash(state),
             InnerTy::Unknown(unique_id) => {
-                20.hash(state);
+                21.hash(state);
                 unique_id.hash(state);
             }
             InnerTy::UnknownIdent(path, block_id) => {
-                21.hash(state);
+                22.hash(state);
                 path.hash_with_state(ty_env, deref_type, state)?;
                 block_id.hash(state);
             }
             InnerTy::UnknownInt(unique_id, _) => {
-                22.hash(state);
+                23.hash(state);
                 unique_id.hash(state);
             }
             InnerTy::UnknownFloat(unique_id) => {
-                20.hash(state);
+                24.hash(state);
                 unique_id.hash(state);
             }
         }

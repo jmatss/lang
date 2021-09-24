@@ -1,0 +1,19 @@
+struct TestStruct<T> {
+    var inner: T
+
+    fn {this} test_func() -> i32 {
+        return 123
+    }
+}
+
+fn main() -> i32 {
+    var i: u64 = 1
+    var f: f32 = 123.
+
+    var test_struct_u64 = TestStruct { i }
+    var test_struct_f32 = TestStruct { f }
+
+    test_struct_u64.test_func()
+
+    return 0
+}

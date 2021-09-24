@@ -1,2 +1,1 @@
-test15.ren
-../std/assert.ren
+test15_while_short_circuit.ren

@@ -204,6 +204,6 @@ impl Visitor for DeferAnalyzer {
     }
 
     fn visit_default_block(&mut self, block: &mut Block, ctx: &mut TraverseCtx) {
-        self.traverse_block(&ctx.ast_ctx, block);
+        self.traverse_block(ctx.ast_ctx, block);
     }
 }
