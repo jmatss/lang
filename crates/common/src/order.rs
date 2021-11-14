@@ -8,7 +8,7 @@ use either::Either;
 use log::debug;
 use parking_lot::RwLock;
 
-use common::{
+use crate::{
     ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx},
     eq::path_eq,
     error::{CyclicDependencyError, LangError, LangErrorKind, LangResult},

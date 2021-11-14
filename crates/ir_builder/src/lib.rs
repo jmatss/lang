@@ -2,36 +2,47 @@ mod build;
 mod collect;
 mod state;
 
+use build::expr::build_expr;
 use common::{
     ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx},
     error::{LangError, LangErrorKind, LangResult},
+    order::dependency_order,
     token::{
         ast::AstToken,
-        block::{Adt, AdtKind, Fn},
+        block::{Adt, Fn},
         stmt::Modifier,
     },
-    ty::{inner_ty::InnerTy, to_string::to_string_path, ty::Ty, ty_env::TyEnv, type_id::TypeId},
+    ty::{
+        get::get_ident, inner_ty::InnerTy, to_string::to_string_path, ty::Ty, ty_env::TyEnv,
+        type_id::TypeId,
+    },
     util,
 };
-
 use ir::{
-    decl::{
-        func::{Func, FuncVisibility},
-        ty::Type,
-    },
     error::IrError,
+    func::{FuncDecl, FuncVisibility},
     module::Module,
-    GlobalVarIdx, LocalVarIdx,
+    ty::Type,
+    ExprTy,
 };
 
 use crate::{
-    build::block::build_block,
+    build::{block::build_block, stmt::build_stmt},
+    builder::InstrBuilder,
     collect::{
-        adt::collect_type_decls, ext::collect_extern_decls, func::collect_func_decls,
-        global::collect_globals, local::collect_locals_and_params,
+        adt::collect_type_decls, func::collect_func_decls, global::collect_globals,
+        local::collect_locals, param::collect_params,
     },
     state::BuildState,
 };
+
+mod builder;
+
+#[derive(Debug, Clone, Copy)]
+pub enum VarModifier {
+    None,
+    Const,
+}
 
 // TODO: Need to verify that the expresion in "match" is constant.
 // TODO: Need to verify that value in while loop evaluates to i1/bool.
@@ -65,17 +76,25 @@ pub fn build_module(
 ) -> Result<Module, Vec<LangError>> {
     let mut module = Module::new(module_name);
 
+    let adt_order = dependency_order(analyze_ctx, ast_root, false, true)?;
     let ast_ctx = &mut analyze_ctx.ast_ctx;
     let ty_env = analyze_ctx.ty_env;
 
-    collect_extern_decls(&mut module, ast_ctx, ty_env, ast_root)?;
-    collect_type_decls(&mut module, ast_ctx, ty_env).map_err(|e| vec![e])?;
+    collect_type_decls(&mut module, ast_ctx, ty_env, &adt_order).map_err(|e| vec![e])?;
     collect_func_decls(&mut module, ast_ctx, ty_env, ast_root).map_err(|e| vec![e])?;
     let globals = collect_globals(&mut module, ast_ctx, ty_env).map_err(|e| vec![e])?;
-    let locals_and_params =
-        collect_locals_and_params(&mut module, ast_ctx, ty_env, ast_root).map_err(|e| vec![e])?;
+    let locals = collect_locals(&mut module, ast_ctx, ty_env, ast_root)?;
+    let params = collect_params(ty_env, ast_root).map_err(|e| vec![e])?;
 
-    let mut build_state = BuildState::new(&mut module, analyze_ctx, globals, locals_and_params);
+    let mut instr_builder = InstrBuilder::default();
+    let mut build_state = BuildState::new(
+        &mut module,
+        &mut instr_builder,
+        analyze_ctx,
+        globals,
+        locals,
+        params,
+    );
     build_token(&mut build_state, ast_root).map_err(|e| vec![e])?;
 
     Ok(module)
@@ -84,26 +103,30 @@ pub fn build_module(
 fn build_token(state: &mut BuildState, ast_token: &AstToken) -> LangResult<()> {
     match ast_token {
         AstToken::Block(block) => build_block(state, block),
-        AstToken::Expr(expr) => todo!(),
         AstToken::Stmt(stmt) => build_stmt(state, stmt),
+        AstToken::Expr(expr) => build_expr(state, expr, ExprTy::RValue).map(|_| ()),
         AstToken::Comment(..) | AstToken::Empty | AstToken::EOF => Ok(()),
     }
 }
 
 /// Converts the given `type_id` into the corresponding IR `Type`.
 fn to_ir_type(ast_ctx: &AstCtx, ty_env: &TyEnv, type_id: TypeId) -> LangResult<Type> {
-    let ty = ty_env.ty(type_id).unwrap();
+    let inf_type_id = ty_env.inferred_type(type_id)?;
+    let ty = ty_env.ty(inf_type_id).unwrap();
     Ok(match ty {
         Ty::CompoundType(inner_ty, ..) => match inner_ty {
-            InnerTy::Struct(adt_path) | InnerTy::Enum(adt_path) | InnerTy::Union(adt_path) => {
+            InnerTy::Struct(adt_path)
+            | InnerTy::Enum(adt_path)
+            | InnerTy::Union(adt_path)
+            | InnerTy::Tuple(adt_path) => {
                 let adt = ast_ctx.get_adt(ty_env, adt_path)?;
-                let adt = adt.as_ref().read().unwrap();
-                to_ir_adt(ast_ctx, ty_env, &adt)?
+                let adt = adt.read();
+                to_ir_adt(ty_env, &adt)
             }
 
             InnerTy::Void => Type::Void,
-            InnerTy::Character => Type::Character,
-            InnerTy::Boolean => Type::Boolean,
+            InnerTy::Character => Type::Char,
+            InnerTy::Boolean => Type::Bool,
 
             InnerTy::I8 => Type::I8,
             InnerTy::U8 => Type::U8,
@@ -151,24 +174,21 @@ fn to_ir_type(ast_ctx: &AstCtx, ty_env: &TyEnv, type_id: TypeId) -> LangResult<T
                 Type::Void
             };
 
-            Type::Func(param_ir_types, Box::new(ret_ir_type))
+            Type::FuncPointer(param_ir_types, Box::new(ret_ir_type))
         }
 
         _ => unreachable!("Bad type -- type_id: {}, ty: {:#?}", type_id, ty),
     })
 }
 
-/// Converts the given `func` into the corresponding IR `Func`.
-fn to_ir_func(ast_ctx: &AstCtx, ty_env: &TyEnv, func: &Fn) -> LangResult<Func> {
-    let func_path = func
-        .module
-        .clone_push(&func.name, func.generics.as_ref(), Some(func.file_pos));
-    let func_full_name = to_string_path(ty_env, &func_path);
+/// Converts the given `func` into the corresponding IR `FuncDecl`.
+fn to_ir_func(ast_ctx: &AstCtx, ty_env: &TyEnv, func: &Fn) -> LangResult<FuncDecl> {
+    let fn_full_path = fn_full_name(ty_env, func)?;
 
     let param_types = if let Some(params) = &func.parameters {
         let mut param_types = Vec::with_capacity(params.len());
         for param in params {
-            let param = param.as_ref().read().unwrap();
+            let param = param.read();
             if let Some(type_id) = param.ty {
                 let ir_type = to_ir_type(ast_ctx, ty_env, type_id)?;
                 param_types.push(ir_type);
@@ -176,7 +196,8 @@ fn to_ir_func(ast_ctx: &AstCtx, ty_env: &TyEnv, func: &Fn) -> LangResult<Func> {
                 return Err(LangError::new(
                     format!(
                         "Param with name \"{}\" in function \"{:?}\" has no type set.",
-                        &param.name, func_path
+                        &param.full_name(),
+                        fn_full_path
                     ),
                     LangErrorKind::IrError,
                     None,
@@ -202,42 +223,118 @@ fn to_ir_func(ast_ctx: &AstCtx, ty_env: &TyEnv, func: &Fn) -> LangResult<Func> {
         FuncVisibility::None
     };
 
-    Ok(Func::new(func_full_name, visibility, param_types, ret_type))
+    Ok(FuncDecl::new(
+        fn_full_path,
+        visibility,
+        param_types,
+        ret_type,
+        func.is_var_arg,
+    ))
 }
 
-/// Converts the given `adt` into the corresponding IR ADT `Type`.
-fn to_ir_adt(ast_ctx: &AstCtx, ty_env: &TyEnv, adt: &Adt) -> LangResult<Type> {
+/// Given the `adt`, returns a `Type` that acts as a reference to the given ADT.
+fn to_ir_adt(ty_env: &TyEnv, adt: &Adt) -> Type {
     let adt_path = adt
         .module
         .clone_push(&adt.name, adt.generics.as_ref(), Some(adt.file_pos));
-    let adt_full_name = to_string_path(ty_env, &adt_path);
+    Type::Adt(to_string_path(ty_env, &adt_path))
+}
+
+fn to_ir_adt_members(ast_ctx: &AstCtx, ty_env: &TyEnv, adt: &Adt) -> LangResult<Vec<Type>> {
+    let adt_full_name = adt_full_name(ty_env, adt);
 
     let mut member_types = Vec::with_capacity(adt.members.len());
     for member in &adt.members {
-        let member = member.as_ref().read().unwrap();
+        let member = member.read();
         if let Some(type_id) = member.ty {
             let ir_type = to_ir_type(ast_ctx, ty_env, type_id)?;
             member_types.push(ir_type);
         } else {
             return Err(LangError::new(
                 format!(
-                    "Member with name \"{}\" of ADT \"{:?}\" has no type set.",
-                    &member.name, adt_path
+                    "Member with name \"{}\" of ADT \"{}\" has no type set.",
+                    &member.full_name(),
+                    &adt_full_name
                 ),
                 LangErrorKind::IrError,
                 None,
             ));
         }
     }
+    Ok(member_types)
+}
 
-    match adt.kind {
-        AdtKind::Struct => Ok(Type::Struct(adt_full_name, member_types)),
-        AdtKind::Enum => Ok(Type::Enum(adt_full_name, member_types.len())),
-        AdtKind::Union => Ok(Type::Union(adt_full_name, member_types)),
-        AdtKind::Unknown => Err(LangError::new(
-            format!("Adt bad type: {:#?}", adt),
-            LangErrorKind::IrError,
-            None,
-        )),
-    }
+// TODO: What size should bool be? Currently set to 1 byte.
+// TODO: How to decide pointer size? Currently set to 4 bytes.
+// TODO: Need to consider the padding in ADTs.
+/// Returns the size of the given type `ir_type` in bytes.
+/// 8 bits = 1 byte.
+pub fn size_of(module: &Module, ir_type: Type) -> LangResult<usize> {
+    Ok(match &ir_type {
+        Type::Adt(adt_name) => {
+            if let Some(members) = module.get_struct(adt_name).cloned() {
+                let mut acc_size = 0;
+                for member_type in members {
+                    acc_size += size_of(module, member_type)?;
+                }
+                acc_size
+            } else {
+                return Err(LangError::new(
+                    format!("Unable to find ADT with name \"{}\" in size_of()", adt_name),
+                    LangErrorKind::IrError,
+                    None,
+                ));
+            }
+        }
+        Type::Pointer(_) | Type::FuncPointer(..) => 4,
+        Type::Array(ir_type_i, Some(dim)) => size_of(module, *ir_type_i.clone())? * (*dim as usize),
+        Type::Char => 4,
+        Type::Bool => 1,
+        Type::I8 | Type::U8 => 1,
+        Type::I16 | Type::U16 => 2,
+        Type::I32 | Type::U32 | Type::F32 => 4,
+        Type::I64 | Type::U64 | Type::F64 => 8,
+        Type::I128 | Type::U128 => 16,
+
+        Type::Func(_) => {
+            return Err(LangError::new(
+                "Tried to take size_of() function (is not sized).".into(),
+                LangErrorKind::IrError,
+                None,
+            ))
+        }
+        Type::Array(_, None) => {
+            return Err(LangError::new(
+                "Tried to take size_of() array slice (is not sized).".into(),
+                LangErrorKind::IrError,
+                None,
+            ))
+        }
+        Type::Void => {
+            return Err(LangError::new(
+                "Tried to take size_of() void (is not sized).".into(),
+                LangErrorKind::IrError,
+                None,
+            ))
+        }
+    })
+}
+
+pub fn fn_full_name(ty_env: &TyEnv, func: &Fn) -> LangResult<String> {
+    Ok(if let Some(adt_type_id) = func.method_adt {
+        let adt_path = get_ident(ty_env, adt_type_id)?.unwrap();
+        util::to_method_name(ty_env, &adt_path, &func.name, func.generics.as_ref())
+    } else {
+        let func_path =
+            func.module
+                .clone_push(&func.name, func.generics.as_ref(), Some(func.file_pos));
+        to_string_path(ty_env, &func_path)
+    })
+}
+
+pub fn adt_full_name(ty_env: &TyEnv, adt: &Adt) -> String {
+    let adt_path = adt
+        .module
+        .clone_push(&adt.name, adt.generics.as_ref(), Some(adt.file_pos));
+    to_string_path(ty_env, &adt_path)
 }

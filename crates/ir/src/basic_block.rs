@@ -1,79 +1,72 @@
+use std::fmt::Debug;
+
 use crate::{
     error::{IrError, IrResult},
-    instruction::{EndInstr, Instr},
+    instr::{EndInstr, ExprInstr},
 };
 
-#[derive(Debug)]
 pub struct BasicBlock {
     /// The name/label of this basic block.
-    pub name: String,
+    pub label: String,
 
     /// A list of all instructions inside the body of this basic block (excluding
     /// the last `end_instruction`).
     ///
     /// The order of the instructions inside the `instructions` vector is the
     /// "actual" order of the instructions and the flow of the program.
-    instructions: Vec<Instr>,
+    instrs: Vec<ExprInstr>,
 
     /// The last instruction of this basic block. This should some sort of
     /// exit/branch instruction.
-    end_instruction: Option<EndInstr>,
+    end_instrs: Option<EndInstr>,
 }
 
 impl BasicBlock {
-    pub fn new(name: String) -> Self {
+    pub fn new(label: String) -> Self {
         Self {
-            name,
-            instructions: Vec::default(),
-            end_instruction: None,
+            label,
+            instrs: Vec::default(),
+            end_instrs: None,
         }
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
+    pub fn get_end_instr(&mut self) -> Option<&EndInstr> {
+        self.end_instrs.as_ref()
     }
 
-    pub fn set_name(&mut self, name: String) {
-        self.name = name;
+    pub fn set_end_instr(&mut self, end_instr: EndInstr) {
+        self.end_instrs = Some(end_instr);
     }
 
-    pub fn get_end_instruction(&mut self) -> Option<&EndInstr> {
-        self.end_instruction.as_ref()
-    }
-
-    pub fn set_end_instruction(&mut self, end_instr: EndInstr) {
-        self.end_instruction = Some(end_instr);
-    }
-
-    pub fn has_end_instruction(&self) -> bool {
-        self.end_instruction.is_some()
+    pub fn has_end_instr(&self) -> bool {
+        self.end_instrs.is_some()
     }
 
     /// Adds a instruction to the end of this basic block (EXCLUDING end instruction).
-    pub fn push(&mut self, instruction: Instr) {
-        self.instructions.push(instruction);
+    pub fn push(&mut self, instr: ExprInstr) {
+        self.instrs.push(instr);
     }
 
     /// Returns the instruction with index `idx`.
-    pub fn get(&self, idx: usize) -> Option<&Instr> {
-        self.instructions.get(idx)
+    pub fn get(&self, idx: usize) -> Option<&ExprInstr> {
+        self.instrs.get(idx)
     }
 
     /// Returns the first instruction of this basic block.
-    pub fn first(&self) -> Option<&Instr> {
-        self.instructions.first()
+    pub fn first(&self) -> Option<&ExprInstr> {
+        self.instrs.first()
     }
 
     /// Returns the last instruction of this basic block (EXCLUDING end instruction).
-    pub fn last(&self) -> Option<&Instr> {
-        self.instructions.last()
+    pub fn last(&self) -> Option<&ExprInstr> {
+        self.instrs.last()
     }
 
     /// Removes the instruction at index `idx`, shifting the remanining
     /// instructions to the "left".
-    pub fn remove(&mut self, idx: usize) -> IrResult<Instr> {
-        if idx < self.instructions.len() {
-            Ok(self.instructions.remove(idx))
+    pub fn remove(&mut self, idx: usize) -> IrResult<ExprInstr> {
+        if idx < self.instrs.len() {
+            Ok(self.instrs.remove(idx))
         } else {
             Err(IrError::new(format!(
                 "remove -- idx > len -- idx: {}, {:#?}",
@@ -84,15 +77,29 @@ impl BasicBlock {
 
     /// Inserts the given instruction at index `idx`, shifting the existing
     /// instructions to the "right".
-    pub fn insert(&mut self, idx: usize, instruction: Instr) -> IrResult<()> {
-        if idx <= self.instructions.len() {
-            self.instructions.insert(idx, instruction);
+    pub fn insert(&mut self, idx: usize, instrs: ExprInstr) -> IrResult<()> {
+        if idx <= self.instrs.len() {
+            self.instrs.insert(idx, instrs);
             Ok(())
         } else {
             Err(IrError::new(format!(
                 "insert -- idx > len -- idx: {}, {:#?}",
                 idx, self
             )))
+        }
+    }
+}
+
+impl Debug for BasicBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, " Label: {}", self.label)?;
+        for instr in &self.instrs {
+            writeln!(f, "  {:?}", instr)?;
+        }
+        if let Some(end_instr) = &self.end_instrs {
+            writeln!(f, "  {:?}", end_instr)
+        } else {
+            writeln!(f, "  No end instruction")
         }
     }
 }

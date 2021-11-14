@@ -5,15 +5,16 @@ use common::{
         block::{Block, BlockHeader, Fn},
         expr::Expr,
     },
-    ty::{to_string::to_string_path, ty::Ty},
-    util, BlockId,
+    BlockId,
 };
-use ir::{decl::ty::Type, instruction::EndInstr, Val};
+use ir::{instr::EndInstr, ty::Type, ExprTy, Val};
 
 use crate::{
-    build_token, into_err,
+    build_token, fn_full_name, into_err,
     state::{BranchInfo, BuildState},
 };
+
+use super::expr::build_expr;
 
 pub(crate) fn build_block(state: &mut BuildState, block: &Block) -> LangResult<()> {
     state.cur_block_id = block.id;
@@ -25,18 +26,18 @@ pub(crate) fn build_block(state: &mut BuildState, block: &Block) -> LangResult<(
                 state.cur_block_id = block.id;
             }
         }
-        BlockHeader::Fn(func) => {
-            build_func_body(state, &func.as_ref().read().unwrap(), &block.body)?
-        }
-        BlockHeader::Implement(..) => {
+        BlockHeader::Fn(func) => build_func_body(state, &func.read(), &block.body)?,
+        BlockHeader::Implement(..) | BlockHeader::Struct(..) | BlockHeader::Union(..) => {
             for body_token in &block.body {
                 if let AstToken::Block(Block {
                     header: BlockHeader::Fn(method),
                     body: method_body,
+                    id: fn_id,
                     ..
                 }) = body_token
                 {
-                    build_func_body(state, &method.as_ref().read().unwrap(), &method_body)?;
+                    state.cur_block_id = *fn_id;
+                    build_func_body(state, &method.read(), method_body)?;
                 }
             }
         }
@@ -62,11 +63,9 @@ pub(crate) fn build_block(state: &mut BuildState, block: &Block) -> LangResult<(
 
         BlockHeader::While(expr_opt) => build_while(state, expr_opt.as_ref(), &block.body)?,
 
-        BlockHeader::Struct(_)
-        | BlockHeader::Enum(_)
-        | BlockHeader::Union(_)
-        | BlockHeader::Trait(_) => {
+        BlockHeader::Enum(_) | BlockHeader::Trait(_) => {
             // All ADTs/traits have already been collected/handled at this stage.
+            // Only the methods inside structs and unions are built.
         }
 
         BlockHeader::For(_, _) => todo!("TODO -- for: {:#?}", block),
@@ -77,53 +76,13 @@ pub(crate) fn build_block(state: &mut BuildState, block: &Block) -> LangResult<(
 }
 
 fn build_func_body(state: &mut BuildState, func: &Fn, body: &[AstToken]) -> LangResult<()> {
-    let ty_env_guard = state.analyze_ctx.ty_env.lock().unwrap();
+    let ty_env_guard = state.analyze_ctx.ty_env.lock();
 
-    let fn_name = if let Some(adt_type_id) = &func.method_adt {
-        let adt_ty = ty_env_guard.ty_clone(*adt_type_id)?;
-        if let Ty::CompoundType(inner_ty, adt_gens, ..) = adt_ty {
-            let adt_path = inner_ty.get_ident().unwrap();
-            let adt_path_without_module = adt_path.last().cloned().unwrap().into();
-            util::to_method_name(
-                &ty_env_guard,
-                &adt_path_without_module,
-                Some(&adt_gens),
-                &func.name,
-                func.generics.as_ref(),
-            )
-        } else {
-            unreachable!("method call on non compund type: {:#?}", func);
-        }
-    } else {
-        func.name.clone()
-    };
+    let fn_full_name = fn_full_name(&ty_env_guard, func)?;
+    state.set_cur_func(Some(fn_full_name.clone()));
 
-    let module_path = state
-        .analyze_ctx
-        .ast_ctx
-        .get_module(state.cur_block_id)?
-        .unwrap_or_default();
-    let full_path = module_path.clone_push(&fn_name, func.generics.as_ref(), Some(func.file_pos));
-    let fn_full_name = to_string_path(&ty_env_guard, &full_path);
-
-    let ir_func = if let Some(ir_func) = state.module.get_function_mut(&fn_full_name) {
-        ir_func
-    } else {
-        return Err(LangError::new(
-            format!("Unable to find function with name: {}", fn_full_name),
-            LangErrorKind::IrError,
-            None,
-        ));
-    };
-
-    let basic_block_name = ir_func
-        .insert_basic_block(format!("{}-entry", ir_func.name))
-        .map_err(|e| into_err(e))?;
-
-    state.set_cur_basic_block(Some(basic_block_name));
-    state.set_cur_func(Some(fn_full_name));
-
-    assert!(ir_func.params.len() != func.parameters.map(|vec| vec.len()).unwrap_or(0));
+    let basic_block_label = state.insert_new_block(format!("{}-entry", fn_full_name))?;
+    state.set_cur_block(Some(basic_block_label));
 
     drop(ty_env_guard);
 
@@ -136,30 +95,36 @@ fn build_func_body(state: &mut BuildState, func: &Fn, body: &[AstToken]) -> Lang
     // Add a "invisible" return at the end of the last block if this is a
     // function with no return type. If an end instruction is manually set it the
     // code, it must be a "return <void>".
-    if matches!(ir_func.ret_ty, Type::Void) {
-        if let Some(last_block) = ir_func.last_mut() {
-            match last_block.get_end_instruction() {
-                None => last_block.set_end_instruction(EndInstr::Return(None)),
-                Some(EndInstr::Return(None)) => (),
-                Some(end_instr) => {
-                    return Err(LangError::new(
-                        format!(
-                            "Found bad end instruction in func \"{:?}\". \
-                            Expected \"return void\" or not set, but found: {:#?}",
-                            &state.cur_func()?.name,
-                            end_instr,
-                        ),
-                        LangErrorKind::IrError,
-                        Some(func.file_pos.to_owned()),
-                    ))
-                }
-            }
+    let ir_func = state.cur_func_mut()?;
+
+    if matches!(ir_func.ret_type, Type::Void) {
+        let cur_func_name = ir_func.name.clone();
+
+        let last_block = if let Some(last_block) = ir_func.last_block_mut() {
+            last_block
         } else {
             return Err(LangError::new(
-                format!("No basic block in func: {:?}", &state.cur_func()?.name),
+                format!("No basic block in func: {:?}", cur_func_name),
                 LangErrorKind::IrError,
                 Some(func.file_pos.to_owned()),
             ));
+        };
+        let last_block_label = last_block.label.clone();
+
+        match last_block.get_end_instr() {
+            None => last_block.set_end_instr(EndInstr::Return(None)),
+            Some(EndInstr::Return(None)) => (),
+            Some(end_instr) => {
+                return Err(LangError::new(
+                    format!(
+                        "Found bad end instruction in func \"{}\" block \"{}\". \
+                        Expected \"return void\" or not set, but found: {:#?}",
+                        cur_func_name, last_block_label, end_instr,
+                    ),
+                    LangErrorKind::IrError,
+                    Some(func.file_pos.to_owned()),
+                ));
+            }
         }
     }
 
@@ -180,19 +145,17 @@ fn build_anon(state: &mut BuildState, body: &[AstToken]) -> LangResult<()> {
     // block should be created.
     let block_ctx = state.get_block_ctx(anon_block_id)?;
     if !block_ctx.all_children_contains_return || !block_ctx.contains_return {
-        let func = state.cur_func_mut()?;
+        let merge_block_label = state.insert_new_block(format!("{}-anon.merge", cur_func_name))?;
+        state
+            .merge_blocks
+            .insert(anon_block_id, merge_block_label.clone());
 
-        let merge_block_name = func
-            .insert_basic_block(format!("{}-anon.merge", cur_func_name))
-            .map_err(|e| into_err(e))?;
-        state.merge_blocks.insert(anon_block_id, merge_block_name);
+        let branch_instr = state.builder.branch(&merge_block_label);
+        state.cur_block_mut()?.set_end_instr(branch_instr);
 
-        let cur_block = state.cur_basic_block_mut()?;
-        cur_block.set_end_instruction(EndInstr::Branch(merge_block_name));
-
-        state.set_cur_basic_block(Some(merge_block_name));
+        state.set_cur_block(Some(merge_block_label));
     } else {
-        state.set_cur_basic_block(None);
+        state.set_cur_block(None);
     }
 
     Ok(())
@@ -201,16 +164,16 @@ fn build_anon(state: &mut BuildState, body: &[AstToken]) -> LangResult<()> {
 /// All the "ParseToken" in the body should be "IfCase"s.
 fn build_if(state: &mut BuildState, body: &[AstToken]) -> LangResult<()> {
     let cur_func_name = state.cur_func()?.name.clone();
-    let cur_block_name = state.cur_basic_block()?.name.clone();
+    let cur_block_label = state.cur_block()?.label.clone();
     let if_block_id = state.cur_block_id;
 
     // Create and store the basic blocks of this if-statement.
-    // For every if-case that has a expression (if/elif), an extra block will be
-    // created which will contain the branching logic between the cases.
-    let mut prev_block_name = cur_block_name;
+    // For every if-case that has am expression (if/elif), an extra block will
+    // be created which will contain the branching logic between the cases.
     let mut branch_info = BranchInfo::new();
+    branch_info.if_branches.push(cur_block_label.clone());
 
-    branch_info.if_branches.push(cur_block_name.clone());
+    let mut prev_block_label = cur_block_label;
     for (i, if_case) in body.iter().enumerate() {
         if let AstToken::Block(Block {
             header: BlockHeader::IfCase(expr_opt),
@@ -221,21 +184,15 @@ fn build_if(state: &mut BuildState, body: &[AstToken]) -> LangResult<()> {
             // has the branch block `cur_block`). Also only add a branch block
             // if this `if_case` contains a expression that can be "branched on".
             if i > 0 && expr_opt.is_some() {
-                let branch_block_name = state
-                    .cur_func_mut()?
-                    .insert_basic_block(format!("{}-if.branch", cur_func_name))
-                    .map_err(|e| into_err(e))?;
-
-                branch_info.if_branches.push(branch_block_name.clone());
-                prev_block_name = branch_block_name;
+                let branch_block_label =
+                    state.insert_new_block(format!("{}-if.branch", cur_func_name))?;
+                branch_info.if_branches.push(branch_block_label.clone());
+                prev_block_label = branch_block_label;
             }
 
             let case_block_name = state
-                .cur_func_mut()?
-                .insert_basic_block_after(format!("{}-if.case", cur_func_name), &prev_block_name)
-                .map_err(|e| into_err(e))?;
-
-            prev_block_name = case_block_name.clone();
+                .insert_new_block_after(format!("{}-if.case", cur_func_name), &prev_block_label)?;
+            prev_block_label = case_block_name.clone();
             branch_info.if_cases.push(case_block_name);
         } else {
             return Err(LangError::new(
@@ -252,21 +209,18 @@ fn build_if(state: &mut BuildState, body: &[AstToken]) -> LangResult<()> {
     // block in that case, so it would just be empty.
     let block_ctx = state.get_block_ctx(if_block_id)?;
     let merge_block_opt = if !block_ctx.all_children_contains_return {
-        let merge_block_name = state
-            .cur_func_mut()?
-            .insert_basic_block_after(format!("{}-if.merge", cur_func_name), &prev_block_name)
-            .map_err(|e| into_err(e))?;
+        let merge_block_label = state
+            .insert_new_block_after(format!("{}-if.merge", cur_func_name), &prev_block_label)?;
         state
             .merge_blocks
-            .insert(if_block_id, merge_block_name.clone());
-
-        Some(merge_block_name)
+            .insert(if_block_id, merge_block_label.clone());
+        Some(merge_block_label)
     } else {
         None
     };
 
     // Iterate through all "if cases" in this if-statement and compile them.
-    for (case_idx, mut if_case) in body.iter().enumerate() {
+    for (case_idx, if_case) in body.iter().enumerate() {
         state.cur_block_id = if_block_id;
 
         if let AstToken::Block(Block {
@@ -286,6 +240,12 @@ fn build_if(state: &mut BuildState, body: &[AstToken]) -> LangResult<()> {
         }
     }
 
+    // The if statement has been built complete. If a merge block was created,
+    // set it as the current block. Otherwise just keep the old cur block.
+    if merge_block_opt.is_some() {
+        state.cur_basic_block_label = merge_block_opt;
+    }
+
     Ok(())
 }
 
@@ -299,40 +259,38 @@ fn build_if_case(
 ) -> LangResult<()> {
     state.cur_block_id = block_id;
 
-    let case_block = branch_info.get_if_case(state, idx)?;
+    let case_block_label = branch_info.get_if_case(state, idx)?.label.clone();
 
     // If this is a if case with a expression, the branch condition should be
     // evaluated and branched from the branch block.
     if let Some(case_expr) = case_expr_opt {
-        let branch_block = branch_info.get_if_branch(state, idx)?;
+        let branch_block_label = branch_info.get_if_branch(state, idx)?.label.clone();
 
         // If there are no more branch blocks, set the next branch block to
         // the merge block if there are no more if_cases or set it to the
         // last if_case if there is still one left.
-        let next_branch_block = if idx + 1 >= branch_info.if_branches.len() {
+        let next_branch_block_label = if idx + 1 >= branch_info.if_branches.len() {
             if idx + 1 >= branch_info.if_cases.len() {
-                state.get_merge_block(block_id)?
+                state.get_merge_block(block_id)?.label.clone()
             } else {
-                branch_info.get_if_case(state, idx + 1)?
+                branch_info.get_if_case(state, idx + 1)?.label.clone()
             }
         } else {
-            branch_info.get_if_branch(state, idx + 1)?
+            branch_info.get_if_branch(state, idx + 1)?.label.clone()
         };
 
-        state.set_cur_basic_block(Some(branch_block.name.clone()));
+        state.set_cur_block(Some(branch_block_label));
 
-        let expr_val = build_expr(case_expr);
-
-        let end_instr = EndInstr::BranchIf(
-            expr_val,
-            case_block.name.clone(),
-            next_branch_block.name.clone(),
-        );
-        state.cur_basic_block_mut()?.set_end_instruction(end_instr);
+        let expr_val = build_expr(state, case_expr, ExprTy::RValue)?;
+        let end_instr =
+            state
+                .builder
+                .branch_if(expr_val, &case_block_label, &next_branch_block_label);
+        state.cur_block_mut()?.set_end_instr(end_instr);
     }
 
     // Compile all tokens inside this if-case.
-    state.set_cur_basic_block(Some(case_block.name.clone()));
+    state.set_cur_block(Some(case_block_label.clone()));
     for token in body {
         state.cur_block_id = block_id;
         build_token(state, token)?;
@@ -340,11 +298,10 @@ fn build_if_case(
 
     // Add a branch to the merge block if the current basic block doesn't have a
     // terminator yet.
-    let cur_basic_block = state.cur_basic_block_mut()?;
-    if !cur_basic_block.has_end_instruction() {
-        let merge_block = state.get_merge_block(block_id)?;
-        let end_instr = EndInstr::Branch(merge_block.name.clone());
-        cur_basic_block.set_end_instruction(end_instr);
+    if !state.cur_block_mut()?.has_end_instr() {
+        let merge_block_label = state.get_merge_block(block_id)?.label.clone();
+        let end_instr = state.builder.branch(&merge_block_label);
+        state.cur_block_mut()?.set_end_instr(end_instr);
     }
 
     Ok(())
@@ -357,15 +314,15 @@ fn build_match(
     block_id: BlockId,
 ) -> LangResult<()> {
     let cur_func_name = state.cur_func()?.name.clone();
-    let start_block_name = state.cur_basic_block()?.name.clone();
+    let start_block_label = state.cur_block()?.label.clone();
 
     let mut cases = Vec::default();
     let mut blocks_without_branch = Vec::default();
 
-    // Iterate through all "match cases" in this match-statement and compile them.
-    // This will NOT compile the default block. It is done in iteration after
-    // this to ensure that the default block is generated after all other block
-    // to keep the sequential flow.
+    // Iterate through all "match cases" in this match-statement and build them.
+    // This will NOT build the default block. It is done in iteration after this
+    // to ensure that the default block is built after all other block to keep
+    // the "sequential flow".
     for match_case in body {
         state.cur_block_id = block_id;
 
@@ -400,28 +357,28 @@ fn build_match(
     }
 
     // The default block that control flow will be branched to if no cases matches.
-    let mut default_block_name_opt = None;
+    let mut default_block_label_opt = None;
 
-    // TODO: Fix the "unreachable" default block. Is not always unreachable.
     // Iterate through the match cases one more time to find the default block.
     // Also ensure that it only exists a single default block. If no default
     // block exists, create a "unreachable" instruction. This might not be
     // correct atm since there might be times when all values aren't covered
     // by the match cases.
+    // TODO: Fix the "unreachable" default block. Is not always unreachable.
     for mut match_case in body {
         state.cur_block_id = block_id;
 
         if let AstToken::Block(Block {
             header: BlockHeader::MatchCase(None),
-            body: case_body,
+            body: default_case_body,
             id: case_id,
             ..
         }) = &mut match_case
         {
             build_match_default_case(
                 state,
-                &mut default_block_name_opt,
-                body,
+                &mut default_block_label_opt,
+                default_case_body,
                 *case_id,
                 &mut blocks_without_branch,
             )?;
@@ -430,59 +387,49 @@ fn build_match(
 
     // If None: No default block found, create a new default block that contains
     // a single unreachable instruction.
-    let default_block_name = if let Some(default_block_name) = default_block_name_opt {
-        default_block_name
+    let default_block_label = if let Some(default_block_label) = default_block_label_opt {
+        default_block_label
     } else {
-        let cur_func = state.cur_func_mut()?;
-        let cur_block_name = state.cur_basic_block()?.name();
+        let cur_block_label = state.cur_block()?.label.clone();
+        let default_block_label = state
+            .insert_new_block_after(format!("{}-match.default", cur_func_name), &cur_block_label)?;
 
-        let default_block_name = state
+        let end_instr = state.builder.unreachable();
+        let default_block = state
             .cur_func_mut()?
-            .insert_basic_block_after(format!("{}-match.default", cur_func_name), cur_block_name)
-            .map_err(|e| into_err(e))?;
+            .get_block_mut(&default_block_label)
+            .unwrap();
+        default_block.set_end_instr(end_instr);
 
-        if let Some(default_block) = cur_func.get_mut(&default_block_name) {
-            default_block.set_end_instruction(EndInstr::Unreachable);
-        } else {
-            unreachable!()
-        }
-
-        default_block_name
+        default_block_label
     };
 
-    state.set_cur_basic_block(Some(default_block_name));
+    state.set_cur_block(Some(default_block_label.clone()));
 
     // The merge block that all cases will branch to after the switch-statement
     // if they don't branch away themselves.
     // This will become the "current basic block" when this function returns.
-    let merge_block_name = state
-        .cur_func_mut()?
-        .insert_basic_block_after(
-            format!("{}-match.merge", cur_func_name),
-            &default_block_name,
-        )
-        .map_err(|e| into_err(e))?;
+    let merge_block_label = state.insert_new_block_after(
+        format!("{}-match.merge", cur_func_name),
+        &default_block_label,
+    )?;
 
-    for block_name in blocks_without_branch {
-        if let Some(block_without_branch) = state.cur_func_mut()?.get_mut(&block_name) {
-            let end_instr = EndInstr::Branch(merge_block_name.clone());
-            block_without_branch.set_end_instruction(end_instr);
-        } else {
-            unreachable!()
-        }
+    for block_label in blocks_without_branch {
+        let end_instr = state.builder.branch(&merge_block_label);
+        let block_without_branch = state.cur_func_mut()?.get_block_mut(&block_label).unwrap();
+        block_without_branch.set_end_instr(end_instr);
     }
 
-    state.set_cur_basic_block(Some(start_block_name));
-    let match_val = build_expr();
+    state.set_cur_block(Some(start_block_label));
 
-    if let Some(start_block) = state.cur_func_mut()?.get_mut(&start_block_name) {
-        let end_instr = EndInstr::BranchSwitch(match_val, default_block_name, cases);
-        start_block.set_end_instruction(end_instr);
-    } else {
-        unreachable!()
-    }
+    let match_val = build_expr(state, expr, ExprTy::RValue)?;
+    let end_instr = state
+        .builder
+        .branch_switch(match_val, &default_block_label, &cases)
+        .map_err(into_err)?;
+    state.cur_block_mut()?.set_end_instr(end_instr);
 
-    state.set_cur_basic_block(Some(merge_block_name));
+    state.set_cur_block(Some(merge_block_label));
 
     Ok(())
 }
@@ -497,31 +444,29 @@ fn build_match_case(
 ) -> LangResult<()> {
     let cur_func_name = state.cur_func()?.name.clone();
 
-    let cur_block = state.cur_basic_block()?;
-    let case_block_name = state
-        .cur_func_mut()?
-        .insert_basic_block_after(format!("{}-match.case", cur_func_name), cur_block.name())
-        .map_err(|e| into_err(e))?;
+    let cur_block_label = &state.cur_block()?.label.clone();
+    let case_block_label =
+        state.insert_new_block_after(format!("{}-match.case", cur_func_name), cur_block_label)?;
 
-    let expr_val = build_expr(case_expr);
+    let expr_val = build_expr(state, case_expr, ExprTy::RValue)?;
 
     // Compile all tokens inside this match-case.
-    state.set_cur_basic_block(Some(case_block_name));
+    state.set_cur_block(Some(case_block_label.clone()));
     for token in body {
         state.cur_block_id = block_id;
         build_token(state, token)?;
     }
 
-    cases.push((expr_val, case_block_name));
+    cases.push((expr_val, case_block_label));
 
     // If the body of the match case doesn't have a ending branch instruction, an
     // "ending" branch needs to be added. Store the current block in
     // `blocks_without_branch`. After this for-loop is done, all the blocks in
     // that vector will be given a branch to the merge block. The merge block
     // will be created after this loop.
-    let cur_block = state.cur_basic_block()?;
-    if !cur_block.has_end_instruction() {
-        blocks_without_branch.push(cur_block.name.into());
+    let cur_block = state.cur_block()?;
+    if !cur_block.has_end_instr() {
+        blocks_without_branch.push(cur_block.label.clone());
     }
 
     Ok(())
@@ -529,14 +474,14 @@ fn build_match_case(
 
 fn build_match_default_case(
     state: &mut BuildState,
-    default_block_name: &mut Option<String>,
-    body: &[AstToken],
+    default_block_label: &mut Option<String>,
+    default_case_body: &[AstToken],
     block_id: BlockId,
     blocks_without_branch: &mut Vec<String>,
 ) -> LangResult<()> {
     let cur_func_name = state.cur_func()?.name.clone();
 
-    if default_block_name.is_some() {
+    if default_block_label.is_some() {
         return Err(LangError::new(
             "More than one default block found in match.".into(),
             LangErrorKind::IrError,
@@ -544,23 +489,21 @@ fn build_match_default_case(
         ));
     }
 
-    let cur_block = state.cur_basic_block()?;
-    let new_default_block_name = state
-        .cur_func_mut()?
-        .insert_basic_block_after(format!("{}-match.default", cur_func_name), cur_block.name())
-        .map_err(|e| into_err(e))?;
-    *default_block_name = Some(new_default_block_name);
+    let cur_block_label = state.cur_block()?.label.clone();
+    let case_block_label = state
+        .insert_new_block_after(format!("{}-match.default", cur_func_name), &cur_block_label)?;
+    *default_block_label = Some(case_block_label);
 
     // Compile all tokens inside this default match-case.
-    state.set_cur_basic_block(*default_block_name);
-    for token in body {
+    state.set_cur_block(default_block_label.clone());
+    for token in default_case_body {
         state.cur_block_id = block_id;
         build_token(state, token)?;
     }
 
-    let cur_block = state.cur_basic_block()?;
-    if !cur_block.has_end_instruction() {
-        blocks_without_branch.push(cur_block.name.into());
+    let cur_block = state.cur_block()?;
+    if !cur_block.has_end_instr() {
+        blocks_without_branch.push(cur_block.label.clone());
     }
 
     Ok(())
@@ -572,60 +515,52 @@ fn build_while(
     body: &[AstToken],
 ) -> LangResult<()> {
     let cur_func_name = state.cur_func()?.name.clone();
-    let cur_block_name = state.cur_basic_block()?.name.clone();
+    let cur_block_label = state.cur_block()?.label.clone();
     let while_block_id = state.cur_block_id;
 
-    let branch_block_name = state
-        .cur_func_mut()?
-        .insert_basic_block_after(format!("{}-while.branch", cur_func_name), &cur_block_name)
-        .map_err(|e| into_err(e))?;
-    let body_block_name = state
-        .cur_func_mut()?
-        .insert_basic_block_after(format!("{}-while.body", cur_func_name), &branch_block_name)
-        .map_err(|e| into_err(e))?;
-    let merge_block_name = state
-        .cur_func_mut()?
-        .insert_basic_block_after(format!("{}-while.merge", cur_func_name), &body_block_name)
-        .map_err(|e| into_err(e))?;
+    let branch_block_label = state
+        .insert_new_block_after(format!("{}-while.branch", cur_func_name), &cur_block_label)?;
+    let body_block_label = state
+        .insert_new_block_after(format!("{}-while.body", cur_func_name), &branch_block_label)?;
+    let merge_block_label = state
+        .insert_new_block_after(format!("{}-while.merge", cur_func_name), &body_block_label)?;
 
-    state.merge_blocks.insert(while_block_id, merge_block_name);
+    state
+        .merge_blocks
+        .insert(while_block_id, merge_block_label.clone());
 
-    if let Some(cur_block) = state.cur_func_mut()?.get_mut(&cur_block_name) {
-        let end_instr = EndInstr::Branch(branch_block_name.clone());
-        cur_block.set_end_instruction(end_instr)
-    } else {
-        unreachable!()
-    }
+    let end_instr = state.builder.branch(&branch_block_label);
+    state.cur_block_mut()?.set_end_instr(end_instr);
 
     // If expression is NOT set, treat this as a infinite while loop.
-    state.set_cur_basic_block(Some(branch_block_name.clone()));
-    if let Some(expr) = expr_opt {
-        let expr_val = build_expr(expr);
-        let end_instr =
-            EndInstr::BranchIf(expr_val, body_block_name.clone(), merge_block_name.clone());
-        state.cur_basic_block_mut()?.set_end_instruction(end_instr);
+    state.set_cur_block(Some(branch_block_label.clone()));
+    let end_instr = if let Some(expr) = expr_opt {
+        let expr_val = build_expr(state, expr, ExprTy::RValue)?;
+        state
+            .builder
+            .branch_if(expr_val, &body_block_label, &merge_block_label)
     } else {
-        let end_instr = EndInstr::Branch(body_block_name.clone());
-        state.cur_basic_block_mut()?.set_end_instruction(end_instr);
-    }
+        state.builder.branch(&body_block_label)
+    };
+    state.cur_block_mut()?.set_end_instr(end_instr);
 
     // Iterate through all "tokens" in this while-loop and compile them.
-    state.set_cur_basic_block(Some(body_block_name.clone()));
+    state.set_cur_block(Some(body_block_label.clone()));
     for token in body {
         state.cur_block_id = while_block_id;
-        state.cur_branch_block_name = Some(branch_block_name.clone());
+        state.cur_branch_block_label = Some(branch_block_label.clone());
         build_token(state, token)?;
     }
 
     // If the block does NOT contain a terminator instruction inside it (return,
     // yield etc.), add a unconditional branch back up to the "while.branch" block.
-    if !state.cur_basic_block()?.has_end_instruction() {
-        let end_instr = EndInstr::Branch(branch_block_name.clone());
-        state.cur_basic_block_mut()?.set_end_instruction(end_instr);
+    if !state.cur_block()?.has_end_instr() {
+        let end_instr = state.builder.branch(&branch_block_label);
+        state.cur_block_mut()?.set_end_instr(end_instr);
     }
 
-    state.set_cur_basic_block(Some(merge_block_name));
-    state.cur_branch_block_name = None;
+    state.set_cur_block(Some(merge_block_label));
+    state.cur_branch_block_label = None;
 
     Ok(())
 }

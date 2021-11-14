@@ -1,11 +1,14 @@
 use either::Either;
 
 use common::{
-    error::LangError,
+    error::{LangError, LangResult},
     token::op::UnOperator,
     token::{expr::FnCall, op::UnOp},
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
-    ty::{get::get_ident, is::is_pointer, to_string::to_string_type_id, ty::Ty, type_id::TypeId},
+    ty::{
+        get::get_ident, is::is_pointer, to_string::to_string_type_id, ty::Ty, ty_env::TyEnv,
+        type_id::TypeId,
+    },
 };
 
 /// Iterates through all types in the AST and replaces them with their correctly
@@ -20,6 +23,15 @@ impl TypeUpdater {
             errors: Vec::default(),
         }
     }
+
+    fn replace_type(ty_env: &mut TyEnv, type_id: &mut TypeId) -> LangResult<()> {
+        let inf_type_id = ty_env.inferred_type(*type_id)?;
+        if *type_id != inf_type_id {
+            ty_env.forward(*type_id, inf_type_id)?;
+            *type_id = inf_type_id;
+        }
+        Ok(())
+    }
 }
 
 impl Visitor for TypeUpdater {
@@ -33,25 +45,9 @@ impl Visitor for TypeUpdater {
 
     fn visit_type(&mut self, type_id: &mut TypeId, ctx: &mut TraverseCtx) {
         let mut ty_env_guard = ctx.ty_env.lock();
-
-        let inf_type_id = match ty_env_guard.inferred_type(*type_id) {
-            Ok(inf_type_id) => inf_type_id,
-            Err(err) => {
-                if !self.errors.contains(&err) {
-                    self.errors.push(err);
-                }
-                return;
-            }
-        };
-
-        if *type_id != inf_type_id {
-            match ty_env_guard.forward(*type_id, inf_type_id) {
-                Ok(_) => *type_id = inf_type_id,
-                Err(err) => {
-                    if !self.errors.contains(&err) {
-                        self.errors.push(err);
-                    }
-                }
+        if let Err(err) = Self::replace_type(&mut ty_env_guard, type_id) {
+            if !self.errors.contains(&err) {
+                self.errors.push(err);
             }
         }
     }

@@ -10,7 +10,7 @@ use common::{
     ty::{generics::Generics, inner_ty::InnerTy, ty::Ty, type_info::TypeInfo},
 };
 
-use crate::util::generics::combine_generics_adt;
+use common::ty::generics::combine_generics_adt;
 
 /// Iterates through all method calls and inserts "this"/"self" into the calls
 /// as the first argument. The bin ops representing the method call will be

@@ -5,37 +5,45 @@ use common::{
     error::{LangError, LangErrorKind, LangResult},
     BlockId,
 };
-use either::Either;
-use ir::{
-    basic_block::BasicBlock, decl::func::Func, module::Module, GlobalVarIdx, LocalVarIdx,
-    ParamVarIdx, Val, VarIdx,
+use ir::{basic_block::BasicBlock, func::FuncDecl, module::Module, ty::Type, GlobalVarIdx, VarIdx};
+
+use crate::{
+    builder::InstrBuilder,
+    collect::{local::LocalVarMap, param::ParamVarMap},
+    into_err, VarModifier,
 };
 
-pub(crate) struct BuildState<'ctx, 'a> {
+// TODO: Handle `const` variables differently than regular `var`s. Should never
+//       be stored/loaded.
+
+pub struct BuildState<'ctx, 'a> {
     pub module: &'a mut Module,
+    pub builder: &'a mut InstrBuilder,
     pub analyze_ctx: &'a mut AnalyzeCtx<'ctx>,
 
+    /// The string key is the name of the variable.
     pub globals: HashMap<String, GlobalVarIdx>,
-    pub locals_and_params:
-        HashMap<String, HashMap<(String, BlockId), Either<LocalVarIdx, ParamVarIdx>>>,
+    /// The string key is the name of the func that this variable was found in.
+    pub locals: HashMap<String, LocalVarMap>,
+    /// The string key is the name of the func that this variable was found in.
+    pub params: HashMap<String, ParamVarMap>,
 
     /// The ID of the current block that we are in.
     /// OBS! A `BlockId` is completly unrelated to a `BasicBlock`. This ID is
     ///      used to identify every block scope in the AST.
     pub cur_block_id: BlockId,
 
-    /// Contains the name of current basic block that instructions are inserted
-    /// into.
-    /// OBS! A `BasicBlock` is completly unrelated to `BlockId`.
-    cur_basic_block_name: Option<String>,
+    /// Contains the label of current basic block that instructions are inserted
+    /// into.  OBS! A `BasicBlock` is completly unrelated to `BlockId`.
+    pub cur_basic_block_label: Option<String>,
 
     /// Contains the name of the current function that is being built.
-    cur_func_name: Option<String>,
+    pub cur_func_name: Option<String>,
 
-    /// Contains the name of the current "branch block" if the current block has
+    /// Contains the label of the current "branch block" if the current block has
     /// one. This is true for "while" and "for" blocks. This branch block will
     /// then be used when a continue call is done to find the start of the loop.
-    pub cur_branch_block_name: Option<String>,
+    pub cur_branch_block_label: Option<String>,
 
     /// Merge blocks created for different if and match statements.
     /// Is stored in this struct so that it can be accessable from everywhere
@@ -43,36 +51,29 @@ pub(crate) struct BuildState<'ctx, 'a> {
     ///
     /// The String value of them map are basic block names.
     pub merge_blocks: HashMap<BlockId, String>,
-
-    // TODO: Should these only be unique per function? Currently they are unique
-    //       for the whole module, but it is possible to reset this count for
-    //       every new func.
-    /// A number used to create `Val` structs. For every new `Val` created, this
-    /// `val` will be incremented to ensure that every new `Val` is unique.
-    val: usize,
 }
 
 impl<'ctx, 'a> BuildState<'ctx, 'a> {
     pub fn new(
         module: &'a mut Module,
+        instr_builder: &'a mut InstrBuilder,
         analyze_ctx: &'a mut AnalyzeCtx<'ctx>,
         globals: HashMap<String, GlobalVarIdx>,
-        locals_and_params: HashMap<
-            String,
-            HashMap<(String, BlockId), Either<LocalVarIdx, ParamVarIdx>>,
-        >,
+        locals: HashMap<String, LocalVarMap>,
+        params: HashMap<String, ParamVarMap>,
     ) -> Self {
         Self {
             module,
+            builder: instr_builder,
             analyze_ctx,
             globals,
-            locals_and_params,
-            cur_block_id: 0,
-            cur_basic_block_name: None,
+            locals,
+            params,
+            cur_block_id: BlockCtx::DEFAULT_BLOCK_ID,
+            cur_basic_block_label: None,
             cur_func_name: None,
-            cur_branch_block_name: None,
+            cur_branch_block_label: None,
             merge_blocks: HashMap::default(),
-            val: 0,
         }
     }
 
@@ -80,54 +81,102 @@ impl<'ctx, 'a> BuildState<'ctx, 'a> {
         self.cur_func_name = name;
     }
 
-    pub fn cur_func(&self) -> LangResult<&Func> {
-        self.cur_func_name
-            .map(|name| self.module.get_function(&name))
-            .flatten()
-            .ok_or(LangError::new(
-                "Unable to get current func.".into(),
+    pub fn cur_func(&self) -> LangResult<&FuncDecl> {
+        if let Some(func_name) = &self.cur_func_name {
+            if let Some(func) = self.module.get_func(func_name) {
+                Ok(func)
+            } else {
+                Err(LangError::new(
+                    "Unable to get current func.".into(),
+                    LangErrorKind::IrError,
+                    None,
+                ))
+            }
+        } else {
+            Err(LangError::new(
+                "Cur func name not set.".into(),
                 LangErrorKind::IrError,
                 None,
             ))
+        }
     }
 
-    pub fn cur_func_mut(&mut self) -> LangResult<&mut Func> {
-        self.cur_func_name
-            .map(|name| self.module.get_function_mut(&name))
-            .flatten()
-            .ok_or(LangError::new(
-                "Unable to get current func.".into(),
+    pub fn cur_func_mut(&mut self) -> LangResult<&mut FuncDecl> {
+        if let Some(func_name) = &self.cur_func_name {
+            if let Some(func) = self.module.get_func_mut(func_name) {
+                Ok(func)
+            } else {
+                Err(LangError::new(
+                    "Unable to get current func.".into(),
+                    LangErrorKind::IrError,
+                    None,
+                ))
+            }
+        } else {
+            Err(LangError::new(
+                "Cur func name not set.".into(),
                 LangErrorKind::IrError,
                 None,
             ))
+        }
     }
 
-    pub fn set_cur_basic_block(&mut self, name: Option<String>) {
-        self.cur_basic_block_name = name;
+    /// Conventient wrapper to insert new blocks into the current function.
+    pub fn insert_new_block(&mut self, label: String) -> LangResult<String> {
+        self.cur_func_mut()?
+            .insert_new_block(label)
+            .map_err(into_err)
     }
 
-    pub fn cur_basic_block(&self) -> LangResult<&BasicBlock> {
-        let cur_func = self.cur_func()?;
-        self.cur_basic_block_name
-            .map(|name| cur_func.get(&name))
-            .flatten()
-            .ok_or(LangError::new(
-                "Unable to get current basic block.".into(),
+    /// Conventient wrapper to insert new blocks into the current function.
+    pub fn insert_new_block_after(&mut self, label: String, after: &str) -> LangResult<String> {
+        self.cur_func_mut()?
+            .insert_new_block_after(label, after)
+            .map_err(into_err)
+    }
+
+    pub fn set_cur_block(&mut self, label: Option<String>) {
+        self.cur_basic_block_label = label;
+    }
+
+    pub fn cur_block(&self) -> LangResult<&BasicBlock> {
+        if let Some(block_label) = &self.cur_basic_block_label {
+            if let Some(block) = self.cur_func()?.get_block(block_label) {
+                Ok(block)
+            } else {
+                Err(LangError::new(
+                    "Unable to get current block.".into(),
+                    LangErrorKind::IrError,
+                    None,
+                ))
+            }
+        } else {
+            Err(LangError::new(
+                "Cur block label not set.".into(),
                 LangErrorKind::IrError,
                 None,
             ))
+        }
     }
 
-    pub fn cur_basic_block_mut(&mut self) -> LangResult<&mut BasicBlock> {
-        let cur_func = self.cur_func_mut()?;
-        self.cur_basic_block_name
-            .map(|name| cur_func.get_mut(&name))
-            .flatten()
-            .ok_or(LangError::new(
-                "Unable to get current basic block.".into(),
+    pub fn cur_block_mut(&mut self) -> LangResult<&mut BasicBlock> {
+        if let Some(block_label) = self.cur_basic_block_label.clone() {
+            if let Some(block) = self.cur_func_mut()?.get_block_mut(&block_label) {
+                Ok(block)
+            } else {
+                Err(LangError::new(
+                    "Unable to get current block.".into(),
+                    LangErrorKind::IrError,
+                    None,
+                ))
+            }
+        } else {
+            Err(LangError::new(
+                "Cur block label not set.".into(),
                 LangErrorKind::IrError,
                 None,
             ))
+        }
     }
 
     /// Returns the BasicBlock representing the "closest" merge block from the
@@ -136,15 +185,20 @@ impl<'ctx, 'a> BuildState<'ctx, 'a> {
     pub fn get_merge_block(&self, id: BlockId) -> LangResult<&BasicBlock> {
         let mut cur_id = id;
         loop {
-            if let Some(merge_block_name) = self.merge_blocks.get(&cur_id) {
-                self.cur_func()?.get(merge_block_name).ok_or(LangError::new(
-                    format!(
-                        "Unable to find merge block with name: {}.",
-                        merge_block_name
-                    ),
-                    LangErrorKind::IrError,
-                    None,
-                ));
+            if let Some(merge_block_label) = self.merge_blocks.get(&cur_id) {
+                return self
+                    .cur_func()?
+                    .get_block(merge_block_label)
+                    .ok_or_else(|| {
+                        LangError::new(
+                            format!(
+                                "Unable to find merge block with label: {}.",
+                                merge_block_label
+                            ),
+                            LangErrorKind::IrError,
+                            None,
+                        )
+                    });
             } else {
                 // Get from the parent scope recursively if possible.
                 cur_id = self.get_block_ctx(cur_id)?.parent_id;
@@ -181,26 +235,22 @@ impl<'ctx, 'a> BuildState<'ctx, 'a> {
         })
     }
 
-    pub fn new_val(&mut self) -> Val {
-        self.val += 1;
-        Val(self.val)
-    }
-
     // TODO: Merge with `get()`.
     /// Given a name of a variable `ident` and a block scope `id`, returns
-    /// the IR index of the given variable.
+    /// the IR index of the given variable. The given `ident` should contain
+    /// any "copy_nr".
     /// This can either be a global, function parameter or local variable.
     pub fn get_var(&self, ident: &str, id: BlockId) -> LangResult<VarIdx> {
         if let Some(global_var_idx) = self.globals.get(ident) {
             Ok(VarIdx::Global(*global_var_idx))
         } else {
-            self.get_local_var(ident, id)
+            self.get_local_or_param_var(ident, id)
         }
     }
 
     /// Given a name of a local variable `ident` and a block scope `id`, returns
     /// the index of the variable. This can either be a local or parameter.
-    fn get_local_var(&self, ident: &str, id: BlockId) -> LangResult<VarIdx> {
+    fn get_local_or_param_var(&self, ident: &str, id: BlockId) -> LangResult<VarIdx> {
         let func_name = if let Some(cur_func_name) = &self.cur_func_name {
             cur_func_name
         } else {
@@ -211,34 +261,39 @@ impl<'ctx, 'a> BuildState<'ctx, 'a> {
             ));
         };
 
-        let func_entry = if let Some(func_entry) = self.locals_and_params.get(func_name) {
-            func_entry
-        } else {
-            return Err(LangError::new(
-                format!(
-                    "Unable to find var with name \"{}\" (currently in empty func \"{}\")",
-                    ident, func_name
-                ),
-                LangErrorKind::IrError,
-                None,
-            ));
-        };
+        if let Some(func_entry) = self.locals.get(func_name) {
+            if let Ok((idx, _)) = self.get_local_or_param_var_rec(func_entry, func_name, ident, id)
+            {
+                return Ok(VarIdx::Local(idx));
+            }
+        }
 
-        self.get_local_var_rec(func_entry, func_name, ident, id)
+        if let Some(func_entry) = self.params.get(func_name) {
+            if let Ok((idx, _)) = self.get_local_or_param_var_rec(func_entry, func_name, ident, id)
+            {
+                return Ok(VarIdx::Param(idx));
+            }
+        }
+
+        Err(LangError::new(
+            format!(
+                "Unable to find var with name \"{}\" in function \"{}\".",
+                ident, func_name
+            ),
+            LangErrorKind::IrError,
+            None,
+        ))
     }
 
-    fn get_local_var_rec(
+    fn get_local_or_param_var_rec<T: ToOwned<Owned = T>>(
         &self,
-        func_entry: &HashMap<(String, BlockId), Either<LocalVarIdx, ParamVarIdx>>,
+        func_entry: &HashMap<(String, BlockId), T>,
         func_name: &str,
         ident: &str,
         id: BlockId,
-    ) -> LangResult<VarIdx> {
-        if let Some(idx) = func_entry.get(&(ident.into(), id)) {
-            Ok(match idx {
-                Either::Left(local_var_idx) => VarIdx::Local(*local_var_idx),
-                Either::Right(param_var_idx) => VarIdx::Param(*param_var_idx),
-            })
+    ) -> LangResult<T> {
+        if let Some(var_idx) = func_entry.get(&(ident.into(), id)) {
+            Ok(var_idx.to_owned())
         } else if id == BlockCtx::DEFAULT_BLOCK_ID {
             return Err(LangError::new(
                 format!(
@@ -254,7 +309,7 @@ impl<'ctx, 'a> BuildState<'ctx, 'a> {
             let parent_id = self.analyze_ctx.ast_ctx.get_parent_id(id)?;
 
             if id != parent_id {
-                self.get_local_var_rec(func_entry, func_name, ident, parent_id)
+                self.get_local_or_param_var_rec(func_entry, func_name, ident, parent_id)
             } else {
                 Err(LangError::new(
                     format!("Block with id {} is its own parent in block info.", id),
@@ -263,6 +318,24 @@ impl<'ctx, 'a> BuildState<'ctx, 'a> {
                 ))
             }
         }
+    }
+
+    /// Adds the local with name `name` in block with ID `block_id` into the
+    /// `self.cur_func_name`.
+    pub fn add_local_to_cur_func(
+        &mut self,
+        name: String,
+        block_id: BlockId,
+        ir_type: Type,
+        modifier: VarModifier,
+    ) -> LangResult<()> {
+        let cur_func = self.cur_func_mut()?;
+        let cur_func_name = cur_func.name.clone();
+
+        let var_idx = cur_func.add_local_var(ir_type);
+        let locals = self.locals.entry(cur_func_name).or_default();
+        locals.insert((name, block_id), (var_idx, modifier));
+        Ok(())
     }
 }
 
@@ -291,7 +364,7 @@ impl BranchInfo {
         index: usize,
     ) -> LangResult<&'state BasicBlock> {
         if let Some(basic_block_name) = self.if_cases.get(index) {
-            if let Some(basic_block) = state.cur_func()?.get(basic_block_name) {
+            if let Some(basic_block) = state.cur_func()?.get_block(basic_block_name) {
                 Ok(basic_block)
             } else {
                 Err(LangError::new(
@@ -320,7 +393,7 @@ impl BranchInfo {
         index: usize,
     ) -> LangResult<&'state BasicBlock> {
         if let Some(basic_block_name) = self.if_branches.get(index) {
-            if let Some(basic_block) = state.cur_func()?.get(basic_block_name) {
+            if let Some(basic_block) = state.cur_func()?.get_block(basic_block_name) {
                 Ok(basic_block)
             } else {
                 Err(LangError::new(

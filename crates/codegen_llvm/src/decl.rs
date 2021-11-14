@@ -1,8 +1,8 @@
 use inkwell::module::Linkage;
 
-use analyze::util::order::dependency_order;
 use common::{
     error::LangResult,
+    order::dependency_order,
     token::{
         ast::AstToken,
         block::{AdtKind, Block, BlockHeader},

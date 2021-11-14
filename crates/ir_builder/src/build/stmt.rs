@@ -6,32 +6,27 @@ use common::{
         op::AssignOperator,
         stmt::Stmt,
     },
+    ty::{ty::Ty, ty_env::TyEnv, type_id::TypeId},
 };
-use ir::{instruction::EndInstr, ExprTy};
+use ir::{instr::Signed, ExprTy, Val, VarIdx};
 
 use crate::{into_err, state::BuildState};
 
+use super::expr::build_expr;
+
 pub(crate) fn build_stmt(state: &mut BuildState, stmt: &Stmt) -> LangResult<()> {
     match stmt {
-        Stmt::Return(expr_opt, file_pos) => {
-            build_return(state, expr_opt.as_ref(), file_pos.as_ref())
-        }
-        Stmt::Yield(expr, file_pos) => build_yield(state, expr, file_pos.as_ref()),
-        Stmt::Break(file_pos) => build_break(state, file_pos.as_ref()),
+        Stmt::Return(expr_opt, _) => build_return(state, expr_opt.as_ref()),
+        Stmt::Yield(expr, _) => build_yield(state, expr),
+        Stmt::Break(_) => build_break(state),
         Stmt::Continue(file_pos) => build_continue(state, file_pos.as_ref()),
-
-        Stmt::Assignment(oper, lhs, rhs, file_pos) => {
-            build_assign(state, *oper, lhs, rhs, file_pos.as_ref())
-        }
-        Stmt::VariableDecl(var, file_pos) => {
-            let var = var.as_ref().write().unwrap();
-            build_var_decl(state, &var, file_pos.as_ref())
-        }
+        Stmt::Assignment(oper, lhs, rhs, _) => build_assign(state, *oper, lhs, rhs),
+        Stmt::VariableDecl(var, _) => build_var_decl(state, &var.read()),
 
         // Only the "DeferExecution" are compiled into code, the "Defer" is
         // only used during analyzing.
         Stmt::DeferExec(expr) => {
-            build_expr(expr)?;
+            build_expr(state, expr, ExprTy::RValue)?;
             Ok(())
         }
 
@@ -41,42 +36,36 @@ pub(crate) fn build_stmt(state: &mut BuildState, stmt: &Stmt) -> LangResult<()> 
     }
 }
 
-fn build_return(
-    state: &mut BuildState,
-    expr_opt: Option<&Expr>,
-    file_pos: Option<&FilePosition>,
-) -> LangResult<()> {
+fn build_return(state: &mut BuildState, expr_opt: Option<&Expr>) -> LangResult<()> {
     let expr_val_opt = if let Some(expr) = expr_opt {
-        Some(build_expr(expr)?)
+        Some(build_expr(state, expr, ExprTy::RValue)?)
     } else {
         None
     };
 
-    state
-        .cur_basic_block_mut()?
-        .set_end_instruction(EndInstr::Return(expr_val_opt));
-
+    let end_instr = state.builder.ret(expr_val_opt);
+    state.cur_block_mut()?.set_end_instr(end_instr);
     Ok(())
 }
 
-fn build_yield(
-    state: &mut BuildState,
-    expr: &Expr,
-    file_pos: Option<&FilePosition>,
-) -> LangResult<()> {
+fn build_yield(state: &mut BuildState, expr: &Expr) -> LangResult<()> {
     panic!("TODO: Implement \"yield\" statement.");
 }
 
-fn build_break(state: &mut BuildState, file_pos: Option<&FilePosition>) -> LangResult<()> {
-    let merge_block = state.get_branchable_merge_block(state.cur_block_id)?;
-    merge_block.set_end_instruction(EndInstr::Branch(merge_block.name.clone()));
+fn build_break(state: &mut BuildState) -> LangResult<()> {
+    let merge_block_label = state
+        .get_branchable_merge_block(state.cur_block_id)?
+        .label
+        .clone();
+    let end_instr = state.builder.branch(&merge_block_label);
+    state.cur_block_mut()?.set_end_instr(end_instr);
     Ok(())
 }
 
 fn build_continue(state: &mut BuildState, file_pos: Option<&FilePosition>) -> LangResult<()> {
-    if let Some(branch_block_name) = &state.cur_branch_block_name {
-        let cur_block = state.cur_basic_block_mut()?;
-        cur_block.set_end_instruction(EndInstr::Branch(branch_block_name.clone()));
+    if let Some(branch_block_label) = &state.cur_branch_block_label {
+        let end_instr = state.builder.branch(branch_block_label);
+        state.cur_block_mut()?.set_end_instr(end_instr);
         Ok(())
     } else {
         Err(LangError::new(
@@ -92,30 +81,86 @@ fn build_assign(
     oper: AssignOperator,
     lhs: &Expr,
     rhs: &Expr,
-    file_pos: Option<&FilePosition>,
 ) -> LangResult<()> {
-    let lhs_ptr = build_expr(lhs, ExprTy::LValue);
+    let lhs_ptr = build_expr(state, lhs, ExprTy::LValue)?;
+    let lhs_val_instr = state.builder.load(lhs_ptr.clone()).map_err(into_err)?;
+    state.cur_block_mut()?.push(lhs_val_instr.clone());
 
-    let rhs_val = build_expr(rhs, ExprTy::RValue);
-    let value = match oper {
-        AssignOperator::Assignment => rhs_val,
-        // TODO: Check so that the types are valid for these operations.
-        AssignOperator::AssignAdd => {}
-        AssignOperator::AssignSub => todo!(),
-        AssignOperator::AssignMul => todo!(),
-        AssignOperator::AssignDiv => todo!(),
-        AssignOperator::AssignMod => todo!(),
-        AssignOperator::AssignBitAnd => todo!(),
-        AssignOperator::AssignBitOr => todo!(),
-        AssignOperator::AssignBitXor => todo!(),
-        AssignOperator::AssignShl => todo!(),
-        AssignOperator::AssignShr => todo!(),
+    let lhs_val = lhs_val_instr.val;
+    let rhs_val = build_expr(state, rhs, ExprTy::RValue)?;
+
+    let type_id = lhs.get_expr_type()?;
+    let signed = is_signed(&state.analyze_ctx.ty_env.lock(), type_id)?;
+
+    let val = if let AssignOperator::Assignment = oper {
+        rhs_val
+    } else {
+        let instr = match oper {
+            // TODO: Check so that the types are valid for these operations.
+            AssignOperator::AssignAdd => state.builder.add(lhs_val, rhs_val),
+            AssignOperator::AssignSub => state.builder.sub(lhs_val, rhs_val),
+            AssignOperator::AssignMul => state.builder.mul(lhs_val, rhs_val),
+            AssignOperator::AssignDiv => state.builder.div(lhs_val, rhs_val, signed),
+            AssignOperator::AssignMod => state.builder.modu(lhs_val, rhs_val, signed),
+            AssignOperator::AssignBitAnd => state.builder.bit_and(lhs_val, rhs_val),
+            AssignOperator::AssignBitOr => state.builder.bit_or(lhs_val, rhs_val),
+            AssignOperator::AssignBitXor => state.builder.bit_xor(lhs_val, rhs_val),
+            AssignOperator::AssignShl => state.builder.shift_left(lhs_val, rhs_val),
+            AssignOperator::AssignShr => state.builder.shift_right(lhs_val, rhs_val, signed),
+            AssignOperator::Assignment => unreachable!(),
+        }
+        .map_err(into_err)?;
+
+        state.cur_block_mut()?.push(instr.clone());
+        instr.val
     };
+
+    let instr = state.builder.store(lhs_ptr, val);
+    state.cur_block_mut()?.push(instr);
+
+    Ok(())
 }
 
-fn build_var_decl(
-    state: &mut BuildState,
-    var: &Var,
-    file_pos: Option<&FilePosition>,
-) -> LangResult<()> {
+// TODO: Handle global init values here?
+pub fn build_var_decl(state: &mut BuildState, var: &Var) -> LangResult<()> {
+    // The variables have already been collected. Just need to build and insert
+    // the init value if any is set.
+    if !var.is_global {
+        if let Some(init_value) = &var.value {
+            let val = build_expr(state, init_value, ExprTy::RValue)?;
+            build_var_store(state, var, val)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn build_var_store(state: &mut BuildState, var: &Var, val: Val) -> LangResult<()> {
+    let var_idx = state.get_var(&var.full_name(), state.cur_block_id)?;
+    let var_type = match var_idx {
+        VarIdx::Local(idx) => state.cur_func()?.locals.get(idx.0).cloned(),
+        VarIdx::Param(idx) => state.cur_func()?.params.get(idx.0).cloned(),
+        VarIdx::Global(_) => unreachable!("Global in `build_var_decl`"),
+    }
+    .unwrap();
+
+    let var_ptr_instr = state.builder.var_address(var_idx, var_type);
+    state.cur_block_mut()?.push(var_ptr_instr.clone());
+
+    let expr_instr = state.builder.store(var_ptr_instr.val, val);
+    state.cur_block_mut()?.push(expr_instr);
+
+    Ok(())
+}
+
+/// Checks if the given type is signed. This returns true if this is a signed
+/// integer, returns false for every other type (includingn non-int types).
+fn is_signed(ty_env: &TyEnv, id: TypeId) -> LangResult<Signed> {
+    let ty = ty_env.ty(id)?;
+    Ok(
+        if matches!(ty, Ty::CompoundType(inner_ty, ..) if inner_ty.is_signed()) {
+            Signed::True
+        } else {
+            Signed::False
+        },
+    )
 }

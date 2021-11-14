@@ -234,6 +234,7 @@ name = "ir"
 version = "0.1.0"
 dependencies = [
  "backtrace",
+ "either",
  "log",
 ]
 
@@ -245,6 +246,8 @@ dependencies = [
  "either",
  "ir",
  "log",
+ "parking_lot",
+ "rand",
 ]
 
 [[package]]

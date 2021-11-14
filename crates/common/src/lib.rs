@@ -24,6 +24,7 @@ pub mod hash;
 pub mod hash_map;
 pub mod hash_set;
 pub mod iter;
+pub mod order;
 pub mod path;
 pub mod token;
 pub mod traverse;

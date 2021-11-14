@@ -667,7 +667,7 @@ impl AdtInit {
     /// Returns the generics. If generics was set at the struct init call, this
     /// function will replace the types of the types parsed during type inference
     /// with type specified at the init call.
-    pub fn generics(&mut self, ty_env: &TyEnv) -> Option<Generics> {
+    pub fn generics(&self, ty_env: &TyEnv) -> Option<Generics> {
         let adt_ty = ty_env.ty(self.adt_type_id.unwrap()).ok()?;
         let adt_gens = if let Ty::CompoundType(inner_ty, ..) = adt_ty {
             inner_ty.gens()
@@ -675,14 +675,14 @@ impl AdtInit {
             panic!("Struct init type not ADT.");
         };
 
-        if let Some(gens) = &mut self.generics {
+        if let Some(gens) = &self.generics {
+            let mut gens_clone = gens.clone();
             if let Some(adt_gens) = adt_gens {
                 for (idx, name) in adt_gens.iter_names().enumerate() {
-                    gens.insert_lookup(name.clone(), idx);
+                    gens_clone.insert_lookup(name.clone(), idx);
                 }
             }
-
-            Some(gens.clone())
+            Some(gens_clone)
         } else {
             adt_gens.cloned()
         }
@@ -690,7 +690,7 @@ impl AdtInit {
 
     /// Returns the "full name" which is the name containing possible generics
     /// as well.
-    pub fn full_name(&mut self, ty_env: &TyEnv) -> LangResult<String> {
+    pub fn full_name(&self, ty_env: &TyEnv) -> LangResult<String> {
         let gens = self.generics(ty_env);
         let adt_path = self
             .module

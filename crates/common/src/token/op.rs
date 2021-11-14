@@ -156,7 +156,7 @@ pub enum UnOperator {
     BoolNot,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AssignOperator {
     Assignment, // "Normal" assignment ("x = y").
     AssignAdd,

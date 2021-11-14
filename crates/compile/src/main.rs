@@ -189,8 +189,18 @@ fn main() -> LangResult<()> {
         return Ok(());
     }
 
-    let ir_module = ir_builder::build_module("MODULE_NAME".into(), &mut analyze_ctx, &mut ast_root);
-    println!("## {:#?} ##", ir_module);
+    let ir_module =
+        match ir_builder::build_module("MODULE_NAME".into(), &mut analyze_ctx, &mut ast_root) {
+            Ok(ir_module) => ir_module,
+            Err(errs) => {
+                eprintln!();
+                for e in errs {
+                    eprintln!("[ERROR] {}", e);
+                }
+                std::process::exit(1);
+            }
+        };
+    println!("{:?}", ir_module);
     std::process::exit(0);
 
     let generate_timer = Instant::now();

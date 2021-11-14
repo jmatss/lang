@@ -4,7 +4,7 @@ use common::{
     token::expr::FnCall,
     traverse::traverse_ctx::TraverseCtx,
     ty::{
-        generics::Generics,
+        generics::{combine_generics, combine_generics_adt, Generics},
         get::{get_file_pos, get_generics},
         inner_ty::InnerTy,
         replace::replace_gen_impls,
@@ -15,10 +15,7 @@ use common::{
 };
 use either::Either;
 
-use crate::{
-    ty::solve::insert_constraint,
-    util::generics::{combine_generics, combine_generics_adt},
-};
+use crate::ty::solve::insert_constraint;
 
 /// Assign the return type of the function to the function call expr.
 /// Also tie the types of the function parameter to argument types.

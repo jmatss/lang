@@ -3,9 +3,8 @@ mod mid;
 mod post;
 mod pre;
 mod ty;
-pub mod util;
 
-use std::{collections::HashMap, io::Write, process::exit, time::Instant};
+use std::{collections::HashMap, io::Write, time::Instant};
 
 use parking_lot::Mutex;
 
@@ -13,6 +12,7 @@ use common::{
     ctx::{analyze_ctx::AnalyzeCtx, ast_ctx::AstCtx},
     error::LangError,
     file::{FileId, FileInfo},
+    order::dependency_order_from_ctx,
     token::ast::AstToken,
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse},
     ty::ty_env::TyEnv,
@@ -32,7 +32,6 @@ use post::{
 };
 use pre::{indexing::IndexingAnalyzer, main_args::MainArgsAnalyzer};
 use ty::{inferencer::TypeInferencer, traits_fn::TraitsFnAnalyzer};
-use util::order::dependency_order_from_ctx;
 
 use crate::{
     mid::trait_impl::TraitImplAnalyzer,
@@ -89,18 +88,6 @@ fn run_solve_type_system(ctx: &mut TraverseCtx, quiet: bool) -> Result<(), Vec<L
     Ok(())
 }
 
-// TODO: Error if a function that doesn't have a return type has a return in it.
-// TODO: Make it so that one doesn't have to recreate a new AstVisitor for every
-//       analyzing step. They all want to shared the same `analyze_context` but
-//       moving the analyzer contianing the `analyze_context` into the traverser
-//       will not work since rust assumes that the analyzer will live for the
-//       whole life of the traverser. And since the analyzer contains a mut ref
-//       to the `analyze_context`, rust will assume that the `analyze_context`
-//       will live for the while "analyze" function inside the analyzer object.
-// TODO: Since the "defer" copies expressions in the AST, is there a possiblity
-//       that the corresponding "DeferExec" and its contents gets different types
-//       during type analyzing? Would that be a problem if it is true?
-
 /// Updates the AST with information about function prototypes and declarations
 /// of structures.
 /// The "defer analyzing" depends on being able to lookup block info, so it needs
@@ -124,27 +111,6 @@ pub fn analyze<'a>(
     file_info: HashMap<FileId, FileInfo>,
     quiet: bool,
 ) -> Result<AnalyzeCtx<'a>, Vec<LangError>> {
-    // TODO: Add analyzer step to check so that someone doesn't take the address
-    //       of a parameter and doesn't dereference a non-pointer.
-    //       Since being able to take the address of a parameter requires it to
-    //       be stack-allocated, that is not something that paramters are as
-    //       default (they are stored in registers as default). It might also
-    //       be confusing being able to take the address of a parameter since
-    //       the person writing the code might expect derefering and writing to
-    //       the memory would modify the argument at the call-site of the function,
-    //       but in reality the address would just point to a temporary stack
-    //       allocation done just to be able to get an address.
-    //
-    //       The better option is to not allow being able to take the address of
-    //       parameters. If an user really wants to take the address of a parameter,
-    //       the user would have to make a manual temporary variable (stack
-    //       allocation) and take the address of that. This is the same logic that
-    //       the compiler could do behind the scenes to allow for taking the
-    //       address of parameters, but in this case the user are 100% sure what
-    //       is going on while if the compiler did it, it would be hidden from
-    //       the user who wrote the code.
-    exit(1);
-
     let built_ins = init_built_ins(ty_env).map_err(|err| vec![err])?;
 
     let mut ast_ctx = AstCtx::new(built_ins, file_info).map_err(|err| vec![err])?;

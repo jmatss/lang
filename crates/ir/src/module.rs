@@ -1,27 +1,33 @@
 use std::{
+    cmp::Ordering,
     collections::{hash_map::Entry, HashMap},
-    ops::Deref,
+    fmt::Debug,
 };
 
 use crate::{
-    decl::{func::Func, ty::Type},
     error::{IrError, IrResult},
+    func::FuncDecl,
+    ty::Type,
     Data, DataIdx, GlobalVarIdx,
 };
 
-#[derive(Debug)]
 pub struct Module {
     name: String,
 
-    funcs: HashMap<String, Func>,
+    /// The string is the name of the function and the `FuncDecl` is the
+    /// declaration of the function.
+    funcs: HashMap<String, FuncDecl>,
 
-    /// The first string is the name of the ADT and the vector are the types of
-    /// the members. At this point the members will accessed with indices, so
-    /// there is no need to store their names.
-    structs: HashMap<String, Vec<Type>>,
-    unions: HashMap<String, Vec<Type>>,
-    /// The value of the map is the amount of enum members.
-    enums: HashMap<String, usize>,
+    // TODO: How to handle externally declared structs? They have no members,
+    //       but there is currently no way to mark a struct in this hashmap
+    //       explicitly as an external struct declaration.
+    //       For now the members are just set to an empty vector.
+    /// The first string is the name of the struct and the vector of `Type`s
+    /// are the members of the struct (in order).
+    ///
+    /// At this point enums and tuples have been compiled into structs, so they
+    /// are stored in here as well.
+    pub structs: HashMap<String, Vec<Type>>,
 
     global_vars: Vec<Type>,
 
@@ -36,14 +42,12 @@ impl Module {
             name,
             funcs: HashMap::default(),
             structs: HashMap::default(),
-            unions: HashMap::default(),
-            enums: HashMap::default(),
             global_vars: Vec::default(),
             data: Vec::default(),
         }
     }
 
-    pub fn add_function(&mut self, name: String, func: Func) -> IrResult<()> {
+    pub fn add_func(&mut self, name: String, func: FuncDecl) -> IrResult<()> {
         match self.funcs.entry(name) {
             Entry::Occupied(entry) => Err(IrError::new(format!(
                 "Function with name \"{}\" already exists.",
@@ -56,29 +60,16 @@ impl Module {
         }
     }
 
-    pub fn get_function(&self, name: &str) -> Option<&Func> {
+    pub fn get_func(&self, name: &str) -> Option<&FuncDecl> {
         self.funcs.get(name)
     }
 
-    pub fn get_function_mut(&mut self, name: &str) -> Option<&mut Func> {
+    pub fn get_func_mut(&mut self, name: &str) -> Option<&mut FuncDecl> {
         self.funcs.get_mut(name)
     }
 
-    pub fn remove_function(&mut self, name: &str) -> Option<Func> {
+    pub fn remove_func(&mut self, name: &str) -> Option<FuncDecl> {
         self.funcs.remove(name)
-    }
-
-    /// Can be used to add any kind of ADT (struct/enum/union).
-    pub fn add_adt(&mut self, adt_type: Type) -> IrResult<()> {
-        match adt_type {
-            Type::Struct(name, members) => self.add_struct(name, members),
-            Type::Enum(name, member_count) => self.add_enum(name, member_count),
-            Type::Union(name, members) => self.add_union(name, members),
-            _ => Err(IrError::new(format!(
-                "Invalid type when adding ADT: {:#?}",
-                adt_type
-            ))),
-        }
     }
 
     pub fn add_struct(&mut self, name: String, members: Vec<Type>) -> IrResult<()> {
@@ -102,48 +93,6 @@ impl Module {
         self.structs.remove(name)
     }
 
-    pub fn add_enum(&mut self, name: String, member_count: usize) -> IrResult<()> {
-        match self.enums.entry(name) {
-            Entry::Occupied(entry) => Err(IrError::new(format!(
-                "Enum with name \"{}\" already exists.",
-                entry.key()
-            ))),
-            Entry::Vacant(entry) => {
-                entry.insert(member_count);
-                Ok(())
-            }
-        }
-    }
-
-    pub fn get_enum(&self, name: &str) -> Option<&usize> {
-        self.enums.get(name)
-    }
-
-    pub fn remove_enum(&mut self, name: &str) -> Option<usize> {
-        self.enums.remove(name)
-    }
-
-    pub fn add_union(&mut self, name: String, members: Vec<Type>) -> IrResult<()> {
-        match self.unions.entry(name) {
-            Entry::Occupied(entry) => Err(IrError::new(format!(
-                "Union with name \"{}\" already exists.",
-                entry.key()
-            ))),
-            Entry::Vacant(entry) => {
-                entry.insert(members);
-                Ok(())
-            }
-        }
-    }
-
-    pub fn get_union(&self, name: &str) -> Option<&Vec<Type>> {
-        self.unions.get(name)
-    }
-
-    pub fn remove_union(&mut self, name: &str) -> Option<Vec<Type>> {
-        self.unions.remove(name)
-    }
-
     /// Returns the index of the added data.
     pub fn add_data(&mut self, data: Data) -> DataIdx {
         self.data.push(data);
@@ -162,5 +111,81 @@ impl Module {
 
     pub fn get_global_var(&self, global_var_idx: GlobalVarIdx) -> Option<&Type> {
         self.global_vars.get(*global_var_idx)
+    }
+}
+
+impl Debug for Module {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Module \"{}\"", self.name)?;
+
+        writeln!(f, "Structs:")?;
+        let mut struct_names = self.structs.keys().cloned().collect::<Vec<_>>();
+        struct_names.sort_by_key(|key| key.to_uppercase());
+
+        for name in struct_names {
+            let members = self.structs.get(&name).unwrap();
+            let members_string = members
+                .iter()
+                .map(|member| format!("{:?}", member))
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(f, " {} - {{ {} }}", name, &members_string)?;
+        }
+
+        writeln!(f, "Globals:")?;
+        for (i, global) in self.global_vars.iter().enumerate() {
+            writeln!(f, " {}) {:?}", i, global)?;
+        }
+
+        writeln!(f, "Data:")?;
+        for (i, data) in self.data.iter().enumerate() {
+            writeln!(f, " {}) \"{:?}\"", i, data)?;
+        }
+
+        writeln!(f)?;
+
+        let mut func_decls = self.funcs.values().collect::<Vec<_>>();
+        func_decls.sort_by(|a, b| {
+            if a.name == "main" {
+                Ordering::Less
+            } else if b.name == "main" {
+                Ordering::Greater
+            } else {
+                a.name.cmp(&b.name)
+            }
+        });
+
+        for func_decl in func_decls {
+            let params_string = func_decl
+                .params
+                .iter()
+                .map(|param| format!("{:?}", param))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let ret_string = if matches!(func_decl.ret_type, Type::Void) {
+                "".into()
+            } else {
+                format!(" -> {:?}", func_decl.ret_type)
+            };
+            writeln!(
+                f,
+                "Function {:?}{}({}){}:",
+                func_decl.visibility, func_decl.name, params_string, ret_string
+            )?;
+
+            if !func_decl.locals.is_empty() {
+                writeln!(f, " Locals:")?;
+                for (i, local) in func_decl.locals.iter().enumerate() {
+                    writeln!(f, "  {}) {:?}", i, local)?;
+                }
+            }
+
+            writeln!(f)?;
+            for basic_block in &func_decl.basic_blocks {
+                writeln!(f, "{:?}", basic_block)?;
+            }
+        }
+
+        Ok(())
     }
 }

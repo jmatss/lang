@@ -43,7 +43,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     fn parse_keyword(
         &mut self,
         keyword: Kw,
-        modifiers: Vec<Modifier>,
+        mut modifiers: Vec<Modifier>,
         kw_file_pos: FilePosition,
     ) -> LangResult<AstToken> {
         match keyword {
@@ -62,7 +62,10 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
             Kw::Use => self.parse_use(kw_file_pos),
             Kw::Module => self.parse_module(kw_file_pos),
-            Kw::External => self.parse_external(modifiers, kw_file_pos),
+            Kw::External => {
+                modifiers.push(Modifier::External);
+                self.parse_external(modifiers, kw_file_pos)
+            }
 
             Kw::Var => self.parse_var_decl(false, kw_file_pos),
             Kw::Const => self.parse_var_decl(true, kw_file_pos),

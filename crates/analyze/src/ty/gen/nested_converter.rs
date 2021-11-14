@@ -10,6 +10,7 @@ use common::{
     hash::DerefType,
     hash_map::TyEnvHashMap,
     hash_set::TyEnvHashSet,
+    order::order_step2_strings,
     path::LangPath,
     traverse::traverse_ctx::TraverseCtx,
     ty::{
@@ -24,7 +25,7 @@ use common::{
     },
 };
 
-use crate::{ty::solve::set_generic_names, util::order::order_step2_strings};
+use crate::ty::solve::set_generic_names;
 
 use super::nested_collector::{NestedAdtInfo, NestedFnInfo};
 
