@@ -5,7 +5,7 @@ use common::{
     error::{LangError, LangErrorKind, LangResult},
     BlockId,
 };
-use ir::{basic_block::BasicBlock, func::FuncDecl, module::Module, ty::Type, GlobalVarIdx, VarIdx};
+use ir::{BasicBlock, FuncDecl, GlobalVarIdx, Module, Type, VarIdx};
 
 use crate::{
     builder::InstrBuilder,

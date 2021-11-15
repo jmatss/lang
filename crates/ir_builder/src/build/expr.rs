@@ -10,7 +10,7 @@ use common::{
     },
     ty::{get::get_inner, inner_ty::InnerTy, to_string::to_string_path, type_id::TypeId},
 };
-use ir::{instr::ExprInstr, ty::Type, Data, DataIdx, ExprTy, Val};
+use ir::{Data, DataIdx, ExprInstr, ExprTy, Type, Val};
 
 use crate::{
     build::{

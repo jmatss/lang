@@ -7,7 +7,7 @@ use common::{
     },
     BlockId,
 };
-use ir::{instr::EndInstr, ty::Type, ExprTy, Val};
+use ir::{EndInstr, ExprTy, Type, Val};
 
 use crate::{
     build_token, fn_full_name, into_err,

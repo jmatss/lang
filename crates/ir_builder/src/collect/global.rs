@@ -7,7 +7,7 @@ use common::{
     error::{LangError, LangErrorKind, LangResult},
     ty::ty_env::TyEnv,
 };
-use ir::{module::Module, GlobalVarIdx};
+use ir::{GlobalVarIdx, Module};
 
 use crate::to_ir_type;
 

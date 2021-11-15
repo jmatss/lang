@@ -24,7 +24,7 @@ use common::{
     util::to_generic_name,
     ARGC_GLOBAL_VAR_NAME, ARGV_GLOBAL_VAR_NAME,
 };
-use ir::{ty::Type, ExprTy, Val, VarIdx, VAL_EMPTY};
+use ir::{ExprTy, Type, Val, VarIdx, VAL_EMPTY};
 use parking_lot::RwLock;
 
 use crate::{

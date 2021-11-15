@@ -15,7 +15,7 @@ use common::{
     ty::ty_env::TyEnv,
     BlockId,
 };
-use ir::{module::Module, LocalVarIdx};
+use ir::{LocalVarIdx, Module};
 
 use crate::{fn_full_name, to_ir_type, VarModifier};
 

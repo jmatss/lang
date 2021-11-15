@@ -1,10 +1,7 @@
 use common::error::{LangError, LangErrorKind, LangResult};
 use ir::{
-    error::{IrError, IrResult},
-    instr::{BinOper, EndInstr, ExprInstr, ExprInstrKind, Lit, Op, Signed, UnOper},
-    module::Module,
-    ty::Type,
-    Data, DataIdx, Val, VarIdx, VAL_EMPTY, VAL_START_NR,
+    BinOper, Data, DataIdx, EndInstr, ExprInstr, ExprInstrKind, IrError, IrResult, Lit, Module, Op,
+    Signed, Type, UnOper, Val, VarIdx, VAL_EMPTY, VAL_START_NR,
 };
 
 use crate::into_err;

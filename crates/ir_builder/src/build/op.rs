@@ -11,7 +11,7 @@ use common::{
     },
     ty::get::get_ident,
 };
-use ir::{instr::Signed, ty::Type, ExprTy, Val, VarIdx, VAL_BOOL_FALSE, VAL_BOOL_TRUE};
+use ir::{ExprTy, Signed, Type, Val, VarIdx, VAL_BOOL_FALSE, VAL_BOOL_TRUE};
 
 use crate::{adt_full_name, into_err, state::BuildState, to_ir_type};
 

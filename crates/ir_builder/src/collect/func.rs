@@ -10,7 +10,7 @@ use common::{
     },
     ty::ty_env::TyEnv,
 };
-use ir::module::Module;
+use ir::Module;
 
 use crate::{into_err, to_ir_func};
 

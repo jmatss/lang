@@ -1,13 +1,18 @@
 use std::{fmt::Debug, ops::Deref};
 
-use ty::Type;
+mod basic_block;
+mod error;
+mod func;
+mod instr;
+mod module;
+mod ty;
 
-pub mod basic_block;
-pub mod error;
-pub mod func;
-pub mod instr;
-pub mod module;
-pub mod ty;
+pub use basic_block::BasicBlock;
+pub use error::{IrError, IrResult};
+pub use func::{FuncDecl, FuncVisibility};
+pub use instr::*;
+pub use module::Module;
+pub use ty::Type;
 
 /// Used to indicate if an expression is a L- or Rvalue.
 #[derive(Debug, Copy, Clone)]

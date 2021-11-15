@@ -18,13 +18,7 @@ use common::{
     },
     util,
 };
-use ir::{
-    error::IrError,
-    func::{FuncDecl, FuncVisibility},
-    module::Module,
-    ty::Type,
-    ExprTy,
-};
+use ir::{ExprTy, FuncDecl, FuncVisibility, IrError, Module, Type};
 
 use crate::{
     build::{block::build_block, stmt::build_stmt},

@@ -1,3 +1,4 @@
+use ir::{Module, Type};
 use parking_lot::Mutex;
 
 use common::{
@@ -8,7 +9,6 @@ use common::{
     token::block::AdtKind,
     ty::ty_env::TyEnv,
 };
-use ir::{module::Module, ty::Type};
 
 use crate::{adt_full_name, into_err, size_of, to_ir_adt_members};
 

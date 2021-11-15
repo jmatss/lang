@@ -8,7 +8,7 @@ use common::{
     },
     ty::{ty::Ty, ty_env::TyEnv, type_id::TypeId},
 };
-use ir::{instr::Signed, ExprTy, Val, VarIdx};
+use ir::{ExprTy, Signed, Val, VarIdx};
 
 use crate::{into_err, state::BuildState};
 
