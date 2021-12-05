@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Type {
     /// The string is the name of the ADT that is being referenced.
     Adt(String),
@@ -55,12 +55,23 @@ impl Type {
     pub fn is_float(&self) -> bool {
         matches!(self, Type::F32 | Type::F64)
     }
+
+    pub fn is_pointer(&self) -> bool {
+        matches!(self, Type::Pointer(_))
+    }
+
+    pub fn is_signed(&self) -> bool {
+        matches!(
+            self,
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
+        )
+    }
 }
 
 impl Debug for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Adt(name) => write!(f, "adt({})", name),
+            Self::Adt(name) => write!(f, "{}", name),
             Self::Func(name) => write!(f, "fn({})", name),
             Self::Pointer(type_i) => write!(f, "{{{:?}}}", type_i),
             Self::Array(type_i, Some(dim)) => write!(f, "[{:?}: {}]", type_i, dim),

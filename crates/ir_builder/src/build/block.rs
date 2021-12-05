@@ -290,7 +290,7 @@ fn build_if_case(
     }
 
     // Compile all tokens inside this if-case.
-    state.set_cur_block(Some(case_block_label.clone()));
+    state.set_cur_block(Some(case_block_label));
     for token in body {
         state.cur_block_id = block_id;
         build_token(state, token)?;
@@ -422,7 +422,13 @@ fn build_match(
 
     state.set_cur_block(Some(start_block_label));
 
-    let match_val = build_expr(state, expr, ExprTy::RValue)?;
+    let mut match_val = build_expr(state, expr, ExprTy::RValue)?;
+
+    // TODO: Verify type of value used as match expression. Must be primitive
+    //       constant type. This will be implement after constant-folding is
+    //       implemented (will help a lot with figuring out if the expression is
+    //       constant or not).
+
     let end_instr = state
         .builder
         .branch_switch(match_val, &default_block_label, &cases)

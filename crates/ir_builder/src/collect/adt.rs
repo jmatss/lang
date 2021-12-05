@@ -1,4 +1,4 @@
-use ir::{Module, Type};
+use ir::{size_with_padding, Module, Type};
 use parking_lot::Mutex;
 
 use common::{
@@ -10,7 +10,7 @@ use common::{
     ty::ty_env::TyEnv,
 };
 
-use crate::{adt_full_name, into_err, size_of, to_ir_adt_members};
+use crate::{adt_full_name, into_err, to_ir_adt_members};
 
 /// Collects all ADTs (struct/enum/unions/tuples) that can be found in the
 /// `AstCtx` and inserts them into the given `module`.
@@ -45,7 +45,11 @@ pub(crate) fn collect_type_decls(
 
         match adt.kind {
             AdtKind::Struct | AdtKind::Tuple => {
-                let members = to_ir_adt_members(ast_ctx, &ty_env_guard, &adt)?;
+                let members = if adt.has_definition {
+                    Some(to_ir_adt_members(ast_ctx, &ty_env_guard, &adt)?)
+                } else {
+                    None
+                };
                 module
                     .add_struct(adt_full_name, members)
                     .map_err(into_err)?;
@@ -54,7 +58,7 @@ pub(crate) fn collect_type_decls(
                 let members = to_ir_adt_members(ast_ctx, &ty_env_guard, &adt)?;
                 let mut largest_size = 0;
                 for member in &members {
-                    let cur_size = size_of(module, member.clone())?;
+                    let cur_size = size_with_padding(module, member).map_err(into_err)?;
                     if cur_size > largest_size {
                         largest_size = cur_size;
                     }
@@ -63,14 +67,14 @@ pub(crate) fn collect_type_decls(
                 let data_type = Type::Array(Box::new(Type::U8), Some(largest_size as u32));
                 let tag_type = Type::U8;
                 module
-                    .add_struct(adt_full_name, vec![data_type, tag_type])
+                    .add_struct(adt_full_name, Some(vec![data_type, tag_type]))
                     .map_err(into_err)?;
             }
             AdtKind::Enum => {
                 // TODO: int/uint.
                 let member_type = Type::U64;
                 module
-                    .add_struct(adt_full_name, vec![member_type])
+                    .add_struct(adt_full_name, Some(vec![member_type]))
                     .map_err(into_err)?;
             }
             AdtKind::Unknown => {

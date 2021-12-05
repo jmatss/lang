@@ -145,9 +145,6 @@ pub enum BinOper {
 
 #[derive(Debug, Clone)]
 pub enum UnOper {
-    Deref,
-    Address,
-
     /// ADT/enum access. The `usize` is the index that is being
     /// indexed.
     AdtAccess(usize),
@@ -214,19 +211,16 @@ impl Debug for ExprInstr {
                 format!("fn_ptr {}", name)
             }
             ExprInstrKind::VarAddress(var_idx) => {
-                format!("var_address {:?}", var_idx)
+                format!("{:?}", var_idx)
             }
             ExprInstrKind::DataAddress(data_idx) => {
                 format!("data_address {:?}", data_idx)
             }
             ExprInstrKind::Store(ptr_val, val) => {
-                format!(
-                    "store ${}: {:?} into ${}: {:?}",
-                    val.0, val.1, ptr_val.0, ptr_val.1
-                )
+                format!("store ${} into ${}", val.0, ptr_val.0,)
             }
             ExprInstrKind::Load(ptr_val) => {
-                format!("load ${}: {:?}", ptr_val.0, ptr_val.1)
+                format!("load ${}", ptr_val.0)
             }
             ExprInstrKind::Op(op) => match op {
                 Op::BinOp {
@@ -263,26 +257,21 @@ impl Debug for ExprInstr {
                     BinOper::ShiftRight => format!("shift_right_u ${} ${}", lhs.0, rhs.0),
                 },
                 Op::UnOp { oper, value } => match oper {
-                    UnOper::Deref => format!("deref ${}: {:?}", value.0, value.1),
-                    UnOper::Address => format!("address ${}: {:?}", value.0, value.1),
                     UnOper::AdtAccess(idx) => {
-                        format!("adt_access ${}: {:?} idx {}", value.0, value.1, idx)
+                        format!("adt_access ${} idx {}", value.0, idx)
                     }
                     UnOper::ArrayAccess(inner_value) => {
-                        format!(
-                            "array_access ${}: {:?} idx {}",
-                            value.0, value.1, inner_value.0
-                        )
+                        format!("array_access ${} idx {}", value.0, inner_value.0)
                     }
-                    UnOper::IsNull => format!("is_null ${}: {:?}", value.0, value.1),
-                    UnOper::BitComplement => format!("bit_complement ${}: {:?}", value.0, value.1),
-                    UnOper::BoolNot => format!("bool_not ${}: {:?}", value.0, value.1),
+                    UnOper::IsNull => format!("is_null ${}", value.0),
+                    UnOper::BitComplement => format!("bit_complement ${}", value.0),
+                    UnOper::BoolNot => format!("bool_not ${}", value.0),
                 },
             },
             ExprInstrKind::Phi(phi_branches) => {
                 let branches_string = phi_branches
                     .iter()
-                    .map(|(label, val)| format!("({}, ${}: {:?})", label, val.0, val.1))
+                    .map(|(label, val)| format!("({}, ${})", label, val.0))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("phi [{}]", branches_string)
@@ -290,7 +279,7 @@ impl Debug for ExprInstr {
             ExprInstrKind::StructInit(name, args) => {
                 let args_string = args
                     .iter()
-                    .map(|val| format!("${}: {:?}", val.0, val.1))
+                    .map(|val| format!("${}", val.0))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("struct_init {}({})", name, args_string)
@@ -317,7 +306,7 @@ impl Debug for ExprInstr {
 impl Debug for EndInstr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let output = match self {
-            Self::Return(Some(val)) => format!("return ${}: {:?}", val.0, val.1),
+            Self::Return(Some(val)) => format!("return ${}", val.0),
             Self::Return(None) => "return".into(),
             Self::Exit => "exit".into(),
             Self::Branch(label) => format!("branch \"{}\"", label),
@@ -330,12 +319,12 @@ impl Debug for EndInstr {
             Self::BranchSwitch(val, label_default, cases) => {
                 let cases_string = cases
                     .iter()
-                    .map(|(val, label)| format!("(${}: {:?}, \"{}\")", val.0, val.1, label))
+                    .map(|(val, label)| format!("(${}, \"{}\")", val.0, label))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!(
-                    "branch_switch ${}: {:?} \"{}\" [{}]",
-                    val.0, val.1, label_default, cases_string
+                    "branch_switch ${} \"{}\" [{}]",
+                    val.0, label_default, cases_string
                 )
             }
             Self::Unreachable => "unreachable".into(),

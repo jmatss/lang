@@ -9,11 +9,11 @@ use common::{
         op::{BinOp, BinOperator, Op, UnOp, UnOperator},
         stmt::Stmt,
     },
-    ty::get::get_ident,
+    ty::{get::get_ident, to_string::to_string_path},
 };
-use ir::{ExprTy, Signed, Type, Val, VarIdx, VAL_BOOL_FALSE, VAL_BOOL_TRUE};
+use ir::{ExprTy, Signed, Type, Val, VarIdx};
 
-use crate::{adt_full_name, into_err, state::BuildState, to_ir_type};
+use crate::{into_err, state::BuildState, to_ir_type};
 
 use super::{
     expr::build_expr,
@@ -64,10 +64,7 @@ pub fn build_bin_op(state: &mut BuildState, bin_op: &BinOp) -> LangResult<Val> {
         &state.analyze_ctx.ty_env.lock(),
         bin_op.lhs.get_expr_type()?,
     )?;
-    let signed = if matches!(
-        lhs_type,
-        Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
-    ) {
+    let signed = if lhs_type.is_signed() {
         Signed::True
     } else {
         Signed::False
@@ -90,7 +87,7 @@ pub fn build_bin_op(state: &mut BuildState, bin_op: &BinOp) -> LangResult<Val> {
         | BinOperator::Lte
         | BinOperator::Gte => {
             let rhs_val = build_expr(state, &bin_op.rhs, ExprTy::RValue)?;
-            build_bin_op_cmp(state, &bin_op.operator, lhs_val, rhs_val, file_pos)
+            build_bin_op_cmp(state, &bin_op.operator, lhs_val, rhs_val, signed, file_pos)
         }
 
         BinOperator::Add
@@ -189,6 +186,9 @@ fn build_bin_op_bool_and(
 
     let start_block_name = state.cur_block_mut()?.label.clone();
 
+    let false_instr = state.builder.bool_false();
+    state.cur_block_mut()?.push(false_instr.clone());
+
     // The eval block is to evaluate the rhs only if the lhs
     // evaluates to true to allow for short circuit.
     let eval_block_name = state.insert_new_block_after("bool.and.rhs".into(), &start_block_name)?;
@@ -207,10 +207,11 @@ fn build_bin_op_bool_and(
     state.cur_block_mut()?.set_end_instr(end_instr);
 
     state.set_cur_block(Some(merge_block_name.clone()));
+
     let phi_instr = state
         .builder
         .phi(&[
-            (start_block_name, VAL_BOOL_FALSE),
+            (start_block_name, false_instr.val),
             (eval_block_name.clone(), rhs_val),
         ])
         .map_err(into_err)?;
@@ -240,6 +241,9 @@ fn build_bin_op_bool_or(
 
     let start_block_name = state.cur_block_mut()?.label.clone();
 
+    let true_instr = state.builder.bool_true();
+    state.cur_block_mut()?.push(true_instr.clone());
+
     // The eval block is to evaluate the rhs only if the lhs
     // evaluates to false to allow for short circuit.
     let eval_block_name = state.insert_new_block_after("bool.or.rhs".into(), &start_block_name)?;
@@ -258,10 +262,11 @@ fn build_bin_op_bool_or(
     state.cur_block_mut()?.set_end_instr(end_instr);
 
     state.set_cur_block(Some(merge_block_name.clone()));
+
     let phi_instr = state
         .builder
         .phi(&[
-            (start_block_name, VAL_BOOL_TRUE),
+            (start_block_name, true_instr.val),
             (eval_block_name.clone(), rhs_val),
         ])
         .map_err(into_err)?;
@@ -274,8 +279,8 @@ fn build_bin_op_bool_or(
     Ok(phi_instr.val)
 }
 
-fn build_bin_op_cast(state: &mut BuildState, lhs_val: Val, rhs_type: Type) -> LangResult<Val> {
-    let instr = state.builder.cast(lhs_val, rhs_type);
+fn build_bin_op_cast(state: &mut BuildState, lhs_val: Val, ret_type: Type) -> LangResult<Val> {
+    let instr = state.builder.cast(lhs_val, ret_type);
     state.cur_block_mut()?.push(instr.clone());
     Ok(instr.val)
 }
@@ -285,6 +290,7 @@ fn build_bin_op_cmp(
     oper: &BinOperator,
     mut lhs_val: Val,
     mut rhs_val: Val,
+    signed: Signed,
     file_pos: Option<&FilePosition>,
 ) -> LangResult<Val> {
     // Allow compares between two enum values. In that case, "deref" the enum
@@ -301,7 +307,11 @@ fn build_bin_op_cmp(
             ));
         }
 
-        let members = state.module.get_struct(adt_name_a).unwrap();
+        let members = state
+            .module
+            .get_struct(adt_name_a)
+            .map_err(into_err)?
+            .unwrap();
         if members.len() != 1 || !members.first().unwrap().is_int() {
             return Err(LangError::new(
                 format!(
@@ -336,12 +346,12 @@ fn build_bin_op_cmp(
     }
 
     let instr = match oper {
-        BinOperator::Eq => state.builder.eq(lhs_val, rhs_val),
-        BinOperator::Neq => state.builder.neq(lhs_val, rhs_val),
-        BinOperator::Lt => state.builder.lt(lhs_val, rhs_val),
-        BinOperator::Gt => state.builder.gt(lhs_val, rhs_val),
-        BinOperator::Lte => state.builder.lte(lhs_val, rhs_val),
-        BinOperator::Gte => state.builder.gte(lhs_val, rhs_val),
+        BinOperator::Eq => state.builder.eq(lhs_val, rhs_val, signed),
+        BinOperator::Neq => state.builder.neq(lhs_val, rhs_val, signed),
+        BinOperator::Lt => state.builder.lt(lhs_val, rhs_val, signed),
+        BinOperator::Gt => state.builder.gt(lhs_val, rhs_val, signed),
+        BinOperator::Lte => state.builder.lte(lhs_val, rhs_val, signed),
+        BinOperator::Gte => state.builder.gte(lhs_val, rhs_val, signed),
         _ => {
             return Err(LangError::new(
                 format!("Invalid operator in int compare: {:?}", oper),
@@ -524,7 +534,7 @@ fn build_un_op_union_is(state: &mut BuildState, un_op: &UnOp, var_decl: &Stmt) -
 
     let cmp_instr = state
         .builder
-        .eq(expected_tag_instr.val, actual_tag)
+        .eq(expected_tag_instr.val, actual_tag, Signed::False)
         .map_err(into_err)?;
     state.cur_block_mut()?.push(cmp_instr.clone());
 
@@ -536,7 +546,7 @@ fn build_un_op_array_access(
     un_op: &UnOp,
     expr_ty: ExprTy,
 ) -> LangResult<Val> {
-    let array_val = build_expr(state, &un_op.value, ExprTy::RValue)?;
+    let array_val = build_expr(state, &un_op.value, expr_ty)?;
 
     let idx_val = if let UnOperator::ArrayAccess(idx_expr) = &un_op.operator {
         build_expr(state, idx_expr, ExprTy::RValue)?
@@ -577,7 +587,7 @@ fn build_adt_access(
     idx: usize,
     expr_ty: ExprTy,
 ) -> LangResult<Val> {
-    let adt_val = build_expr(state, adt_expr, ExprTy::RValue)?;
+    let adt_val = build_expr(state, adt_expr, expr_ty)?;
 
     let adt_type_id = adt_expr.get_expr_type()?;
     let path = get_ident(&state.analyze_ctx.ty_env.lock(), adt_type_id)?.unwrap();
@@ -586,7 +596,7 @@ fn build_adt_access(
         .ast_ctx
         .get_adt(&state.analyze_ctx.ty_env.lock(), &path)?;
 
-    // If the current ADT is a enum, need to look-up the type of the member that
+    // If the current ADT is a union, need to look-up the type of the member that
     // we are accessing (member with idx `idx`). Also need to change the `idx`
     // to 0 which is the location of the member in the IR type.
     let (idx, member_type) = if let AdtKind::Union = adt.read().kind {
@@ -609,22 +619,18 @@ fn build_adt_access(
         .map_err(into_err)?;
     state.cur_block_mut()?.push(instr.clone());
 
-    if let ExprTy::RValue = expr_ty {
-        instr = state.builder.load(instr.val).map_err(into_err)?;
+    // Need to cast to the correct member type if this was a union access.
+    // The instructions above will return a type of {[u8; x]}.
+    // `member_type` will only be set to Some if this is a union.
+    if let Some(member_type) = member_type {
+        let ptr_member_type = Type::Pointer(Box::new(member_type));
+        instr = state.builder.cast(instr.val, ptr_member_type);
         state.cur_block_mut()?.push(instr.clone());
     }
 
-    // Need to cast to the correct member type if this was a union access.
-    // The instructions above will return a type of [u8; x].
-    if let Some(member_type) = member_type {
-        if let ExprTy::RValue = expr_ty {
-            instr = state.builder.cast(instr.val, member_type);
-            state.cur_block_mut()?.push(instr.clone());
-        } else {
-            let ptr_member_type = Type::Pointer(Box::new(member_type));
-            instr = state.builder.cast(instr.val, ptr_member_type);
-            state.cur_block_mut()?.push(instr.clone());
-        }
+    if let ExprTy::RValue = expr_ty {
+        instr = state.builder.load(instr.val).map_err(into_err)?;
+        state.cur_block_mut()?.push(instr.clone());
     }
 
     Ok(instr.val)
@@ -664,12 +670,7 @@ fn build_un_op_enum_access(state: &mut BuildState, un_op: &UnOp) -> LangResult<V
             un_op.value.file_pos().cloned(),
         ));
     };
-
-    let adt = state
-        .analyze_ctx
-        .ast_ctx
-        .get_adt(&state.analyze_ctx.ty_env.lock(), &adt_path)?;
-    let adt_full_name = adt_full_name(&state.analyze_ctx.ty_env.lock(), &adt.read());
+    let adt_full_name = to_string_path(&state.analyze_ctx.ty_env.lock(), &adt_path);
 
     let member_idx = state.analyze_ctx.ast_ctx.get_adt_member_index(
         &state.analyze_ctx.ty_env.lock(),

@@ -18,7 +18,7 @@ use common::{
     },
     util,
 };
-use ir::{ExprTy, FuncDecl, FuncVisibility, IrError, Module, Type};
+use ir::{ExprTy, FuncDecl, FuncVisibility, IrError, IrResult, Module, Type};
 
 use crate::{
     build::{block::build_block, stmt::build_stmt},
@@ -65,10 +65,11 @@ fn into_err(err: IrError) -> LangError {
 
 pub fn build_module(
     module_name: String,
+    ptr_size: usize,
     analyze_ctx: &mut AnalyzeCtx,
     ast_root: &mut AstToken,
 ) -> Result<Module, Vec<LangError>> {
-    let mut module = Module::new(module_name);
+    let mut module = Module::new(module_name, ptr_size);
 
     let adt_order = dependency_order(analyze_ctx, ast_root, false, true)?;
     let ast_ctx = &mut analyze_ctx.ast_ctx;
@@ -90,6 +91,15 @@ pub fn build_module(
         params,
     );
     build_token(&mut build_state, ast_root).map_err(|e| vec![e])?;
+
+    let mut structs_order = Vec::with_capacity(module.structs.len());
+    for adt_path in &adt_order {
+        let adt_name = to_string_path(&analyze_ctx.ty_env.lock(), adt_path);
+        if module.structs.contains_key(&adt_name) {
+            structs_order.push(adt_name);
+        }
+    }
+    module.add_structs_order(&structs_order);
 
     Ok(module)
 }
@@ -177,7 +187,7 @@ fn to_ir_type(ast_ctx: &AstCtx, ty_env: &TyEnv, type_id: TypeId) -> LangResult<T
 
 /// Converts the given `func` into the corresponding IR `FuncDecl`.
 fn to_ir_func(ast_ctx: &AstCtx, ty_env: &TyEnv, func: &Fn) -> LangResult<FuncDecl> {
-    let fn_full_path = fn_full_name(ty_env, func)?;
+    let fn_full_name = fn_full_name(ty_env, func)?;
 
     let param_types = if let Some(params) = &func.parameters {
         let mut param_types = Vec::with_capacity(params.len());
@@ -191,7 +201,7 @@ fn to_ir_func(ast_ctx: &AstCtx, ty_env: &TyEnv, func: &Fn) -> LangResult<FuncDec
                     format!(
                         "Param with name \"{}\" in function \"{:?}\" has no type set.",
                         &param.full_name(),
-                        fn_full_path
+                        fn_full_name
                     ),
                     LangErrorKind::IrError,
                     None,
@@ -211,14 +221,14 @@ fn to_ir_func(ast_ctx: &AstCtx, ty_env: &TyEnv, func: &Fn) -> LangResult<FuncDec
 
     let visibility = if func.modifiers.contains(&Modifier::External) {
         FuncVisibility::Import
-    } else if func.modifiers.contains(&Modifier::Public) {
+    } else if func.modifiers.contains(&Modifier::Public) || &fn_full_name == "main" {
         FuncVisibility::Export
     } else {
         FuncVisibility::None
     };
 
     Ok(FuncDecl::new(
-        fn_full_path,
+        fn_full_name,
         visibility,
         param_types,
         ret_type,
@@ -258,62 +268,6 @@ fn to_ir_adt_members(ast_ctx: &AstCtx, ty_env: &TyEnv, adt: &Adt) -> LangResult<
     Ok(member_types)
 }
 
-// TODO: What size should bool be? Currently set to 1 byte.
-// TODO: How to decide pointer size? Currently set to 4 bytes.
-// TODO: Need to consider the padding in ADTs.
-/// Returns the size of the given type `ir_type` in bytes.
-/// 8 bits = 1 byte.
-pub fn size_of(module: &Module, ir_type: Type) -> LangResult<usize> {
-    Ok(match &ir_type {
-        Type::Adt(adt_name) => {
-            if let Some(members) = module.get_struct(adt_name).cloned() {
-                let mut acc_size = 0;
-                for member_type in members {
-                    acc_size += size_of(module, member_type)?;
-                }
-                acc_size
-            } else {
-                return Err(LangError::new(
-                    format!("Unable to find ADT with name \"{}\" in size_of()", adt_name),
-                    LangErrorKind::IrError,
-                    None,
-                ));
-            }
-        }
-        Type::Pointer(_) | Type::FuncPointer(..) => 4,
-        Type::Array(ir_type_i, Some(dim)) => size_of(module, *ir_type_i.clone())? * (*dim as usize),
-        Type::Char => 4,
-        Type::Bool => 1,
-        Type::I8 | Type::U8 => 1,
-        Type::I16 | Type::U16 => 2,
-        Type::I32 | Type::U32 | Type::F32 => 4,
-        Type::I64 | Type::U64 | Type::F64 => 8,
-        Type::I128 | Type::U128 => 16,
-
-        Type::Func(_) => {
-            return Err(LangError::new(
-                "Tried to take size_of() function (is not sized).".into(),
-                LangErrorKind::IrError,
-                None,
-            ))
-        }
-        Type::Array(_, None) => {
-            return Err(LangError::new(
-                "Tried to take size_of() array slice (is not sized).".into(),
-                LangErrorKind::IrError,
-                None,
-            ))
-        }
-        Type::Void => {
-            return Err(LangError::new(
-                "Tried to take size_of() void (is not sized).".into(),
-                LangErrorKind::IrError,
-                None,
-            ))
-        }
-    })
-}
-
 pub fn fn_full_name(ty_env: &TyEnv, func: &Fn) -> LangResult<String> {
     Ok(if let Some(adt_type_id) = func.method_adt {
         let adt_path = get_ident(ty_env, adt_type_id)?.unwrap();
@@ -331,4 +285,102 @@ pub fn adt_full_name(ty_env: &TyEnv, adt: &Adt) -> String {
         .module
         .clone_push(&adt.name, adt.generics.as_ref(), Some(adt.file_pos));
     to_string_path(ty_env, &adt_path)
+}
+
+fn assert_type_eq(lhs_type: &Type, rhs_type: &Type) -> IrResult<()> {
+    match (lhs_type, rhs_type) {
+        (Type::Pointer(inner_type_a), Type::Pointer(inner_type_b)) => {
+            assert_type_eq(inner_type_a, inner_type_b)?;
+        }
+        (Type::Array(inner_type_a, dim_a), Type::Array(inner_type_b, dim_b)) if dim_a == dim_b => {
+            assert_type_eq(inner_type_a, inner_type_b)?;
+        }
+
+        (Type::Adt(name_a), Type::Adt(name_b)) | (Type::Func(name_a), Type::Func(name_b))
+            if name_a == name_b => {}
+
+        (Type::FuncPointer(params_a, ret_a), Type::FuncPointer(params_b, ret_b)) => {
+            let mut is_eq = true;
+
+            if params_a.len() != params_b.len() {
+                is_eq = false;
+            }
+            for (param_a, param_b) in params_a.iter().zip(params_b) {
+                if assert_type_eq(param_a, param_b).is_err() {
+                    is_eq = false;
+                    break;
+                }
+            }
+            if assert_type_eq(ret_a, ret_b).is_err() {
+                is_eq = false;
+            }
+
+            if !is_eq {
+                return Err(IrError::new(format!(
+                    "Expected lhs and rhs types to match but they didn't (function pointers).\n\
+                    Lhs type: {:#?}\nRhs type: {:#?}",
+                    lhs_type, rhs_type,
+                )));
+            }
+        }
+
+        (Type::Void, Type::Void)
+        | (Type::Char, Type::Char)
+        | (Type::Bool, Type::Bool)
+        | (Type::I8, Type::I8)
+        | (Type::U8, Type::U8)
+        | (Type::I16, Type::I16)
+        | (Type::U16, Type::U16)
+        | (Type::I32, Type::I32)
+        | (Type::U32, Type::U32)
+        | (Type::F32, Type::F32)
+        | (Type::I64, Type::I64)
+        | (Type::U64, Type::U64)
+        | (Type::F64, Type::F64)
+        | (Type::I128, Type::I128)
+        | (Type::U128, Type::U128) => (),
+
+        // TODO: Add line/column nr to error.
+        _ => {
+            return Err(IrError::new(format!(
+                "Expected lhs and rhs types to match but they didn't.\n\
+                Lhs type: {:#?}\nRhs type: {:#?}",
+                lhs_type, rhs_type,
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn assert_number(ir_type: &Type) -> IrResult<()> {
+    if ir_type.is_number() {
+        Ok(())
+    } else {
+        Err(IrError::new(format!(
+            "Expected type to be number, got: {:?}.",
+            ir_type,
+        )))
+    }
+}
+
+fn assert_number_or_pointer(ir_type: &Type) -> IrResult<()> {
+    if ir_type.is_number() || ir_type.is_pointer() {
+        Ok(())
+    } else {
+        Err(IrError::new(format!(
+            "Expected type to be number or pointer, got: {:?}.",
+            ir_type,
+        )))
+    }
+}
+
+fn assert_int(ir_type: &Type) -> IrResult<()> {
+    if ir_type.is_int() {
+        Ok(())
+    } else {
+        Err(IrError::new(format!(
+            "Expected type to be integer, got: {:?}.",
+            ir_type,
+        )))
+    }
 }

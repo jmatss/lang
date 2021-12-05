@@ -5,9 +5,10 @@ use parking_lot::Mutex;
 use common::{
     ctx::ast_ctx::AstCtx,
     error::{LangError, LangErrorKind, LangResult},
+    token::{expr::Expr, lit::Lit},
     ty::ty_env::TyEnv,
 };
-use ir::{GlobalVarIdx, Module};
+use ir::{Data, GlobalVarIdx, Module};
 
 use crate::to_ir_type;
 
@@ -38,8 +39,34 @@ pub(crate) fn collect_globals(
                 ));
             };
 
+            let lit_opt = if let Some(init_expr) = &var.value {
+                if let Expr::Lit(ref lit, ..) = **init_expr {
+                    Some(match lit {
+                        // TODO: Handle different string types.
+                        Lit::String(s, _) => {
+                            let data = Data::StringLit(s.into());
+                            ir::Lit::String(module.add_data(data))
+                        }
+                        // TODO: Handle error of char.
+                        Lit::Char(c) => ir::Lit::Char(c.chars().next().unwrap()),
+                        Lit::Bool(b) => ir::Lit::Bool(*b),
+                        // TODO: Handle radix of integer.
+                        Lit::Integer(i, _) => ir::Lit::Integer(i.into()),
+                        Lit::Float(f) => ir::Lit::Float(f.into()),
+                    })
+                } else {
+                    return Err(LangError::new(
+                        format!("Init value of global \"{}\" must be literal.", var.name),
+                        LangErrorKind::IrError,
+                        None,
+                    ));
+                }
+            } else {
+                None
+            };
+
             let ir_type = to_ir_type(ast_ctx, &ty_env_guard, type_id)?;
-            let global_var_idx = module.add_global_var(ir_type);
+            let global_var_idx = module.add_global_var(ir_type, lit_opt);
             globals.insert(var.full_name(), global_var_idx);
         }
     }

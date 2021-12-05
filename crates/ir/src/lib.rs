@@ -5,6 +5,7 @@ mod error;
 mod func;
 mod instr;
 mod module;
+mod size;
 mod ty;
 
 pub use basic_block::BasicBlock;
@@ -12,6 +13,7 @@ pub use error::{IrError, IrResult};
 pub use func::{FuncDecl, FuncVisibility};
 pub use instr::*;
 pub use module::Module;
+pub use size::size_with_padding;
 pub use ty::Type;
 
 /// Used to indicate if an expression is a L- or Rvalue.
@@ -21,11 +23,15 @@ pub enum ExprTy {
     RValue,
 }
 
+/// Can be used as a dummy value when a `Val` needs to be provided but that
+/// never will be used.
+pub const DUMMY_VAL: Val = Val(usize::MAX, Type::Void);
+
 /// Will store temporary values that are evaluated from `ExprInstr`s. These
 /// values can then be referenced from other instructions to use the result of
 /// the previous expr instruction.
 /// The `usize` is a unique identifier and the type is the type of the value.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Val(pub usize, pub Type);
 
 impl Deref for Val {
@@ -36,13 +42,6 @@ impl Deref for Val {
     }
 }
 
-/// Used to indicate the Val of a expression that doesn't return anything.
-/// This will be used for ex. `EndExpr`s.
-pub const VAL_EMPTY: Val = Val(0, Type::Void);
-pub const VAL_BOOL_TRUE: Val = Val(1, Type::Bool);
-pub const VAL_BOOL_FALSE: Val = Val(2, Type::Bool);
-pub const VAL_START_NR: usize = 3;
-
 // TODO: More different data types.
 pub enum Data {
     StringLit(String),
@@ -51,7 +50,7 @@ pub enum Data {
 impl Debug for Data {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::StringLit(data) => write!(f, "{}", data),
+            Self::StringLit(data) => write!(f, "\"{}\"", data),
         }
     }
 }

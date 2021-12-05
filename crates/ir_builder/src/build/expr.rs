@@ -10,9 +10,10 @@ use common::{
     },
     ty::{get::get_inner, inner_ty::InnerTy, to_string::to_string_path, type_id::TypeId},
 };
-use ir::{Data, DataIdx, ExprInstr, ExprTy, Type, Val};
+use ir::{Data, DataIdx, ExprInstr, ExprTy, Type, Val, VarIdx};
 
 use crate::{
+    assert_type_eq,
     build::{
         built_in::build_built_in_call,
         op::{build_bin_op, build_un_op},
@@ -101,10 +102,7 @@ fn build_lit_string(
         StringType::C => {
             let data_idx = build_data(state, str_lit, true);
             let data_type = Type::Pointer(Box::new(Type::U8));
-            let data_instr = state.builder.data_address(data_idx, data_type);
-            state.cur_block_mut()?.push(data_instr.clone());
-
-            state.builder.load(data_instr.val).map_err(into_err)
+            Ok(state.builder.data_address(data_idx, data_type))
         }
 
         StringType::Regular => {
@@ -113,15 +111,12 @@ fn build_lit_string(
             let data_instr = state.builder.data_address(data_idx, data_type);
             state.cur_block_mut()?.push(data_instr.clone());
 
-            let data_ptr_instr = state.builder.load(data_instr.val).map_err(into_err)?;
-            state.cur_block_mut()?.push(data_ptr_instr.clone());
-
             let len_instr = state.builder.u32(&str_len.to_string());
             state.cur_block_mut()?.push(len_instr.clone());
 
             let view_path = ["std".into(), "string".into(), "StringView".into()].into();
             let view_name = to_string_path(&state.analyze_ctx.ty_env.lock(), &view_path);
-            let view_args = [data_ptr_instr.val, len_instr.val];
+            let view_args = [data_instr.val, len_instr.val];
 
             state
                 .builder
@@ -135,15 +130,12 @@ fn build_lit_string(
             let data_instr = state.builder.data_address(data_idx, data_type);
             state.cur_block_mut()?.push(data_instr.clone());
 
-            let data_ptr_instr = state.builder.load(data_instr.val).map_err(into_err)?;
-            state.cur_block_mut()?.push(data_ptr_instr.clone());
-
             let len_instr = state.builder.u32(&str_len.to_string());
             state.cur_block_mut()?.push(len_instr.clone());
 
             let list_path = ["std".into(), "collection".into(), "List".into()].into();
             let list_name = to_string_path(&state.analyze_ctx.ty_env.lock(), &list_path);
-            let list_args = [data_ptr_instr.val, len_instr.val.clone(), len_instr.val];
+            let list_args = [data_instr.val, len_instr.val.clone(), len_instr.val];
 
             let list_init_instr = state
                 .builder
@@ -281,14 +273,11 @@ pub(crate) fn build_fn_call(state: &mut BuildState, fn_call: &FnCall) -> LangRes
         arg_vals.push(arg_val);
     }
 
+    let fn_full_name = fn_call.full_name(&state.analyze_ctx.ty_env.lock())?;
+
     let expr_instr = if fn_call.is_fn_ptr_call {
-        let fn_ptr_var_idx = state.get_var(&fn_call.name, state.cur_block_id)?;
-        state
-            .builder
-            .fn_ptr_call(&mut state.module, fn_ptr_var_idx, &[])
-            .map_err(into_err)?
+        build_fn_ptr_call(state, fn_call, &arg_vals)?
     } else {
-        let fn_full_name = fn_call.full_name(&state.analyze_ctx.ty_env.lock())?;
         state
             .builder
             .fn_call(&mut state.module, &fn_full_name, &arg_vals)
@@ -297,6 +286,69 @@ pub(crate) fn build_fn_call(state: &mut BuildState, fn_call: &FnCall) -> LangRes
 
     state.cur_block_mut()?.push(expr_instr.clone());
     Ok(expr_instr.val)
+}
+
+fn build_fn_ptr_call(
+    state: &mut BuildState,
+    fn_ptr_call: &FnCall,
+    arg_vals: &[Val],
+) -> LangResult<ExprInstr> {
+    let var_idx = state.get_var(&fn_ptr_call.name, state.cur_block_id)?;
+    let var_type = match var_idx {
+        VarIdx::Global(global_idx) => &state.module.global_vars.get(global_idx.0).unwrap().0,
+        VarIdx::Local(local_idx) => state.cur_func()?.locals.get(local_idx.0).unwrap(),
+        VarIdx::Param(param_idx) => state.cur_func()?.params.get(param_idx.0).unwrap(),
+    }
+    .clone();
+
+    let (arg_types, ret_type) = if let Type::FuncPointer(arg_types, ret_type) = &var_type {
+        (arg_types, ret_type)
+    } else {
+        return Err(LangError::new(
+            format!(
+                "Expected var \"{}\" to be of func pointer type, was: {:?}.",
+                &fn_ptr_call.name, var_type
+            ),
+            LangErrorKind::IrError,
+            fn_ptr_call.file_pos,
+        ));
+    };
+
+    if arg_vals.len() != arg_types.len() {
+        return Err(LangError::new(
+            format!(
+                "Incorrect amount of args when calling func pointer in var \"{}\". \
+                Amount of arg types specified for pointer type: {}, args in call: {}.",
+                &fn_ptr_call.name,
+                arg_types.len(),
+                arg_vals.len()
+            ),
+            LangErrorKind::IrError,
+            fn_ptr_call.file_pos,
+        ));
+    }
+
+    for (idx, (arg, arg_type)) in arg_vals.iter().zip(arg_types).enumerate() {
+        if assert_type_eq(&arg.1, arg_type).is_err() {
+            return Err(LangError::new(
+                format!(
+                    "Arg at index {} has bad type when calling function pointer in var \"{}\". \
+                    Arg type in func pointer variable: {:?}, type of arg in call: {:?}.",
+                    idx, &fn_ptr_call.name, arg_type, arg.1
+                ),
+                LangErrorKind::IrError,
+                fn_ptr_call.file_pos,
+            ));
+        }
+    }
+
+    let var_instr = state.builder.var_address(var_idx, var_type.clone());
+    state.cur_block_mut()?.push(var_instr.clone());
+
+    state
+        .builder
+        .fn_ptr_call(var_instr.val, arg_vals, *ret_type.clone())
+        .map_err(into_err)
 }
 
 fn build_fn_ptr(state: &mut BuildState, fn_ptr: &FnPtr) -> LangResult<Val> {
@@ -329,18 +381,19 @@ fn build_fn_ptr(state: &mut BuildState, fn_ptr: &FnPtr) -> LangResult<Val> {
 fn build_struct_init(state: &mut BuildState, struct_init: &AdtInit) -> LangResult<Val> {
     let full_name = struct_init.full_name(&state.analyze_ctx.ty_env.lock())?;
 
-    let member_types = if let Some(member_types) = state.module.get_struct(&full_name) {
-        member_types
-    } else {
-        return Err(LangError::new(
-            format!(
-                "Unable to find struct with name \"{}\". Struct init: {:#?}",
-                full_name, struct_init
-            ),
-            LangErrorKind::IrError,
-            struct_init.file_pos,
-        ));
-    };
+    let member_types =
+        if let Some(member_types) = state.module.get_struct(&full_name).map_err(into_err)? {
+            member_types
+        } else {
+            return Err(LangError::new(
+                format!(
+                    "Tried to init externally declared struct \"{}\". Struct init: {:#?}",
+                    full_name, struct_init
+                ),
+                LangErrorKind::IrError,
+                struct_init.file_pos,
+            ));
+        };
 
     if struct_init.arguments.len() != member_types.len() {
         return Err(LangError::new(
@@ -408,20 +461,37 @@ fn build_union_init(state: &mut BuildState, union_init: &AdtInit) -> LangResult<
         ));
     };
 
-    let arg_val = build_expr(state, &arg.value, ExprTy::RValue)?;
-
     let member_idx = state.analyze_ctx.ast_ctx.get_adt_member_index(
         &state.analyze_ctx.ty_env.lock(),
         &full_path,
         arg_name,
     )?;
-    // TODO: int/unit.
-    let idx_instr = state.builder.u32(&member_idx.to_string());
+
+    let arg_val = build_expr(state, &arg.value, ExprTy::RValue)?;
+
+    let union_member_type =
+        if let Some(members) = state.module.get_struct(&full_name).map_err(into_err)? {
+            members.first().unwrap().clone()
+        } else {
+            return Err(LangError::new(
+                format!("Union with name \"{}\" had no members.", full_name),
+                LangErrorKind::IrError,
+                union_init.file_pos,
+            ));
+        };
+
+    // Need to cast value to the `[u8: x]` type so that it can be stored in
+    // the union struct.
+    let cast_instr = state.builder.cast(arg_val, union_member_type);
+    state.cur_block_mut()?.push(cast_instr.clone());
+
+    // TODO: int/unit?
+    let idx_instr = state.builder.u8(&member_idx.to_string());
     state.cur_block_mut()?.push(idx_instr.clone());
 
     let union_init_instr = state
         .builder
-        .union_init(&mut state.module, &full_name, arg_val, idx_instr.val)
+        .union_init(&mut state.module, &full_name, cast_instr.val, idx_instr.val)
         .map_err(into_err)?;
     state.cur_block_mut()?.push(union_init_instr.clone());
 

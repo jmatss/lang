@@ -5,6 +5,7 @@ use crate::{
     instr::{EndInstr, ExprInstr},
 };
 
+#[derive(Clone)]
 pub struct BasicBlock {
     /// The name/label of this basic block.
     pub label: String,
@@ -14,11 +15,11 @@ pub struct BasicBlock {
     ///
     /// The order of the instructions inside the `instructions` vector is the
     /// "actual" order of the instructions and the flow of the program.
-    instrs: Vec<ExprInstr>,
+    pub instrs: Vec<ExprInstr>,
 
     /// The last instruction of this basic block. This should some sort of
     /// exit/branch instruction.
-    end_instrs: Option<EndInstr>,
+    pub end_instrs: Option<EndInstr>,
 }
 
 impl BasicBlock {

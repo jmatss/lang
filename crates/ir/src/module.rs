@@ -8,40 +8,53 @@ use crate::{
     error::{IrError, IrResult},
     func::FuncDecl,
     ty::Type,
-    Data, DataIdx, GlobalVarIdx,
+    Data, DataIdx, GlobalVarIdx, Lit,
 };
 
 pub struct Module {
-    name: String,
+    pub name: String,
+
+    /// Size of a pointer in this IR module.
+    pub ptr_size: usize,
 
     /// The string is the name of the function and the `FuncDecl` is the
     /// declaration of the function.
-    funcs: HashMap<String, FuncDecl>,
+    pub funcs: HashMap<String, FuncDecl>,
 
-    // TODO: How to handle externally declared structs? They have no members,
-    //       but there is currently no way to mark a struct in this hashmap
-    //       explicitly as an external struct declaration.
-    //       For now the members are just set to an empty vector.
     /// The first string is the name of the struct and the vector of `Type`s
-    /// are the members of the struct (in order).
+    /// are the members of the struct (in order). If this is a externally
+    /// declared struct, it will have no members (set to None).
     ///
     /// At this point enums and tuples have been compiled into structs, so they
     /// are stored in here as well.
-    pub structs: HashMap<String, Vec<Type>>,
+    pub structs: HashMap<String, Option<Vec<Type>>>,
 
-    global_vars: Vec<Type>,
+    /// Order in which the `structs` references each other and should therefore
+    /// be compiled in. Ex. a struct `A` that has a member of type `B` should
+    /// be compiled after `B`.
+    ///
+    /// This should be filled/set after all structs have been inserted into the
+    /// `structs` map.
+    pub structs_order: Vec<String>,
+
+    /// The `Type` is the type of the global and the `Lit` is the init value of
+    /// the global variable. If set to None, the global will be initialized with
+    /// the value zero/null.
+    pub global_vars: Vec<(Type, Option<Lit>)>,
 
     /// Contains static data that can be used to initialize values. This will
     /// mostly be string literals.
-    data: Vec<Data>,
+    pub data: Vec<Data>,
 }
 
 impl Module {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: String, ptr_size: usize) -> Self {
         Self {
             name,
+            ptr_size,
             funcs: HashMap::default(),
             structs: HashMap::default(),
+            structs_order: Vec::default(),
             global_vars: Vec::default(),
             data: Vec::default(),
         }
@@ -72,7 +85,7 @@ impl Module {
         self.funcs.remove(name)
     }
 
-    pub fn add_struct(&mut self, name: String, members: Vec<Type>) -> IrResult<()> {
+    pub fn add_struct(&mut self, name: String, members: Option<Vec<Type>>) -> IrResult<()> {
         match self.structs.entry(name) {
             Entry::Occupied(entry) => Err(IrError::new(format!(
                 "Struct with name \"{}\" already exists.",
@@ -85,12 +98,19 @@ impl Module {
         }
     }
 
-    pub fn get_struct(&self, name: &str) -> Option<&Vec<Type>> {
-        self.structs.get(name)
+    pub fn get_struct(&self, name: &str) -> IrResult<Option<&Vec<Type>>> {
+        if let Some(member_types) = self.structs.get(name) {
+            Ok(member_types.as_ref())
+        } else {
+            Err(IrError::new(format!(
+                "Unable to find struct with name \"{}\".",
+                name
+            )))
+        }
     }
 
-    pub fn remove_struct(&mut self, name: &str) -> Option<Vec<Type>> {
-        self.structs.remove(name)
+    pub fn remove_struct(&mut self, name: &str) {
+        self.structs.remove(name);
     }
 
     /// Returns the index of the added data.
@@ -104,13 +124,13 @@ impl Module {
     }
 
     /// Returns the index of the added global.
-    pub fn add_global_var(&mut self, ty: Type) -> GlobalVarIdx {
-        self.global_vars.push(ty);
+    pub fn add_global_var(&mut self, ty: Type, lit_opt: Option<Lit>) -> GlobalVarIdx {
+        self.global_vars.push((ty, lit_opt));
         GlobalVarIdx(self.global_vars.len() - 1)
     }
 
-    pub fn get_global_var(&self, global_var_idx: GlobalVarIdx) -> Option<&Type> {
-        self.global_vars.get(*global_var_idx)
+    pub fn add_structs_order(&mut self, order: &[String]) {
+        self.structs_order.extend_from_slice(order);
     }
 }
 
@@ -139,7 +159,7 @@ impl Debug for Module {
 
         writeln!(f, "Data:")?;
         for (i, data) in self.data.iter().enumerate() {
-            writeln!(f, " {}) \"{:?}\"", i, data)?;
+            writeln!(f, " {}) {:?}", i, data)?;
         }
 
         writeln!(f)?;

@@ -1,10 +1,9 @@
-use common::error::{LangError, LangErrorKind, LangResult};
 use ir::{
     BinOper, Data, DataIdx, EndInstr, ExprInstr, ExprInstrKind, IrError, IrResult, Lit, Module, Op,
-    Signed, Type, UnOper, Val, VarIdx, VAL_EMPTY, VAL_START_NR,
+    Signed, Type, UnOper, Val, VarIdx, DUMMY_VAL,
 };
 
-use crate::into_err;
+use crate::{assert_int, assert_number, assert_number_or_pointer, assert_type_eq};
 
 pub struct InstrBuilder {
     /// The unique ID used when creating new `Val`s. This will be incremented
@@ -16,9 +15,7 @@ impl InstrBuilder {
     const STD_STRING_VIEW: &'static str = "std::string::StringView";
 
     pub fn new() -> Self {
-        Self {
-            val_id: VAL_START_NR,
-        }
+        Self { val_id: 0 }
     }
 
     pub fn new_val(&mut self, ir_type: Type) -> Val {
@@ -154,7 +151,7 @@ impl InstrBuilder {
 
         for (idx, (arg, param_type)) in args.iter().zip(&fn_decl.params).enumerate() {
             let arg_type = &arg.1;
-            if Self::assert_type_eq(arg_type, param_type).is_err() {
+            if assert_type_eq(arg_type, param_type).is_err() {
                 return Err(IrError::new(format!(
                     "Invalid type of argument at index {} when calling function \"{}\". \
                     Parameter type: {:#?}, argument type: {:#?}",
@@ -169,20 +166,17 @@ impl InstrBuilder {
         })
     }
 
+    /// The `fn_ptr` should be a variable reference (VarAddress(VarIdx)).
     pub fn fn_ptr_call(
         &mut self,
-        module: &mut Module,
-        fn_ptr_var_idx: VarIdx,
+        fn_ptr: Val,
         args: &[Val],
+        ret_type: Type,
     ) -> IrResult<ExprInstr> {
-        todo!("build_fn_ptr_call");
-        // TODO: How to check that arg/param count matches?
-        /*
         Ok(ExprInstr {
-            ret_val: Val(self.new_val_id(), fn_decl.ret_ty.clone()),
-            kind: ExprInstrKind::FnPtrCall(fn_name.into(), args.to_vec()),
+            val: self.new_val(ret_type),
+            kind: ExprInstrKind::FnPtrCall(fn_ptr, args.to_vec()),
         })
-        */
     }
 
     pub fn fn_ptr(&mut self, module: &mut Module, fn_name: &str) -> IrResult<ExprInstr> {
@@ -231,125 +225,125 @@ impl InstrBuilder {
     }
 
     pub fn cast(&mut self, lhs: Val, ty: Type) -> ExprInstr {
-        self.bin_op(BinOper::As, lhs, VAL_EMPTY, ty)
+        let signed = if lhs.1.is_signed() {
+            Signed::True
+        } else {
+            Signed::False
+        };
+        self.bin_op_without_type_eq(BinOper::As, lhs, DUMMY_VAL, ty, signed)
     }
 
-    pub fn eq(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
+    pub fn eq(&mut self, lhs: Val, rhs: Val, signed: Signed) -> IrResult<ExprInstr> {
         let ret_type = Type::Bool;
-        Self::assert_number(&lhs.1)?;
-        self.bin_op_with_type_eq(BinOper::Eq, lhs, rhs, ret_type)
+        assert_number_or_pointer(&lhs.1)?;
+        self.bin_op(BinOper::Eq, lhs, rhs, ret_type, signed)
     }
 
-    pub fn neq(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
+    pub fn neq(&mut self, lhs: Val, rhs: Val, signed: Signed) -> IrResult<ExprInstr> {
         let ret_type = Type::Bool;
-        Self::assert_number(&lhs.1)?;
-        self.bin_op_with_type_eq(BinOper::Neq, lhs, rhs, ret_type)
+        assert_number_or_pointer(&lhs.1)?;
+        self.bin_op(BinOper::Neq, lhs, rhs, ret_type, signed)
     }
 
-    pub fn lt(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
+    pub fn lt(&mut self, lhs: Val, rhs: Val, signed: Signed) -> IrResult<ExprInstr> {
         let ret_type = Type::Bool;
-        Self::assert_number(&lhs.1)?;
-        self.bin_op_with_type_eq(BinOper::Lt, lhs, rhs, ret_type)
+        assert_number_or_pointer(&lhs.1)?;
+        self.bin_op(BinOper::Lt, lhs, rhs, ret_type, signed)
     }
 
-    pub fn gt(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
+    pub fn gt(&mut self, lhs: Val, rhs: Val, signed: Signed) -> IrResult<ExprInstr> {
         let ret_type = Type::Bool;
-        Self::assert_number(&lhs.1)?;
-        self.bin_op_with_type_eq(BinOper::Gt, lhs, rhs, ret_type)
+        assert_number_or_pointer(&lhs.1)?;
+        self.bin_op(BinOper::Gt, lhs, rhs, ret_type, signed)
     }
 
-    pub fn lte(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
+    pub fn lte(&mut self, lhs: Val, rhs: Val, signed: Signed) -> IrResult<ExprInstr> {
         let ret_type = Type::Bool;
-        Self::assert_number(&lhs.1)?;
-        self.bin_op_with_type_eq(BinOper::Lte, lhs, rhs, ret_type)
+        assert_number_or_pointer(&lhs.1)?;
+        self.bin_op(BinOper::Lte, lhs, rhs, ret_type, signed)
     }
 
-    pub fn gte(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
+    pub fn gte(&mut self, lhs: Val, rhs: Val, signed: Signed) -> IrResult<ExprInstr> {
         let ret_type = Type::Bool;
-        Self::assert_number(&lhs.1)?;
-        self.bin_op_with_type_eq(BinOper::Gte, lhs, rhs, ret_type)
+        assert_number_or_pointer(&lhs.1)?;
+        self.bin_op(BinOper::Gte, lhs, rhs, ret_type, signed)
     }
 
     pub fn add(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
         let ret_type = lhs.1.clone();
-        Self::assert_number(&ret_type)?;
-        self.bin_op_with_type_eq(BinOper::Add, lhs, rhs, ret_type)
+        assert_number(&ret_type)?;
+        self.bin_op(BinOper::Add, lhs, rhs, ret_type, Signed::False)
     }
 
     pub fn sub(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
         let ret_type = lhs.1.clone();
-        Self::assert_number(&ret_type)?;
-        self.bin_op_with_type_eq(BinOper::Sub, lhs, rhs, ret_type)
+        assert_number(&ret_type)?;
+        self.bin_op(BinOper::Sub, lhs, rhs, ret_type, Signed::False)
     }
 
     pub fn mul(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
         let ret_type = lhs.1.clone();
-        Self::assert_number(&ret_type)?;
-        self.bin_op_with_type_eq(BinOper::Mul, lhs, rhs, ret_type)
+        assert_number(&ret_type)?;
+        self.bin_op(BinOper::Mul, lhs, rhs, ret_type, Signed::False)
     }
 
     pub fn div(&mut self, lhs: Val, rhs: Val, signed: Signed) -> IrResult<ExprInstr> {
         let ret_type = lhs.1.clone();
-        Self::assert_number(&ret_type)?;
-        Self::assert_type_eq(&lhs.1, &rhs.1)?;
-        Ok(self.bin_op_signed(BinOper::Div, lhs, rhs, ret_type, signed))
+        assert_number(&ret_type)?;
+        self.bin_op(BinOper::Div, lhs, rhs, ret_type, signed)
     }
 
     pub fn modu(&mut self, lhs: Val, rhs: Val, signed: Signed) -> IrResult<ExprInstr> {
         let ret_type = lhs.1.clone();
-        Self::assert_int(&ret_type)?;
-        Self::assert_type_eq(&lhs.1, &rhs.1)?;
-        Ok(self.bin_op_signed(BinOper::Mod, lhs, rhs, ret_type, signed))
+        assert_int(&ret_type)?;
+        self.bin_op(BinOper::Mod, lhs, rhs, ret_type, signed)
     }
 
     pub fn bit_and(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
         let ret_type = lhs.1.clone();
-        Self::assert_int(&ret_type)?;
-        self.bin_op_with_type_eq(BinOper::BitAnd, lhs, rhs, ret_type)
+        assert_int(&ret_type)?;
+        self.bin_op(BinOper::BitAnd, lhs, rhs, ret_type, Signed::False)
     }
 
     pub fn bit_or(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
         let ret_type = lhs.1.clone();
-        Self::assert_int(&ret_type)?;
-        self.bin_op_with_type_eq(BinOper::BitOr, lhs, rhs, ret_type)
+        assert_int(&ret_type)?;
+        self.bin_op(BinOper::BitOr, lhs, rhs, ret_type, Signed::False)
     }
 
     pub fn bit_xor(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
         let ret_type = lhs.1.clone();
-        Self::assert_int(&ret_type)?;
-        self.bin_op_with_type_eq(BinOper::BitXor, lhs, rhs, ret_type)
+        assert_int(&ret_type)?;
+        self.bin_op(BinOper::BitXor, lhs, rhs, ret_type, Signed::False)
     }
 
     pub fn shift_left(&mut self, lhs: Val, rhs: Val) -> IrResult<ExprInstr> {
         let ret_type = lhs.1.clone();
-        Self::assert_int(&ret_type)?;
-        Ok(self.bin_op(BinOper::ShiftLeft, lhs, rhs, ret_type))
+        assert_int(&ret_type)?;
+        Ok(self.bin_op_without_type_eq(BinOper::ShiftLeft, lhs, rhs, ret_type, Signed::False))
     }
 
     pub fn shift_right(&mut self, lhs: Val, rhs: Val, signed: Signed) -> IrResult<ExprInstr> {
         let ret_type = lhs.1.clone();
-        Self::assert_int(&ret_type)?;
-        Ok(self.bin_op_signed(BinOper::ShiftRight, lhs, rhs, ret_type, signed))
+        assert_int(&ret_type)?;
+        Ok(self.bin_op_without_type_eq(BinOper::ShiftRight, lhs, rhs, ret_type, signed))
     }
 
     /// Builds an binary operator. This function also makes sure that the types
     /// of `lhs` & `rhs` are the same/compatible.
-    fn bin_op_with_type_eq(
+    fn bin_op(
         &mut self,
         oper: BinOper,
         lhs: Val,
         rhs: Val,
         ret_type: Type,
+        signed: Signed,
     ) -> IrResult<ExprInstr> {
-        Self::assert_type_eq(&lhs.1, &rhs.1)?;
-        Ok(self.bin_op(oper, lhs, rhs, ret_type))
+        assert_type_eq(&lhs.1, &rhs.1)?;
+        Ok(self.bin_op_without_type_eq(oper, lhs, rhs, ret_type, signed))
     }
 
-    fn bin_op(&mut self, oper: BinOper, lhs: Val, rhs: Val, ret_type: Type) -> ExprInstr {
-        self.bin_op_signed(oper, lhs, rhs, ret_type, Signed::False)
-    }
-
-    fn bin_op_signed(
+    fn bin_op_without_type_eq(
         &mut self,
         oper: BinOper,
         lhs: Val,
@@ -378,10 +372,9 @@ impl InstrBuilder {
     }
 
     /// Returns the address of the given data.
-    pub fn data_address(&mut self, data_idx: DataIdx, var_type: Type) -> ExprInstr {
-        let data_ptr_type = Type::Pointer(Box::new(var_type));
+    pub fn data_address(&mut self, data_idx: DataIdx, data_type: Type) -> ExprInstr {
         ExprInstr {
-            val: self.new_val(data_ptr_type),
+            val: self.new_val(data_type),
             kind: ExprInstrKind::DataAddress(data_idx),
         }
     }
@@ -446,11 +439,11 @@ impl InstrBuilder {
     }
 
     fn adt_member_type(module: &Module, name: &str, idx: usize) -> IrResult<Type> {
-        let members = if let Some(members) = module.get_struct(name) {
+        let members = if let Some(members) = module.get_struct(name)? {
             members
         } else {
             return Err(IrError::new(format!(
-                "Unable to find ADT with name \"{}\" in `build_access`.",
+                "Tried to get type of member for externally declared struct \"{}\".",
                 name
             )));
         };
@@ -495,7 +488,7 @@ impl InstrBuilder {
         let first_type = (values.iter().next().unwrap().1).1.clone();
         for (idx, (_, val)) in values.iter().enumerate() {
             let val_type = &val.1;
-            if Self::assert_type_eq(&first_type, val_type).is_err() {
+            if assert_type_eq(&first_type, val_type).is_err() {
                 return Err(IrError::new(format!(
                     "Values in phi-block must have same type, but found different types.\n\
                     First type: {:#?}, type at index {}: {:#?}",
@@ -516,18 +509,18 @@ impl InstrBuilder {
         name: &str,
         args: &[Val],
     ) -> IrResult<ExprInstr> {
-        let members = if let Some(members) = module.get_struct(name) {
+        let members = if let Some(members) = module.get_struct(name)? {
             members
         } else {
             return Err(IrError::new(format!(
-                "Unable to find string with name \"{}\" in `build_struct_init`.",
+                "Tried to Tried to init externally declared struct \"{}\" in `build_struct_init`.",
                 name
             )));
         };
 
         for (idx, (arg, param_type)) in args.iter().zip(members).enumerate() {
             let arg_type = &arg.1;
-            if Self::assert_type_eq(arg_type, param_type).is_err() {
+            if assert_type_eq(arg_type, param_type).is_err() {
                 return Err(IrError::new(format!(
                     "Invalid type of struct init argument at index {} for struct \"{}\". \
                     Struct decl type: {:#?}, argument type: {:#?}",
@@ -553,7 +546,7 @@ impl InstrBuilder {
         value: Val,
         idx: Val,
     ) -> IrResult<ExprInstr> {
-        if module.get_struct(name).is_none() {
+        if module.get_struct(name).is_err() {
             return Err(IrError::new(format!(
                 "Unable to find union(struct) with name \"{}\" in `build_union_init`.",
                 name
@@ -578,7 +571,7 @@ impl InstrBuilder {
         let first_type = args.iter().next().unwrap().1.clone();
         for (idx, val) in args.iter().enumerate() {
             let val_type = &val.1;
-            if Self::assert_type_eq(&first_type, val_type).is_err() {
+            if assert_type_eq(&first_type, val_type).is_err() {
                 return Err(IrError::new(format!(
                     "Values in array init must have same type, but found different types.\n\
                     First type: {:#?}, type at index {}: {:#?}",
@@ -593,24 +586,24 @@ impl InstrBuilder {
         })
     }
 
-    pub fn ret(&mut self, val: Option<Val>) -> EndInstr {
+    pub fn ret(&self, val: Option<Val>) -> EndInstr {
         EndInstr::Return(val)
     }
 
-    pub fn exit(&mut self) -> EndInstr {
+    pub fn exit(&self) -> EndInstr {
         EndInstr::Exit
     }
 
-    pub fn branch(&mut self, label: &str) -> EndInstr {
+    pub fn branch(&self, label: &str) -> EndInstr {
         EndInstr::Branch(label.into())
     }
 
-    pub fn branch_if(&mut self, expr: Val, label_true: &str, label_false: &str) -> EndInstr {
+    pub fn branch_if(&self, expr: Val, label_true: &str, label_false: &str) -> EndInstr {
         EndInstr::BranchIf(expr, label_true.into(), label_false.into())
     }
 
     pub fn branch_switch(
-        &mut self,
+        &self,
         expr: Val,
         label_default: &str,
         cases: &[(Val, String)],
@@ -618,7 +611,7 @@ impl InstrBuilder {
         if let Some(first_type) = cases.iter().next().map(|(val, _)| val.1.clone()) {
             for (idx, (val, _)) in cases.iter().enumerate() {
                 let val_type = &val.1;
-                if Self::assert_type_eq(&first_type, val_type).is_err() {
+                if assert_type_eq(&first_type, val_type).is_err() {
                     return Err(IrError::new(format!(
                         "Values in branch switch must have same type, but found different types.\n\
                         First type: {:#?}, type at index {}: {:#?}",
@@ -634,159 +627,12 @@ impl InstrBuilder {
         ))
     }
 
-    pub fn unreachable(&mut self) -> EndInstr {
+    pub fn unreachable(&self) -> EndInstr {
         EndInstr::Unreachable
-    }
-
-    pub fn null(&mut self, module: &mut Module, ir_type: Type) -> LangResult<ExprInstr> {
-        Ok(match &ir_type {
-            Type::Adt(adt_name) => {
-                if let Some(members) = module.get_struct(adt_name).cloned() {
-                    let mut arg_vals = Vec::with_capacity(members.len());
-                    for member_type in members {
-                        let member_instr = self.null(module, member_type)?;
-                        arg_vals.push(member_instr.val);
-                    }
-
-                    self.struct_init(module, adt_name, &arg_vals)
-                        .map_err(into_err)?
-                } else {
-                    return Err(LangError::new(
-                        format!(
-                            "Unable to find ADT with name \"{}\" in build_null()",
-                            adt_name
-                        ),
-                        LangErrorKind::IrError,
-                        None,
-                    ));
-                }
-            }
-
-            // TODO: int/uint instead of u64.
-            Type::Pointer(_) => {
-                let lhs_instr = self.u64("0");
-                self.cast(lhs_instr.val, ir_type.clone())
-            }
-
-            Type::Char => self.char_lit('\0'),
-            Type::Bool => self.bool_false(),
-            Type::I8 => self.i8("0"),
-            Type::U8 => self.u8("0"),
-            Type::I16 => self.i16("0"),
-            Type::U16 => self.u16("0"),
-            Type::I32 => self.i32("0"),
-            Type::U32 => self.u32("0"),
-            Type::F32 => self.f32("0"),
-            Type::I64 => self.i64("0"),
-            Type::U64 => self.u64("0"),
-            Type::F64 => self.f64("0"),
-
-            Type::Array(ir_type_i, Some(dim)) => {
-                let mut args = Vec::with_capacity(*dim as usize);
-                for _ in 0..(*dim as usize) {
-                    let arg_val = self.null(module, *ir_type_i.clone())?;
-                    args.push(arg_val.val)
-                }
-                self.array_init(&args).map_err(into_err)?
-            }
-
-            Type::Array(_, None) | Type::Void | Type::Func(_) | Type::FuncPointer(..) => {
-                return Err(LangError::new(
-                    format!("Tried to create null of unsized type: {:#?}", ir_type),
-                    LangErrorKind::IrError,
-                    None,
-                ))
-            }
-
-            Type::I128 => todo!("build_null i128"),
-            Type::U128 => todo!("build_null u128"),
-        })
     }
 
     pub fn is_null(&mut self, value: Val) -> ExprInstr {
         self.un_op(UnOper::IsNull, value, Type::Bool)
-    }
-
-    fn assert_type_eq(lhs_type: &Type, rhs_type: &Type) -> IrResult<()> {
-        match (lhs_type, rhs_type) {
-            (Type::Pointer(inner_type_a), Type::Pointer(inner_type_b)) => {
-                Self::assert_type_eq(inner_type_a, inner_type_b)?;
-            }
-            (Type::Array(inner_type_a, dim_a), Type::Array(inner_type_b, dim_b))
-                if dim_a == dim_b =>
-            {
-                Self::assert_type_eq(inner_type_a, inner_type_b)?;
-            }
-
-            (Type::Adt(name_a), Type::Adt(name_b)) | (Type::Func(name_a), Type::Func(name_b))
-                if name_a == name_b => {}
-
-            (Type::Void, Type::Void)
-            | (Type::Char, Type::Char)
-            | (Type::Bool, Type::Bool)
-            | (Type::I8, Type::I8)
-            | (Type::U8, Type::U8)
-            | (Type::I16, Type::I16)
-            | (Type::U16, Type::U16)
-            | (Type::I32, Type::I32)
-            | (Type::U32, Type::U32)
-            | (Type::F32, Type::F32)
-            | (Type::I64, Type::I64)
-            | (Type::U64, Type::U64)
-            | (Type::F64, Type::F64)
-            | (Type::I128, Type::I128)
-            | (Type::U128, Type::U128) => (),
-
-            // TODO: Add line/column nr to error.
-            _ => {
-                return Err(IrError::new(format!(
-                    "Expected lhs and rhs types to match but they didn't.\n\
-                    Lhs type: {:#?}\nRhs type: {:#?}",
-                    lhs_type, rhs_type,
-                )));
-            }
-        }
-        Ok(())
-    }
-
-    fn assert_number(ir_type: &Type) -> IrResult<()> {
-        match ir_type {
-            Type::I8
-            | Type::U8
-            | Type::I16
-            | Type::U16
-            | Type::I32
-            | Type::U32
-            | Type::F32
-            | Type::I64
-            | Type::U64
-            | Type::F64
-            | Type::I128
-            | Type::U128 => Ok(()),
-            _ => Err(IrError::new(format!(
-                "Expected type to be number, got: {:?}.",
-                ir_type,
-            ))),
-        }
-    }
-
-    fn assert_int(ir_type: &Type) -> IrResult<()> {
-        match ir_type {
-            Type::I8
-            | Type::U8
-            | Type::I16
-            | Type::U16
-            | Type::I32
-            | Type::U32
-            | Type::I64
-            | Type::U64
-            | Type::I128
-            | Type::U128 => Ok(()),
-            _ => Err(IrError::new(format!(
-                "Expected type to be integer, got: {:?}.",
-                ir_type,
-            ))),
-        }
     }
 }
 

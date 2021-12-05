@@ -8,6 +8,7 @@ use crate::{
 
 use super::ty::Type;
 
+#[derive(Clone)]
 pub enum FuncVisibility {
     /// Indicates that this function should be exported/exposed. A function with
     /// this visibility needs to implement a function body.
@@ -34,7 +35,7 @@ impl Debug for FuncVisibility {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FuncDecl {
     pub name: String,
     pub visibility: FuncVisibility,

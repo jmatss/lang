@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use parking_lot::RwLock;
+
 use common::{
     error::{LangError, LangErrorKind, LangResult},
     file::FilePosition,
@@ -24,12 +26,11 @@ use common::{
     util::to_generic_name,
     ARGC_GLOBAL_VAR_NAME, ARGV_GLOBAL_VAR_NAME,
 };
-use ir::{ExprTy, Type, Val, VarIdx, VAL_EMPTY};
-use parking_lot::RwLock;
+use ir::{size_with_padding, ExprTy, Type, Val, VarIdx, DUMMY_VAL};
 
 use crate::{
     build::{expr::build_fn_call, stmt::build_stmt},
-    into_err, size_of,
+    into_err,
     state::BuildState,
     to_ir_type, VarModifier,
 };
@@ -78,7 +79,7 @@ fn build_built_in_size(state: &mut BuildState, built_in_call: &BuiltInCall) -> L
             &state.analyze_ctx.ty_env.lock(),
             *arg_type_id,
         )?;
-        let size = size_of(state.module, ir_type)?;
+        let size = size_with_padding(state.module, &ir_type).map_err(into_err)?;
 
         let instr = state.builder.u32(&size.to_string());
         state.cur_block_mut()?.push(instr.clone());
@@ -129,10 +130,7 @@ fn build_built_in_null(state: &mut BuildState, built_in_call: &BuiltInCall) -> L
             &state.analyze_ctx.ty_env.lock(),
             ret_type_id,
         )?;
-
-        let instr = state.builder.null(&mut state.module, ir_type)?;
-        state.cur_block_mut()?.push(instr.clone());
-        Ok(instr.val)
+        build_null(state, ir_type)
     } else {
         Err(LangError::new(
             "Type not set for @null.".into(),
@@ -140,6 +138,82 @@ fn build_built_in_null(state: &mut BuildState, built_in_call: &BuiltInCall) -> L
             Some(built_in_call.file_pos.to_owned()),
         ))
     }
+}
+
+fn build_null(state: &mut BuildState, ir_type: Type) -> LangResult<Val> {
+    let instr = match &ir_type {
+        Type::Adt(adt_name) => {
+            if let Some(members) = state
+                .module
+                .get_struct(adt_name)
+                .map_err(into_err)?
+                .cloned()
+            {
+                let mut arg_vals = Vec::with_capacity(members.len());
+                for member_type in members {
+                    let member_val = build_null(state, member_type)?;
+                    arg_vals.push(member_val);
+                }
+
+                state
+                    .builder
+                    .struct_init(state.module, adt_name, &arg_vals)
+                    .map_err(into_err)?
+            } else {
+                return Err(LangError::new(
+                    format!(
+                        "Tried to create null of externally declared ADT \"{}\".",
+                        adt_name
+                    ),
+                    LangErrorKind::IrError,
+                    None,
+                ));
+            }
+        }
+
+        // TODO: int/uint instead of u64.
+        Type::Pointer(_) => {
+            let zero_instr = state.builder.u64("0");
+            state.cur_block_mut()?.push(zero_instr.clone());
+            state.builder.cast(zero_instr.val, ir_type.clone())
+        }
+
+        Type::Char => state.builder.char_lit('\0'),
+        Type::Bool => state.builder.bool_false(),
+        Type::I8 => state.builder.i8("0"),
+        Type::U8 => state.builder.u8("0"),
+        Type::I16 => state.builder.i16("0"),
+        Type::U16 => state.builder.u16("0"),
+        Type::I32 => state.builder.i32("0"),
+        Type::U32 => state.builder.u32("0"),
+        Type::F32 => state.builder.f32("0"),
+        Type::I64 => state.builder.i64("0"),
+        Type::U64 => state.builder.u64("0"),
+        Type::F64 => state.builder.f64("0"),
+
+        Type::Array(ir_type_i, Some(dim)) => {
+            let mut args = Vec::with_capacity(*dim as usize);
+            for _ in 0..(*dim as usize) {
+                let arg_val = build_null(state, *ir_type_i.clone())?;
+                args.push(arg_val)
+            }
+            state.builder.array_init(&args).map_err(into_err)?
+        }
+
+        Type::Array(_, None) | Type::Void | Type::Func(_) | Type::FuncPointer(..) => {
+            return Err(LangError::new(
+                format!("Tried to create null of unsized type: {:#?}", ir_type),
+                LangErrorKind::IrError,
+                None,
+            ))
+        }
+
+        Type::I128 => todo!("build_null i128"),
+        Type::U128 => todo!("build_null u128"),
+    };
+
+    state.cur_block_mut()?.push(instr.clone());
+    Ok(instr.val)
 }
 
 fn build_built_in_is_null(state: &mut BuildState, built_in_call: &BuiltInCall) -> LangResult<Val> {
@@ -175,7 +249,7 @@ fn build_built_in_ptr_math(
     let amount_value = build_expr(state, &amount_arg.value, ExprTy::RValue)?;
 
     let ptr_element_size = if let Type::Pointer(ir_type_i) = &ptr_value.1 {
-        size_of(state.module, *ir_type_i.clone())?
+        size_with_padding(state.module, &*ir_type_i).map_err(into_err)?
     } else {
         return Err(LangError::new(
             format!("Tried to @ptr_add non pointer type: {:?}", ptr_value.1),
@@ -183,12 +257,12 @@ fn build_built_in_ptr_math(
             Some(built_in_call.file_pos.to_owned()),
         ));
     };
-    // TODO: int/uint.
+
     let ptr_element_size_value = state.builder.u32(&ptr_element_size.to_string());
     state.cur_block_mut()?.push(ptr_element_size_value.clone());
 
     // TODO: int/uint.
-    let ptr_int_value = state.builder.cast(ptr_value.clone(), Type::U32);
+    let ptr_int_value = state.builder.cast(ptr_value.clone(), Type::U64);
     state.cur_block_mut()?.push(ptr_int_value.clone());
 
     let mul_instr = state
@@ -197,9 +271,14 @@ fn build_built_in_ptr_math(
         .map_err(into_err)?;
     state.cur_block_mut()?.push(mul_instr.clone());
 
+    // TODO: int/uint. This should be removed, should not be needed if all ints
+    //       are of the same size (ptr_size).
+    let mul_cast_instr = state.builder.cast(mul_instr.val, Type::U64);
+    state.cur_block_mut()?.push(mul_cast_instr.clone());
+
     let math_instr = match ptr_math_op {
-        PtrMathOp::Add => state.builder.add(ptr_int_value.val, mul_instr.val),
-        PtrMathOp::Sub => state.builder.sub(ptr_int_value.val, mul_instr.val),
+        PtrMathOp::Add => state.builder.add(ptr_int_value.val, mul_cast_instr.val),
+        PtrMathOp::Sub => state.builder.sub(ptr_int_value.val, mul_cast_instr.val),
     }
     .map_err(into_err)?;
     state.cur_block_mut()?.push(math_instr.clone());
@@ -370,7 +449,7 @@ fn build_built_in_column(state: &mut BuildState, built_in_call: &BuiltInCall) ->
 fn build_built_in_unreachable(state: &mut BuildState) -> LangResult<Val> {
     let end_instr = state.builder.unreachable();
     state.cur_block_mut()?.set_end_instr(end_instr);
-    Ok(VAL_EMPTY)
+    Ok(DUMMY_VAL)
 }
 
 /// This function creates a `std::string::String` variable and appends all
