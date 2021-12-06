@@ -12,7 +12,7 @@ log = "0.4.11"
 env_logger = "0.7.1"
 clap = "2.33.3"
 
-analyze = { path = "../analyze" }
+analyze_ast = { path = "../analyze_ast" }
 codegen_llvm = { path = "../codegen_llvm" }
 common = { path = "../common" }
 ir = { path = "../ir" }

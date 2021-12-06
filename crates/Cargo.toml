@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "compile",
-    "analyze",
+    "analyze_ast",
     "codegen_llvm",
     "common",
     "ir",

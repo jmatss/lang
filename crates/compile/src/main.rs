@@ -6,7 +6,7 @@ use clap::{App, Arg};
 use inkwell::context::Context;
 use log::{log_enabled, Level};
 
-use analyze::analyze;
+use analyze_ast::analyze;
 use common::{
     error::{LangError, LangErrorKind, LangResult},
     file::{FileId, FileInfo},

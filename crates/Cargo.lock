@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "analyze"
+name = "analyze_ast"
 version = "0.1.0"
 dependencies = [
  "common",
@@ -263,7 +263,7 @@ dependencies = [
 name = "lang"
 version = "0.1.0"
 dependencies = [
- "analyze",
+ "analyze_ast",
  "clap",
  "codegen_llvm",
  "common",
