@@ -1,5 +1,3 @@
-ext fn printf(format: {u8}, ...) -> i32
-
 struct TestStruct {
     fn static_func() -> i8 {
         return 12
@@ -36,7 +34,7 @@ struct TestStructWithGen<Ts> {
     }
 }
 
-fn main() -> i32
+fn main() -> int
 {
     var expected = 12
     var ts = TestStruct {}

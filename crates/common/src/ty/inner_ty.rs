@@ -21,6 +21,8 @@ pub enum InnerTy {
     Character,
     String, // TODO: String type (?)
     Boolean,
+    Int,
+    Uint,
     I8,
     U8,
     I16,
@@ -103,6 +105,8 @@ impl InnerTy {
         match self {
             InnerTy::Character => "char",
             InnerTy::Boolean => "bool",
+            InnerTy::Int => "int",
+            InnerTy::Uint => "uint",
             InnerTy::I8 => "i8",
             InnerTy::U8 => "u8",
             InnerTy::I16 => "i16",
@@ -145,7 +149,7 @@ impl InnerTy {
     }
 
     pub fn default_int() -> InnerTy {
-        InnerTy::I32
+        InnerTy::Int
     }
 
     pub fn default_float() -> InnerTy {
@@ -160,6 +164,8 @@ impl InnerTy {
             "char" => InnerTy::Character,
             "BuiltInString" => InnerTy::String,
             "bool" => InnerTy::Boolean,
+            "int" => InnerTy::Int,
+            "uint" => InnerTy::Uint,
             "i8" => InnerTy::I8,
             "u8" => InnerTy::U8,
             "i16" => InnerTy::I16,
@@ -184,7 +190,9 @@ impl InnerTy {
 
     pub fn is_int(&self) -> bool {
         match self {
-            InnerTy::I8
+            InnerTy::Int
+            | InnerTy::Uint
+            | InnerTy::I8
             | InnerTy::U8
             | InnerTy::I16
             | InnerTy::U16
@@ -236,6 +244,8 @@ impl InnerTy {
             | InnerTy::Character
             | InnerTy::String
             | InnerTy::Boolean
+            | InnerTy::Int
+            | InnerTy::Uint
             | InnerTy::I8
             | InnerTy::U8
             | InnerTy::I16
@@ -316,7 +326,7 @@ impl InnerTy {
     pub fn is_signed(&self) -> bool {
         matches!(
             self,
-            InnerTy::I8 | InnerTy::I16 | InnerTy::I32 | InnerTy::I64 | InnerTy::I128
+            InnerTy::Int | InnerTy::I8 | InnerTy::I16 | InnerTy::I32 | InnerTy::I64 | InnerTy::I128
         )
     }
 
@@ -331,6 +341,8 @@ impl InnerTy {
             | (InnerTy::Character, InnerTy::Character)
             | (InnerTy::String, InnerTy::String)
             | (InnerTy::Boolean, InnerTy::Boolean)
+            | (InnerTy::Int, InnerTy::Int)
+            | (InnerTy::Uint, InnerTy::Uint)
             | (InnerTy::I8, InnerTy::I8)
             | (InnerTy::U8, InnerTy::U8)
             | (InnerTy::I16, InnerTy::I16)
@@ -384,33 +396,35 @@ impl TyEnvHash for InnerTy {
             InnerTy::Character => 6.hash(state),
             InnerTy::String => 7.hash(state),
             InnerTy::Boolean => 8.hash(state),
-            InnerTy::I8 => 9.hash(state),
-            InnerTy::U8 => 10.hash(state),
-            InnerTy::I16 => 11.hash(state),
-            InnerTy::U16 => 12.hash(state),
-            InnerTy::I32 => 13.hash(state),
-            InnerTy::U32 => 14.hash(state),
-            InnerTy::F32 => 15.hash(state),
-            InnerTy::I64 => 16.hash(state),
-            InnerTy::U64 => 17.hash(state),
-            InnerTy::F64 => 18.hash(state),
-            InnerTy::I128 => 19.hash(state),
-            InnerTy::U128 => 20.hash(state),
+            InnerTy::Int => 9.hash(state),
+            InnerTy::Uint => 10.hash(state),
+            InnerTy::I8 => 11.hash(state),
+            InnerTy::U8 => 12.hash(state),
+            InnerTy::I16 => 13.hash(state),
+            InnerTy::U16 => 14.hash(state),
+            InnerTy::I32 => 15.hash(state),
+            InnerTy::U32 => 16.hash(state),
+            InnerTy::F32 => 17.hash(state),
+            InnerTy::I64 => 18.hash(state),
+            InnerTy::U64 => 19.hash(state),
+            InnerTy::F64 => 20.hash(state),
+            InnerTy::I128 => 21.hash(state),
+            InnerTy::U128 => 22.hash(state),
             InnerTy::Unknown(unique_id) => {
-                21.hash(state);
+                23.hash(state);
                 unique_id.hash(state);
             }
             InnerTy::UnknownIdent(path, block_id) => {
-                22.hash(state);
+                24.hash(state);
                 path.hash_with_state(ty_env, deref_type, state)?;
                 block_id.hash(state);
             }
             InnerTy::UnknownInt(unique_id, _) => {
-                23.hash(state);
+                25.hash(state);
                 unique_id.hash(state);
             }
             InnerTy::UnknownFloat(unique_id) => {
-                24.hash(state);
+                26.hash(state);
                 unique_id.hash(state);
             }
         }

@@ -16,7 +16,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let unique_id = ty_env_guard.new_unique_id();
     let any_type_id = ty_env_guard.id(&Ty::Any(unique_id, TypeInfo::BuiltIn))?;
     let any_ptr_type_id = ty_env_guard.id(&Ty::Pointer(any_type_id, TypeInfo::BuiltIn))?;
-    let u32_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::U32, TypeInfo::BuiltIn))?;
+    let uint_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::Uint, TypeInfo::BuiltIn))?;
     let u8_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::U8, TypeInfo::BuiltIn))?;
     let u8_ptr_type_id = ty_env_guard.id(&Ty::Pointer(u8_type_id, TypeInfo::BuiltIn))?;
     let u8_ptr_ptr_type_id = ty_env_guard.id(&Ty::Pointer(u8_ptr_type_id, TypeInfo::BuiltIn))?;
@@ -36,7 +36,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let generics = Some(vec![any_type_id]);
     built_ins.insert(
         name,
-        BuiltIn::new(name, parameters, generics, u32_type_id, false),
+        BuiltIn::new(name, parameters, generics, uint_type_id, false),
     );
 
     // TODO: How should this work? How will the type be represented in the
@@ -126,7 +126,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         ),
         Var::new(
             "amount".into(),
-            Some(u32_type_id),
+            Some(uint_type_id),
             None,
             None,
             None,
@@ -153,7 +153,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         ),
         Var::new(
             "amount".into(),
-            Some(u32_type_id),
+            Some(uint_type_id),
             None,
             None,
             None,
@@ -180,7 +180,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         ),
         Var::new(
             "dimension".into(),
-            Some(u32_type_id),
+            Some(uint_type_id),
             None,
             None,
             None,
@@ -229,7 +229,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let generics = None;
     built_ins.insert(
         name,
-        BuiltIn::new(name, parameters, generics, u32_type_id, false),
+        BuiltIn::new(name, parameters, generics, uint_type_id, false),
     );
 
     let name = "argv";
@@ -253,7 +253,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let generics = None;
     built_ins.insert(
         name,
-        BuiltIn::new(name, parameters, generics, u32_type_id, false),
+        BuiltIn::new(name, parameters, generics, uint_type_id, false),
     );
 
     let name = "column";
@@ -261,7 +261,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
     let generics = None;
     built_ins.insert(
         name,
-        BuiltIn::new(name, parameters, generics, u32_type_id, false),
+        BuiltIn::new(name, parameters, generics, uint_type_id, false),
     );
 
     let name = "unreachable";

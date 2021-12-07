@@ -1,6 +1,4 @@
-ext fn printf(format: {u8}, ...) -> i32
-
-fn main() -> i32 {
+fn main() -> int {
     var i = 3
 
     second_file::double(i.&)

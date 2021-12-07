@@ -1,4 +1,4 @@
-fn main() -> i32 {
+fn main() -> int {
     const a: i32 = 5
     const b: i32 = 123
     const x = a + b

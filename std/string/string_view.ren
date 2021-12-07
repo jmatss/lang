@@ -3,7 +3,7 @@ mod std::string
 use std::Eq
 use std::string::AsView
 
-ext fn strlen(str: {u8}) -> u32
+ext fn strlen(str: {u8}) -> uint
 
 /// Represents a unmutable "view" of some string-like type.
 ///
@@ -12,7 +12,7 @@ ext fn strlen(str: {u8}) -> u32
 /// string memory is freed.
 pub struct StringView {
     var ptr: {u8}
-    var len: u32
+    var len: uint
 
     /// Creates a `StringView` from a string literal.
     /// The view will span the length of `len` bytes starting at the offset
@@ -24,7 +24,7 @@ pub struct StringView {
     ///
     /// OBS! This function does NOT check the validity of the given index and length,
     ///      it is up to the caller to make sure that they are correct.
-    pub fn new(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> StringView {
+    pub fn new(str_lit: {u8}, start_idx: uint = 0, len: uint = 0) -> StringView {
         if start_idx != 0 {
             str_lit = @ptr_add(str_lit, start_idx)
         }
@@ -36,7 +36,7 @@ pub struct StringView {
         return StringView { str_lit, len }
     }
 
-    pub fn this len() -> u32 {
+    pub fn this len() -> uint {
         return this.len
     }
 }

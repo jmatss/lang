@@ -1,11 +1,9 @@
-ext fn printf(format: {u8}, ...) -> i32
-
 fn double(n: {i32}) -> bool {
     n.* *= 2
     return true
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var num = 3
 
     if true and 1 == 1 or double(num.&) {

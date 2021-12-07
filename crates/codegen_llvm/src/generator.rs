@@ -316,7 +316,9 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
             }
             Type::Array(inner_ir_type, Some(size)) => {
                 let inner_type = self.compile_type(inner_ir_type)?;
-                any_into_basic_type(inner_type)?.array_type(*size).into()
+                any_into_basic_type(inner_type)?
+                    .array_type(*size as u32)
+                    .into()
             }
             Type::Array(inner_ir_type, None) => {
                 todo!("compile_type -- Slice")

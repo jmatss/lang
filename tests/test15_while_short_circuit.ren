@@ -7,7 +7,7 @@ fn inc(ten: {i32}) -> i32 {
     return ten.*
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var ten = 3
     var one = 0
 

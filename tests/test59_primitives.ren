@@ -1,4 +1,4 @@
-fn main() -> i32 {
+fn main() -> int {
     var min_u8 = u8::min()
     var abs_u8 = (1 as u8).abs()
     std::io::print(@format("min_u8: {}, abs_u8: {}", min_u8, abs_u8).as_view())

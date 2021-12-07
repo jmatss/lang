@@ -105,24 +105,7 @@ fn build_lit_string(
             Ok(state.builder.data_address(data_idx, data_type))
         }
 
-        StringType::Regular => {
-            let data_idx = build_data(state, str_lit, false);
-            let data_type = Type::Pointer(Box::new(Type::U8));
-            let data_instr = state.builder.data_address(data_idx, data_type);
-            state.cur_block_mut()?.push(data_instr.clone());
-
-            let len_instr = state.builder.u32(&str_len.to_string());
-            state.cur_block_mut()?.push(len_instr.clone());
-
-            let view_path = ["std".into(), "string".into(), "StringView".into()].into();
-            let view_name = to_string_path(&state.analyze_ctx.ty_env.lock(), &view_path);
-            let view_args = [data_instr.val, len_instr.val];
-
-            state
-                .builder
-                .struct_init(&mut state.module, &view_name, &view_args)
-                .map_err(into_err)
-        }
+        StringType::Regular => build_lit_string_view(state, str_lit),
 
         StringType::F | StringType::S => {
             let data_idx = build_data(state, str_lit, false);
@@ -130,7 +113,9 @@ fn build_lit_string(
             let data_instr = state.builder.data_address(data_idx, data_type);
             state.cur_block_mut()?.push(data_instr.clone());
 
-            let len_instr = state.builder.u32(&str_len.to_string());
+            let len_instr = state
+                .builder
+                .int(&str_len.to_string(), state.module.default_uint());
             state.cur_block_mut()?.push(len_instr.clone());
 
             let list_path = ["std".into(), "collection".into(), "List".into()].into();
@@ -155,6 +140,30 @@ fn build_lit_string(
     }
 }
 
+pub(super) fn build_lit_string_view(
+    state: &mut BuildState,
+    str_lit: &str,
+) -> LangResult<ExprInstr> {
+    let data_idx = build_data(state, str_lit, false);
+    let data_type = Type::Pointer(Box::new(Type::U8));
+    let data_instr = state.builder.data_address(data_idx, data_type);
+    state.cur_block_mut()?.push(data_instr.clone());
+
+    let len_instr = state
+        .builder
+        .int(&str_lit.len().to_string(), state.module.default_uint());
+    state.cur_block_mut()?.push(len_instr.clone());
+
+    let view_path = ["std".into(), "string".into(), "StringView".into()].into();
+    let view_name = to_string_path(&state.analyze_ctx.ty_env.lock(), &view_path);
+    let view_args = [data_instr.val, len_instr.val];
+
+    state
+        .builder
+        .struct_init(&mut state.module, &view_name, &view_args)
+        .map_err(into_err)
+}
+
 fn build_data(state: &mut BuildState, str_lit: &str, null_terminated: bool) -> DataIdx {
     state.module.add_data(Data::StringLit(if null_terminated {
         format!("{}\0", str_lit)
@@ -177,7 +186,7 @@ fn build_lit_int(
     radix: u32,
     type_id_opt: Option<&TypeId>,
 ) -> LangResult<ExprInstr> {
-    let inner_ty = if let Some(type_id) = type_id_opt {
+    let mut inner_ty = if let Some(type_id) = type_id_opt {
         let ty_env_guard = state.analyze_ctx.ty_env.lock();
         let fwd_type_id = ty_env_guard.forwarded(*type_id);
         get_inner(&ty_env_guard, fwd_type_id)?.clone()
@@ -188,6 +197,36 @@ fn build_lit_int(
             None,
         ));
     };
+
+    if let InnerTy::Int = inner_ty {
+        inner_ty = if state.module.ptr_size == 1 {
+            InnerTy::I8
+        } else if state.module.ptr_size == 2 {
+            InnerTy::I16
+        } else if state.module.ptr_size == 4 {
+            InnerTy::I32
+        } else if state.module.ptr_size == 8 {
+            InnerTy::I64
+        } else if state.module.ptr_size == 16 {
+            InnerTy::I128
+        } else {
+            unreachable!("Bad ptr_size: {}", state.module.ptr_size);
+        };
+    } else if let InnerTy::Uint = inner_ty {
+        inner_ty = if state.module.ptr_size == 1 {
+            InnerTy::U8
+        } else if state.module.ptr_size == 2 {
+            InnerTy::U16
+        } else if state.module.ptr_size == 4 {
+            InnerTy::U32
+        } else if state.module.ptr_size == 8 {
+            InnerTy::U64
+        } else if state.module.ptr_size == 16 {
+            InnerTy::U128
+        } else {
+            unreachable!("Bad ptr_size: {}", state.module.ptr_size);
+        };
+    }
 
     Ok(match inner_ty {
         InnerTy::I8 => state.builder.i8(parse_with_radix!(int_lit, radix, i8)),
@@ -251,6 +290,7 @@ fn build_var_address(state: &mut BuildState, var: &Var) -> LangResult<Val> {
     let var_type = to_ir_type(
         &state.analyze_ctx.ast_ctx,
         &state.analyze_ctx.ty_env.lock(),
+        state.module.ptr_size,
         var.ty.unwrap(),
     )?;
 

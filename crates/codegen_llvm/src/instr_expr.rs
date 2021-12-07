@@ -3,7 +3,7 @@ use inkwell::{
     values::{AnyValue, AnyValueEnum, BasicValue},
     AddressSpace,
 };
-use log::debug;
+use log::{debug, warn};
 
 use common::error::{LangError, LangErrorKind, LangResult};
 use ir::{Data, DataIdx, ExprInstr, ExprInstrKind, Lit, Op, Type, Val, VarIdx};
@@ -32,7 +32,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
     /// to a pointer to the x memory which will be assigned the new value, it
     /// should NOT be evaluated to the literal 3.
     pub(super) fn compile_instr(&self, instr: &ExprInstr) -> LangResult<AnyValueEnum<'ctx>> {
-        debug!("INSTR: {:?}", instr);
+        debug!("compile_instr -- {:?}", instr);
         match &instr.kind {
             ExprInstrKind::Lit(lit) => self.compile_lit(lit, &instr.val.1),
             ExprInstrKind::FnCall(name, args) => self.compile_fn_call(name, args),

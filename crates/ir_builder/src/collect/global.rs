@@ -65,7 +65,7 @@ pub(crate) fn collect_globals(
                 None
             };
 
-            let ir_type = to_ir_type(ast_ctx, &ty_env_guard, type_id)?;
+            let ir_type = to_ir_type(ast_ctx, &ty_env_guard, module.ptr_size, type_id)?;
             let global_var_idx = module.add_global_var(ir_type, lit_opt);
             globals.insert(var.full_name(), global_var_idx);
         }

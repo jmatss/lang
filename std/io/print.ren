@@ -4,14 +4,14 @@ use std::Result
 use std::string::AsView
 use std::string::StringView
 
-ext fn printf(format: {u8}, ...) -> i32
-ext fn _write(fd: i32, data: {u8}, len: u32) -> i32
-ext fn fflush(file: {FILE}) -> i32
+ext fn printf(format: {u8}, ...) -> int
+ext fn _write(fd: int, data: {u8}, len: uint) -> int
+ext fn fflush(file: {FILE}) -> int
 ext struct FILE
 
 pub fn print_fd(
     view: StringView,
-    fd: i32,
+    fd: int,
     line_break: bool = true,
     flush: bool = false
 ) -> Result<(), StringView> {

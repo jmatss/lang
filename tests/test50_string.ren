@@ -1,8 +1,6 @@
 use std::string::String
 
-ext fn printf(format: {u8}, ...) -> i32
-
-fn main() -> i32 {
+fn main() -> int {
     var str1_or_error = String::init(1)
     printf(c"test2")
     std::assert(str1_or_error.is_success())

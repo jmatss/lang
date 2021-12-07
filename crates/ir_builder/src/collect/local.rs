@@ -76,6 +76,8 @@ impl<'a> LocalVarCollector<'a> {
         var: &Var,
         block_id: BlockId,
     ) -> LangResult<()> {
+        let ptr_size = self.module.ptr_size;
+
         let cur_func_name = if let Some(cur_func_name) = &self.cur_func_name {
             cur_func_name.clone()
         } else {
@@ -112,7 +114,7 @@ impl<'a> LocalVarCollector<'a> {
             ));
         };
 
-        let ir_type = to_ir_type(ast_ctx, ty_env, type_id)?;
+        let ir_type = to_ir_type(ast_ctx, ty_env, ptr_size, type_id)?;
         let idx = ir_func.add_local_var(ir_type);
         let var_modifier = if var.is_const {
             VarModifier::Const

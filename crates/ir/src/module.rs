@@ -14,7 +14,7 @@ use crate::{
 pub struct Module {
     pub name: String,
 
-    /// Size of a pointer in this IR module.
+    /// Size of a pointer in this IR module (bytes).
     pub ptr_size: usize,
 
     /// The string is the name of the function and the `FuncDecl` is the
@@ -131,6 +131,38 @@ impl Module {
 
     pub fn add_structs_order(&mut self, order: &[String]) {
         self.structs_order.extend_from_slice(order);
+    }
+
+    pub fn default_int(&self) -> Type {
+        if self.ptr_size == 1 {
+            Type::I8
+        } else if self.ptr_size == 2 {
+            Type::I16
+        } else if self.ptr_size == 4 {
+            Type::I32
+        } else if self.ptr_size == 8 {
+            Type::I64
+        } else if self.ptr_size == 16 {
+            Type::I128
+        } else {
+            unreachable!("default_int");
+        }
+    }
+
+    pub fn default_uint(&self) -> Type {
+        if self.ptr_size == 1 {
+            Type::U8
+        } else if self.ptr_size == 2 {
+            Type::U16
+        } else if self.ptr_size == 4 {
+            Type::U32
+        } else if self.ptr_size == 8 {
+            Type::U64
+        } else if self.ptr_size == 16 {
+            Type::U128
+        } else {
+            unreachable!("default_uint");
+        }
     }
 }
 

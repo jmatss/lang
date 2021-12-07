@@ -1,6 +1,6 @@
 use std::StringView
 
-fn main() -> i32 {
+fn main() -> int {
     var res
     var view = "test output"
 

@@ -18,11 +18,12 @@ impl TestStruct: Eq<TestStruct> {
     }
 }
 
-fn is_power_of_two(n: u32) -> bool {
+fn is_power_of_two(n: uint) -> bool {
     return n != 0 and (n & (n - 1)) == 0
 }
 
-fn main() -> i32 {
+fn main() -> int {
+/*
     const x: u8  = 1
     const y: u32 = 2
     const z: i64 = 3
@@ -33,7 +34,7 @@ fn main() -> i32 {
 
     // TODO: Make `std::io::print` take a generic that implements `AsView`.
     std::io::print(@format("x_hash: {}, y_hash: {}, z_hash: {}", x_hash, y_hash, z_hash).as_view())
-
+*/
 
     var map_or_error = Map::init(2)
     std::assert(map_or_error.is_success())
@@ -46,7 +47,7 @@ fn main() -> i32 {
 
     var insert1_or_error = map.insert(key1, value1)
     std::assert(insert1_or_error.is_success())
-
+/*
     var insert2_or_error = map.insert(key2, value2)
     std::assert(insert2_or_error.is_success())
 
@@ -89,6 +90,6 @@ fn main() -> i32 {
 
     std::io::print(@format("map.len(): {}, map.len_removed: {}", map.len(), map.len_removed).as_view())
     std::assert(map.len() == 2 and map.len_removed == 1)
-
+*/
     return 0
 }

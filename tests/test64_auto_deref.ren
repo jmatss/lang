@@ -15,7 +15,7 @@ impl TestStruct: TestTrait {
     pub fn {this} trait_fn_by_ref() { }
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var ts_val = TestStruct { 123 }
     var ts_ref = ts_val.&
 

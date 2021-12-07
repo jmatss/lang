@@ -149,6 +149,8 @@ pub fn to_string_inner_ty(ty_env: &TyEnv, inner_ty: &InnerTy) -> String {
         InnerTy::Character => "char".into(),
         InnerTy::String => "String".into(),
         InnerTy::Boolean => "bool".into(),
+        InnerTy::Int => "int".into(),
+        InnerTy::Uint => "uint".into(),
         InnerTy::I8 => "i8".into(),
         InnerTy::U8 => "u8".into(),
         InnerTy::I16 => "i16".into(),

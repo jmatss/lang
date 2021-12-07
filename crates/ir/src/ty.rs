@@ -8,7 +8,7 @@ pub enum Type {
     Func(String),
 
     Pointer(Box<Type>),
-    Array(Box<Type>, Option<u32>),
+    Array(Box<Type>, Option<u128>),
 
     /// The type of a function pointer. The vector are the parameter types and
     /// the boxed type is the return type.

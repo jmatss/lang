@@ -14,7 +14,7 @@ fn as_ret() -> (i32, u8) {
     return @tuple(1, 2)
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var tuple_a = @tuple(1)
     var expected_val_a: i8 = 1
     std::assert(tuple_a.(0) == expected_val_a)

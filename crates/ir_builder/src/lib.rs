@@ -114,7 +114,12 @@ fn build_token(state: &mut BuildState, ast_token: &AstToken) -> LangResult<()> {
 }
 
 /// Converts the given `type_id` into the corresponding IR `Type`.
-fn to_ir_type(ast_ctx: &AstCtx, ty_env: &TyEnv, type_id: TypeId) -> LangResult<Type> {
+fn to_ir_type(
+    ast_ctx: &AstCtx,
+    ty_env: &TyEnv,
+    ptr_size: usize,
+    type_id: TypeId,
+) -> LangResult<Type> {
     let inf_type_id = ty_env.inferred_type(type_id)?;
     let ty = ty_env.ty(inf_type_id).unwrap();
     Ok(match ty {
@@ -131,6 +136,37 @@ fn to_ir_type(ast_ctx: &AstCtx, ty_env: &TyEnv, type_id: TypeId) -> LangResult<T
             InnerTy::Void => Type::Void,
             InnerTy::Character => Type::Char,
             InnerTy::Boolean => Type::Bool,
+
+            InnerTy::Int => {
+                if ptr_size == 1 {
+                    Type::I8
+                } else if ptr_size == 2 {
+                    Type::I16
+                } else if ptr_size == 4 {
+                    Type::I32
+                } else if ptr_size == 8 {
+                    Type::I64
+                } else if ptr_size == 16 {
+                    Type::I128
+                } else {
+                    unreachable!("Bad ptr_size in to_ir_type (int): {}", ptr_size);
+                }
+            }
+            InnerTy::Uint => {
+                if ptr_size == 1 {
+                    Type::U8
+                } else if ptr_size == 2 {
+                    Type::U16
+                } else if ptr_size == 4 {
+                    Type::U32
+                } else if ptr_size == 8 {
+                    Type::U64
+                } else if ptr_size == 16 {
+                    Type::U128
+                } else {
+                    unreachable!("Bad ptr_size in to_ir_type (uint): {}", ptr_size);
+                }
+            }
 
             InnerTy::I8 => Type::I8,
             InnerTy::U8 => Type::U8,
@@ -155,7 +191,7 @@ fn to_ir_type(ast_ctx: &AstCtx, ty_env: &TyEnv, type_id: TypeId) -> LangResult<T
         },
 
         Ty::Pointer(type_id_i, ..) => {
-            Type::Pointer(Box::new(to_ir_type(ast_ctx, ty_env, *type_id_i)?))
+            Type::Pointer(Box::new(to_ir_type(ast_ctx, ty_env, ptr_size, *type_id_i)?))
         }
         Ty::Array(type_id_i, dim_expr, ..) => {
             let dim = if let Some(dim_expr) = dim_expr {
@@ -164,16 +200,19 @@ fn to_ir_type(ast_ctx: &AstCtx, ty_env: &TyEnv, type_id: TypeId) -> LangResult<T
                 None
             };
 
-            Type::Array(Box::new(to_ir_type(ast_ctx, ty_env, *type_id_i)?), dim)
+            Type::Array(
+                Box::new(to_ir_type(ast_ctx, ty_env, ptr_size, *type_id_i)?),
+                dim,
+            )
         }
         Ty::Fn(_, params, ret_type_id, _) => {
             let mut param_ir_types = Vec::with_capacity(params.len());
             for param_type_id in params {
-                param_ir_types.push(to_ir_type(ast_ctx, ty_env, *param_type_id)?);
+                param_ir_types.push(to_ir_type(ast_ctx, ty_env, ptr_size, *param_type_id)?);
             }
 
             let ret_ir_type = if let Some(ret_type_id) = ret_type_id {
-                to_ir_type(ast_ctx, ty_env, *ret_type_id)?
+                to_ir_type(ast_ctx, ty_env, ptr_size, *ret_type_id)?
             } else {
                 Type::Void
             };
@@ -186,7 +225,12 @@ fn to_ir_type(ast_ctx: &AstCtx, ty_env: &TyEnv, type_id: TypeId) -> LangResult<T
 }
 
 /// Converts the given `func` into the corresponding IR `FuncDecl`.
-fn to_ir_func(ast_ctx: &AstCtx, ty_env: &TyEnv, func: &Fn) -> LangResult<FuncDecl> {
+fn to_ir_func(
+    ast_ctx: &AstCtx,
+    ty_env: &TyEnv,
+    ptr_size: usize,
+    func: &Fn,
+) -> LangResult<FuncDecl> {
     let fn_full_name = fn_full_name(ty_env, func)?;
 
     let param_types = if let Some(params) = &func.parameters {
@@ -194,7 +238,7 @@ fn to_ir_func(ast_ctx: &AstCtx, ty_env: &TyEnv, func: &Fn) -> LangResult<FuncDec
         for param in params {
             let param = param.read();
             if let Some(type_id) = param.ty {
-                let ir_type = to_ir_type(ast_ctx, ty_env, type_id)?;
+                let ir_type = to_ir_type(ast_ctx, ty_env, ptr_size, type_id)?;
                 param_types.push(ir_type);
             } else {
                 return Err(LangError::new(
@@ -214,7 +258,7 @@ fn to_ir_func(ast_ctx: &AstCtx, ty_env: &TyEnv, func: &Fn) -> LangResult<FuncDec
     };
 
     let ret_type = if let Some(ret_type_id) = func.ret_type {
-        to_ir_type(ast_ctx, ty_env, ret_type_id)?
+        to_ir_type(ast_ctx, ty_env, ptr_size, ret_type_id)?
     } else {
         Type::Void
     };
@@ -244,14 +288,19 @@ fn to_ir_adt(ty_env: &TyEnv, adt: &Adt) -> Type {
     Type::Adt(to_string_path(ty_env, &adt_path))
 }
 
-fn to_ir_adt_members(ast_ctx: &AstCtx, ty_env: &TyEnv, adt: &Adt) -> LangResult<Vec<Type>> {
+fn to_ir_adt_members(
+    ast_ctx: &AstCtx,
+    ty_env: &TyEnv,
+    ptr_size: usize,
+    adt: &Adt,
+) -> LangResult<Vec<Type>> {
     let adt_full_name = adt_full_name(ty_env, adt);
 
     let mut member_types = Vec::with_capacity(adt.members.len());
     for member in &adt.members {
         let member = member.read();
         if let Some(type_id) = member.ty {
-            let ir_type = to_ir_type(ast_ctx, ty_env, type_id)?;
+            let ir_type = to_ir_type(ast_ctx, ty_env, ptr_size, type_id)?;
             member_types.push(ir_type);
         } else {
             return Err(LangError::new(

@@ -10,7 +10,7 @@ struct TestStruct<T> {
     }
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var i: i64 = 123
     var f: f64 = 456.
 

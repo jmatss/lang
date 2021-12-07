@@ -28,6 +28,7 @@ pub fn build_bin_op(state: &mut BuildState, bin_op: &BinOp) -> LangResult<Val> {
         to_ir_type(
             &state.analyze_ctx.ast_ctx,
             &state.analyze_ctx.ty_env.lock(),
+            state.module.ptr_size,
             *ret_type_id,
         )?
     } else {
@@ -62,6 +63,7 @@ pub fn build_bin_op(state: &mut BuildState, bin_op: &BinOp) -> LangResult<Val> {
     let lhs_type = to_ir_type(
         &state.analyze_ctx.ast_ctx,
         &state.analyze_ctx.ty_env.lock(),
+        state.module.ptr_size,
         bin_op.lhs.get_expr_type()?,
     )?;
     let signed = if lhs_type.is_signed() {
@@ -115,6 +117,7 @@ pub fn build_un_op(state: &mut BuildState, un_op: &UnOp, expr_ty: ExprTy) -> Lan
         to_ir_type(
             &state.analyze_ctx.ast_ctx,
             &state.analyze_ctx.ty_env.lock(),
+            state.module.ptr_size,
             *ret_type_id,
         )?
     } else {
@@ -605,6 +608,7 @@ fn build_adt_access(
         let ir_type = to_ir_type(
             &state.analyze_ctx.ast_ctx,
             &state.analyze_ctx.ty_env.lock(),
+            state.module.ptr_size,
             member.read().ty.unwrap(),
         )?;
 

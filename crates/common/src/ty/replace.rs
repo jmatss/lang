@@ -575,8 +575,8 @@ pub fn convert_defaults(ty_env: &mut TyEnv) -> LangResult<()> {
 }
 
 /// Converts any unknown values to their corresponding "default" values
-/// if possible. This includes ints and floats that are converted to i32
-/// and f32 respectively.
+/// if possible. This includes ints and floats that are converted to `int`
+/// and `uint` respectively.
 pub fn convert_default(ty_env: &mut TyEnv, type_id: TypeId) -> LangResult<()> {
     let inf_type_id = ty_env.inferred_type(type_id)?;
 

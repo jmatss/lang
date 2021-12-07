@@ -2,7 +2,7 @@ struct TestStruct {
     var x: i32
 }
 
-fn main() -> i32 {
+fn main() -> int {
     // TODO:
     /*
     var x = 3

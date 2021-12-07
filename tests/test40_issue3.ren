@@ -3,7 +3,7 @@ struct TestStruct<T> {
 }
 
 // Issue #3
-fn main() -> i32 {
+fn main() -> int {
     var ts = TestStruct { 34 }
     var i: i8 = 12
 

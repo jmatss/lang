@@ -18,12 +18,12 @@ pub struct Map<K: Hash Eq<K>, V> {
     /// A pointer to the allocated memory.
     var ptr: {Entry<K, V>}
     /// The amount of entries currently "alive" inside the map.
-    var len: u32
+    var len: uint
     /// The amount of entries removed from the current map.
     /// These take up slots in the map, but new items can take their place.
-    var len_removed: u32
+    var len_removed: uint
     /// The amount of maximum entries that can fit in the current memory allocation.
-    var cap: u32
+    var cap: uint
     /// The load factor at which the map should be resized.
     var load_factor: f64
 
@@ -32,7 +32,7 @@ pub struct Map<K: Hash Eq<K>, V> {
     ///
     /// If `cap` is set to 0, the heap allocation will be done lazily at
     /// the first use of the map. The capacity will be set to 16.
-    pub fn init(cap: u32 = 0) -> Result<Map<K, V>, StringView> {
+    pub fn init(cap: uint = 0) -> Result<Map<K, V>, StringView> {
         const load_factor = 0.75
         var map = Map { @null(), 0, 0, 0, load_factor }
 
@@ -132,20 +132,21 @@ pub struct Map<K: Hash Eq<K>, V> {
         }
     }
 
-    pub fn this len() -> u32 {
+    pub fn this len() -> uint {
         return this.len
     }
 
-    pub fn this cap() -> u32 {
+    pub fn this cap() -> uint {
         return this.cap
     }
 
     /// Finds the entry with key `key` and returns its entry index.
     ///
     /// If unable to find an entry with that key, Optional::empty() is returned.
-    fn {this} find_taken(key: K) -> Optional<u32> {
+    fn {this} find_taken(key: K) -> Optional<uint> {
         const cap = this.cap()
-        var idx = key.hash() % cap
+        const hash: u32 = key.hash()
+        var idx = (hash as uint) % cap
         var entry_found = false
         var step_size = 0
 
@@ -182,9 +183,10 @@ pub struct Map<K: Hash Eq<K>, V> {
     ///
     /// Before calling this function, the underlying array should have been resized
     /// so that it contains atleast one free spot.
-    fn {this} find_to_insert(key: K) -> u32 {
+    fn {this} find_to_insert(key: K) -> uint {
         const cap = this.cap()
-        var idx = key.hash() % cap
+        const hash: u32 = key.hash()
+        var idx = (hash as uint) % cap
         var step_size = 0
 
         while true {       
@@ -219,7 +221,7 @@ pub struct Map<K: Hash Eq<K>, V> {
     /// with a default capacity of 16. If an allocation already exists, a new allocation will
     /// be made with double the size (to preserve power of 2). The entries will then be moved
     /// to the new allocation and the old memory will be de-allocated.
-    fn {this} resize_and_move(new_cap: u32) -> Result<(), StringView> {
+    fn {this} resize_and_move(new_cap: uint) -> Result<(), StringView> {
         if new_cap == 0 {
             new_cap = 16
         }
@@ -260,7 +262,7 @@ pub struct Map<K: Hash Eq<K>, V> {
     }
 }
 
-fn is_power_of_two(n: u32) -> bool {
+fn is_power_of_two(n: uint) -> bool {
     return n != 0 and (n & (n - 1)) == 0
 }
 

@@ -18,7 +18,7 @@ fn test_fn_ret<T>() -> T { return 7 }
 
 fn test_fn2<K, V>(k: K, v: V) { }
 
-fn main() -> i32 {
+fn main() -> int {
     var one: u8 = 1
     TestStruct::test_method(one)
 

@@ -177,7 +177,7 @@ impl Debug for ExprInstr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let output = match &self.kind {
             ExprInstrKind::Lit(lit) => match lit {
-                Lit::String(data_idx) => format!("string {}", data_idx.0),
+                Lit::String(data_idx) => format!("string_data({})", data_idx.0),
                 Lit::Char(char) => format!("char '{}'", char),
                 Lit::Bool(bool) => format!("bool {}", bool),
                 Lit::Integer(int) => format!("int {}", int),

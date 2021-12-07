@@ -7,7 +7,7 @@ use std::assert as assert_fn
 // Change name of path.
 use std as longer_std
 
-fn main() -> i32 {
+fn main() -> int {
     std::Optional<i8>::empty()
     Opt<u64>::empty()
     // This should not work since `std::Optional` "renamed" to `Opt`:

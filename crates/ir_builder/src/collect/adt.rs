@@ -46,7 +46,12 @@ pub(crate) fn collect_type_decls(
         match adt.kind {
             AdtKind::Struct | AdtKind::Tuple => {
                 let members = if adt.has_definition {
-                    Some(to_ir_adt_members(ast_ctx, &ty_env_guard, &adt)?)
+                    Some(to_ir_adt_members(
+                        ast_ctx,
+                        &ty_env_guard,
+                        module.ptr_size,
+                        &adt,
+                    )?)
                 } else {
                     None
                 };
@@ -55,7 +60,7 @@ pub(crate) fn collect_type_decls(
                     .map_err(into_err)?;
             }
             AdtKind::Union => {
-                let members = to_ir_adt_members(ast_ctx, &ty_env_guard, &adt)?;
+                let members = to_ir_adt_members(ast_ctx, &ty_env_guard, module.ptr_size, &adt)?;
                 let mut largest_size = 0;
                 for member in &members {
                     let cur_size = size_with_padding(module, member).map_err(into_err)?;
@@ -64,7 +69,7 @@ pub(crate) fn collect_type_decls(
                     }
                 }
 
-                let data_type = Type::Array(Box::new(Type::U8), Some(largest_size as u32));
+                let data_type = Type::Array(Box::new(Type::U8), Some(largest_size as u128));
                 let tag_type = Type::U8;
                 module
                     .add_struct(adt_full_name, Some(vec![data_type, tag_type]))

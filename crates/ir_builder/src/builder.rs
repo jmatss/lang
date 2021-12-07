@@ -339,6 +339,13 @@ impl InstrBuilder {
         ret_type: Type,
         signed: Signed,
     ) -> IrResult<ExprInstr> {
+        if assert_type_eq(&lhs.1, &rhs.1).is_err() {
+            return Err(IrError::new(format!(
+                "Lhs and rhs of bin op \"{:?}\" didn't match. \
+                lhs val: {:?}, rhs val: {:?}.",
+                oper, lhs, rhs,
+            )));
+        }
         assert_type_eq(&lhs.1, &rhs.1)?;
         Ok(self.bin_op_without_type_eq(oper, lhs, rhs, ret_type, signed))
     }

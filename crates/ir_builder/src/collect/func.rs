@@ -25,7 +25,7 @@ pub(crate) fn collect_func_decls(
     if let AstToken::Block(Block { header, body, .. }) = ast_token {
         if let BlockHeader::Fn(func) = header {
             let func = func.read();
-            let ir_func = to_ir_func(ast_ctx, &ty_env.lock(), &func)?;
+            let ir_func = to_ir_func(ast_ctx, &ty_env.lock(), module.ptr_size, &func)?;
             module
                 .add_func(ir_func.name.clone(), ir_func)
                 .map_err(into_err)?;
@@ -36,7 +36,7 @@ pub(crate) fn collect_func_decls(
         }
     } else if let AstToken::Stmt(Stmt::ExternalDecl(ExternalDecl::Fn(func), _)) = ast_token {
         let func = func.read();
-        let ir_func = to_ir_func(ast_ctx, &ty_env.lock(), &func)?;
+        let ir_func = to_ir_func(ast_ctx, &ty_env.lock(), module.ptr_size, &func)?;
 
         // Allow mulitple declaration of the same extern function.
         if module.get_func(&ir_func.name).is_none() {

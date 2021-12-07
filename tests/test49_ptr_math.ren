@@ -1,6 +1,4 @@
-ext fn printf(format: {u8}, ...) -> i32
-
-fn main() -> i32 {
+fn main() -> int {
     var argc = @argc()
     var argv = @argv()
     printf(c"argc: %d, argv: %s", argc, argv.*)

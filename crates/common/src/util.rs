@@ -64,15 +64,17 @@ pub fn to_union_variant_name(union_name: &str, member_name: &str) -> String {
 ///
 /// Currently only integer literals are allowed to be used to specify array
 /// dimension, but this should be changed in the future.
-pub fn get_array_dim(dim_expr: &Expr, file_pos: Option<FilePosition>) -> LangResult<u32> {
+pub fn get_array_dim(dim_expr: &Expr, file_pos: Option<FilePosition>) -> LangResult<u128> {
     match dim_expr {
-        Expr::Lit(Lit::Integer(num, radix), ..) => u32::from_str_radix(num, *radix).map_err(|_| {
-            LangError::new(
-                format!("Invalid integer found in array dimension: {}", num),
-                LangErrorKind::GeneralError,
-                file_pos,
-            )
-        }),
+        Expr::Lit(Lit::Integer(num, radix), ..) => {
+            u128::from_str_radix(num, *radix).map_err(|_| {
+                LangError::new(
+                    format!("Invalid integer found in array dimension: {}", num),
+                    LangErrorKind::GeneralError,
+                    file_pos,
+                )
+            })
+        }
 
         _ => Err(LangError::new(
             format!(

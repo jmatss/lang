@@ -35,8 +35,7 @@ pub(crate) fn infer_array_init(
         arg_types.push(arg.value.get_expr_type()?);
     }
 
-    // TODO: What should the type of the index for the array size be?
-    let arr_idx_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::U32, TypeInfo::None))?;
+    let arr_idx_type_id = ty_env_guard.id(&Ty::CompoundType(InnerTy::Uint, TypeInfo::None))?;
 
     let dim = array_init.arguments.len();
     let dim_expr = Expr::Lit(

@@ -6,7 +6,7 @@ struct TestStruct<T> {
     }
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var i: u64 = 1
     var f: f32 = 123.
 

@@ -477,6 +477,8 @@ pub fn is_compatible_inner_ty(
         | (InnerTy::Character, InnerTy::Character)
         | (InnerTy::String, InnerTy::String)
         | (InnerTy::Boolean, InnerTy::Boolean)
+        | (InnerTy::Int, InnerTy::Int)
+        | (InnerTy::Uint, InnerTy::Uint)
         | (InnerTy::I8, InnerTy::I8)
         | (InnerTy::U8, InnerTy::U8)
         | (InnerTy::I16, InnerTy::I16)

@@ -35,7 +35,7 @@ use crate::{
     to_ir_type, VarModifier,
 };
 
-use super::expr::build_expr;
+use super::expr::{build_expr, build_lit_string_view};
 
 #[derive(Debug)]
 enum PtrMathOp {
@@ -77,11 +77,14 @@ fn build_built_in_size(state: &mut BuildState, built_in_call: &BuiltInCall) -> L
         let ir_type = to_ir_type(
             &state.analyze_ctx.ast_ctx,
             &state.analyze_ctx.ty_env.lock(),
+            state.module.ptr_size,
             *arg_type_id,
         )?;
         let size = size_with_padding(state.module, &ir_type).map_err(into_err)?;
 
-        let instr = state.builder.u32(&size.to_string());
+        let instr = state
+            .builder
+            .int(&size.to_string(), state.module.default_uint());
         state.cur_block_mut()?.push(instr.clone());
         Ok(instr.val)
     } else {
@@ -104,7 +107,7 @@ fn build_built_in_type(_state: &mut BuildState, built_in_call: &BuiltInCall) -> 
 fn build_built_in_name(state: &mut BuildState, built_in_call: &BuiltInCall) -> LangResult<Val> {
     if let Some(value) = built_in_call.arguments.first().map(|arg| &arg.value) {
         if let Expr::Var(var) = &value {
-            let instr = state.builder.string_lit(&mut state.module, &var.name);
+            let instr = build_lit_string_view(state, &var.name)?;
             state.cur_block_mut()?.push(instr.clone());
             Ok(instr.val)
         } else {
@@ -128,6 +131,7 @@ fn build_built_in_null(state: &mut BuildState, built_in_call: &BuiltInCall) -> L
         let ir_type = to_ir_type(
             &state.analyze_ctx.ast_ctx,
             &state.analyze_ctx.ty_env.lock(),
+            state.module.ptr_size,
             ret_type_id,
         )?;
         build_null(state, ir_type)
@@ -171,9 +175,8 @@ fn build_null(state: &mut BuildState, ir_type: Type) -> LangResult<Val> {
             }
         }
 
-        // TODO: int/uint instead of u64.
         Type::Pointer(_) => {
-            let zero_instr = state.builder.u64("0");
+            let zero_instr = state.builder.int("0", state.module.default_uint());
             state.cur_block_mut()?.push(zero_instr.clone());
             state.builder.cast(zero_instr.val, ir_type.clone())
         }
@@ -258,11 +261,14 @@ fn build_built_in_ptr_math(
         ));
     };
 
-    let ptr_element_size_value = state.builder.u32(&ptr_element_size.to_string());
+    let ptr_element_size_value = state
+        .builder
+        .int(&ptr_element_size.to_string(), state.module.default_uint());
     state.cur_block_mut()?.push(ptr_element_size_value.clone());
 
-    // TODO: int/uint.
-    let ptr_int_value = state.builder.cast(ptr_value.clone(), Type::U64);
+    let ptr_int_value = state
+        .builder
+        .cast(ptr_value.clone(), state.module.default_uint());
     state.cur_block_mut()?.push(ptr_int_value.clone());
 
     let mul_instr = state
@@ -271,14 +277,9 @@ fn build_built_in_ptr_math(
         .map_err(into_err)?;
     state.cur_block_mut()?.push(mul_instr.clone());
 
-    // TODO: int/uint. This should be removed, should not be needed if all ints
-    //       are of the same size (ptr_size).
-    let mul_cast_instr = state.builder.cast(mul_instr.val, Type::U64);
-    state.cur_block_mut()?.push(mul_cast_instr.clone());
-
     let math_instr = match ptr_math_op {
-        PtrMathOp::Add => state.builder.add(ptr_int_value.val, mul_cast_instr.val),
-        PtrMathOp::Sub => state.builder.sub(ptr_int_value.val, mul_cast_instr.val),
+        PtrMathOp::Add => state.builder.add(ptr_int_value.val, mul_instr.val),
+        PtrMathOp::Sub => state.builder.sub(ptr_int_value.val, mul_instr.val),
     }
     .map_err(into_err)?;
     state.cur_block_mut()?.push(math_instr.clone());
@@ -297,7 +298,7 @@ fn build_built_in_array(state: &mut BuildState, built_in_call: &BuiltInCall) -> 
     //       compile-time constants in the future.
     let lit_dim = match &arr_dim {
         Expr::Lit(Lit::Integer(num, radix), ..) => {
-            u32::from_str_radix(num, *radix).map_err(|_| {
+            u128::from_str_radix(num, *radix).map_err(|_| {
                 LangError::new(
                     format!(
                         "Invalid integer found in array dimension of @array: {:#?}",
@@ -390,6 +391,7 @@ fn load_global_var(
         to_ir_type(
             &state.analyze_ctx.ast_ctx,
             &state.analyze_ctx.ty_env.lock(),
+            state.module.ptr_size,
             type_id,
         )?
     } else {
@@ -413,9 +415,8 @@ fn build_built_in_file(state: &mut BuildState, built_in_call: &BuiltInCall) -> L
         .file_info
         .get(&built_in_call.file_pos.file_nr)
     {
-        let instr = state
-            .builder
-            .string_lit(&mut state.module, &file_info.filename);
+        let file_name = file_info.filename.clone();
+        let instr = build_lit_string_view(state, &file_name)?;
         state.cur_block_mut()?.push(instr.clone());
         Ok(instr.val)
     } else {
@@ -431,17 +432,19 @@ fn build_built_in_file(state: &mut BuildState, built_in_call: &BuiltInCall) -> L
 }
 
 fn build_built_in_line(state: &mut BuildState, built_in_call: &BuiltInCall) -> LangResult<Val> {
-    let instr = state
-        .builder
-        .i32(&built_in_call.file_pos.line_start.to_string());
+    let instr = state.builder.int(
+        &built_in_call.file_pos.line_start.to_string(),
+        state.module.default_uint(),
+    );
     state.cur_block_mut()?.push(instr.clone());
     Ok(instr.val)
 }
 
 fn build_built_in_column(state: &mut BuildState, built_in_call: &BuiltInCall) -> LangResult<Val> {
-    let instr = state
-        .builder
-        .i32(&built_in_call.file_pos.column_start.to_string());
+    let instr = state.builder.int(
+        &built_in_call.file_pos.column_start.to_string(),
+        state.module.default_uint(),
+    );
     state.cur_block_mut()?.push(instr.clone());
     Ok(instr.val)
 }
@@ -485,7 +488,10 @@ fn build_built_in_format(state: &mut BuildState, built_in_call: &BuiltInCall) ->
             None,
             Expr::Lit(
                 Lit::Integer("16".into(), 10),
-                Some(type_id_u32(&mut state.analyze_ctx.ty_env.lock(), file_pos)?),
+                Some(type_id_uint(
+                    &mut state.analyze_ctx.ty_env.lock(),
+                    file_pos,
+                )?),
                 file_pos,
             ),
         )],
@@ -641,7 +647,7 @@ fn append_view_to_string(
         &mut state.analyze_ctx.ty_env.lock(),
         file_pos,
     )?);
-    string_append_view_call.ret_type = Some(type_id_result_u32(
+    string_append_view_call.ret_type = Some(type_id_result_uint(
         &mut state.analyze_ctx.ty_env.lock(),
         file_pos,
     )?);
@@ -733,12 +739,12 @@ fn int_to_string_view(
     ))?;
 
     let u8_type_id = type_id_u8(&mut ty_env_guard, file_pos)?;
-    let u32_type_id = type_id_u32(&mut ty_env_guard, file_pos)?;
+    let uint_type_id = type_id_uint(&mut ty_env_guard, file_pos)?;
     let arr_type_id = ty_env_guard.id(&Ty::Array(
         u8_type_id,
         Some(Box::new(Expr::Lit(
             Lit::Integer(buf_size.to_string(), 10),
-            Some(u32_type_id),
+            Some(uint_type_id),
             None,
         ))),
         TypeInfo::DefaultOpt(file_pos),
@@ -764,7 +770,12 @@ fn int_to_string_view(
         .variables
         .insert(buf_var_key, Arc::clone(&buf_var));
 
-    let ir_type = to_ir_type(&state.analyze_ctx.ast_ctx, &ty_env_guard, arr_type_id)?;
+    let ir_type = to_ir_type(
+        &state.analyze_ctx.ast_ctx,
+        &ty_env_guard,
+        state.module.ptr_size,
+        arr_type_id,
+    )?;
     state.add_local_to_cur_func(buf_var_name, state.cur_block_id, ir_type, VarModifier::None)?;
 
     std::mem::drop(ty_env_guard);
@@ -846,7 +857,12 @@ fn bool_to_string_view(
         .variables
         .insert(var_key, Arc::clone(&var));
 
-    let ir_type = to_ir_type(&state.analyze_ctx.ast_ctx, &ty_env_guard, bool_type_id)?;
+    let ir_type = to_ir_type(
+        &state.analyze_ctx.ast_ctx,
+        &ty_env_guard,
+        state.module.ptr_size,
+        bool_type_id,
+    )?;
     state.add_local_to_cur_func(var_name, state.cur_block_id, ir_type, VarModifier::None)?;
 
     std::mem::drop(ty_env_guard);
@@ -888,9 +904,9 @@ fn type_id_u8(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangResult<
     ))
 }
 
-fn type_id_u32(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangResult<TypeId> {
+fn type_id_uint(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangResult<TypeId> {
     ty_env.id(&Ty::CompoundType(
-        InnerTy::U32,
+        InnerTy::Uint,
         TypeInfo::DefaultOpt(file_pos),
     ))
 }
@@ -933,10 +949,10 @@ fn type_id_result_string(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> 
     ))
 }
 
-fn type_id_result_u32(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangResult<TypeId> {
+fn type_id_result_uint(ty_env: &mut TyEnv, file_pos: Option<FilePosition>) -> LangResult<TypeId> {
     let result_path: LangPath = ["std".into(), "Result".into()].into();
     let mut gens = Generics::new();
-    gens.insert("T".into(), type_id_u32(ty_env, file_pos)?);
+    gens.insert("T".into(), type_id_uint(ty_env, file_pos)?);
     gens.insert("E".into(), type_id_string_view(ty_env, file_pos)?);
     ty_env.id(&Ty::CompoundType(
         InnerTy::Struct(result_path.with_gens(gens)),

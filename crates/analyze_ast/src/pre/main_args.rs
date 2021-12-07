@@ -35,7 +35,7 @@ use common::{
 ///
 /// # Only valid definition of main
 /// ```no_run
-/// fn main() -> i32
+/// fn main() -> int
 /// ```
 pub struct MainArgsAnalyzer {
     errors: Vec<LangError>,
@@ -51,7 +51,7 @@ impl MainArgsAnalyzer {
     fn verify_main(&mut self, ctx: &TraverseCtx, func: &Fn) -> LangResult<()> {
         if let Some(ret_type_id) = func.ret_type {
             let ret_ty = ctx.ty_env.lock().ty(ret_type_id)?.clone();
-            if matches!(ret_ty, Ty::CompoundType(InnerTy::I32, ..)) {
+            if matches!(ret_ty, Ty::CompoundType(InnerTy::Int, ..)) {
                 if func.parameters.is_none() {
                     Ok(())
                 } else {
@@ -62,7 +62,7 @@ impl MainArgsAnalyzer {
                 }
             } else {
                 Err(ctx.ast_ctx.err(format!(
-                    "Found \"main\" function with no that didn't return the expected i32. \
+                    "Found \"main\" function with no that didn't return the expected int. \
                     Instead if returns type_id: {}, ty: {:?}",
                     ret_type_id, ret_ty
                 )))
@@ -71,7 +71,7 @@ impl MainArgsAnalyzer {
             // TODO: Add file pos of function.
             Err(ctx
                 .ast_ctx
-                .err("Found \"main\" function with no return type set, should return i32.".into()))
+                .err("Found \"main\" function with no return type set, should return int.".into()))
         }
     }
 
@@ -153,13 +153,13 @@ impl MainArgsAnalyzer {
     /// The first item in the returned tuple is a variable representing `argc`
     /// and the second item represents `argv`.
     fn construct_params(&self, ctx: &mut TraverseCtx) -> LangResult<(Var, Var)> {
-        let i32_type_id = ctx
+        let uint_type_id = ctx
             .ty_env
             .lock()
-            .id(&Ty::CompoundType(InnerTy::I32, TypeInfo::None))?;
+            .id(&Ty::CompoundType(InnerTy::Uint, TypeInfo::None))?;
         let argc_param = Var::new(
             ARGC_PARAM_VAR_NAME.into(),
-            Some(i32_type_id),
+            Some(uint_type_id),
             None,
             None,
             None,
