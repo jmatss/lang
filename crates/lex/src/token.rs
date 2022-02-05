@@ -50,6 +50,7 @@ pub enum Kw {
 
     Var,
     Const,
+    Final,
     Static,
     /// Only accessable from the same file (or "class" ?).
     Private,
@@ -229,7 +230,9 @@ impl LexToken {
 
             "var" => LexTokenKind::Kw(Kw::Var),
             "const" => LexTokenKind::Kw(Kw::Const),
+            "final" => LexTokenKind::Kw(Kw::Final),
             "static" => LexTokenKind::Kw(Kw::Static),
+
             "priv" => LexTokenKind::Kw(Kw::Private),
             "pub" => LexTokenKind::Kw(Kw::Public),
             "hid" => LexTokenKind::Kw(Kw::Hidden),

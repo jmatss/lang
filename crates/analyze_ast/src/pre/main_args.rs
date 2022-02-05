@@ -7,7 +7,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{Block, BlockHeader, Fn},
-        expr::{Expr, Var},
+        expr::{Expr, Var, VarType},
         op::AssignOperator,
         stmt::Stmt,
     },
@@ -164,7 +164,7 @@ impl MainArgsAnalyzer {
             None,
             None,
             None,
-            false,
+            VarType::Unknown,
         );
 
         let u8_type_id = ctx
@@ -186,7 +186,7 @@ impl MainArgsAnalyzer {
             None,
             None,
             None,
-            false,
+            VarType::Unknown,
         );
 
         Ok((argc_param, argv_param))

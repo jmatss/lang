@@ -15,7 +15,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{Adt, AdtKind, Block, BlockHeader},
-        expr::Var,
+        expr::{Var, VarType},
     },
     traverse::{traverse_ctx::TraverseCtx, visitor::Visitor},
     ty::{inner_ty::InnerTy, to_string::to_string_type_id, ty::Ty, type_id::TypeId},
@@ -66,7 +66,15 @@ impl TupleCreator {
                 let mut members = Vec::with_capacity(gens.len());
                 for (i, member_type_id) in gens.iter_types().enumerate() {
                     let name = format!("tuple_member_{}", i);
-                    let var = Var::new(name, Some(*member_type_id), None, None, None, None, false);
+                    let var = Var::new(
+                        name,
+                        Some(*member_type_id),
+                        None,
+                        None,
+                        None,
+                        None,
+                        VarType::Unknown,
+                    );
                     members.push(Arc::new(RwLock::new(var)));
                 }
                 members

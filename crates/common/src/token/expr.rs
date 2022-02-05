@@ -306,7 +306,7 @@ impl Expr {
             // These might come to be possible const in the future.
             Expr::FnCall(..) | Expr::FnPtr(..) | Expr::BuiltInCall(..) | Expr::Block(..) => false,
 
-            Expr::Var(var) => var.is_const,
+            Expr::Var(var) => matches!(var.var_type, VarType::Const),
 
             Expr::AdtInit(adt_init) => {
                 let mut all_is_const = true;
@@ -391,13 +391,30 @@ impl Expr {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VarType {
+    /// A "regular" variable. Can be assigned multiple times and the content
+    /// are mutable.
+    Var,
+    /// A variable that can only be assigned once. The contents of the variable
+    /// is still mutable.
+    Final,
+    /// A variable that will be evaluated at compile-time. This will never be
+    /// compiled into an actual variable in the output.
+    Const,
+    /// Set to variables that we don't know the type of. This will be assigned
+    /// to ex. varible uses (i.e. not declarations) where we don't know what
+    /// type the variable is.
+    Unknown,
+}
+
 #[derive(Debug, Clone)]
 pub struct Var {
     pub name: String,
     pub ty: Option<TypeId>,
     pub modifiers: Option<Vec<Modifier>>,
     pub value: Option<Box<Expr>>,
-    pub is_const: bool,
+    pub var_type: VarType,
     pub is_global: bool,
 
     /// The file position spanning the whole variable.
@@ -419,7 +436,7 @@ impl Var {
         default_value: Option<Box<Expr>>,
         file_pos: Option<FilePosition>,
         ty_file_pos: Option<FilePosition>,
-        is_const: bool,
+        var_type: VarType,
     ) -> Self {
         Var {
             name,
@@ -428,7 +445,7 @@ impl Var {
             value: default_value,
             file_pos,
             ty_file_pos,
-            is_const,
+            var_type,
             is_global: false,
             copy_nr: None,
         }
@@ -437,7 +454,15 @@ impl Var {
     /// Constructor for creating variable for var "use"s. These will contain
     /// a lot less information, so only requires name and filepos.
     pub fn new_use(name: String, file_pos: FilePosition) -> Self {
-        Var::new(name, None, None, None, Some(file_pos), None, false)
+        Var::new(
+            name,
+            None,
+            None,
+            None,
+            Some(file_pos),
+            None,
+            VarType::Unknown,
+        )
     }
 
     pub fn set_copy_nr(&mut self, copy_nr: usize) {

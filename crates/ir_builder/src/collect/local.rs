@@ -8,7 +8,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{Block, BlockHeader},
-        expr::Var,
+        expr::{Var, VarType},
         stmt::Stmt,
     },
     traverse::{traverse_ctx::TraverseCtx, traverser::traverse, visitor::Visitor},
@@ -116,10 +116,10 @@ impl<'a> LocalVarCollector<'a> {
 
         let ir_type = to_ir_type(ast_ctx, ty_env, ptr_size, type_id)?;
         let idx = ir_func.add_local_var(ir_type);
-        let var_modifier = if var.is_const {
-            VarModifier::Const
-        } else {
-            VarModifier::None
+        let var_modifier = match var.var_type {
+            VarType::Var | VarType::Unknown => VarModifier::Var,
+            VarType::Final => VarModifier::Final,
+            VarType::Const => VarModifier::Const,
         };
 
         let entry = self.locals.entry(cur_func_name).or_default();

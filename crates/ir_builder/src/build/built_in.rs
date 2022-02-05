@@ -7,7 +7,7 @@ use common::{
     file::FilePosition,
     path::LangPath,
     token::{
-        expr::{Argument, BuiltInCall, Expr, FnCall, FormatPart, Var},
+        expr::{Argument, BuiltInCall, Expr, FnCall, FormatPart, Var, VarType},
         lit::{Lit, StringType},
         op::{AssignOperator, Op, UnOp, UnOperator},
         stmt::Stmt,
@@ -357,7 +357,7 @@ fn build_built_in_tuple(state: &mut BuildState, built_in_call: &BuiltInCall) -> 
 
     let instr = state
         .builder
-        .struct_init(&mut state.module, &tuple_full_name, &args)
+        .struct_init(state.module, &tuple_full_name, &args)
         .map_err(into_err)?;
     state.cur_block_mut()?.push(instr.clone());
 
@@ -557,7 +557,7 @@ fn build_built_in_format(state: &mut BuildState, built_in_call: &BuiltInCall) ->
         None,
         None,
         None,
-        false,
+        VarType::Final,
     )));
     let string_var_expr = Expr::Var(string_var.read().clone());
 
@@ -566,7 +566,7 @@ fn build_built_in_format(state: &mut BuildState, built_in_call: &BuiltInCall) ->
         var_name.clone(),
         state.cur_block_id,
         string_ir_type,
-        VarModifier::None,
+        VarModifier::Final,
     )?;
 
     let string_var_decl = Stmt::VariableDecl(Arc::clone(&string_var), None);
@@ -759,7 +759,7 @@ fn int_to_string_view(
         None,
         None,
         None,
-        false,
+        VarType::Final,
     )));
     let buf_var_decl = Stmt::VariableDecl(Arc::clone(&buf_var), None);
 
@@ -776,7 +776,12 @@ fn int_to_string_view(
         state.module.ptr_size,
         arr_type_id,
     )?;
-    state.add_local_to_cur_func(buf_var_name, state.cur_block_id, ir_type, VarModifier::None)?;
+    state.add_local_to_cur_func(
+        buf_var_name,
+        state.cur_block_id,
+        ir_type,
+        VarModifier::Final,
+    )?;
 
     std::mem::drop(ty_env_guard);
 
@@ -846,7 +851,7 @@ fn bool_to_string_view(
         Some(Box::new(bool_expr.clone())),
         None,
         None,
-        false,
+        VarType::Final,
     )));
     let var_decl = Stmt::VariableDecl(Arc::clone(&var), None);
 
@@ -863,7 +868,7 @@ fn bool_to_string_view(
         state.module.ptr_size,
         bool_type_id,
     )?;
-    state.add_local_to_cur_func(var_name, state.cur_block_id, ir_type, VarModifier::None)?;
+    state.add_local_to_cur_func(var_name, state.cur_block_id, ir_type, VarModifier::Final)?;
 
     std::mem::drop(ty_env_guard);
 

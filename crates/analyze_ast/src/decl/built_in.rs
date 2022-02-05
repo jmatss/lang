@@ -4,7 +4,10 @@ use parking_lot::Mutex;
 
 use common::{
     error::LangResult,
-    token::{block::BuiltIn, expr::Var},
+    token::{
+        block::BuiltIn,
+        expr::{Var, VarType},
+    },
     ty::{inner_ty::InnerTy, ty::Ty, ty_env::TyEnv, type_info::TypeInfo},
 };
 
@@ -49,7 +52,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         None,
         None,
         None,
-        false,
+        VarType::Unknown,
     )];
     let generics = None;
     built_ins.insert(
@@ -65,7 +68,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         None,
         None,
         None,
-        false,
+        VarType::Unknown,
     )];
     let generics = None;
     built_ins.insert(
@@ -89,7 +92,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         None,
         None,
         None,
-        false,
+        VarType::Unknown,
     )];
     let generics = None;
     built_ins.insert(
@@ -105,7 +108,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         None,
         None,
         None,
-        false,
+        VarType::Unknown,
     )];
     let generics = None;
     built_ins.insert(
@@ -122,7 +125,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
             None,
             None,
             None,
-            false,
+            VarType::Unknown,
         ),
         Var::new(
             "amount".into(),
@@ -131,7 +134,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
             None,
             None,
             None,
-            false,
+            VarType::Unknown,
         ),
     ];
     let generics = None;
@@ -149,7 +152,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
             None,
             None,
             None,
-            false,
+            VarType::Unknown,
         ),
         Var::new(
             "amount".into(),
@@ -158,7 +161,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
             None,
             None,
             None,
-            false,
+            VarType::Unknown,
         ),
     ];
     let generics = None;
@@ -176,7 +179,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
             None,
             None,
             None,
-            false,
+            VarType::Unknown,
         ),
         Var::new(
             "dimension".into(),
@@ -185,7 +188,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
             None,
             None,
             None,
-            true,
+            VarType::Const,
         ),
     ];
     let generics = None;
@@ -216,7 +219,7 @@ pub fn init_built_ins(ty_env: &Mutex<TyEnv>) -> LangResult<HashMap<&'static str,
         None,
         None,
         None,
-        true,
+        VarType::Const,
     )];
     let generics = None;
     built_ins.insert(

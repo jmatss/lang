@@ -12,7 +12,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{AdtBuilder, Block, BlockHeader, Fn, Trait},
-        expr::{Expr, Var},
+        expr::{Expr, Var, VarType},
         lit::Lit,
         stmt::{ExternalDecl, Modifier, Stmt},
     },
@@ -67,8 +67,9 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                 self.parse_external(modifiers, kw_file_pos)
             }
 
-            Kw::Var => self.parse_var_decl(false, kw_file_pos),
-            Kw::Const => self.parse_var_decl(true, kw_file_pos),
+            Kw::Var => self.parse_var_decl(VarType::Var, kw_file_pos),
+            Kw::Final => self.parse_var_decl(VarType::Final, kw_file_pos),
+            Kw::Const => self.parse_var_decl(VarType::Const, kw_file_pos),
             Kw::Static => Err(self.iter.err(
                 "\"Static\" keyword not implemented.".into(),
                 Some(kw_file_pos),
@@ -606,8 +607,8 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
         }
     }
 
-    /// Parses a `var`/`const` declaration statement:
-    ///   "[var | const] <ident> [: <type>] [= <expr>]"
+    /// Parses a `var`/`final`/`const` declaration statement:
+    ///   "[var | final | const] <ident> [: <type>] [= <expr>]"
     ///
     /// # Examples
     ///
@@ -623,11 +624,11 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
     /// var x: i32 = 3
     /// ```
     ///
-    /// The "var"/"const" keyword has already been consumed when this function
-    /// is called.
+    /// The "var"/"final"/"const" keyword has already been consumed when this
+    /// function is called.
     fn parse_var_decl(
         &mut self,
-        is_const: bool,
+        var_type: VarType,
         mut file_pos: FilePosition,
     ) -> LangResult<AstToken> {
         let lex_token = self.iter.next_skip_space_line();
@@ -648,7 +649,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
 
         let var = Arc::new(RwLock::new(self.iter.parse_var_decl(
             &ident,
-            is_const,
+            var_type,
             None,
             var_file_pos,
         )?));
@@ -960,8 +961,6 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
             let next_kind = next_token.as_ref().map(|t| t.kind.clone());
             if let Some(LexTokenKind::Ident(member_name)) = next_kind {
                 let member_file_pos = next_token.unwrap().file_pos.to_owned();
-                let is_const = true;
-
                 let member = Var::new(
                     member_name,
                     None,
@@ -969,7 +968,7 @@ impl<'a, 'b> KeyworkParser<'a, 'b> {
                     None,
                     Some(member_file_pos),
                     None,
-                    is_const,
+                    VarType::Const,
                 );
                 members.push(member);
             } else {

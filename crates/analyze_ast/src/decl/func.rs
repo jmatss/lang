@@ -11,6 +11,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{AdtKind, Block, BlockHeader, Fn},
+        expr::VarType,
         stmt::Stmt,
         stmt::{ExternalDecl, Modifier},
     },
@@ -169,7 +170,7 @@ impl DeclFnAnalyzer {
                 None,
                 None,
                 None,
-                false,
+                VarType::Unknown,
             )));
 
             if let Some(ref mut params) = func.parameters {

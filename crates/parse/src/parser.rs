@@ -12,7 +12,7 @@ use common::{
     token::{
         ast::AstToken,
         block::{Block, BlockHeader},
-        expr::{Argument, Expr, Var},
+        expr::{Argument, Expr, Var, VarType},
         stmt::Stmt,
     },
     ty::{
@@ -378,7 +378,7 @@ impl<'a> ParseTokenIter<'a> {
     pub fn parse_var_decl(
         &mut self,
         ident: &str,
-        is_const: bool,
+        var_type: VarType,
         generics: Option<&Generics>,
         mut file_pos: FilePosition,
     ) -> LangResult<Var> {
@@ -444,7 +444,7 @@ impl<'a> ParseTokenIter<'a> {
             value,
             Some(file_pos),
             ty_file_pos,
-            is_const,
+            var_type,
         ))
     }
 
@@ -599,6 +599,8 @@ impl<'a> ParseTokenIter<'a> {
         }
     }
 
+    // TODO: Implement var type for parameters? Ex. var/final/const to make it
+    //       explicit what type of parameter it is and what can be done with it.
     /// Parses a list of parameters. This can be used for a generic lists
     /// contanining variables and their types, ex. function params and structs.
     ///   "<start_symbol> [ <ident> : <type> [= <default value>] [,]] [...] <end_symbol>"
@@ -659,10 +661,12 @@ impl<'a> ParseTokenIter<'a> {
                 // "TripleDot" which is the indicator for a variadic function.
                 match lex_token.kind {
                     LexTokenKind::Ident(ident) => {
-                        let is_const = false;
-                        let parameter =
-                            self.parse_var_decl(&ident, is_const, generics, lex_token.file_pos)?;
-
+                        let parameter = self.parse_var_decl(
+                            &ident,
+                            VarType::Var,
+                            generics,
+                            lex_token.file_pos,
+                        )?;
                         parameters.push(parameter);
                     }
 

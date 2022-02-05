@@ -34,7 +34,8 @@ mod builder;
 
 #[derive(Debug, Clone, Copy)]
 pub enum VarModifier {
-    None,
+    Var,
+    Final,
     Const,
 }
 

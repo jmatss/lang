@@ -76,7 +76,7 @@ fn collect_params_rec(
             let func_entry = params.entry(fn_full_name).or_default();
             for (idx, param) in fn_params.iter().enumerate() {
                 let key = (param.read().full_name(), *block_id);
-                func_entry.insert(key, (ParamVarIdx(idx), VarModifier::None));
+                func_entry.insert(key, (ParamVarIdx(idx), VarModifier::Var));
             }
         } else if let AstToken::Block(Block { body, .. }) = token {
             collect_params_rec(ty_env, params, body)?;
