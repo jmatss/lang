@@ -281,11 +281,10 @@ impl LexToken {
         // Put the characters that exists (is Some) into a string so that it can
         // be matched easier.
         tmp_chars.push(c1);
-        if c2.is_some() {
-            tmp_chars.push(c2.expect("Unable to unwrap c2"));
-            if c3.is_some() {
-                tmp_chars.push(c3.expect("Unable to unwrap c3"));
-            }
+        match (c2, c3) {
+            (None, Some(c)) | (Some(c), None) => tmp_chars.push(c),
+            (Some(c2), Some(c3)) => tmp_chars.extend_from_slice(&[c2, c3]),
+            (None, None) => (),
         }
         let real_string: String = tmp_chars.into_iter().collect();
 
