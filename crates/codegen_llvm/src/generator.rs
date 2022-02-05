@@ -252,7 +252,7 @@ impl<'a, 'ctx> CodeGen<'a, 'ctx> {
                 let compiled_block = *self.compiled_blocks.get(&basic_block.label).unwrap();
                 self.builder.position_at_end(compiled_block);
 
-                if let Some(end_instr) = &basic_block.end_instrs {
+                if let Some(end_instr) = &basic_block.end_instr {
                     self.compile_end_instr(end_instr)?;
                 } else {
                     return Err(self.err(

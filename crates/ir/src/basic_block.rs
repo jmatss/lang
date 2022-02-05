@@ -19,7 +19,7 @@ pub struct BasicBlock {
 
     /// The last instruction of this basic block. This should some sort of
     /// exit/branch instruction.
-    pub end_instrs: Option<EndInstr>,
+    pub end_instr: Option<EndInstr>,
 }
 
 impl BasicBlock {
@@ -27,20 +27,20 @@ impl BasicBlock {
         Self {
             label,
             instrs: Vec::default(),
-            end_instrs: None,
+            end_instr: None,
         }
     }
 
     pub fn get_end_instr(&mut self) -> Option<&EndInstr> {
-        self.end_instrs.as_ref()
+        self.end_instr.as_ref()
     }
 
     pub fn set_end_instr(&mut self, end_instr: EndInstr) {
-        self.end_instrs = Some(end_instr);
+        self.end_instr = Some(end_instr);
     }
 
     pub fn has_end_instr(&self) -> bool {
-        self.end_instrs.is_some()
+        self.end_instr.is_some()
     }
 
     /// Adds a instruction to the end of this basic block (EXCLUDING end instruction).
@@ -78,13 +78,26 @@ impl BasicBlock {
 
     /// Inserts the given instruction at index `idx`, shifting the existing
     /// instructions to the "right".
-    pub fn insert(&mut self, idx: usize, instrs: ExprInstr) -> IrResult<()> {
+    pub fn insert(&mut self, idx: usize, instr: ExprInstr) -> IrResult<()> {
         if idx <= self.instrs.len() {
-            self.instrs.insert(idx, instrs);
+            self.instrs.insert(idx, instr);
             Ok(())
         } else {
             Err(IrError::new(format!(
                 "insert -- idx > len -- idx: {}, {:#?}",
+                idx, self
+            )))
+        }
+    }
+
+    /// Replace the instruction at index `idx` with `instr`.
+    pub fn replace(&mut self, idx: usize, instr: ExprInstr) -> IrResult<()> {
+        if idx < self.instrs.len() {
+            self.instrs[idx] = instr;
+            Ok(())
+        } else {
+            Err(IrError::new(format!(
+                "replace -- idx > len -- idx: {}, {:#?}",
                 idx, self
             )))
         }
@@ -97,7 +110,7 @@ impl Debug for BasicBlock {
         for instr in &self.instrs {
             writeln!(f, "  {:?}", instr)?;
         }
-        if let Some(end_instr) = &self.end_instrs {
+        if let Some(end_instr) = &self.end_instr {
             writeln!(f, "  {:?}", end_instr)
         } else {
             writeln!(f, "  No end instruction")

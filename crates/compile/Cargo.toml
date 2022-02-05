@@ -13,6 +13,7 @@ env_logger = "0.7.1"
 clap = "2.33.3"
 
 analyze_ast = { path = "../analyze_ast" }
+analyze_ir = { path = "../analyze_ir" }
 codegen_llvm = { path = "../codegen_llvm" }
 common = { path = "../common" }
 ir = { path = "../ir" }

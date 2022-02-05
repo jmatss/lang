@@ -38,6 +38,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "analyze_ir"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "ir",
+ "log",
+]
+
+[[package]]
 name = "ansi_term"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -264,6 +273,7 @@ name = "lang"
 version = "0.1.0"
 dependencies = [
  "analyze_ast",
+ "analyze_ir",
  "clap",
  "codegen_llvm",
  "common",

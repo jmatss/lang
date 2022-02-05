@@ -55,7 +55,7 @@ impl Debug for Data {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DataIdx(pub usize);
 
 impl Deref for DataIdx {
@@ -66,14 +66,14 @@ impl Deref for DataIdx {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VarIdx {
     Global(GlobalVarIdx),
     Local(LocalVarIdx),
     Param(ParamVarIdx),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GlobalVarIdx(pub usize);
 
 impl Deref for GlobalVarIdx {
@@ -84,7 +84,7 @@ impl Deref for GlobalVarIdx {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalVarIdx(pub usize);
 
 impl Deref for LocalVarIdx {
@@ -95,7 +95,7 @@ impl Deref for LocalVarIdx {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ParamVarIdx(pub usize);
 
 impl Deref for ParamVarIdx {

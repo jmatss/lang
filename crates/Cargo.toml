@@ -2,6 +2,7 @@
 members = [
     "compile",
     "analyze_ast",
+    "analyze_ir",
     "codegen_llvm",
     "common",
     "ir",
