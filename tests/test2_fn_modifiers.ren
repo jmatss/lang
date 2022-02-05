@@ -2,6 +2,6 @@ fn priv_func() {}
 pub fn pub_func() {}
 hid fn hid_func() {}
 
-fn main() -> i32 {
+fn main() -> int {
     return 0
 }

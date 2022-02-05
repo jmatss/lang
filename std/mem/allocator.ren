@@ -4,11 +4,11 @@ use std::Optional
 use std::Result
 use std::string::StringView
 
-ext fn malloc(size: u32) -> {u8}
+ext fn malloc(size: uint) -> {u8}
 ext fn free(ptr: {u8})
-ext fn realloc(ptr: {u8}, size: u32) -> {u8}
-ext fn memcpy(dest: {u8}, src: {u8}, size: u32) -> {u8}
-ext fn memset(ptr: {u8}, value: u8, size: u32) -> {u8}
+ext fn realloc(ptr: {u8}, size: uint) -> {u8}
+ext fn memcpy(dest: {u8}, src: {u8}, size: uint) -> {u8}
+ext fn memset(ptr: {u8}, value: u8, size: uint) -> {u8}
 
 /// A basic heap allocator that can be used to work with heap allocated data.
 pub struct Allocator {
@@ -20,7 +20,7 @@ pub struct Allocator {
         return ptr_or_error
     }
 
-    pub fn init_size<T>(size: u32) -> Result<{T}, StringView> {
+    pub fn init_size<T>(size: uint) -> Result<{T}, StringView> {
         var ptr = malloc(size) as {T}
         if @is_not_null(ptr) {
             return Result::success(ptr)
@@ -32,7 +32,7 @@ pub struct Allocator {
     /// Re-allocates the heap memory with a new size `size`.
     /// After a successful re-allocation, the new pointer will returned in the Optional value.
     /// If the allocation failed, the function will return an empty Optional.
-    pub fn reinit<T>(ptr: {T}, size: u32) -> Optional<{T}> {
+    pub fn reinit<T>(ptr: {T}, size: uint) -> Optional<{T}> {
         var new_ptr = realloc(ptr as {u8}, size) as {T}
         if @is_not_null(new_ptr) {
             return Optional::value(new_ptr)
@@ -49,7 +49,7 @@ pub struct Allocator {
     /// and returns a pointer to the new allocation.
     /// If `size` isn't set, it will default to the size of `T`.
     /// Implemented using libc `memcpy`.
-    fn clone<T>(src: {T}, size: u32 = @size<T>() as u32) -> Result<{T}, StringView> {
+    fn clone<T>(src: {T}, size: uint = @size<T>() as uint) -> Result<{T}, StringView> {
         var ptr_or_error = this::init_size(size)
         if dst is ptr_or_error.success {
             memcpy(dst as {u8}, src as {u8}, size)
@@ -60,19 +60,19 @@ pub struct Allocator {
     /// Copies `size` bytes from `src` to `dst`.
     /// If `size` isn't set, it will default to the size of `T`.
     /// Implemented using libc `memcpy`.
-    pub fn copy<T>(dst: {T}, src: {T}, size: u32 = @size<T>() as u32) {
+    pub fn copy<T>(dst: {T}, src: {T}, size: uint = @size<T>() as uint) {
         memcpy(dst as {u8}, src as {u8}, size)
     }
 
     /// Writes `size` bytes of the `value` into the memory in `ptr`.
     /// Implemented using libc `memset`.
-    pub fn set<T>(ptr: {T}, value: u8, size: u32) {
+    pub fn set<T>(ptr: {T}, value: u8, size: uint) {
         memset(ptr as {u8}, value, size)
     }
 
     /// Zeros the first `size` bytes of the memory in `ptr`.
     /// Implemented using libc `memset`.
-    pub fn zero<T>(ptr: {T}, size: u32) {
+    pub fn zero<T>(ptr: {T}, size: uint) {
         Allocator::set<T>(ptr, 0, size)
     }
 }

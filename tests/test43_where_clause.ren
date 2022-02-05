@@ -15,6 +15,6 @@ struct TestStruct<T> where T: TestTrait {
     }
 }
 
-fn main() -> i32 {
+fn main() -> int {
     return 0
 }

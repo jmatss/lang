@@ -26,6 +26,7 @@ pub enum LangErrorKind {
     LexError,
     ParseError,
     AnalyzeError,
+    IrError,
     CodeGenError,
     CompileError,
 }

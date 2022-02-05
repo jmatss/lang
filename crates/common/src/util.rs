@@ -1,5 +1,8 @@
 use crate::{
+    error::{LangError, LangErrorKind, LangResult},
+    file::FilePosition,
     path::LangPath,
+    token::{expr::Expr, lit::Lit},
     ty::{
         generics::Generics,
         to_string::{to_string_generics, to_string_path},
@@ -54,4 +57,32 @@ pub fn to_generic_name(ty_env: &TyEnv, old_name: &str, generics: &Generics) -> S
 /// accessed/used.
 pub fn to_union_variant_name(union_name: &str, member_name: &str) -> String {
     format!("{}${}", union_name, member_name)
+}
+
+/// Given the `dim_expr` that should represent the expression used in an array
+/// dimension, figures out the actual integer literal value.
+///
+/// Currently only integer literals are allowed to be used to specify array
+/// dimension, but this should be changed in the future.
+pub fn get_array_dim(dim_expr: &Expr, file_pos: Option<FilePosition>) -> LangResult<u128> {
+    match dim_expr {
+        Expr::Lit(Lit::Integer(num, radix), ..) => {
+            u128::from_str_radix(num, *radix).map_err(|_| {
+                LangError::new(
+                    format!("Invalid integer found in array dimension: {}", num),
+                    LangErrorKind::GeneralError,
+                    file_pos,
+                )
+            })
+        }
+
+        _ => Err(LangError::new(
+            format!(
+                "TODO: Invalid expression used as array dimension: {:?}",
+                dim_expr
+            ),
+            LangErrorKind::GeneralError,
+            file_pos,
+        )),
+    }
 }

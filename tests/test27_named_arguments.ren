@@ -2,7 +2,7 @@ fn two(a: i32, b: f32) { }
 
 fn three(a: i32, b: f32, c: bool) { }
 
-fn main() -> i32 {
+fn main() -> int {
     var x: i32 = 123
     var y: f32 = 123.456
     var z: bool = true

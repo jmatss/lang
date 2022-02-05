@@ -29,7 +29,7 @@ fn new(n: i32) -> TestEnum {
     }
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var e1: TestEnum = TestEnum::SECOND
     //var e2 = TestEnum::new(3)
     var e2 = new(3)

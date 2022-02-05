@@ -6,8 +6,6 @@ use clap::{App, Arg};
 use inkwell::context::Context;
 use log::{log_enabled, Level};
 
-use analyze::analyze;
-use codegen_llvm::generator;
 use common::{
     error::{LangError, LangErrorKind, LangResult},
     file::{FileId, FileInfo},
@@ -161,8 +159,9 @@ fn main() -> LangResult<()> {
         debug!("\nAST after parsing:\n{:#?}", ast_root);
     }
 
-    let analyze_timer = Instant::now();
-    let mut analyze_ctx = match analyze(&mut ast_root, &TY_ENV, file_infos, opts.quiet) {
+    let analyze_ast_timer = Instant::now();
+    let mut analyze_ctx = match analyze_ast::analyze(&mut ast_root, &TY_ENV, file_infos, opts.quiet)
+    {
         Ok(analyze_ctx) => analyze_ctx,
         Err(errs) => {
             eprintln!();
@@ -174,7 +173,10 @@ fn main() -> LangResult<()> {
     };
 
     if !opts.quiet || opts.validate {
-        println!("Analyzing complete ({:?}).", analyze_timer.elapsed());
+        println!(
+            "Analyzing AST complete ({:?}).",
+            analyze_ast_timer.elapsed()
+        );
     }
     if log_enabled!(Level::Debug) {
         debug!("\nAST after analyze:\n{:#?}", ast_root);
@@ -183,10 +185,47 @@ fn main() -> LangResult<()> {
     }
     analyze_ctx.ast_ctx.debug_print();
 
-    // Only validate the correctness of the AST and skip code generation if
-    // `validate` is set.
+    // Only validate the correctness of the AST and skip code generation and
+    // IR if `validate` is set.
     if opts.validate {
         return Ok(());
+    }
+
+    let mut ir_module = match ir_builder::build_module(
+        "MODULE_NAME".into(),
+        opts.ptr_size,
+        &mut analyze_ctx,
+        &mut ast_root,
+    ) {
+        Ok(ir_module) => ir_module,
+        Err(errs) => {
+            eprintln!();
+            for e in errs {
+                eprintln!("[ERROR] {}", e);
+            }
+            std::process::exit(1);
+        }
+    };
+
+    if opts.ir {
+        println!("\n## IR before optimization ##\n{:?}", ir_module);
+    }
+
+    let analyze_ir_timer = Instant::now();
+    if let Err(errs) = analyze_ir::analyze(&mut ir_module, opts.optimize) {
+        eprintln!();
+        for e in errs {
+            eprintln!("[ERROR] {}", e);
+        }
+        std::process::exit(1);
+    };
+
+    if opts.ir && opts.optimize {
+        println!("\n## IR after optimization ##\n{:?}", ir_module);
+    }
+
+    if !opts.quiet {
+        println!("Analyzing IR complete ({:?}).", analyze_ir_timer.elapsed());
     }
 
     let generate_timer = Instant::now();
@@ -194,14 +233,7 @@ fn main() -> LangResult<()> {
     let context = Context::create();
     let builder = context.create_builder();
     let module = context.create_module(&opts.module_name);
-    match generator::generate(
-        &mut ast_root,
-        &mut analyze_ctx,
-        &context,
-        &builder,
-        &module,
-        &target_machine,
-    ) {
+    match codegen_llvm::generate(&context, &builder, &module, &target_machine, ir_module) {
         Ok(_) => (),
         Err(e) => {
             eprintln!("[ERROR] {}", e);
@@ -321,10 +353,12 @@ struct Options {
     input_files_list: Option<String>,
     output_file: String,
     module_name: String,
+    ptr_size: usize,
     target_triple: Option<String>,
     optimize: bool,
     llvm: bool,
     ast: bool,
+    ir: bool,
     quiet: bool,
     validate: bool,
 }
@@ -368,6 +402,15 @@ fn parse_opts() -> Options {
                 .required(false),
         )
         .arg(
+            Arg::with_name("size")
+                .short("s")
+                .long("size")
+                .help("Size in bytes that should be used for pointers.")
+                .default_value("8")
+                .takes_value(true)
+                .required(false),
+        )
+        .arg(
             Arg::with_name("triple")
                 .short("t")
                 .long("triple")
@@ -388,6 +431,14 @@ fn parse_opts() -> Options {
                 .short("a")
                 .long("ast")
                 .help("Set to print AST.")
+                .takes_value(false)
+                .required(false),
+        )
+        .arg(
+            Arg::with_name("ir")
+                .short("I")
+                .long("ir")
+                .help("Set to dump/print the generated IR code.")
                 .takes_value(false)
                 .required(false),
         )
@@ -430,10 +481,12 @@ fn parse_opts() -> Options {
         input_files_list,
         output_file: matches.value_of("output").unwrap().into(),
         module_name: matches.value_of("module").unwrap().into(),
+        ptr_size: matches.value_of("size").unwrap().parse().unwrap(),
         target_triple: matches.value_of("triple").map(|t| t.into()),
         optimize: matches.is_present("optimize"),
         llvm: matches.is_present("llvm"),
         ast: matches.is_present("ast"),
+        ir: matches.is_present("ir"),
         quiet: matches.is_present("quiet"),
         validate: matches.is_present("validate"),
     }

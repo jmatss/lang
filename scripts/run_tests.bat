@@ -10,7 +10,7 @@ if "%~1" == "" (
 )
 if "%~2" == "" (
     if "%~1" == "" (
-        set RANGE_END=67
+        set RANGE_END=68
     ) else (
         set RANGE_END=%1
     )
@@ -22,7 +22,7 @@ set TEST_FAILURE=
 
 for /l %%x in (%RANGE_START%, 1, %RANGE_END%) do (
     echo | set /p="Running test %%x..."
-    %~dp0\..\crates\target\debug\lang.exe --input %~dp0\..\tests\test%%x.incl --output a.o > NUL 2>&1
+    %~dp0\..\crates\target\debug\lang.exe -O --input %~dp0\..\tests\test%%x.incl --output a.o > NUL 2>&1
     if !ERRORLEVEL! NEQ 0 (
         echo compiling failed.
         set TEST_FAILURE=!TEST_FAILURE! %%x

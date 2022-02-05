@@ -21,7 +21,7 @@ pub fn test_fn<T: TestOk<u8>>(ts: T, value: u8) -> bool {
     return ts.ok(value)
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var ts_u8 = TestStructU8 {}
     var ts_u8_res = test_fn(ts_u8, 1)
     std::assert(ts_u8_res)

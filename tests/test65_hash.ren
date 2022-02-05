@@ -18,11 +18,11 @@ impl TestStruct: Eq<TestStruct> {
     }
 }
 
-fn is_power_of_two(n: u32) -> bool {
+fn is_power_of_two(n: uint) -> bool {
     return n != 0 and (n & (n - 1)) == 0
 }
 
-fn main() -> i32 {
+fn main() -> int {
     const x: u8  = 1
     const y: u32 = 2
     const z: i64 = 3

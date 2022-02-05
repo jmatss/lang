@@ -11,6 +11,7 @@ use super::{
 };
 
 #[repr(u8)]
+#[derive(Clone, Debug)]
 pub enum SectionId {
     Custom = 0,
     Type = 1,
@@ -27,8 +28,10 @@ pub enum SectionId {
     DataCount = 12,
 }
 
+#[derive(Clone, Debug)]
 pub struct SectionStruct(SectionId, u32, Vec<u8>);
 
+#[derive(Clone, Debug)]
 pub enum Section {
     Type(Vec<FuncType>),
     // First name is module name, second is "nm" (?).
@@ -66,6 +69,7 @@ impl Bytes for Section {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Global(GlobalType, Expr);
 
 impl Bytes for Global {
@@ -76,6 +80,7 @@ impl Bytes for Global {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Import(Name, Name, ImportDesc);
 
 impl Bytes for Import {
@@ -87,6 +92,7 @@ impl Bytes for Import {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum ImportDesc {
     TypeIdx(TypeIdx),
     TableType(TableType),
@@ -105,6 +111,7 @@ impl Bytes for ImportDesc {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Export(Name, ExportDesc);
 
 impl Bytes for Export {
@@ -115,6 +122,7 @@ impl Bytes for Export {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum ExportDesc {
     FuncIdx(FuncIdx),
     TableIdx(TableIdx),
@@ -134,6 +142,7 @@ impl Bytes for ExportDesc {
 }
 
 // TODO: What should the variants be named?
+#[derive(Clone, Debug)]
 pub enum Elem {
     Zero(Expr, Vec<FuncIdx>),
     One(ElemKind, Vec<FuncIdx>),
@@ -206,6 +215,8 @@ impl Bytes for Elem {
 
 // 0x00 is currently the only possible ElemKind value according to the wasm spec.
 pub const ELEM_KIND: u8 = 0x00;
+
+#[derive(Clone, Debug)]
 pub struct ElemKind(u8);
 
 impl Bytes for ElemKind {
@@ -214,6 +225,7 @@ impl Bytes for ElemKind {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Code(u32, Func);
 
 impl Bytes for Code {
@@ -226,6 +238,7 @@ impl Bytes for Code {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Func(Vec<Locals>, Expr);
 
 impl Bytes for Func {
@@ -236,6 +249,7 @@ impl Bytes for Func {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Locals(u32, ValType);
 
 impl Bytes for Locals {
@@ -247,6 +261,7 @@ impl Bytes for Locals {
 }
 
 // TODO: What should the variants be named?
+#[derive(Clone, Debug)]
 pub enum Data {
     Zero(Expr, Vec<u8>),
     One(Vec<u8>),

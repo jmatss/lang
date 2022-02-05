@@ -13,5 +13,5 @@ log = "0.4.11"
 parking_lot = "0.11"
 rand = "0.8.0"
 
-analyze = { path = "../analyze" }
 common = { path = "../common" }
+ir = { path = "../ir" }

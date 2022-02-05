@@ -1,10 +1,8 @@
-ext fn printf(format: {u8}, ...) -> i32
-
 struct TestStruct<T> {
     var inner: T
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var i1 = 1
     var i2 = 2
     var i3: i16 = 3

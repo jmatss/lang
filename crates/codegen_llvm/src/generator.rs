@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use inkwell::{
     basic_block::BasicBlock,
@@ -6,588 +6,396 @@ use inkwell::{
     context::Context,
     module::{Linkage, Module},
     targets::TargetMachine,
-    types::{AnyTypeEnum, BasicType, BasicTypeEnum},
-    values::{AnyValueEnum, BasicValueEnum, FunctionValue, PointerValue},
+    types::{AnyType, AnyTypeEnum, BasicType, BasicTypeEnum},
+    values::{AnyValueEnum, BasicValue, FunctionValue, PointerValue},
     AddressSpace,
 };
-use log::debug;
 
 use common::{
-    ctx::analyze_ctx::AnalyzeCtx,
-    error::{LangError, LangErrorKind::CodeGenError, LangResult},
+    error::{
+        LangError,
+        LangErrorKind::{self, CodeGenError},
+        LangResult,
+    },
     file::FilePosition,
-    token::{
-        ast::AstToken,
-        expr::{Expr, Var},
-        lit::Lit,
-    },
-    ty::{
-        get::get_file_pos,
-        inner_ty::InnerTy,
-        to_string::{to_string_inner_ty, to_string_path, to_string_type_id},
-        ty::Ty,
-        type_id::TypeId,
-    },
-    BlockId,
+};
+use ir::{Data, FuncVisibility, Type, Val, DUMMY_VAL};
+
+use crate::util::{
+    any_into_basic_type, any_into_basic_value, to_data_name, to_global_name, to_local_name,
+    to_param_name,
 };
 
-use crate::expr::ExprTy;
-
-pub(super) struct CodeGen<'a, 'b, 'ctx> {
+pub(super) struct CodeGen<'a, 'ctx> {
     pub context: &'ctx Context,
     pub builder: &'a Builder<'ctx>,
     pub module: &'a Module<'ctx>,
     pub target_machine: &'a TargetMachine,
 
-    /// Information parsed during the "Analyzing" stage. This contains ex.
-    /// defintions (var, struct, func etc.) and information about the AST blocks.
-    pub analyze_ctx: &'ctx mut AnalyzeCtx<'b>,
+    /// The IR representation of the code that will be used to generated the
+    /// LLVM code.
+    pub ir_module: ir::Module,
 
-    /// The ID of the current block that is being compiled.
-    pub cur_block_id: BlockId,
+    /// Will contain the values that have been compiled in the function that is
+    /// currently being built/compiled. The `usize` will be the unique `ir::Val`
+    /// value that is given to every evaluated expression.
+    /// The Strings in the `params` and `locals` maps are the names of the
+    /// variables specified in the LLVM IR.
+    /// These map will be reset for every function that is being traversed.
+    pub(super) compiled_vals: HashMap<usize, AnyValueEnum<'ctx>>,
+    pub(super) compiled_params: HashMap<String, PointerValue<'ctx>>,
+    pub(super) compiled_locals: HashMap<String, PointerValue<'ctx>>,
 
-    /// Contains the current basic block that instructions are inserted into.
-    pub cur_basic_block: Option<BasicBlock<'ctx>>,
-
-    /// Contains a pointer to the current function that is being generated.
-    pub cur_func: Option<FunctionValue<'ctx>>,
-
-    /// Contains the current "branch block" if the current block has one. This is
-    /// true for "while" and "for" blocks. This branch block will then be
-    /// used when a continue call is done to find the start of the loop.
-    pub cur_branch_block: Option<BasicBlock<'ctx>>,
-
-    /// Contains the latest compiled expression. This will be used when compiling
-    /// unary operations for expressions. This allows the cur expression that is
-    /// being compiled to know about the previous expressions which will allow
-    /// for chainining operations.
-    pub prev_expr: Option<AnyValueEnum<'ctx>>,
-
-    /// Merge blocks created for different if and match statements.
-    /// Is stored in this struct so that it can be accessable from everywhere
-    /// and statements etc. can figure out where to branch.
-    pub merge_blocks: HashMap<BlockId, BasicBlock<'ctx>>,
-
-    /// Contains pointers to mutable variables that have been compiled.
-    pub variables: HashMap<(String, BlockId), PointerValue<'ctx>>,
-
-    /// Contains constant variables. They can't be used as regular variable
-    /// in the code. Keep track of them in this hashmap and do calculations
-    /// and update them in here during the codegen process.
-    pub constants: HashMap<(String, BlockId), BasicValueEnum<'ctx>>,
+    /// Will contain basic blocks that have been compiled for the function that
+    /// is currently being built/compiled.
+    /// This map will be reset for every function that is being traversed.
+    pub(super) compiled_blocks: HashMap<String, BasicBlock<'ctx>>,
 }
 
-pub fn generate<'a, 'b, 'ctx>(
-    ast_root: &'ctx mut AstToken,
-    analyze_ctx: &'ctx mut AnalyzeCtx<'b>,
-    context: &'ctx Context,
-    builder: &'a Builder<'ctx>,
-    module: &'a Module<'ctx>,
-    target_machine: &'a TargetMachine,
-) -> LangResult<()> {
-    let mut code_gen = CodeGen::new(context, analyze_ctx, builder, module, target_machine);
-    // Start by first compiling all types (structs/enums/inferfaces) and after
-    // that all functions/methods. This makes it so that one doesn't have to
-    // specifiy type/func prototypes above their use in the source code.
-    code_gen.compile_type_decl(ast_root)?;
-    code_gen.compile_fn_decl(ast_root)?;
-
-    code_gen.compile(ast_root)?;
-
-    // TODO: Temporary solution, loop through all merge blocks and look for all
-    //       merge blocks with no terminator instruction. If the merge block has
-    //       a "wrapping" block, the merge block should branch to the wrapping
-    //       blocks merge block. Otherwise something has gone wrong.
-    for (block_id, merge_block) in &code_gen.merge_blocks {
-        if merge_block.get_terminator().is_none() {
-            let parent_block_id = code_gen
-                .analyze_ctx
-                .ast_ctx
-                .block_ctxs
-                .get(block_id)
-                .ok_or_else(|| {
-                    LangError::new(
-                        format!("Unable to find block info for block with id {}", block_id),
-                        CodeGenError,
-                        None,
-                    )
-                })?
-                .parent_id;
-
-            if let Ok(wrapping_merge_block) = code_gen.get_merge_block(parent_block_id) {
-                code_gen.builder.position_at_end(*merge_block);
-                code_gen
-                    .builder
-                    .build_unconditional_branch(wrapping_merge_block);
-            } else {
-                return Err(code_gen.err(
-                    format!(
-                        "MergeBlock for block with ID {} has no terminator and no wrapping block.",
-                        block_id
-                    ),
-                    None,
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
-    fn new(
+impl<'a, 'ctx> CodeGen<'a, 'ctx> {
+    pub(super) fn new(
         context: &'ctx Context,
-        analyze_ctx: &'ctx mut AnalyzeCtx<'b>,
         builder: &'a Builder<'ctx>,
         module: &'a Module<'ctx>,
         target_machine: &'a TargetMachine,
+        ir_module: ir::Module,
     ) -> Self {
         Self {
             context,
             builder,
             module,
             target_machine,
-
-            analyze_ctx,
-
-            cur_block_id: 0,
-            cur_basic_block: None,
-            cur_func: None,
-            cur_branch_block: None,
-
-            prev_expr: None,
-
-            merge_blocks: HashMap::default(),
-            variables: HashMap::default(),
-            constants: HashMap::default(),
+            ir_module,
+            compiled_vals: HashMap::default(),
+            compiled_params: HashMap::default(),
+            compiled_locals: HashMap::default(),
+            compiled_blocks: HashMap::default(),
         }
     }
 
-    pub(super) fn compile(&mut self, mut ast_token: &mut AstToken) -> LangResult<()> {
-        match &mut ast_token {
-            AstToken::Block(block) => {
-                self.compile_block(block)?;
+    pub(super) fn compile(&mut self) -> LangResult<()> {
+        self.compile_structs()?;
+        self.compile_data();
+        self.compile_globals()?;
+        self.compile_fn_decls()?;
+        self.compile_fn_bodies()
+    }
+
+    fn compile_structs(&mut self) -> LangResult<()> {
+        for name in &self.ir_module.structs_order {
+            let struct_type = self.context.opaque_struct_type(name);
+
+            // If the struct has members defined (i.e. not a externally declared
+            // struct), add information about its members type.
+            if let Some(members) = self.ir_module.structs.get(name).unwrap() {
+                let mut member_types = Vec::with_capacity(members.len());
+                for member in members {
+                    let any_type = self.compile_type(member)?;
+                    member_types.push(any_into_basic_type(any_type)?);
+                }
+
+                let packed = false;
+                struct_type.set_body(member_types.as_ref(), packed);
             }
-            AstToken::Stmt(stmt) => {
-                self.compile_stmt(stmt)?;
-            }
-            AstToken::Expr(expr) => {
-                self.compile_expr(expr, ExprTy::RValue)?;
-            }
-            AstToken::Empty | AstToken::Comment(..) | AstToken::EOF => (),
         }
         Ok(())
     }
 
-    pub(super) fn alloc_var(&self, var: &Var) -> LangResult<PointerValue<'ctx>> {
-        if let Some(var_type_id) = &var.ty {
-            Ok(
-                match self.compile_type(*var_type_id, var.file_pos.to_owned())? {
-                    AnyTypeEnum::ArrayType(ty) => {
-                        let sign_extend = false;
-                        let dim = self
-                            .context
-                            .i64_type()
-                            .const_int(ty.len() as u64, sign_extend);
-                        self.builder.build_array_alloca(ty, dim, &var.name)
-                    }
-                    AnyTypeEnum::FloatType(ty) => self.builder.build_alloca(ty, &var.name),
-                    AnyTypeEnum::IntType(ty) => self.builder.build_alloca(ty, &var.name),
-                    AnyTypeEnum::PointerType(ty) => self.builder.build_alloca(ty, &var.name),
-                    AnyTypeEnum::StructType(ty) => self.builder.build_alloca(ty, &var.name),
-                    AnyTypeEnum::VectorType(ty) => self.builder.build_alloca(ty, &var.name),
-                    AnyTypeEnum::FunctionType(_) => {
-                        return Err(
-                            self.err("Tried to alloca function.".into(), var.file_pos.to_owned())
-                        );
-                    }
-                    AnyTypeEnum::VoidType(_) => {
-                        return Err(
-                            self.err("Tried to alloca void type.".into(), var.file_pos.to_owned())
-                        );
-                    }
-                },
-            )
-        } else {
-            Err(self.err(
-                format!("type None when allocating var: {:?}", &var.name),
-                var.file_pos.to_owned(),
-            ))
+    fn compile_data(&mut self) {
+        for (idx, data) in self.ir_module.data.iter().enumerate() {
+            match data {
+                Data::StringLit(lit) => self.compile_data_string(lit, idx),
+            }
         }
     }
 
-    pub(super) fn compile_var_decl(&mut self, var: &mut Var) -> LangResult<()> {
-        debug!("Compiling var_decl: {:#?}", &var);
+    fn compile_data_string(&self, lit: &str, idx: usize) {
+        let data_name = to_data_name(idx);
+        let i8_type = self.context.i8_type();
 
-        // Constants are never "compiled" into instructions, they are handled
-        // "internally" in this code during compilation.
-        if var.is_global {
-            let decl_block_id = self
-                .analyze_ctx
-                .ast_ctx
-                .get_var_decl_scope(&var.full_name(), self.cur_block_id)?;
-            let key = (var.full_name(), decl_block_id);
+        let mut bytes = Vec::with_capacity(lit.len());
+        for byte in lit.as_bytes() {
+            bytes.push(i8_type.const_int(*byte as u64, false));
+        }
 
-            let var_type = self.compile_type(var.ty.unwrap(), var.file_pos.to_owned())?;
-            let global_var = self.module.add_global(
-                CodeGen::any_into_basic_type(var_type)?,
-                Some(AddressSpace::Generic),
-                &var.full_name(),
+        let arr_val = i8_type.const_array(&bytes);
+        let arr_type = arr_val.get_type();
+
+        let global_val = self
+            .module
+            .add_global(arr_type, Some(AddressSpace::Const), &data_name);
+        global_val.set_initializer(&arr_val.as_basic_value_enum());
+    }
+
+    fn compile_globals(&mut self) -> LangResult<()> {
+        // TODO: Handle const globals.
+        let address_space = AddressSpace::Generic;
+        for (idx, (ir_type, lit_opt)) in self.ir_module.global_vars.iter().enumerate() {
+            let global_name = to_global_name(idx);
+            let any_type = self.compile_type(ir_type)?;
+
+            let global_val = self.module.add_global(
+                any_into_basic_type(any_type)?,
+                Some(address_space),
+                &global_name,
             );
-            global_var.set_linkage(Linkage::Private);
 
-            if let Some(init_value) = &mut var.value {
-                let any_value = self.compile_expr(init_value, ExprTy::RValue)?;
-                let basic_value = CodeGen::any_into_basic_value(any_value)?;
-                global_var.set_initializer(&basic_value);
+            let init_value = if let Some(lit) = lit_opt {
+                self.compile_lit(lit, ir_type)?
             } else {
-                // If no init value is given, set value to zero if possible.
-                match var_type {
-                    AnyTypeEnum::FloatType(ty) => {
-                        global_var.set_initializer(&BasicValueEnum::FloatValue(ty.const_zero()));
+                self.compile_null(any_type)?
+            };
+
+            global_val.set_initializer(&any_into_basic_value(init_value)?);
+        }
+        Ok(())
+    }
+
+    fn compile_fn_decls(&mut self) -> LangResult<()> {
+        for (name, func) in &self.ir_module.funcs {
+            let mut params = Vec::with_capacity(func.params.len());
+            for param in &func.params {
+                let any_type = self.compile_type(param)?;
+                params.push(any_into_basic_type(any_type)?);
+            }
+
+            let fn_type = match self.compile_type(&func.ret_type)? {
+                AnyTypeEnum::ArrayType(ty) => ty.fn_type(params.as_slice(), func.is_var_arg),
+                AnyTypeEnum::FloatType(ty) => ty.fn_type(params.as_slice(), func.is_var_arg),
+                AnyTypeEnum::FunctionType(ty) => ty,
+                AnyTypeEnum::IntType(ty) => ty.fn_type(params.as_slice(), func.is_var_arg),
+                AnyTypeEnum::PointerType(ty) => ty.fn_type(params.as_slice(), func.is_var_arg),
+                AnyTypeEnum::StructType(ty) => ty.fn_type(params.as_slice(), func.is_var_arg),
+                AnyTypeEnum::VectorType(ty) => ty.fn_type(params.as_slice(), func.is_var_arg),
+                AnyTypeEnum::VoidType(ty) => ty.fn_type(params.as_slice(), func.is_var_arg),
+            };
+
+            let linkage = match func.visibility {
+                FuncVisibility::Export | FuncVisibility::Import => Linkage::External,
+                // TODO: Linkage::Private
+                FuncVisibility::None => Linkage::External,
+            };
+
+            self.module.add_function(name, fn_type, Some(linkage));
+        }
+        Ok(())
+    }
+
+    fn compile_fn_bodies(&mut self) -> LangResult<()> {
+        // TODO: Skip the need for clone here.
+        for (name, func) in self.ir_module.funcs.clone() {
+            self.compiled_vals.clear();
+            self.compiled_params.clear();
+            self.compiled_locals.clear();
+            self.compiled_blocks.clear();
+
+            // Imported functions should have no bodies, they are externaly declared.
+            if matches!(func.visibility, FuncVisibility::Import) {
+                continue;
+            }
+
+            let fn_val = if let Some(fn_val) = self.module.get_function(&name) {
+                fn_val
+            } else {
+                return Err(self.err(
+                    format!("Unable to find LLVM function with name \"{}\".", name),
+                    None,
+                ));
+            };
+
+            // Parameters and locals are compiled into the `entry` block. The
+            // end instruction for the entry block is compiled at the end of
+            // this for-loop.
+            let entry_block = self
+                .context
+                .append_basic_block(fn_val, &format!("{}.entry", &name));
+            self.builder.position_at_end(entry_block);
+
+            for (idx, (param_ir_type, param_value)) in
+                func.params.iter().zip(fn_val.get_params()).enumerate()
+            {
+                let param_name = to_param_name(idx);
+                let param_ptr = self.alloc_var(&param_name, param_ir_type)?;
+                self.builder.build_store(param_ptr, param_value);
+                self.compiled_params.insert(param_name, param_ptr);
+            }
+
+            for (idx, local) in func.locals.iter().enumerate() {
+                let local_name = to_local_name(idx);
+                let local_ptr = self.alloc_var(&local_name, local)?;
+                self.compiled_locals.insert(local_name, local_ptr);
+            }
+
+            for ir_block in &func.basic_blocks {
+                let llvm_block = self.compile_expr_instrs(fn_val, ir_block)?;
+                match self.compiled_blocks.entry(ir_block.label.clone()) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(llvm_block);
                     }
-                    AnyTypeEnum::IntType(ty) => {
-                        global_var.set_initializer(&BasicValueEnum::IntValue(ty.const_zero()));
+                    Entry::Occupied(_) => {
+                        return Err(self.err(
+                            format!(
+                                "Found multiple blocks in function \"{}\" with label: {}",
+                                name, ir_block.label
+                            ),
+                            None,
+                        ));
                     }
-                    AnyTypeEnum::PointerType(ty) => {
-                        global_var.set_initializer(&BasicValueEnum::PointerValue(ty.const_zero()));
-                    }
-                    AnyTypeEnum::StructType(ty) => {
-                        global_var.set_initializer(&BasicValueEnum::StructValue(ty.const_zero()));
-                    }
-                    AnyTypeEnum::VectorType(ty) => {
-                        global_var.set_initializer(&BasicValueEnum::VectorValue(ty.const_zero()));
-                    }
-                    _ => (),
                 }
             }
 
-            let ptr = global_var.as_pointer_value();
-            self.variables.insert(key, ptr);
-        } else if !var.is_const {
-            let decl_block_id = self
-                .analyze_ctx
-                .ast_ctx
-                .get_var_decl_scope(&var.full_name(), self.cur_block_id)?;
-            let key = (var.full_name(), decl_block_id);
+            // Since `EndInstr`s might branch to other basic blocks that can be
+            // declared before/after the current block, we compile all end
+            // instructions AFTER all basic blocks have been created in the
+            // logic above.
+            for basic_block in &func.basic_blocks {
+                let compiled_block = *self.compiled_blocks.get(&basic_block.label).unwrap();
+                self.builder.position_at_end(compiled_block);
 
-            let ptr = self.alloc_var(var)?;
-            self.variables.insert(key, ptr);
+                if let Some(end_instr) = &basic_block.end_instr {
+                    self.compile_end_instr(end_instr)?;
+                } else {
+                    return Err(self.err(
+                        format!(
+                            "No end instruction found for block with label: {}",
+                            basic_block.label
+                        ),
+                        None,
+                    ));
+                }
+            }
+
+            self.builder.position_at_end(entry_block);
+
+            // The entry block will be branch to the first "actual" block. If no
+            // "actual" block exists, the entry block will return to the caller
+            // with a zero/null/void value.
+            if let Some(ir_block) = func.basic_blocks.first() {
+                let llvm_block = self.compiled_blocks.get(&ir_block.label).unwrap();
+                self.builder.build_unconditional_branch(*llvm_block);
+            } else if let Some(ret_type) = fn_val.get_type().get_return_type() {
+                let any_value = self.compile_null(ret_type.as_any_type_enum())?;
+                let basic_value = any_into_basic_value(any_value)?;
+                self.builder.build_return(Some(&basic_value));
+            } else {
+                // void
+                self.builder.build_return(None);
+            }
         }
 
         Ok(())
     }
 
-    pub(super) fn compile_var_store(
+    fn compile_expr_instrs(
         &mut self,
-        var: &Var,
-        basic_value: BasicValueEnum<'ctx>,
-    ) -> LangResult<()> {
-        debug!(
-            "Compile var_store, var: {:#?}\nbasic_value: {:#?}.",
-            &var, &basic_value
-        );
+        fn_val: FunctionValue,
+        ir_block: &ir::BasicBlock,
+    ) -> LangResult<BasicBlock<'ctx>> {
+        let llvm_block = self.context.append_basic_block(fn_val, &ir_block.label);
+        self.builder.position_at_end(llvm_block);
 
-        if var.is_const {
-            let block_id = self.cur_block_id;
-            let decl_block_id = self
-                .analyze_ctx
-                .ast_ctx
-                .get_var_decl_scope(&var.full_name(), block_id)?;
-            let key = (var.full_name(), decl_block_id);
-
-            self.constants.insert(key, basic_value);
-        } else {
-            let ptr = self.get_var_ptr(var)?;
-            self.builder.build_store(ptr, basic_value);
+        for instr in &ir_block.instrs {
+            let any_value = self.compile_instr(instr)?;
+            self.compiled_vals.insert(instr.val.0, any_value);
         }
 
-        Ok(())
+        Ok(llvm_block)
     }
 
-    pub(super) fn compile_var_load(&mut self, var: &Var) -> LangResult<BasicValueEnum<'ctx>> {
-        // If unable to find variable pointer, assume it is a const variable
-        // that is stored in another place.
-        Ok(match self.get_var_ptr(var) {
-            Ok(ptr) => self.builder.build_load(ptr, "load"),
-            Err(_) => self.get_const_value(var)?,
+    pub(super) fn compile_type(&self, ir_type: &Type) -> LangResult<AnyTypeEnum<'ctx>> {
+        // TODO: What AddressSpace should be used?
+        let address_space = AddressSpace::Generic;
+        Ok(match ir_type {
+            Type::Adt(struct_name) => self.module.get_struct_type(struct_name).unwrap().into(),
+            Type::Func(func) => todo!(),
+            Type::Pointer(inner_ir_type) => {
+                let inner_type = self.compile_type(inner_ir_type)?;
+                any_into_basic_type(inner_type)?
+                    .ptr_type(address_space)
+                    .into()
+            }
+            Type::Array(inner_ir_type, Some(size)) => {
+                let inner_type = self.compile_type(inner_ir_type)?;
+                any_into_basic_type(inner_type)?
+                    .array_type(*size as u32)
+                    .into()
+            }
+            Type::Array(inner_ir_type, None) => {
+                todo!("compile_type -- Slice")
+            }
+            Type::FuncPointer(param_ir_types, ret_ir_type) => {
+                let mut param_types = Vec::with_capacity(param_ir_types.len());
+                for ir_type in param_ir_types {
+                    let any_type = self.compile_type(ir_type)?;
+                    param_types.push(any_into_basic_type(any_type)?)
+                }
+
+                let ret_type = self.compile_type(ret_ir_type)?;
+                let is_var_args = false;
+                let fn_type = match ret_type {
+                    AnyTypeEnum::ArrayType(ty) => ty.fn_type(&param_types, is_var_args),
+                    AnyTypeEnum::FloatType(ty) => ty.fn_type(&param_types, is_var_args),
+                    AnyTypeEnum::FunctionType(ty) => ty,
+                    AnyTypeEnum::IntType(ty) => ty.fn_type(&param_types, is_var_args),
+                    AnyTypeEnum::PointerType(ty) => ty.fn_type(&param_types, is_var_args),
+                    AnyTypeEnum::StructType(ty) => ty.fn_type(&param_types, is_var_args),
+                    AnyTypeEnum::VectorType(ty) => ty.fn_type(&param_types, is_var_args),
+                    AnyTypeEnum::VoidType(ty) => ty.fn_type(&param_types, is_var_args),
+                };
+
+                // Need to make the FunctionType sized. This is done by getting
+                // a pointer to it. This value can then be used as ex. an argument.
+                fn_type.ptr_type(address_space).into()
+            }
+            Type::Void => self.context.void_type().into(),
+            Type::Char => self.context.i32_type().into(),
+            Type::Bool => self.context.bool_type().into(),
+            Type::I8 | Type::U8 => self.context.i8_type().into(),
+            Type::I16 | Type::U16 => self.context.i16_type().into(),
+            Type::I32 | Type::U32 => self.context.i32_type().into(),
+            Type::F32 => self.context.f32_type().into(),
+            Type::I64 | Type::U64 => self.context.i64_type().into(),
+            Type::F64 => self.context.f64_type().into(),
+            Type::I128 | Type::U128 => self.context.i128_type().into(),
         })
     }
 
-    // TODO: Implement logic to load both regular variables and struct members
-    //       if they are const.
-    fn get_const_value(&mut self, var: &Var) -> LangResult<BasicValueEnum<'ctx>> {
-        let block_id = self.cur_block_id;
-        let decl_block_id = self
-            .analyze_ctx
-            .ast_ctx
-            .get_var_decl_scope(&var.full_name(), block_id)?;
-        let key = (var.full_name(), decl_block_id);
-        debug!("Loading constant value. Key: {:?}", &key);
-
-        if let Some(const_value) = self.constants.get(&key) {
-            Ok(*const_value)
-        } else {
-            Err(self.err(
-                format!(
-                    "Unable to find value for constant \"{}\" in decl block ID {}.",
-                    &var.full_name(),
-                    decl_block_id
-                ),
-                var.file_pos.to_owned(),
-            ))
-        }
+    fn alloc_var(&self, name: &str, ir_type: &Type) -> LangResult<PointerValue<'ctx>> {
+        Ok(match self.compile_type(ir_type)? {
+            AnyTypeEnum::ArrayType(ty) => {
+                let sign_extend = false;
+                let dim = self
+                    .context
+                    .i64_type()
+                    .const_int(ty.len() as u64, sign_extend);
+                self.builder.build_array_alloca(ty, dim, name)
+            }
+            AnyTypeEnum::FloatType(ty) => self.builder.build_alloca(ty, name),
+            AnyTypeEnum::IntType(ty) => self.builder.build_alloca(ty, name),
+            AnyTypeEnum::PointerType(ty) => self.builder.build_alloca(ty, name),
+            AnyTypeEnum::StructType(ty) => self.builder.build_alloca(ty, name),
+            AnyTypeEnum::VectorType(ty) => self.builder.build_alloca(ty, name),
+            AnyTypeEnum::FunctionType(_) => {
+                return Err(self.err("Tried to alloc function.".into(), None));
+            }
+            AnyTypeEnum::VoidType(_) => {
+                return Err(self.err("Tried to alloc void type.".into(), None));
+            }
+        })
     }
 
-    pub(crate) fn get_var_ptr(&mut self, var: &Var) -> LangResult<PointerValue<'ctx>> {
-        let block_id = self.cur_block_id;
-        let decl_block_id = self
-            .analyze_ctx
-            .ast_ctx
-            .get_var_decl_scope(&var.full_name(), block_id)?;
-        let key = (var.full_name(), decl_block_id);
-        debug!(
-            "Loading variable pointer. Key: {:?}, cur_block_id: {}",
-            &key, block_id
-        );
-
-        if let Some(var_ptr) = self.variables.get(&key) {
-            Ok(*var_ptr)
-        } else if self.constants.get(&key).is_some() {
-            Err(self.err(
-                format!(
-                    "Tried to get pointer to the constant with name \"{}\" in decl block ID {}. \
-                    Currently this is not allowed and the constant needs to be changed to \
-                    a variable (use the `var` keyword instead of `const`) in the code. \
-                    In the future, support for this will be implemented.",
-                    &var.full_name(),
-                    decl_block_id,
-                ),
-                var.file_pos.to_owned(),
-            ))
-        } else {
-            Err(self.err(
-                format!(
-                    "Unable to find ptr for variable \"{}\" in decl block ID {}.",
-                    &var.full_name(),
-                    decl_block_id,
-                ),
-                var.file_pos.to_owned(),
-            ))
+    pub(crate) fn get_compiled_val(&self, val: &Val) -> LangResult<AnyValueEnum<'ctx>> {
+        // TODO: Better way to handle dummy values?
+        if val == &DUMMY_VAL {
+            return Ok(self.context.struct_type(&[], false).const_zero().into());
         }
-    }
 
-    pub(super) fn compile_type(
-        &self,
-        type_id: TypeId,
-        file_pos: Option<FilePosition>,
-    ) -> LangResult<AnyTypeEnum<'ctx>> {
-        // TODO: What AddressSpace should be used?
-        let address_space = AddressSpace::Generic;
-
-        let inf_type_id = self.analyze_ctx.ty_env.lock().inferred_type(type_id)?;
-        let inf_ty = self.analyze_ctx.ty_env.lock().ty_clone(inf_type_id)?;
-
-        Ok(match inf_ty {
-            Ty::Pointer(ptr_type_id, ..) => {
-                // Get the type of the inner type and wrap into a "PointerType".
-                match self.compile_type(ptr_type_id, file_pos)? {
-                    AnyTypeEnum::ArrayType(ty) => ty.ptr_type(address_space).into(),
-                    AnyTypeEnum::FloatType(ty) => ty.ptr_type(address_space).into(),
-                    AnyTypeEnum::FunctionType(ty) => ty.ptr_type(address_space).into(),
-                    AnyTypeEnum::IntType(ty) => ty.ptr_type(address_space).into(),
-                    AnyTypeEnum::PointerType(ty) => ty.ptr_type(address_space).into(),
-                    AnyTypeEnum::StructType(ty) => ty.ptr_type(address_space).into(),
-                    AnyTypeEnum::VectorType(ty) => ty.ptr_type(address_space).into(),
-                    AnyTypeEnum::VoidType(_) => {
-                        // TODO: FIXME: Is this OK? Can't use pointer to void, use
-                        //              pointer to a generic I8 instead.
-                        self.context.i8_type().ptr_type(address_space).into()
-                    }
-                }
-            }
-
-            // TODO: Calculate array size that contains ther things than just
-            //       a single integer literal
-            Ty::Array(inner_type_id, dim_opt, ..) => {
-                if let Some(dim) = dim_opt {
-                    let lit_dim = match dim.as_ref() {
-                        Expr::Lit(Lit::Integer(num, radix), ..) => u32::from_str_radix(num, *radix)
-                            .map_err(|_| {
-                                self.err(
-                                    format!("Invalid integer found in array dimension: {}", num),
-                                    file_pos,
-                                )
-                            })?,
-                        _ => {
-                            return Err(self.err(
-                                format!(
-                                    "TODO: Invalid expression used as array dimension: {:?}",
-                                    dim
-                                ),
-                                file_pos,
-                            ))
-                        }
-                    };
-
-                    match self.compile_type(inner_type_id, file_pos)? {
-                        AnyTypeEnum::ArrayType(ty) => ty.array_type(lit_dim).into(),
-                        AnyTypeEnum::FloatType(ty) => ty.array_type(lit_dim).into(),
-                        AnyTypeEnum::IntType(ty) => ty.array_type(lit_dim).into(),
-                        AnyTypeEnum::PointerType(ty) => ty.array_type(lit_dim).into(),
-                        AnyTypeEnum::StructType(ty) => ty.array_type(lit_dim).into(),
-                        AnyTypeEnum::VectorType(ty) => ty.array_type(lit_dim).into(),
-                        AnyTypeEnum::FunctionType(_) => {
-                            return Err(self
-                                .err("Tried to array index into function type.".into(), file_pos));
-                        }
-                        AnyTypeEnum::VoidType(_) => {
-                            return Err(
-                                self.err("Tried to array index into void type.".into(), file_pos)
-                            );
-                        }
-                    }
-                } else {
-                    // TODO: Is this corrent? Can an array with no dimension set
-                    //       be treated as a pointer in LLVM?
-                    match self.compile_type(inner_type_id, file_pos)? {
-                        AnyTypeEnum::ArrayType(ty) => ty.ptr_type(address_space).into(),
-                        AnyTypeEnum::FloatType(ty) => ty.ptr_type(address_space).into(),
-                        AnyTypeEnum::IntType(ty) => ty.ptr_type(address_space).into(),
-                        AnyTypeEnum::PointerType(ty) => ty.ptr_type(address_space).into(),
-                        AnyTypeEnum::StructType(ty) => ty.ptr_type(address_space).into(),
-                        AnyTypeEnum::VectorType(ty) => ty.ptr_type(address_space).into(),
-                        AnyTypeEnum::FunctionType(ty) => ty.ptr_type(address_space).into(),
-                        AnyTypeEnum::VoidType(_) => {
-                            return Err(
-                                self.err("Tried to array index into void type.".into(), file_pos)
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Need to wrap `FunctionType`s inside `PointerType`s since they
-            // aren't sized, and can't be used as args/params etc otherwise.
-            Ty::Fn(_, param_tys, ret_type_id_opt, type_info) => {
-                let mut param_types = Vec::with_capacity(param_tys.len());
-                for param_ty in param_tys {
-                    let file_pos = get_file_pos(&self.analyze_ctx.ty_env.lock(), param_ty).cloned();
-                    let compiled_ty = self.compile_type(param_ty, file_pos)?;
-                    param_types.push(CodeGen::any_into_basic_type(compiled_ty)?);
-                }
-
-                let address_space = AddressSpace::Generic;
-                if let Some(ret_type_id) = ret_type_id_opt {
-                    let compiled_ret_ty =
-                        self.compile_type(ret_type_id, type_info.file_pos().cloned())?;
-                    let basic_ty = CodeGen::any_into_basic_type(compiled_ret_ty)?;
-
-                    basic_ty
-                        .fn_type(&param_types, false)
-                        .ptr_type(address_space)
-                        .into()
-                } else {
-                    self.context
-                        .void_type()
-                        .fn_type(&param_types, false)
-                        .ptr_type(address_space)
-                        .into()
-                }
-            }
-
-            Ty::CompoundType(inner_ty, ..) => {
-                match inner_ty {
-                    InnerTy::Struct(full_path)
-                    | InnerTy::Union(full_path)
-                    | InnerTy::Tuple(full_path) => {
-                        let struct_type_opt = self.module.get_struct_type(&to_string_path(
-                            &self.analyze_ctx.ty_env.lock(),
-                            &full_path,
-                        ));
-
-                        if let Some(struct_type) = struct_type_opt {
-                            struct_type.into()
-                        } else {
-                            return Err(self.err(
-                                format!(
-                                    "Unable to find custom struct type with name: {}",
-                                    to_string_path(&self.analyze_ctx.ty_env.lock(), &full_path)
-                                ),
-                                file_pos,
-                            ));
-                        }
-                    }
-                    InnerTy::Enum(full_path) => {
-                        let struct_type_opt = self.module.get_struct_type(&to_string_path(
-                            &self.analyze_ctx.ty_env.lock(),
-                            &full_path,
-                        ));
-
-                        if let Some(struct_type) = struct_type_opt {
-                            struct_type.into()
-                        } else {
-                            return Err(self.err(
-                                format!(
-                                    "Unable to find custom enum type with name: {:#?}",
-                                    full_path
-                                ),
-                                file_pos,
-                            ));
-                        }
-                    }
-                    InnerTy::Trait(_) => {
-                        panic!("TODO: interface")
-                    }
-                    InnerTy::Void => AnyTypeEnum::VoidType(self.context.void_type()),
-                    InnerTy::Character => AnyTypeEnum::IntType(self.context.i32_type()),
-                    // TODO: What type should the string be?
-                    InnerTy::String => {
-                        AnyTypeEnum::PointerType(self.context.i8_type().ptr_type(address_space))
-                    }
-                    InnerTy::Boolean => AnyTypeEnum::IntType(self.context.bool_type()),
-                    InnerTy::I8 => AnyTypeEnum::IntType(self.context.i8_type()),
-                    InnerTy::U8 => AnyTypeEnum::IntType(self.context.i8_type()),
-                    InnerTy::I16 => AnyTypeEnum::IntType(self.context.i16_type()),
-                    InnerTy::U16 => AnyTypeEnum::IntType(self.context.i16_type()),
-                    InnerTy::I32 => AnyTypeEnum::IntType(self.context.i32_type()),
-                    InnerTy::U32 => AnyTypeEnum::IntType(self.context.i32_type()),
-                    InnerTy::F32 => AnyTypeEnum::FloatType(self.context.f32_type()),
-                    InnerTy::I64 => AnyTypeEnum::IntType(self.context.i64_type()),
-                    InnerTy::U64 => AnyTypeEnum::IntType(self.context.i64_type()),
-                    InnerTy::F64 => AnyTypeEnum::FloatType(self.context.f64_type()),
-                    InnerTy::I128 => AnyTypeEnum::IntType(self.context.i128_type()),
-                    InnerTy::U128 => AnyTypeEnum::IntType(self.context.i128_type()),
-
-                    _ => {
-                        let ty = to_string_type_id(&self.analyze_ctx.ty_env.lock(), type_id)?;
-                        let inner_ty =
-                            to_string_inner_ty(&self.analyze_ctx.ty_env.lock(), &inner_ty);
-                        return Err(self.err(
-                            format!(
-                                "Invalid inner type during type codegen. \
-                                Type ID: {}, ty: {:?}, inner type: {:#}",
-                                &type_id, ty, inner_ty,
-                            ),
-                            file_pos,
-                        ));
-                    }
-                }
-            }
-
-            Ty::Expr(expr, ..) => self.compile_type(expr.get_expr_type()?, file_pos)?,
-
-            _ => {
-                return Err(self.err(
-                    format!(
-                        "Invalid type during type codegen. \
-                        Type ID: {}, inf_type_id: {}, inf_ty: {:#?}",
-                        type_id,
-                        inf_type_id,
-                        to_string_type_id(&self.analyze_ctx.ty_env.lock(), inf_type_id)?,
-                    ),
-                    file_pos,
-                ))
-            }
+        self.compiled_vals.get(&val.0).copied().ok_or_else(|| {
+            LangError::new(
+                format!("Unable to get compiled value for val: {:?}", val),
+                LangErrorKind::CompileError,
+                None,
+            )
         })
     }
 
@@ -598,12 +406,47 @@ impl<'a, 'b, 'ctx> CodeGen<'a, 'b, 'ctx> {
         left_type: BasicTypeEnum<'ctx>,
         right_type: BasicTypeEnum<'ctx>,
     ) -> bool {
-        left_type.is_int_type() && right_type.is_int_type()
-            || left_type.is_float_type() && right_type.is_float_type()
-            || left_type.is_array_type() && right_type.is_array_type()
-            || left_type.is_pointer_type() && right_type.is_pointer_type()
-            || left_type.is_struct_type() && right_type.is_struct_type()
-            || left_type.is_vector_type() && right_type.is_vector_type()
+        match (left_type, right_type) {
+            // TODO: Should we care about what a pointer points to or the bit-size
+            //       of ints/floats in this function.
+            (BasicTypeEnum::FloatType(_), BasicTypeEnum::FloatType(_))
+            | (BasicTypeEnum::IntType(_), BasicTypeEnum::IntType(_))
+            | (BasicTypeEnum::PointerType(_), BasicTypeEnum::PointerType(_)) => true,
+
+            (BasicTypeEnum::ArrayType(left_type_i), BasicTypeEnum::ArrayType(right_type_i)) => self
+                .is_same_base_type(
+                    left_type_i.get_element_type(),
+                    right_type_i.get_element_type(),
+                ),
+
+            (BasicTypeEnum::VectorType(left_type_i), BasicTypeEnum::VectorType(right_type_i)) => {
+                self.is_same_base_type(
+                    left_type_i.get_element_type(),
+                    right_type_i.get_element_type(),
+                )
+            }
+
+            (BasicTypeEnum::StructType(left_type_i), BasicTypeEnum::StructType(right_type_i)) => {
+                if left_type_i.count_fields() != right_type_i.count_fields() {
+                    return false;
+                }
+
+                let mut is_same_struct = true;
+                for (left_type_mem, right_type_mem) in left_type_i
+                    .get_field_types()
+                    .into_iter()
+                    .zip(right_type_i.get_field_types())
+                {
+                    if !self.is_same_base_type(left_type_mem, right_type_mem) {
+                        is_same_struct = false;
+                        break;
+                    }
+                }
+                is_same_struct
+            }
+
+            _ => false,
+        }
     }
 
     /// Used when returing errors to include current line/column number.

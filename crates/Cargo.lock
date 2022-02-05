@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "analyze"
+name = "analyze_ast"
 version = "0.1.0"
 dependencies = [
  "common",
@@ -35,6 +35,15 @@ dependencies = [
  "log",
  "parking_lot",
  "parse",
+]
+
+[[package]]
+name = "analyze_ir"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "ir",
+ "log",
 ]
 
 [[package]]
@@ -123,10 +132,10 @@ dependencies = [
 name = "codegen_llvm"
 version = "0.1.0"
 dependencies = [
- "analyze",
  "common",
  "either",
  "inkwell",
+ "ir",
  "log",
  "parking_lot",
  "rand",
@@ -230,6 +239,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b141fdc7836c525d4d594027d318c84161ca17aaf8113ab1f81ab93ae897485"
 
 [[package]]
+name = "ir"
+version = "0.1.0"
+dependencies = [
+ "backtrace",
+ "either",
+ "log",
+]
+
+[[package]]
+name = "ir_builder"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "either",
+ "ir",
+ "log",
+ "parking_lot",
+ "rand",
+]
+
+[[package]]
 name = "itertools"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -242,12 +272,15 @@ dependencies = [
 name = "lang"
 version = "0.1.0"
 dependencies = [
- "analyze",
+ "analyze_ast",
+ "analyze_ir",
  "clap",
  "codegen_llvm",
  "common",
  "env_logger",
  "inkwell",
+ "ir",
+ "ir_builder",
  "lex",
  "log",
  "parse",

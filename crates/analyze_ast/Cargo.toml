@@ -1,0 +1,15 @@
+[package]
+name = "analyze_ast"
+version = "0.1.0"
+authors = ["jmatss <jmatss@kth.se>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+either = "1.6.1"
+log = "0.4.11"
+parking_lot = "0.11"
+
+common = { path = "../common" }
+parse = { path = "../parse" }

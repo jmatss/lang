@@ -31,7 +31,7 @@ impl InnerStructWithTrait: TestTrait {
 
 struct InnerStructWithoutTrait;
 
-fn main() -> i32 {
+fn main() -> int {
     // Should produce a error since u64 doesn't implement TestTrait
     //var ts = TestStruct<u64> { 34 }
     

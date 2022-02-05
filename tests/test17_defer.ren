@@ -1,6 +1,4 @@
-ext fn printf(format: {u8}, ...) -> i32
-
-fn main() -> i32 {
+fn main() -> int {
     var k = 0
     defer printf(c"\nHELLO - k: %d", k)
     if true {

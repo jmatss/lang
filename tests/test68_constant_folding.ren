@@ -1,0 +1,33 @@
+// TODO: StringView as const?
+// TODO: Const function?
+// TODO: Const if/else?
+// TODO: ... ?
+
+var y: u32 = 5
+
+fn main() -> int {
+    var a = 1
+    var b = 2
+    var x = a + b
+
+    y = x
+
+    return 0
+}
+
+/*
+fn main() -> int {
+    var a = 1
+    match a { default { } }
+/*
+    var b = 1 + 2
+    match b { default { } }
+
+    var c1 = 1
+    var c2 = 2
+    var c3 = c1 + c2
+    match c3 { default { } }
+*/
+    return 0
+}
+*/

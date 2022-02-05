@@ -1,8 +1,6 @@
 use std::mem::Allocator
 use std::mem::Disposable
 
-ext fn printf(format: {u8}, ...) -> i32
-
 enum ErrorKind {
     FIRST
     SECOND
@@ -26,7 +24,7 @@ impl Error: Disposable {
     }
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var kind
     var msg
     var msg_or_error

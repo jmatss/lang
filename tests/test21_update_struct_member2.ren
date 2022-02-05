@@ -5,7 +5,7 @@ struct TestStruct {
     var b: f64
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var test_struct = TestStruct { 123, 456.789 }
     var x = test_struct.a
     test_struct.b = 3.4

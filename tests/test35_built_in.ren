@@ -1,16 +1,14 @@
-ext fn printf(format: {u8}, ...) -> i32
-
 struct TestStruct<T> {
     var a: i64
     var b: T
 
-    fn this generic_size() -> u32 {
+    fn this generic_size() -> uint {
         return @size<T>()
     }
 }
 
 
-fn main() -> i32 {
+fn main() -> int {
     var ts = TestStruct<f64> { 123, 456. }
     var size_inner = ts.generic_size()
 
@@ -51,7 +49,7 @@ fn main() -> i32 {
     std::assert(column_nr == 21 + 33)
 
     printf(c"\nline_nr: %d", line_nr)
-    std::assert(line_nr == 47)
+    std::assert(line_nr == 45)
 
     std::io::print("\nfilename: ", line_break = false)
     std::io::print(filename, line_break = false)

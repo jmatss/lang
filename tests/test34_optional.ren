@@ -1,7 +1,5 @@
 use std::Optional
 
-ext fn printf(format: {u8}, ...) -> i32
-
 struct TypeStruct {
     var len: u64
 
@@ -10,7 +8,7 @@ struct TypeStruct {
     }
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var x = Optional::value(TypeStruct { 123 })
 
     var y

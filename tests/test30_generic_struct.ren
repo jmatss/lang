@@ -1,5 +1,3 @@
-ext fn printf(format: {u8}, ...) -> i32
-
 struct TestStruct<T> {
     var inner: T
 }
@@ -13,7 +11,7 @@ struct UnImplemented<U> {
     var unimplemented: U
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var i: u64 = 1
     var f: f32 = 123.
 

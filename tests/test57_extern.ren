@@ -2,4 +2,4 @@
 ext struct FILE
 ext fn fopen(pathname: {u8}, mode: {u8}) -> {FILE}
 
-fn main() -> i32 { return 0 }
+fn main() -> int { return 0 }

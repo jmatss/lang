@@ -9,7 +9,7 @@ use std::mem::Disposable
 use std::string::AsView
 use std::string::StringView
 
-ext fn strlen(str: {u8}) -> u32
+ext fn strlen(str: {u8}) -> uint
 
 /// Represents a mutable, heap-allocated, string of text.
 pub struct String {
@@ -20,7 +20,7 @@ pub struct String {
     /// If unable to allocate memory, the function will return an error.
     /// If the given `size` is 0, the memory allocation will be lazily initialized
     /// at the first insertion into the string.
-    pub fn init(size: u32) -> Result<String, StringView> {
+    pub fn init(size: uint) -> Result<String, StringView> {
         var buf_or_error = List::init(size)
         if buf is buf_or_error.success {
             var str = String { buf }
@@ -36,7 +36,7 @@ pub struct String {
     /// If no `start_idx` argument is given, it will be set to the default value 0.
     /// If no `len` arguments is given, or it is set to 0, this function will assume that
     /// the given `str_lit` is null-terminated and calculate the length with `strlen()`.
-    pub fn from_lit(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<String, StringView> {
+    pub fn from_lit(str_lit: {u8}, start_idx: uint = 0, len: uint = 0) -> Result<String, StringView> {
         if start_idx != 0 {
             str_lit = @ptr_add(str_lit, start_idx)
         }
@@ -58,7 +58,7 @@ pub struct String {
     }
 
     /// Creates a new String from the given StringView.
-    pub fn from_view(str_view: StringView, start_idx: u32 = 0, len: u32 = 0) -> Result<String, StringView> {
+    pub fn from_view(str_view: StringView, start_idx: uint = 0, len: uint = 0) -> Result<String, StringView> {
         if len == 0 {
             len = str_view.len()
         }
@@ -70,11 +70,11 @@ pub struct String {
         return this::from_lit(str_view.ptr, start_idx, len)
     }
 
-    pub fn this len() -> u32 {
+    pub fn this len() -> uint {
         return this.buf.len()
     }
 
-    pub fn this cap() -> u32 {
+    pub fn this cap() -> uint {
         return this.buf.cap()
     }
 
@@ -91,7 +91,7 @@ pub struct String {
     /// If no `start_idx` argument is given, it will be set to the default value 0.
     /// If no `len` arguments is given, this function will assume that the given
     /// `str_lit` is null-terminated and calculate the length with `strlen()`.
-    pub fn {this} append_lit(str_lit: {u8}, start_idx: u32 = 0, len: u32 = 0) -> Result<(), StringView> {
+    pub fn {this} append_lit(str_lit: {u8}, start_idx: uint = 0, len: uint = 0) -> Result<(), StringView> {
         if start_idx != 0 {
             str_lit = @ptr_add(str_lit, start_idx)
         }

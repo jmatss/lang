@@ -1,7 +1,7 @@
-fn test_func() -> i32 {
-    var res: i32
+fn test_func() -> int {
+    var res: int
 
-    var x: i32 = 2
+    var x: int = 2
     if x >= 3 {
         res = 1
     } else {
@@ -11,6 +11,6 @@ fn test_func() -> i32 {
     return res
 }
 
-fn main() -> i32 {
+fn main() -> int {
     return test_func()
 }

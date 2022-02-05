@@ -17,7 +17,7 @@ impl TestStruct: Cmp<TestStruct> {
     }
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var ts1 = TestStruct { 1 }
     var ts2 = TestStruct { 1 }
     std::assert(ts1.cmp(ts2) == Order::Eq)

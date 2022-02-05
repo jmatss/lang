@@ -4,7 +4,7 @@ struct TestStruct {
     var x: u8
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var init_val = 123 as u64
     var arr1 = @array(init_val, 2)
     var arr2: [u64: 2] = @array(init_val, 2)

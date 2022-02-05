@@ -3,7 +3,7 @@ mod std
 use std::io::print
 use std::string::StringView
 
-ext fn exit(exit_code: i32)
+ext fn exit(exit_code: int)
 
 fn assert(expr: bool, msg: StringView = @null()) {
     if not expr {

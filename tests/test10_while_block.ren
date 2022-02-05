@@ -2,7 +2,7 @@ struct TestStruct {
     var i: i32
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var test_struct = TestStruct { 0 }
 
     while test_struct.i < 3 {

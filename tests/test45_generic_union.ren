@@ -1,5 +1,3 @@
-ext fn printf(format: {u8}, ...) -> i32
-
 union TestUnion {
     var var_a: f64
     var another: i16
@@ -10,7 +8,7 @@ union TestGenericUnion<T> {
     var b: T
 }
 
-fn main() -> i32 {
+fn main() -> int {
     var correct
 
     var abc = TestUnion { var_a = 123.456 }

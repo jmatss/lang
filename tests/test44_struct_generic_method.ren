@@ -2,7 +2,7 @@ struct TestStruct {
     fn method<T, V>(value: T, other: V) {}
 }
 
-fn main() -> i32
+fn main() -> int
 {
     var i: u8 = 123
     var o: i64 = 456

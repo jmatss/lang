@@ -1,8 +1,6 @@
 use std::collection::List
 
-ext fn printf(format: {u8}, ...) -> i32
-
-fn main() -> i32 {
+fn main() -> int {
     var list_or_error = List<u8>::init(1)
     std::assert(list_or_error.is_success())
     var list = list_or_error.get_success()
