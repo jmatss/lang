@@ -1,3 +1,7 @@
+# Examples
+All `*.ren` files located in the `tests` folder contains code written in the language.
+
+
 # Requirements
 The strictest requirements can be found in the crate `codegen` because it depends on the crate https://github.com/TheDan64/inkwell to interact with LLVM. This implicitly makes the requirements for this project (copied from `inkwell`):
 
